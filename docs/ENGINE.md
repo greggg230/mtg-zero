@@ -35022,3 +35022,297 @@ desktop can run three gates at once with pb2 at 4.6-5.0 min when nothing uses th
   (the companion started 8 times instead of once): a real macOS difference in the companion's keeper or the test,
   not investigated; until fixed it runs on the desktop only and is fenced while a run is live.
 * A Job Object for run trees (S8's first point) and supervisor-alive checks in `tools/watch_run.sh`: not in this phase.
+
+## 167. Phase 1 of the iteration-speed migration: the fast local loop - warm worktrees, the artifact cache, the sharded 2k fuzz with its checks on the total, parallel gate steps, lighter links, and a panicking game dropped instead of the run (branch `mig/phase1`, zero-core `mig/phase1-panic`, 2026-11-15)
+
+Branch `mig/phase1` from main 72e5a0df, main 90731110 (165 farm campaigns, 166 phase 0) merged in; zero-core pin ->
+`mig/phase1-panic` cd47511 (from bf229a5: the driver's panic containment, zero-core docs/search.md 2.18, merged with
+the pin of main, mainline-1115 d29b134). Why: Fable's review of 2026-11-15
+(hub/data/mtg_bot/fable_review_iteration_and_farm_2026-11-15.md, sections 1 and 2: S1, S2) and the gate speed-up plan
+of 11-14 (gate_speedup_plan_2026-11-14.md, phase 1): a change paid a cold build in every new worktree (14 min for the
+engine's test binaries on today's desktop beside the live runs), a 6 h suite tier (20k fuzz per pool, single-threaded,
+pools in series), ~169 test binaries each linking the whole engine, and gate steps one after another; the user approved
+the migration on 2026-11-15 with decision D1 (the gate fuzzes ~2,000 games per affected pool with the
+hidden-information checks; the 20k depth moves to continuous farm fuzz; prerequisite: self-play contains a game-level
+panic). No rule, encoding or search behaviour changes: the digests are EQUAL (167.8). The test-binary consolidation is
+on its own branch `mig/phase1-tests` (167.9): open branches add engine tests. (Section number: 165 and 166 are main's
+since 90731110; `feat/pb3-varied` has 168.)
+
+### 167.1 The warm worktree pool (`tools/warm_pool.py`)
+
+A few fixed worktrees (`mtg-zero-wt/warm-1` .. `warm-4`, `MTGZ_WARM_SLOTS`), each with its own fixed target dir
+(`E:/cargo-target/mtg-zero/warm-K`): a gate, a lane check or a run build checks a commit out into a free one instead of
+making a new worktree. `python tools/warm_pool.py run --sha <rev> -- <command>` takes a free slot's lease (a file under
+`mtg-zero-wt/.leases/`, created exclusively: pid + the process's creation time + label; a lease whose holder is gone, or
+whose pid Windows reused for another process, is taken over), checks the commit out there (detached, forced; untracked
+files removed, ignored build products kept; the zero-core submodule at the pin, clean; refused unless HEAD is the
+commit and nothing tracked differs), runs the command there with `CARGO_TARGET_DIR` = the slot's dir, and releases the
+lease however the command ends. `acquire` / `release` / `status` / `init`; `--slot K` for one slot (a measurement).
+
+The same path and the same target dir every time, so the one-target-dir-per-checkout rule holds (a warm worktree's dir
+is never another checkout's: `target_guard` passes) and cargo rebuilds only what the commit changed (git rewrites only
+the files that differ, with new mtimes). This is the user's rule "reuse one worktree, never delete" applied to gates.
+Never edit in a warm worktree: a checkout resets it. The 331 old worktrees and 211 target dirs are not touched by this
+branch (their removal needs the junction audit of feedback_worktree_remove_junction_hazard; a later clean-up).
+
+### 167.2 The artifact cache (`tools/zcache.py`)
+
+Builds kept by the hash `H` of every Rust input, so a commit that changes none (a Python, tools or docs commit, a merge
+of such) takes its parent's builds without cargo. Kinds: `pyd` (mtgz/_engine.pyd / .so), `worker` (the release
+mtgz-worker), `core-pyd` (zero-core's zero._engine, for the core tiers).
+
+* **The key.** sha256 over: the git blob ids of every tracked file under engine/, card_ir/, py/, worker/, data/ (the
+  card IR, decklists and tables the engine compiles in with `include_str!`), Cargo.toml, Cargo.lock, .cargo/,
+  rust-toolchain(.toml); the zero-core gitlink (the pinned commit names every core file; core-pyd: the pin alone); the
+  toolchain (`rustc -vV`); the build's environment (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, RUSTC, RUSTC_WRAPPER,
+  CARGO_INCREMENTAL, CARGO_BUILD_* / CARGO_PROFILE_* / CARGO_TARGET_* but the target dir and jobs, ~/.cargo/config.toml);
+  the platform; the profile (release); for a Python module the interpreter (version, platform, ABI: PyO3 builds for
+  one); the kind; the tool's schema. A checkout with an uncommitted or untracked file under those paths, a submodule off
+  its pin or not clean, ZERO_CORE_UNPINNED=1 or MTGZ_ARTIFACT_CACHE=0 has no key: it builds as before, nothing stored.
+  Computing it takes ~0.4 s (git ls-tree).
+* **Entries** are content-addressed and immutable: `E:/zero-artifacts/mtg-zero/<kind>-<H[:32]>/` (`MTGZ_ARTIFACTS`
+  elsewhere) holds the file and manifest.json (the full key and every input, the file's sha256, the commit and checkout
+  it was built from), written to a temp dir and renamed into place once, read-only; an existing entry is never
+  replaced. A fetch checks the manifest's key and kind and the file's sha256, copies (a Windows-locked .pyd renamed out
+  of the way, as build_engine.sh does), checks the copy, and touches the entry (the LRU clock). It never serves an entry
+  of another key: a different `H` is a different directory, and a mismatched manifest or file is refused (tested).
+* **Eviction**: after every store, least recently used entries go until the cache is under `MTGZ_ARTIFACTS_MAX_GB`
+  (default 40); temp dirs a killed store left are removed after an hour. `ls`, `gc --max-gb`.
+* **Who asks.** `tools/build_py.sh`: after the target-dir guard, `zcache.py fetch pyd` - a hit imports the module and
+  prints build_engine.sh's own "mtgz._engine OK: <this checkout>/mtgz/_engine.pyd | games: [...]" line (the gate's build
+  checker is unchanged) and builds nothing; a miss builds as before and stores the module under the key computed before
+  the build (not stored if the key changed meanwhile). gate.py's `worker-build` step runs `zcache.py worker` (fetch into
+  the gate's target/release, else `cargo build --release -p mtgz_worker` + store; its checker takes cargo's line or the
+  cache's "artifact cache: hit worker <key> -> <exe> (sha256 ...)" line naming the exe with that sha256, and records
+  `worker_cache`: built / hit <key>), the core tiers' `core-build` runs `zcache.py core-pyd`.
+* **Scope check.** `zcache.py check-scope --target-dir <dir>` reads cargo's own dep-info of a build (mtgz_py.d,
+  mtgz-worker.d) and lists every file inside the checkout the build read outside the key's paths (the risk Fable named:
+  a key that misses an input). On this branch's build: 167.8.
+* **Not cached: test binaries.** They compile `env!("CARGO_MANIFEST_DIR")` in (digests.txt and the other test data are
+  read from the building checkout): one checkout's test binary would test another's files. They stay in the warm
+  worktrees' own target dirs, where the same path rebuilds only what changed. And a cached build's panic messages name
+  the building checkout's absolute path for zero-core sources (cargo passes path dependencies outside the workspace by
+  absolute path): messages only, never behaviour.
+
+### 167.3 The gate's fuzz: 2,000 games a pool, sharded, the end-of-run checks on the total (`tools/fuzz_shards.py`)
+
+The user's decision D1 (2026-11-15): the gate fuzzes ~2,000 games per affected pool, the hidden-information checks
+included, on engine changes only (the python and docs tiers fuzz nothing, as before); the 20k depth leaves the gate and
+becomes continuous farm fuzz on main and on each live run's build (phase 4). `gate.py suite` now runs, per
+`--fuzz-pools` entry (default `default,default+hidden,delver_dealt`; `<pool>+hidden` = `FUZZ_HIDDEN_DECKS=1`), one step
+`python tools/fuzz_shards.py --pool <pool> [--hidden] --games 2000 --shards 8`:
+
+* **Shards.** The fuzz test binary of the checkout (built by the tier's first step) runs `fuzz_random_games` over 8
+  disjoint contiguous seed ranges tiling [0, 2000) and `fuzz_random_matches` over 8 ranges tiling [0, 100) (the test's
+  own default max(20, games / 20); none with hidden decklists, a games mode), each shard its own process (one test, one
+  thread, below normal priority) with `FUZZ_FIRST` / `FUZZ_GAMES` or `FUZZ_MATCHES` and `FUZZ_SHARD=1`; the caller's
+  `FUZZ_*` / `DIGEST_*` never reach a shard. Every per-game and per-match check (invariants, replays, clones,
+  determinize, the information-set walks, the private-key masks, the rules checks: a violation fails its shard) runs in
+  its shard, exactly as in one process: the games are seeded by index.
+* **The end-of-run checks on the total.** Each loop's end-of-run checks - what the mode must have exercised (a companion
+  special action, graveyard-list decisions, the pools' signature cards, ...), the information-set walks' counters
+  (`IS_WALKS` / `IS_STEPS` with open decklists, `HD_STEPS` with hidden ones, `MATCH_IS_WALKS` / `MATCH_IS_STEPS`), the
+  private-key check reaching a new game, the dealt decks, the constructed deals - each over its own least number of games
+  (200 for most, 300, 2,000; 20 matches) are now functions of named counters (`engine::fuzz::Totals`;
+  `games::check_games` / `check_matches` / `check_post`, the same assertions and messages as before). Every run prints
+  its counters as one `FUZZ_TOTALS {"kind", "first", "n", "totals"}` line (`matches` with `"skipped"` for a pool that
+  plays none). A plain run then checks them over its own seeds, as before; a shard (`FUZZ_SHARD=1`, refused by the farm
+  worker's settings check) leaves them to the merge, so a 250-game shard neither dodges a 200-game check nor passes it
+  alone.
+* **The merge.** Every shard exited 0 with exactly one "test result: ok. 1 passed" line, its FUZZ_TOTALS names exactly
+  the range it was given and its "N games: wins" line that count, and it printed the "FUZZ_SHARD=1:" line (the checks
+  were left to the merge); the ranges tile [first, first + count) with no gap or overlap and the counts add up; every
+  shard agrees on a skip. The counters are summed (a `max_` one: the max) into `merged_totals.json`, and the binary's new
+  test `fuzz_shard_totals` with `FUZZ_TOTALS_FILE=<it>` runs `games::check_merged`: the same checks over the whole run's
+  seeds; its "fuzz totals: <kind> checked over N seeds" lines are the positive evidence. The binary's other tests (the
+  replay tests and the regression seeds) run once beside it. The step passes on exactly one "fuzz shards: PASSED - ..."
+  line and its JSON summary for that pool with 2,000 games and the merged checks of games and (unless none) matches
+  (`make_fuzz_shards_checker`); the report keeps `fuzz_games` (2000) and the summary. A failing shard names its seed and
+  rerun command (the test's own panic message) and its log; no new shard starts after a failure.
+* The engine tier's suite evidence wants a passed fuzz step of at least FUZZ_GAMES (2,000) games: a 20k report of
+  before still counts.
+
+### 167.4 Parallel gate steps, placed by phase 0
+
+* A tier is now its builds in order - `build` (the Python module), `worker-build`, the core build in the core tiers,
+  and `test-build` (`cargo test --release -p engine --no-run --test <the tier's targets>`, every target for the suite) -
+  then one parallel group of every independent check (`in_parallel`; run_steps' existing `group` batches): the suite
+  and every pool's fuzz in the suite tier; the digests, az / limits / hidden, pytest, the smoke and farm-compat in the
+  engine tier; likewise encoding, search-core and optin-core; pytest and the run-loop smoke in the python tier. A group
+  runs to its end and the gate stops after it if any step failed (the failure and "not run" as before). Two `cargo test`
+  runs of built binaries do not serialise on cargo's lock (measured: two 9.3 s runs at once took 11 s).
+* Where each step runs is phase 0's (166): `place` puts a step with a Mac command on the Mac beside a live run (unless
+  `--no-mac`) and a heavy desktop step on a slot of tools/slotd.sh while the gate throttles. This branch's new steps take
+  part: the test-binary build, every pool's sharded fuzz and every pytest shard have Mac commands (the fuzz writes under
+  a checkout-relative gates/tmp/ path, the same on either machine), the worker and core builds are heavy desktop steps. A
+  parallel group then queues its steps for slots instead of piling up beside the run; a Mac step's desktop part joins
+  its group. (This branch first carried its own throttle in run_step; the merge of main replaced it with phase 0's.)
+  Run gate.py itself unthrottled: it would hold a slot its own steps wait for.
+* **pytest in shards** (`--pytest-shards`, default 4): this repo's pytest as that many steps over disjoint sets of test
+  files, each its own process, `--basetemp` and junit file, every tests/test_*.py in exactly one (checked when the plan
+  is made), balanced longest-first by each file's seconds from earlier runs (`pytest_durations.json` in the machine's
+  state dir E:/mtg-zero-state, shared by every checkout; updated from the junit files after a shard passes; a file
+  without one weighed by its size). On the Mac each shard runs its files but phase 0's desktop-only ones, which run in one
+  desktop part beside the first shard (together every test once, tested). Each passes on its own final summary line;
+  the report's test counts are per shard.
+* The report format is unchanged: the same keys, one entry per step (the new steps `test-build` and `pytest-K-of-N`),
+  `fuzz_games` on the fuzz steps, `worker_cache` on the worker build.
+
+### 167.5 Lighter links: line tables only, rust-lld
+
+* `[profile.release] debug = "line-tables-only"` (was 1, "limited"): backtraces and panics keep file:line (checked: a
+  panic's backtrace names the function and src file:line under rust-lld), smaller PDBs; codegen is the same (digests
+  EQUAL, 167.8).
+* `.cargo/config.toml`: `[target.x86_64-pc-windows-msvc] linker = "rust-lld"` (the toolchain's bundled lld) - every test
+  binary, the Python module and the worker link with it on Windows; the Mac and Linux are untouched. The worker built
+  this way passes farm compat (167.8).
+* No test file changes here: the binaries' consolidation is 167.9.
+
+### 167.6 D1's prerequisite: a panicking game costs that game, not the run (zero-core pin -> `mig/phase1-panic`)
+
+zero-core's driver already caught a panic per game (`run_chunk`'s `catch_unwind`), but turned it into the driver's
+error, which failed the self-play phase and with it the run ("game G (driver seed S): search worker panicked: ...").
+Now (zero-core docs/search.md 2.18): the game's rows of the step are taken back (every key's buffer back to its length
+before the slot's step; the other games' rows untouched), the game ends as an aborted result row (`abort_reason`
+"panic", not over, no samples, no trace) and the slot starts the next game; its `GameFailure` - game id, driver seed,
+game seed, players, the spec's JSON, tag, archive entry / branch point, its real moves as trace steps (kept for every
+game whether or not the driver traces), the message - is handed out by `Driver::take_failures` (the binding's
+`take_failures()`, JSON strings; `stats()['game_panics']` once there was one). A panic outside a game's step (batch
+assembly, `resolve`) and an error a game returns still fail the driver. A game without a panic plays exactly as before:
+no setting, nothing read; the digests (the driver digest included) are EQUAL (167.8).
+
+* The run (`zero.run`, `Run.failure_metrics` after each iteration's self-play, both the local and the shared-quota
+  paths): every failure of its driver appended to `<run>/game_failures.jsonl` (+ the iteration), one log line each,
+  `game_failures` (the dropped rows among the iteration's results, a remote's too) in the metrics; more than 5% of an
+  iteration's games (at least 3) is a broken build, not a rare bug: the run fails loudly as before, the records
+  written first. pb2's in-process self-play, its Mac remote (the remote worker prints each failure in its log, its rows
+  come back as aborted rows) and the farm worker (logs each failure; a dropped game goes into neither its records nor
+  its shards; an eval row of one carries `"abort_reason": "panic"`, only then) all keep running.
+* Replay: `new_game(spec, players, game_seed)` and the steps bring the game to the decision where it panicked; a panic
+  inside a search simulation needs the search's state too (the record names the game and the move).
+* Tests (zero-core): `a_panicking_game_is_dropped_and_the_run_goes_on` (PanicToy, in-process threads only - no process
+  is started: with the caller waiting for the panicking group, the caller busy, one and two groups: the run finishes,
+  the dropped game's row aborted with reason "panic" and no samples, one failure with its ids, seeds, spec and message,
+  its moves legal on a fresh game of its seed, and every other game's row and the samples exactly the plain toy's run
+  of the same seed); `tests/test_game_failures.py` (the run's file, metrics, log and the storm limit, a fake driver);
+  zero-core `cargo test --release`: 200 + 3 passed.
+
+### 167.7 Measured (the desktop, 2026-11-15, beside pb1 / pb2 and other sessions' gates: noisy, the order is what holds)
+
+Builds (`tools/build_times`-style harness, CARGO_BUILD_JOBS 10, each in a warm-pool slot of its own target dir):
+
+| | old: main 72e5a0df (169 test binaries, debug 1, link.exe) | new: consolidated + line tables + rust-lld (eacc1027) | new without the consolidation (e95f91ba) |
+|---|---|---|---|
+| `cargo test --release -p engine --no-run`, cold target dir | 826.5 s | 298.8 s (2.8x) | 730.9 s (1.13x: line tables + rust-lld alone) |
+| the same after touching engine/src/lib.rs (warm: an engine change) | 880.9 s (no faster than cold: the engine crate + 169 links) | 259.0 s (3.4x) | - |
+| `cargo build --release -p mtgz_worker` (engine built) | 128.5 s | 147.6 s | - |
+| `tools/build_py.sh` (engine built; cache off) | 127.3 s | 141.6 s | - |
+| the built suite's run (`cargo test --release -p engine --no-fail-fast`) | 297.5 s (2663 passed, 171 binaries) | 259.3 s (2664 passed, 18 binaries) | - |
+| a commit with no Rust change in a fresh warm worktree: the worker | a cold build | 2.7 s (artifact cache hit) | - |
+
+The fuzz (one desktop slot each, 8 shards):
+
+| pool, 2,000 games | one process (the old way's test threads) | sharded (`tools/fuzz_shards.py`) | counters equal |
+|---|---|---|---|
+| default (+100 matches) | 357.2 s games, 37.9 s matches (the old 20k: 2,658 s on 49716d52) | 61.1 s | games 94 counters, matches 16: EQUAL |
+| delver_dealt (+100 matches, +100 post-sideboard) | 231.1 s, 53.3 s (the old 20k: 2,020 s) | 46.1 s | games, matches, post: EQUAL |
+| default, hidden decklists | 477.6 s | 72.8 s | games: EQUAL |
+
+"Counters equal": the shards' merged FUZZ_TOTALS == one process's FUZZ_TOTALS over the same seeds, every counter
+(`E:/mtg-zero-scratch/mig-phase1/timing/fuzz_equal-*.json`): the sharded run plays the same games with the same coverage.
+
+Gate tiers, old -> new (wall time of the whole gate; the new ones with every heavy step through tools/slotd.sh while 1-3
+of its 4 slots were held by other sessions' gates and h2hs, so each step's time includes its wait for a slot):
+
+| tier | old (report) | new (report) | of which waiting for slots (summed over steps) |
+|---|---|---|---|
+| suite | 5,993 s (49716d52: suite + 2 pools x 20k, in series) | 1,731 s (d1bc60f8: 3 pools x 2k, consolidated) / **256 s** (e5bd0242: the test binaries already built in its warm worktree, no slot waited for) | 1,680 s / 0 s |
+| engine | 1,476 s (1b2a9cdf) | 1,835 s (d1bc60f8) / **762 s** (38a189f8: the module and the worker from the cache) | 3,620 s / 1,180 s |
+| python, a commit with no Rust change | 1,123 s (72e5a0df) | 1,029 s (3e99e7b0, fresh warm worktree, builds from the cache) / **703 s** (416c0a2a: module 4 s + worker 3 s from the cache, the slowest shard's own work 296 s: **5.1 min of work**) | 1,520 s / 620 s |
+
+What the numbers say:
+* The build is ~3x faster cold and ~3.4x after an engine change; the worker and the module come from the cache in
+  seconds for a commit without Rust changes (a fresh worktree: no cold build at all).
+* The fuzz is 5-7x faster at the same depth, and the gate's depth is a tenth of before (D1): the suite tier's fuzz work
+  went from ~78 min (two pools, 20k) to ~3.5 min of shard time (three pools, 2k).
+* The tiers' wall times are now dominated by waiting for the throttle's slots, not by work: beside two live runs and
+  other sessions' gates every heavy step queued. The python tier's work was build (15 s, cache) + worker (3 s, cache) +
+  the longest pytest shard and the run-loop smoke - the < 6 min target holds only on a free slot set; the throttle (or
+  phase 0's Mac placement) decides the rest. The first sharded pytest was unbalanced (by file size: one shard 857 s);
+  with the measured durations the four shards are within 15% (470 / 408 / 408 / 408 s of measured, loaded seconds).
+
+### 167.8 Checks and gates
+
+* Digests EQUAL: full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5 (main's), digest formats (constructed
+  e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd) and dealt e802d9df793c9993 = the recorded files, on
+  d1bc60f8 and on the merged 38a189f8.
+* The sharded fuzz plays the same games as one process: every counter equal over the same seeds, three pools (167.7).
+* `zcache.py check-scope` on the warm-2 build: 322 files read by the Python module's and the worker's builds, 0 outside
+  the key's paths.
+* Tests: tests/test_fuzz_shards.py (ranges tile, a shard is evidence only for its own range, the merge refuses a gap, an
+  overlap, a count that does not add up, a disagreeing skip; the harness prefix; the caller's FUZZ_* never reach a
+  shard), tests/test_artifact_cache.py (the key follows every Rust input and nothing else - a Python or docs commit keeps
+  it, an engine file, data, RUSTFLAGS, the toolchain, the pin change it; uncommitted inputs have no key; store / fetch,
+  never replaced, a tampered entry refused; LRU eviction; dep-info scope; the warm pool's leases: exclusive, a dead or
+  reused pid's taken over), tests/test_gate.py (the suite's sharded fuzz steps and their checker, an old 20k report still
+  evidence, the cached worker's line, pytest shards: every test once, split files, the Mac commands and the desktop part,
+  phase 0's tests with the new steps); zero-core: 167.6. pytest of the whole repo runs in every gate below.
+* Gates (all `--no-mac`, from warm-pool worktrees, the heavy steps throttled beside pb1 / pb2):
+  * before the merge of main: **GATE PASSED suite d1bc60f855fa in 1731s** (2664 passed in 18 binaries, three pools'
+    sharded fuzz) and **GATE PASSED engine d1bc60f855fa in 1835s** (digests EQUAL, farm compat PASS: gate 2 identical,
+    6 games, 2484 rows; gate 3 identical, 2556 rows); **GATE PASSED python 3e99e7b063fe in 1029s** (a fresh warm worktree:
+    the module and the worker from the cache).
+  * on the merged branch: **GATE PASSED suite e5bd02420215 in 256s** (2664 passed in 171 binaries = the 2663 of 72e5a0df + fuzz_shard_totals; default 85 s, default+hidden 109 s, delver_dealt 69 s of shards); **GATE PASSED WITH SKIPS engine 38a189f88db5 in 762s** (--tested-sha e5bd0242; digests EQUAL; farm compat PASS: gate 2 identical, 6 games, 2484 rows, 150 batches; the skips: 6 live-run-hazard tests fenced by phase 0 beside the live runs (166); the first try on e5bd0242 failed tests/test_mac_remote.py::test_a_worker_plays_mtg[matches] on its 180 s deadline under load - alone it passes, 102.7 s - and this branch's own test_gate read the machine's shared durations: fixed in 38a189f8); the python tier on the docs commit: **GATE PASSED WITH SKIPS python 416c0a2acc7a in 703s** (the module and the worker from the artifact cache in 4 s and 3 s; four pytest shards 202-296 s of work each after the waits; the run-loop smoke 157 s; the skips: 6 live-run-hazard tests fenced by phase 0).
+  * The first suite gate (befcbebb) failed 11 tests of rules_suite: the engine's "one card database per process"
+    (az::sample) in a binary of several test files - fixed on the consolidation branch (167.9). The first merged suite gate
+    (e95f91ba) failed the fuzz steps' merged checks: the gate's checkout-relative `--out` and the test processes' engine/
+    cwd - fuzz_shards makes it absolute (e5bd0242).
+
+### 167.9 The test-binary consolidation (branch `mig/phase1-tests`, on top of this branch)
+
+Not on `mig/phase1`: open branches add engine test files (`feat/pb3-varied`: bo3_game_log.rs, dealt_per_seat.rs), and
+with it every one of them needs a line in a suite. `mig/phase1-tests` (e512e720 + this branch merged) holds:
+* `engine/Cargo.toml`: `autotests = false` and 16 `[[test]]` targets instead of 169. Their own binaries (named entry
+  points of the gate, the tools, the farm's repro strings and the docs; the benchmarks and digest_formats each set the
+  process's global allocator, one per binary): `az`, `dealt_decks`, `digest`, `digest_formats`, `draft`,
+  `driver_bench`, `fuzz`, `hidden`, `limits`, `measure_delver`, `perf`, `support`. The other 157 files are modules of
+  four suites: `cards_suite` (cards.rs + the 70 cards_*.rs), `rules_suite` (35 rules_*.rs), `rulings_suite` (24),
+  `misc_suite` (27 others). A suite file is `#[path = "x.rs"] mod x;` lines: a module loaded by `#[path]` resolves its own
+  `mod common;` / kit modules beside it like a crate root, so no test file changed but rulings_util's `use
+  crate::common::db` (now `super::common::db`). One file's tests: `cargo test --release -p engine --test rules_suite
+  rules_combat::` (was `--test rules_combat`).
+* `az::sample`'s two caches (the basic lands and the card facts) assumed "one card database per process" (asserted):
+  a suite holds the cube (`CardDb::cube()`, rules_m8b*) and the cube plus the test cards (`common::db()`). Now `PerDb`:
+  the first database's value on the same OnceLock fast path, any other's in a short list behind a lock - each value
+  from its database alone, the same values (digests EQUAL). The other engine statics that read a card database
+  (`identity::identities`, `hidden_decks`' priors) already keep one per database; the rest read none or one fixed table.
+* tests/test_engine_test_layout.py: every engine/tests file is a `[[test]]` or a suite module, or the test fails naming
+  the file and where it goes - what makes a branch from before this one loud instead of silently untested.
+* Measured: 167.7 (cold 298.8 s vs 730.9 s without it on the same tree, 826.5 s on main); the suites ran stable three
+  times (1391 / 450 / 397 / 187 passed).
+* Merge it after the branches that add test files, adding their files to a suite (`misc_suite` for pb3's two); then its
+  suite tier on the result.
+
+### 167.10 Deferred, and what it gives pb2
+
+Deferred:
+* The consolidation's merge (167.9). Caching test binaries in the artifact cache (167.2: they compile the checkout's
+  path in; a warm worktree does the job). The removal of the old 331 worktrees / 211 target dirs (junction audit first).
+  farm_build.py and `tools/run.py repin` taking the worker from the cache (phase 3's builder). A diff-driven choice of
+  the fuzz pools (phase 2's per-step evidence; today `--fuzz-pools`, default three). Splitting pytest below a test (one
+  test of tests/test_mac_remote.py is 137 s). Recording durations from shards that ran on the Mac (their junit stays
+  there).
+* The farm side of D1: continuous 20k fuzz on main and the live runs' builds with a failure queue and an alert (phase 4);
+  the farm worker's dropped-game records go to its log only, not uploaded yet; a traced eval row of a dropped game has no
+  record, and farm_campaign's collector should treat it as a failed id (it plays it locally then).
+* The python tier is under 6 min of work (5.1 min on 416c0a2a: cache builds 7 s + the slowest shard 296 s) but its wall
+  time beside two live runs is the throttle's: phase 0's Mac placement or a quieter desktop.
+
+pb2: nothing of the live run was touched (its files, processes, the Mac's run checkouts, the farm run). What it gains:
+* A rare engine bug in self-play now costs one game (an aborted row, a line in game_failures.jsonl) instead of the run,
+  once pb2 restarts on a pin with zero-core `mig/phase1-panic` (its in-process self-play, the Mac's remote worker and the
+  farm worker all keep running); more than 5% of an iteration's games still fails the run loudly.
+* Its restarts and re-pins get faster: a re-pin onto a commit without Rust changes takes the module and the worker from
+  the cache (seconds, no cold build in the new pinned worktree); an engine change builds ~3x faster.
+* Gates take far less of the desktop beside it: the fuzz work per suite tier fell from ~78 min single-threaded to ~3.5
+  min of shard time, and every heavy step queues for a slot of the throttle instead of piling up.

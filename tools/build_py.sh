@@ -14,6 +14,10 @@
 # dir another checkout built in is refused (tools/target_guard.py: docs/ENGINE.md 143).
 # Windows locks a loaded .pyd: if the copy fails, the old file is renamed out of the way
 # (running processes keep using it; new ones get the new build).
+# The artifact cache (tools/zcache.py, docs/ENGINE.md 167): a commit whose Rust inputs were built before (any checkout,
+# the same hash of engine/, card_ir/, py/, worker/, data/, Cargo.*, the zero-core pin, the toolchain and the Python)
+# takes that build instead of cargo's, checked by its sha256; a fresh build is stored for the next one. Off with
+# MTGZ_ARTIFACT_CACHE=0; never with ZERO_CORE_UNPINNED=1 or uncommitted Rust inputs (they build as before).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORE="$ROOT/third_party/zero-core"
@@ -52,4 +56,23 @@ if command -v cygpath >/dev/null 2>&1; then
 else
   "${PYTHON:-python}" "$ROOT/tools/target_guard.py" "$CARGO_TARGET_DIR" "$ROOT"
 fi
-exec bash "$CORE/tools/build_engine.sh" "$ROOT" mtgz mtgz_py
+PY="${PYTHON:-python}"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT) DST="$ROOT/mtgz/_engine.pyd" ;;
+  *) DST="$ROOT/mtgz/_engine.so" ;;
+esac
+KEY=""
+if KEY="$("$PY" "$ROOT/tools/zcache.py" key pyd --root "$ROOT" 2>/dev/null)"; then
+  if "$PY" "$ROOT/tools/zcache.py" fetch pyd --root "$ROOT" --dest "$DST"; then
+    PARENT="$ROOT"
+    command -v cygpath >/dev/null 2>&1 && PARENT="$(cygpath -w "$PARENT")"
+    # (build_engine.sh's own last line: the module imported from this checkout)
+    exec "$PY" -c "import sys; sys.path.insert(0, r'$PARENT'); import importlib; e = importlib.import_module('mtgz._engine'); print('mtgz._engine OK:', e.__file__, '| games:', e.game_names())"
+  fi
+else
+  KEY=""
+fi
+bash "$CORE/tools/build_engine.sh" "$ROOT" mtgz mtgz_py
+if [ -n "$KEY" ]; then
+  "$PY" "$ROOT/tools/zcache.py" store pyd --root "$ROOT" --src "$DST" --key "$KEY" || echo "artifact cache: store failed (the build stands)"
+fi

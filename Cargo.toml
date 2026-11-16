@@ -16,7 +16,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [profile.release]
-debug = 1
+# line tables only (docs/ENGINE.md 165): file:line in backtraces and panics, without the variable and type info that
+# made every link write a large PDB; codegen is the same (the digests are equal)
+debug = "line-tables-only"
 
 # The fuzz farm's build (docs/ENGINE.md 70, tools/fuzz_farm.py): release speed with
 # debug_assertions and overflow checks turned back on, so `debug_assert!`-style invariant checks

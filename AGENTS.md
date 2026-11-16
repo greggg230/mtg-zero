@@ -44,8 +44,9 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   behaviour that names the CR rule it checks (`fn cr_704_5j_the_legend_rule_for_planeswalkers`
   style). Check the card against its Oracle text. For official rulings, see
   `docs/rulings.md` (`// ruling: <hash8>` in the test). Add newly supported cards to
-  `engine/tests/support.rs::SUPPORTED`. Before merging, run
-  `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`.
+  `engine/tests/support.rs::SUPPORTED`. Before merging, the `suite` gate runs the full engine suite and a sharded
+  2,000-game fuzz per pool (`python tools/fuzz_shards.py --pool <pool> --games 2000`, hidden decklists included); the
+  20k depth runs continuously on the farm, not in the gate (the user's decision, `docs/ENGINE.md` 167).
 * **Card data (the IR).** Cards come from the oracle-text parser in `ir/mtgz_ir` (moved from
   mtg-bot, `docs/ENGINE.md` 169). A card the parser reads wrong is fixed at the parser, with a
   test in `tests/ir/`, never patched in the JSON; then `python tools/card_ir.py export`
@@ -88,7 +89,7 @@ the agent tested) are required; a step you skip on purpose (`--allow-skip <step>
 | docs, or tools not on the run path | `docs` |
 | Python run loop, settings, presets | `python` |
 | encoding only, layout unchanged | `encoding` |
-| engine rules or cards | `suite` on your branch's commit (the full engine suite + the 20k fuzz above; its report `gates/<sha12>-suite.json` is the evidence), then `engine --tested-sha <that sha>` |
+| engine rules or cards | `suite` on your branch's commit (the full engine suite + the sharded 2k fuzz per pool above; its report `gates/<sha12>-suite.json` is the evidence), then `engine --tested-sha <that sha>` |
 | zero-core search or behaviour | `search-core` |
 | an opt-in zero-core feature, defaults byte-identical | `optin-core` |
 | moving a run onto an already-verified commit | `repin` |
@@ -112,6 +113,12 @@ keeps everything here (throttled); `--offload local|mac` and `--throttle on|off`
 other heavy command you run by hand beside a live run goes through the throttle too:
 `bash tools/slotd.sh cargo test --release -p engine --test az` (state and settings in `E:/mtg-zero-state`;
 `bash tools/slotd.sh --status`).
+
+**Gate in a warm worktree** (`docs/ENGINE.md` 167), not a new one: `python tools/warm_pool.py run --sha <sha> -- python
+tools/gate.py <tier>` checks the commit out into one of a few fixed worktrees with their own fixed target dirs, so cargo
+rebuilds only what changed, and the Python module and the release worker come from the artifact cache
+(`tools/zcache.py`) when the commit changed no Rust input. gate.py runs a tier's independent steps at once, each where
+the placement above puts it. Never edit in a warm worktree.
 
 Don't re-run a full suite on a sha that already passed it: each tier writes `gates/<sha12>-<tier>.json`
 (`docs/ENGINE.md` 143). The checkout must be exactly its commit: an untracked file under `engine/`,
