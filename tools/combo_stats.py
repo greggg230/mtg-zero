@@ -492,6 +492,12 @@ def summarize(rs):
     out['aborted'] = sum(1 for r in rs if r['aborted'])
     out['turn_cap'] = sum(1 for r in rs if r['method'] == 'turn_cap')
     out['failures'] = sum(dict(((r['driver_seed'], r['batch']), r['batch_failures']) for r in rs).values())
+    # every cast (per game), the most cast cards of each player
+    cc = [collections.Counter(), collections.Counter()]
+    for r in rs:
+        for p, card, k in r['casts']:
+            cc[p][card] += k
+    out['casts_per_game'] = [{c: round(k / n, 2) for c, k in cc[p].most_common(12)} for p in (0, 1)]
     # tracked spells
     sp = collections.Counter()
     by = collections.Counter()
@@ -600,6 +606,8 @@ def table(s):
          f'(any {s["mull_any"][1]:.2f})',
          f'* per game: {s["decisions"]:.0f} decisions (the driver count), moves p0 {s["moves"][0]:.0f} / p1 {s["moves"][1]:.0f}, '
          f'{s["steps"]:.0f} engine steps; {s["wall_s"]:.1f} s wall a game in its batch, {s["cpu_s"]:.1f} CPU-s a game',
+         f'* casts per game p0: ' + ', '.join(f'{k} {v}' for k, v in s['casts_per_game'][0].items()),
+         f'* casts per game p1: ' + ', '.join(f'{k} {v}' for k, v in s['casts_per_game'][1].items()),
          f'* tracked casts: ' + ', '.join(f'{k} {v}' for k, v in s['spells'].items())]
     if s['countered_by']:
         L.append('* countered by: ' + ', '.join(f'{k} {v}' for k, v in s['countered_by'].items()))
