@@ -37086,3 +37086,33 @@ delver_dealt`): pass `--fuzz-pools ...,meta`.
   gate 2 identical (6 games, 1,640 rows, 150 batches), gate 3 identical (6 games, 944 rows, 6 decks compared); with the
   best-of-three metagame (`--set spec=<metagame_spec(fmt='bo3', game_episodes=True)>`): **PASSED** - gate 2 identical
   (4,204 rows, 150 batches), gate 3 identical (3,099 rows, 6 decks compared).
+
+### 176.8 Checks and gates (on b04e524a)
+
+* **The run loop**: `python -m mtgz.az.run --preset legacy-meta3-smoke` in a scratch run directory (CPU, 3 iterations,
+  16 games each): `done`, no panic; its game log 124 `"bo1"` lines (self-play and every evaluation game) over all 9
+  cells (16 13 17 / 10 11 13 / 16 11 17, row = p0's deck) and 9 spec lines, one per pairing.
+* **The fuzz, `FUZZ_POOL=meta`** (`tools/fuzz_shards.py --pool meta --games 2000`, in the suite gate): **PASSED** - 2,000
+  games, 100 matches, 100 post-sideboard matches, every game and match through its lockstep pairing check, the merged
+  end-of-run checks (every cell played; the post-sideboard matches the mirrors only). The cells by seed (the engine's
+  draw): games 223 238 219 / 235 202 224 / 224 219 216; matches 7 14 12 / 12 7 9 / 8 11 20; post-sideboard (mirrors)
+  27 / 32 / 41. A 40-game local smoke before it: 10,410 game steps and 2,588 worlds compared in lockstep (12 matches:
+  6,048 steps, 1,504 worlds; 12 post-sideboard: 5,368 and 1,338).
+* **`suite`**: **GATE PASSED suite b04e524ac1ad in 513s** - the full engine suite (2,688 passed, 24 binaries) and the
+  sharded 2k fuzz of `default`, `default+hidden`, `delver_dealt` and `meta`.
+* **`engine --tested-sha b04e524a --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`**: **GATE PASSED
+  WITH SKIPS engine b04e524ac1ad in 1164s** (skipped: one live-run-hazard test, fenced by the live run here) - digests
+  full 8f71ccb0d89031a6 and encoding-free 41e27319acdae5b5 (= expected), digest formats constructed e1177d609d6c1aee,
+  eoe 2efe956d589840ce, driver 6f7b863096e47dcd (each = the recorded file, unchanged by this branch), metagame
+  8b2b74f436d338a0 (new), dealt e802d9df793c9993; `az` 54, `limits` 13, `hidden` 28 passed; pytest 487 + 44 passed;
+  the desktop smoke; farm compat on the Delver preset identical; the suite evidence.
+
+### 176.9 Open
+
+* **Resigned best-of-one games are not in the game log** (as sealed games: zero-core's resign rule ends a game outside
+  it). With self-play resignation on, per-cell win rates read from the log alone would miss the resigned games; a
+  per-cell count from the game records (`record_setup`'s pairing) or zero-core's results would not.
+* **`meta` is not in the suite tier's default fuzz pools** (each gate's cost); add it to `FUZZ_POOLS` or the fuzz
+  steward's modes when the metagame run starts.
+* **The launch flags of the real run** (network size - the Delver line's runs are 128 x 8 -, evaluation cadence,
+  remotes, resignation) are the launch's; the preset keeps `delver-mirror`'s.
