@@ -35562,15 +35562,27 @@ own target directory (one per checkout, zero-core's its own).
   game 2 at once (both seats dealt) checked a game-1 look at the viewer's own hand card against game 2's hand - the
   check, not the engine; fixed in the walk (75fe39b0: the hand before the step, and that new game counted as one the
   world started) and rerun above.
-* **The gates.** `suite` (the tier's sharded 2k fuzz: default, default+hidden, delver_dealt, delver_dealt2) **GATE PASSED
-  suite 579a2331df4a in 737s** - the merge of main acc00acd, before the fuzz-walk fix and main's 1779035a (comment, doc
-  and the fuzz harness changes only since); the full engine suite on 2258c9b0 (the Mac): 2,671 passed; the 20k fuzz of
-  the default pool and of delver_dealt there: passed. The `engine`, `python` and `optin-core` tiers on the final merge
-  b34402a0 were started and stopped on the user's request (the desktop freed for a while: the throttle set to 0 slots)
-  before they finished - to run when work resumes (the commands in the launch checklist's step 0; `optin-core` with
-  `--baseline-root` a built checkout of main 1779035a). Farm compatibility (the release worker, three configurations)
-  passed on 875644b7, whose engine and worker sources the later commits change only in comments, the fuzz harness and
-  main's merged work.
+* **The gates, on 91db9c01** (main 1779035a merged; zero-core pin feat/pb3-teacher 002731c; gate.py placing its steps
+  beside the live pb2 - the Mac for the pure-CPU ones, `tools/slotd.sh` slots here):
+  - `suite` (the sharded 2k fuzz of default, default+hidden, delver_dealt and delver_dealt2, the full engine suite):
+    **GATE PASSED suite 91db9c015ce1 in 256s**;
+  - `engine --tested-sha 91db9c01 --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`: **GATE PASSED WITH
+    SKIPS engine 91db9c015ce1 in 456s** - skipped: one live-run-hazard test fenced (a live run on this machine);
+  - `python`: **GATE PASSED WITH SKIPS python 91db9c015ce1 in 251s** - the same fenced test;
+  - `optin-core --baseline-root <a checkout of main 1779035a>`: **GATE PASSED WITH SKIPS optin-core 91db9c015ce1 in
+    1156s** - checkpoint_compat byte identity identical across both checkouts (visits 3,272 samples, cq 3,272), the
+    digest formats and the dealt digest equal, az 54, hidden 28, the other games' build-only 3 of 3, core pytest 653
+    passed and 53 skipped with 17 live-run-hazard tests fenced;
+  - farm compatibility with the gate's worker of 91db9c01: the gate's step on the default dealt preset passed, and by
+    hand the pb3 preset **PASSED** (6 games, 2,966 rows; records 2,895 rows) and the pb3 preset with a choice table
+    **PASSED** (8 games, 3,896 rows; records 3,660 rows).
+  Two of main's own problems met on the way: (1) `tests/test_artifact_cache.py::test_check_scope_reads_cargo_dep_info`
+  writes Windows dep-info paths and fails on the Mac - this branch adds it to `PYTEST_DESKTOP_ONLY` (91db9c01); (2)
+  `tools/slotd.sh` sources `tools/local_env.sh`, whose exported `MTGZ_MAC_HOME=/Users/...` Git Bash converts into a
+  Windows path (`C:/Program Files/Git/Users/...`) for every Windows program the throttle starts, so
+  `tests/test_mac_remote.py::test_the_macs_selfplay_settings` fails whenever its shard runs on the desktop. Not fixed
+  here (main's script): the gates above ran with `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`; the fix is
+  that exclusion exported by `tools/local_env.sh` itself.
 
 ### 168.6 Left, decisions for the user
 
