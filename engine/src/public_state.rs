@@ -373,6 +373,7 @@ pub fn fields() -> Vec<Field> {
         table: Hidden "the seats that sideboard by the choice table (ENGINE.md 168.3): a seat's own policy, as keep; never encoded, the other player's worlds deal its 60 from the constructed prior",
         glog: Derived "the live match's game log record (ENGINE.md 168.2): never read by the rules, the encodings or the search; a clone carries none",
         dealt_seed: Hidden "seeds the dealt seat's later deals (ENGINE.md 154): chance not yet happened, determinize reseeds it in every world",
+        test_panic: Derived "a test fault (ENGINE.md 172, MTGZ_TEST_PANIC): None in every real match; never read by the rules, the encodings or the search",
     });
     v
 }

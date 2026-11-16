@@ -126,7 +126,7 @@ fn team_draft_events_park_and_resolve_through_the_driver() {
 }
 
 /// Parked memory of real-sized events (DESIGN.md 2.3.9: ~185 records of 14,488 features per 4v4
-/// event in float16, ~5 MB): `cargo test --release -p engine --test draft_deferred -- --ignored
+/// event in float16, ~5 MB): `cargo test --release -p engine --test misc_suite draft_deferred:: -- --ignored
 /// --nocapture`.
 #[test]
 #[ignore]

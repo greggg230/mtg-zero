@@ -19,6 +19,10 @@ serde_json = "1"
 # line tables only (docs/ENGINE.md 165): file:line in backtraces and panics, without the variable and type info that
 # made every link write a large PDB; codegen is the same (the digests are equal)
 debug = "line-tables-only"
+# A panic unwinds (Rust's default, said here so no one turns it off): self-play's driver catches one game's panic at the
+# game's step and drops that game instead of the run (docs/ENGINE.md 172; zero-core docs/search.md 2.18) - the farm
+# worker, the Python module and the tests alike. `panic = "abort"` would make every engine bug kill the whole process.
+panic = "unwind"
 
 # The fuzz farm's build (docs/ENGINE.md 70, tools/fuzz_farm.py): release speed with
 # debug_assertions and overflow checks turned back on, so `debug_assert!`-style invariant checks

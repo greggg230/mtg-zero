@@ -35663,6 +35663,40 @@ with it every one of them needs a line in a suite. `mig/phase1-tests` (e512e720 
   times (1391 / 450 / 397 / 187 passed).
 * Merge it after the branches that add test files, adding their files to a suite (`misc_suite` for pb3's two); then its
   suite tier on the result.
+* **Merged into main** (main merged into the branch at ebf322d5: pb3 168, the public cleanup 169, the card IR 170, the
+  MTGO build 95.11). The engine test files main added since the branch point: `dealt_per_seat.rs` and `build.rs` (95,
+  the described-position round trip: no allocator, no process-wide state) are modules of `misc_suite`; `bo3_game_log.rs`
+  is a `[[test]]` of its own - it sets the game log's sink (`az::game_log::set`, a process-wide static), and its file
+  says so. The same holds for three files the branch had put in `misc_suite`: `game_log.rs` ("its own binary: the log
+  is a process-wide sink"), `deck_choice.rs` and `deck_scorer.rs` (each one test sets the sink): in one process their
+  sink windows overlap each other's and every other live EoE / best-of-three game of the suite (`sealed`, `eoe_net`,
+  `bo3_episodes`, ...), so a line lands in the wrong file or a test's `set(None)` ends another's log - the three
+  stable runs above were the scheduler's luck. They are `[[test]]`s again: 20 targets, 16 named (`az`,
+  `bo3_game_log`, `dealt_decks`, `deck_choice`, `deck_scorer`, `digest`, `digest_formats`, `draft`, `driver_bench`,
+  `fuzz`, `game_log`, `hidden`, `limits`, `measure_delver`, `perf`, `support`) + 4 suites (cards 71, rules 35, rulings
+  24, misc 26: 172 files). The test files' own run instructions that named a binary now gone say the suite and the
+  module (`--test misc_suite dealt_per_seat:: -- --ignored --nocapture` records / checks the dealt-per-seat digests,
+  `--test misc_suite build::` the round trip; `bots`, `draft_deferred`, `eoe_net`, `sealed`, `v7_tails`, `view`); no
+  gate step, tool or farm repro string ran one of the moved files by name (the gate's `--test` steps are `az`,
+  `digest`, `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, all named).
+* **Measured on the merge** (the desktop beside the live pb1 / pb3 runs, ~2 GB of RAM free, each build through
+  `tools/slotd.sh` with CARGO_BUILD_JOBS 10 in a fresh target dir of its own): a cold `cargo test --release -p engine
+  --no-run` takes **717.8 s on main ebf322d5** (173 test executables) and **234.4 s on the merge 96afc516** (21: the
+  20 targets + the lib's unit tests), 3.1x. `dealt_per_seat::dealt_per_seat_digests` (ignored, not a gate step) in
+  `misc_suite`: combined **26c9751332e70c73**, the recorded value.
+* **The gates on 96afc516** (gate.py placing its pure-CPU steps on the Mac beside the live runs, the desktop's heavy
+  steps in `tools/slotd.sh` slots; `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"` for main's Git Bash
+  conversion, 170.7):
+  - `suite`: **GATE PASSED suite 96afc5162b5f in 405s** (the full engine suite 2,678 passed in 22 binaries - main's
+    2,678 in 174 -; the sharded 2k fuzz of default, default+hidden and delver_dealt);
+  - `engine --tested-sha 96afc5162b5f --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`: **GATE PASSED
+    WITH SKIPS engine 96afc5162b5f in 926s** - skipped: one live-run-hazard test fenced (a live run on this machine).
+    Digests EQUAL (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5; constructed e1177d609d6c1aee, EoE
+    2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993 = the recorded files), az 54, limits 13, hidden
+    28, pytest 465 passed in four Mac shards + 44 on the desktop, the smoke config, farm compat PASS (gate 2 identical:
+    6 games, 2,484 rows, 150 batches; gate 3 identical: 2,556 rows);
+  - `python`: **GATE PASSED WITH SKIPS python 96afc5162b5f in 851s** - skipped: two live-run-hazard tests fenced (pytest
+    524 passed in four shards + the desktop part, the run-loop smoke 16 games).
 
 ### 167.10 Deferred, and what it gives pb2
 
@@ -35998,8 +36032,80 @@ own target directory (one per checkout, zero-core's its own).
   a triggered ability encodes as one without it (three collisions at GATE_SEED 4242 with a redrawn sample). Layout v7
   (`mtg`) is not affected; `mtg_eoe` stays on v6 until EoE run 2 resumes (encoding-options.md 2.8): a known-gap entry or
   the v6 fix is that work's.
-* **Not done**: a site panel for the matchup model (needs the user's screenshot approval); the gate's farm-compat step
+* **Not done**: a site panel for the matchup model (needs the user's screenshot approval; built in 168.7, awaiting it); the gate's farm-compat step
   still runs the default preset only (run the pb3 preset by hand: the checklist's step 0).
+
+### 168.7 Does the network learn the table? The agreement metric, the site's matchup record (branch `feat/matchup-agreement`, 2026-11-15)
+
+**Why.** Teacher decisions (168.3) record the table's 60 as the policy target at a chosen seat's sideboarding, so the
+network's PRIOR should learn the table's choice - the measure of whether option 2 works. Nothing measured it: the
+census (132) runs on the evaluation spec with a search, and `keep_h2h` measures results, not the prior.
+
+**The probe set** (`tools/matchup_agreement.py probe RUN --out PROBE`, made once and saved: every checkpoint is
+measured on the same positions). Sideboarding decisions of seats that choose their 60 in the run's own logged
+self-play matches (168.2), rebuilt exactly from the match's seed on the run's spec without a table (the table is
+never encoded and draws nothing from the match's RNG). Game 2: the match's start (`start_game` 2); a seat that
+sideboards second sees the first seat driven to the 60 the log says it played. Game 3: the logged game-2
+sideboarding as above, then game 2 played out by a fixed policy - the run's first checkpoint's prior, sampled with
+the probe's seed (the log has no moves) - kept when the match reaches a game 3; a second sideboarder there sees the
+first keep its 60. Each position is stored as its action list from the match's start (`-1`: the next episode), so a
+rebuild is the same game anywhere; `check_counts` checks every rebuilt position's options against its stored deck.
+Stratified by the table's context (game, first, lead, other seat dealt): `--per-context` (75) of each reachable
+context by a seeded shuffle. pb3's: 602 positions (75 in each of the 8 reachable contexts, 2 from drawn-game contexts),
+3 minutes to make.
+
+**The measures** (`measure` / `watch`; forward passes only, CPU, below-normal priority). A sideboarding is a sequence
+of decisions (36.2), so the prior over 60s is the product of the priors along the canonical path (the teacher's path,
+`sbtable::next_action`, mirrored in Python and checked against the engine's legal answers at every step). Per
+position: `prior` on a table's 60 for its context; `top1`, the network's highest-prior 60 is the table's - found
+EXACTLY by a best-first search over the sideboarding tree (path priors only shrink, so the first complete 60 off the
+queue is the mode; tested against brute force), a search past `--budget` (400) evaluations reported `unresolved` and
+left out, never guessed; `keep` (PASS at the first decision: the last game's 60; in game 2 the main), `main`, and
+`rough` (pb1's habit, the main +Rough // Tumble -Prismari Charm). Against the newest table at the measurement, the
+table live for the checkpoint's own iteration (`used.jsonl`: iteration N's self-play, which checkpoint N trained on)
+and the first table. One row per checkpoint in `<run>/matchup/agreement.jsonl` (overall and per context, each
+context's favourite 60 and its share, the versions, the probe's id); when a new table publishes after the newest
+checkpoint was measured, the watcher measures that checkpoint again against it (a second row: readers take each
+checkpoint's newest). ~9,000 evaluations and 6-13 s a checkpoint on 4 CPU threads.
+
+**pb3, backfilled iter 0 (pb2@166) to 17** (probe dbb5ac497f79; prior on the live table's 60, else the first's):
+
+| iter | table | game 2: prior / top-1 / +Rough -Charm | game 3: prior / top-1 / keep |
+|---|---|---|---|
+| 0-9 | (v0008) | 0.000 / 0.00 / 0.91-0.96 | 0.000 / 0.00 / 0.00 |
+| 10 | v0008 | 0.229 / 0.00 / 0.714 | 0.063 / 0.02 / 0.08 |
+| 11 | v0008 | 0.689 / 1.00 / 0.282 | 0.287 / 0.31 / 0.43 |
+| 13 | v0008 | 0.952 / 1.00 / 0.041 | 0.306 / 0.31 / 0.53 |
+| 14 | v0012 | 0.008 / 0.00 / 0.017 | 0.112 / 0.11 / 0.67 |
+| 16 | v0012 | 0.613 / 0.50 / 0.000 | 0.113 / 0.11 / 0.98 |
+| 17 | v0012 | 0.429 / 0.00 / 0.000 | 0.113 / 0.11 / 0.96 |
+
+Game 2: the inherited habit (0.94 on +Rough // Tumble -Prismari Charm, pb2's 0.93) is gone four generations after the
+first teacher targets, v0008's 60 (+2 Hydroblast -2 Unholy Heat) took 0.95 by iter 13; v0012 (+3 Pyroblast +1
+Hydroblast -4 Force of Will) moved the target and the prior follows it more slowly (a four-card change: eight
+decisions on its path). Game 3: the network learned to keep its game-2 60 (in self-play a table seat's game-2 60 is
+its game-3 choice already, so the teacher's game-3 path is mostly PASS); the probe's game-3 seats start from logged
+game-2 60s of every origin (searched before iteration 10, older tables), so its game-3 agreement is the share whose
+game-2 60 already was the table's.
+
+**The site's record** (`tools/delverai_matchup.py RUN [--upload]`; `watch --upload` uploads after each new row or
+input change): delverai record `matchup.<run>` (kind 'matchup'): the versions' held-out gains, the agreement rows
+(against the live table, the first before it), the newest checkpoint's per-context numbers against the newest table,
+the newest table's reachable contexts as in / out lists, and **self-play matches per hour**: one point per iteration
+end, each iteration's matches (`selfplay.games` the desktop's, `remote.games` on top: the farm pools' games summed,
+the Mac the rest; zero-core run.py's `queue.games` = local + remote) spread over its run time, a point the trailing
+hour of run time's matches per hour of run time; stops (the supervisor log's run exits to the next start) and run
+time missing between iterations > 60 s are gaps, never drops. No farm machine names or ids (the site's worker refuses
+`m_...` ids in the record). Site panel: delverai branch `matchup-panel` (needs the user's screenshot approval).
+
+**Checks.** `tests/test_matchup_agreement.py` 9: the canonical path reaches every legal 60 of a small 75 exactly once
+(no path a prefix of another); the best-first mode equals brute force on six made-up trees, the path prior the same
+product, a search past its budget unresolved; end to end on the engine with a tiny untrained network (a real game
+log of random post-sideboard matches, a table version, the probe made twice identically, every position rebuilt and
+its options checked, rows for two checkpoints against the newest / live / first tables, keep = main in game 2, one
+position's table prior against the engine stepped by hand, nothing measured twice, the record); matches per hour on
+made-up metrics and a supervisor log (prorated windows, the stop merged with the missing run time, no machine id).
+**GATE PASSED WITH SKIPS python d5f307a5a73a in 552s** (the live-run fence only: 5 live-run-hazard tests fenced, pb1 / pb3 live), in a warm worktree (`tools/warm_pool.py run`).
 
 ## 169. Public cleanup: no farm computer details or machine-specific settings in the repos, the privacy check, licenses (branch `chore/public-cleanup`, zero-core `chore/public-cleanup`, zero-farm `chore/public-cleanup`, 2026-11-15)
 
@@ -36199,7 +36305,277 @@ that runs pytest (python, encoding, engine, search-core and the rest share `pyte
 `tests/test_gate.py::test_the_card_ir_tests_run_only_when_the_commit_touches_the_pipeline` checks both ways, a commit on
 main and no main. By hand: `python -m pytest tests/ir -q` (or `python tools/card_ir.py check` alone, ~5 s).
 
-## 171. The farm pool's per-generation export by weight swap: ~150 s -> ~2 s (branch `feat/fast-farm-export`, zero-core `feat/fast-farm-export`, 2026-11-15)
+## 171. The fuzz steward: continuous farm-first fuzz of main's and each live run's build at 50,000 seeds a day, the Mac and the desktop filling in, a failure queue with replay and an alert (`tools/fuzz_steward.py`, `tools/fuzz_local.py`; zero-farm PROTOCOL rev 14; branch `feat/fuzz-steward`, 2026-11-16)
+
+Why: the user's decision D1 of 2026-11-15 (the maintainer's notes, the iteration-speed review's decisions): the gate
+fuzzes ~2,000 games per pool (167.3); the 20k-style depth becomes **continuous farm fuzz of main and of each live run's
+pinned build**, with an automatic failure queue (replayable seeds) and an alert to the user. Settings the user approved:
+a target of **50,000 fuzz games per build per UTC day** (main, plus each live run's pinned build); the farm does it
+when it can, and when the farm is behind pace the Mac and then the desktop fill in; the farm's side-work cap (~25% of
+the farm while a run is live, D5; idle machines always) **may be exceeded while fuzz is behind its daily pace**. No
+engine, encoding, search or run-loop change; digests untouched. (Self-play's own panic containment, D1's
+prerequisite, is 167.6 and section 172.)
+
+### 171.1 Why the coordinator changed (zero-farm PROTOCOL rev 14)
+
+Fuzz campaigns were the backfill: the coordinator leases them only after every run's evaluation and self-play
+(PROTOCOL 3), whatever their `priority`. A live run's farm self-play always has games to give (the pool never holds a
+share of a generation's quota), so beside pb3 the farm fuzzed **0 seeds an hour** (8,600 in the day before, all while
+no run had work). Rev 14 (zero-farm 541820f; coordinator only, migration 0010; deployed 2026-11-16, Worker version
+8c33c87c) gives a campaign an optional `share` (0 < x <= 1): such a campaign competes with the runs' games and goes
+first while its own active leases + 1 are at most x times (all runs' active self-play and eval leases + its own + 1),
+else after every other run job - rev 13's rule for background jobs (165.4), with the campaign's own leases added to the
+total since they are not run leases. It never idles a PC, never takes more than its share from a run that has games
+to give, and without `share` nothing changes. Tests: coordinator `test/fuzz_share.test.ts` (7: the rank function; no
+share -> nothing beside a live run; share 0.25 -> 1 machine in 4; 0.5 -> every other; beyond its share it still gets
+what the runs leave; a share campaign before the backfill; checks, GET, stats, a PUT without it removes it); `npm test`
+23 files, 196 tests; `tsc` clean. `tools/farm_campaign.py create|update --share X|none` (kept by later updates; not
+signed: no new definition; tests/test_farm_campaign.py).
+
+### 171.2 The steward (`tools/fuzz_steward.py run`)
+
+A long-running desktop process, started at logon by the Task Scheduler task "MTG Zero fuzz steward" (`install-task`:
+the current user, interactive token, least privilege, no time limit, restarted after a failure, one instance;
+`pythonw.exe`, so no console window), stopped by `<state>/STOP` (`fuzz_steward.py stop`). It binds no port. State
+`$ZERO_BIG_DISK/mtg-zero-state/fuzz-steward/` (config.json overrides, state.json, queue.jsonl, steward.log, daily.log,
+builds/, jobs/); `--status-file` writes a small JSON for the hub. The repo's scripts run under Git Bash (a console-less
+process's bare `bash` can be WSL's, which reads a CRLF checkout's scripts as broken).
+
+* **Targets.** `main` (the local `main` branch's newest commit) and every live run: a `runs/*/supervisor_state.json`
+  with state running, its supervisor pid alive with the recorded start time, no STOP; its pinned commit is the
+  supervisor's working directory's HEAD. A run that stops being live is retired (its campaigns paused, its local jobs
+  finish); one that comes back with the same build resumes.
+* **Builds.** Each target has its own pinned worktree `mtg-zero-wt/steward-<target>` and target dir
+  `$ZERO_BIG_DISK/cargo-target/mtg-zero/steward-<target>` (one per checkout, never shared); the build is
+  `tools/farm_build.py --profile fuzz --publish` there, through `tools/slotd.sh` (2 min 41 s of cargo on the desktop).
+  An existing signed fuzz build of the same commit, or of a commit with the same **engine hash** (the git tree ids of
+  every Rust input - tools/zcache.py's paths - and the zero-core gitlink: the same executable), is reused. Main is
+  rebuilt when its engine hash changes, at most once per `main_rebuild_min_h` (24 h); a Python or docs commit on main
+  never rebuilds.
+* **Campaigns.** One per (build, mode): `fz-<target>-<sha7>-<alias>`, seeds from 100,000,000, priority 0.3, created
+  with `farm_campaign.py create` (fuzz-check of the mode, a signed definition). Modes and their weights in the quota:
+  main - `games` 0.35, `hidden-games` (FUZZ_HIDDEN_DECKS=1) 0.15, `delver_dealt2-games` 0.3, `delver_dealt2-matches`
+  0.2; a Delver run - `delver_dealt2-games` 0.5, `delver_dealt2-matches` 0.25, `games` 0.15, `hidden-games` 0.1
+  (config.json `main_modes` / `run_modes` change them). A seed is one game or one best-of-three match (2-3 games), so
+  50,000 seeds are at least 50,000 games. A build replaced on main pauses its campaigns.
+* **Progress.** The steward's campaigns' results (credited seed ranges, by upload time; acked), the local jobs' seeds
+  (when they end) and, as in flight, the campaigns' leased seeds and the running local jobs.
+
+### 171.3 Quota, pace and the decisions (pure functions; `tests/test_fuzz_steward.py`)
+
+A build's day is `quota` (50,000) seeds; its first day is prorated from the build's start. The pace at time t is
+`quota` x (seconds since the later of the UTC midnight and the build's start) / 86,400: uniform through the day. Every
+`check_s` (15 min) the deficit in hours of quota, h = (pace - done - in flight) / (quota / 24), decides:
+
+| h | the farm (the campaign of the most-behind mode) | the Mac | the desktop |
+|---|---|---|---|
+| <= 0 | no share: the backfill (idle PCs only) | no new chunk | stops |
+| 0 - 1 h | share 0.25 (the side-work share, D5) | - | - |
+| > 1 h | share 0.5 (past the side-work share: allowed while behind), kept until back on pace | - | - |
+| > 2 h after 30 min at 0.5, or no farm PC online | 0.5 | chunks of ~20 min, `nice 19`, 6 processes | - |
+| > 3 h with the Mac at work for 30 min | 0.5 | chunks | one job of 2 processes, idle priority, through tools/slotd.sh, only while every live run's iteration time stays within 1.10 x its median of before (else it finishes its seed and the desktop waits 2 h) |
+
+The boosted mode is the one furthest behind its own share of the quota (kept unless another is more than 0.5 h
+further behind: no flapping between equals); at most one campaign per build has a share, so the farm's fuzz share is
+bounded by the number of builds x 0.5. The desktop runs the live runs' GPU self-play and training: the steward never
+takes the GPU, never starts more than one desktop job, and the throttle refuses one while RAM is short (on the night
+this was built the desktop had ~1 GB available: the desktop is the last resort by design).
+
+### 171.4 One fuzz loop everywhere: `tools/fuzz_local.py`
+
+The Mac and the desktop run exactly what a farm PC runs: a worker's own `serve` with one fuzz job line (PROTOCOL 5;
+the same chunk processes, crash and hang isolation, failure events, reproduction strings and `fuzz-final.json`).
+`fuzz_local.py --worker EXE --mode M --env K=V --first F --count N --threads T [--stop-file F] [--max-s S] [--idle]`
+prints `FUZZ_LOCAL_HELLO`, one `FUZZ_LOCAL_FAILURE {seed, mode, site, panic, repro, output_tail}` per failing seed as
+it happens, and `FUZZ_LOCAL_SUMMARY {done, covered, failures, unfinished, seconds, build_id, engine_commit}`; a stop
+file, `--max-s` or SIGTERM asks the job to `finish`. The desktop uses the build's signed executable; the Mac builds the
+same commit's worker (`cargo build --profile fuzz -p mtgz_worker` through `tools/mac.sh`: 73 s cold on the M4; the
+file's text is shipped with the command, so the target commit needs no copy of it) - the native worker builds and runs
+on macOS as it is. Local seeds come from their own spaces (Mac from 3e9, desktop from 4e9; one cursor per build and
+mode), so no seed is played twice. A Mac build is unsigned: its repro's `(at unknown)` becomes the build's commit.
+Checked: an injected test panic (`ZERO_FARM_TEST_FAULT=panic:S`, fuzz profile + `ZERO_FARM_ALLOW_TEST_FAULTS=1`) on
+the Mac came back as one `FUZZ_LOCAL_FAILURE` with its site and repro, and all 60 seeds done.
+
+### 171.5 The failure queue and the alert
+
+Sources: the steward's campaigns' failures (`GET /v1/admin/campaign/{id}/failures`), the local jobs' failure lines, and
+every run's `game_failures.jsonl` (self-play games dropped for a panic: 167.6; section 172's record adds the `repro`
+command). One JSON line per failure site in `<state>/queue.jsonl`, keyed as tools/fuzz_farm.py keys a failure (the
+site and its message's first line, digits masked: the id tools/farm_fuzz_pull.py and the Mac's fuzz farm give the same
+panic): id, kind (fuzz | selfplay), site, message, key, mode, seed, repro, build, engine_commit, target, first_seen,
+last_seen, count, seeds (up to 20, with their source), sources, confirmed, confirm_note, alerted_at.
+
+A new site is replayed here before anyone is told: a fuzz seed through the build's own worker over that one seed
+(`fuzz_local.py --first S --count 1`, idle priority; confirmed when it fails at the same site), a self-play failure by
+its record's `repro` in the run's own checkout (section 172's `python -m mtgz.az.game_failure replay`: confirmed on exit 101,
+not on 0 - the moves replay without the panic -, unknown on 2 - cannot replay; a record without one counts as confirmed
+when it happened on the owner's own machines). A confirmed new site sends ONE short message through the game-alerts
+relay on the Mac (`relay.py --notify-b64`, a one-shot mode added to the relay for this; the address lives in the relay's
+untracked config): `mtg-zero: new engine failure <id> on <target>@<sha7> - <mode> seed <seed> - <file:line>. Queue:
+...` - no machine names or details. `fuzz_steward.py confirm ID` replays an entry on demand. Checked on a real farm
+failure of an older build (eoe-games seed 100000075, `activate.rs:1176`): replayed and confirmed in 2.5 s.
+
+### 171.6 The daily summary and the status
+
+At each UTC day's end `daily.log` gets one line: per build, seeds by source (farm / Mac / desktop) and failures, and
+the queue's size. `--status-file` (the hub's `fuzz_steward_status.json`) holds today's numbers per target (done, in
+flight, quota, pace, hours behind, the boosted mode, the farm share, the local sources, by source), the farm's seeds
+over the last hour and day, the measured local rates and the queue's newest 20 entries.
+
+### 171.7 Measured, the first finding, gates (2026-11-16)
+
+Throughput (seeds an hour; a seed = one game, or one best-of-three match for `-matches`):
+
+| source | games | hidden-games | delver_dealt2-games | delver_dealt2-matches |
+|---|---|---|---|---|
+| a farm PC (16 threads, the first lease of `fz-delver-bo3-pb3-b309fa0-g`: 5,326 seeds in its ~7.5-minute slot, then the rest back to the pool) | ~42,000 per PC | - | - | - |
+| the Mac, per process (4 processes for 120 s each, `nice 19`, beside pb3's remote self-play: load ~19) | 10,800 | 9,600 | 16,200 | 6,500 |
+| the desktop, per process (idle priority beside pb3, ~1 GB RAM available) | - | - | ~9,600 (40 seeds in 15 s with start-up) | ~2,300 (200 matches in 155 s, 2 processes) |
+
+So a build's 50,000 seeds a day are ~1.2 hours of one farm PC, or ~1 hour of the Mac at the steward's 6 processes:
+comfortably reachable for main plus one or two live runs while the farm has PCs online, with the Mac as an ample
+fallback; the desktop is rarely needed. At share 0.25 beside pb3 the farm's 3 online PCs give fuzz ~0.75 of a PC.
+
+**The first finding** (the Mac's first run, before any campaign had reported): `delver_dealt2-matches` fails
+`engine/src/fuzz/games.rs:3898` in ~2.5% of matches - "a world determinized for P1: P0's private key (kind 3) carries
+the card's identity (N) in a world of P1 (ENGINE.md 141)" - on pb3's build (b309fa08) and on main's (f76ab8af), the
+same seeds failing on the Mac and the desktop (seeds 52, 95, 135, 163 of 0-199; repro `(at b309fa08) FUZZ_POOL=
+delver_dealt2 FUZZ_FIRST=52 FUZZ_MATCHES=1 cargo test --profile fuzz -p engine --test fuzz fuzz_random_matches --
+--exact --nocapture`). The release worker passes the same seeds: the check samples determinized worlds 1 in 4 under
+the `fuzz` profile and 1 in 40 in release (`checkpoint_every`), which is why 168.5's release-profile 20k (1,000
+matches) passed. Queue entry c8af53b37bd8: replayed and confirmed, the owner told. Not fixed here (an engine lane; a
+pb3 re-pin decision).
+
+**Gates.** `python tools/warm_pool.py run --sha 954143b4 -- python tools/gate.py python`: **GATE PASSED WITH SKIPS
+python 954143b4198a in 705s** (the live-run fence only: 7 live-run-hazard tests). zero-farm: `npm test` 23 files, 196
+tests; `tsc` clean; privacy check clean. Main fast-forwarded to 954143b4 (origin + mac); the logon task runs the
+steward from main's checkout.
+
+## 172. Self-play panic containment for every executor: one failure queue with a replay command, the farm worker's and the Mac's failures, `selfplay.panics`, a test fault on real games (branch `feat/selfplay-panic-queue`, zero-core `feat/panic-queue`, 2026-11-16)
+
+Branch `feat/selfplay-panic-queue` from main ebf322d5 (main f76ab8af merged in); zero-core pin 002731c ->
+`feat/panic-queue` 8ae31f8 (zero-core docs/search.md 2.19). Why: the user's decision D1 (2026-11-15, 167.3) moved the
+20k fuzz depth to continuous farm fuzz (171), with "a rare bug costs a game, not the run" as its prerequisite. 167.6
+made a panicking game cost one game on every executor, but only this machine's driver kept what replays it: the Mac's
+remote worker printed it into its log, the farm worker logged it on the farm PC (unreachable). Now every dropped game,
+wherever it was played, is one line of `<run>/game_failures.jsonl` that names where it panicked and replays with one
+command, and 171's fuzz steward takes those lines into the same failure queue (and alert) as the fuzz's. No rule,
+encoding or search change: the digests are EQUAL (172.5). Section number: 171 is the fuzz steward's (`feat/fuzz-steward`).
+
+### 172.1 What was already there (167.6) and what was checked
+
+* **Unwinding.** No profile in this repo or zero-core sets `panic = "abort"`: a panic unwinds in the Python module, the
+  tests and the `+crt-static` farm worker (the static CRT does not change MSVC unwinding). `[profile.release]` now says
+  `panic = "unwind"` (the default: the same code) so no one turns it off; `[profile.fuzz]` inherits it. The native
+  worker test below drops a game inside a release `mtgz-worker`: catch_unwind works there.
+* **Shared state after a dropped game** (zero-core's driver, read again): a game's step runs inside `run_chunk`'s
+  per-game `catch_unwind`; the leaves a game queues for the next batch are the rows it adds to its chunk's buffers in
+  that step, and on a panic every buffer is rolled back to its length before the step (`LeafBuf::snap` / `rollback`),
+  the results, samples and parked games it emitted in the step are truncated, and `drop_game` clears the slot's
+  pending leaf, lookahead, trees, records and evaluation cache. Answers to the game's earlier leaves were consumed at
+  the step's start (`slot.pending.take()`), and the other games of the chunk compute their row offsets after the
+  rollback, so nothing of the dropped game reaches a batch, a later game in its slot or the shard writer. No gap found;
+  the tests below check it on real MTG games (every other game's samples bit for bit).
+
+### 172.2 One record for every executor (zero-core docs/search.md 2.19)
+
+* The driver's `GameFailure` gains `site` (the panic's `file:line:col`, noted by a chained panic hook), `phase`
+  (`move`: inside a real move, `search`: anywhere else in the game's step) and `panic_move` (the chosen action that
+  panicked).
+* **This machine's driver** ('local'): `Run.failure_metrics` as before.
+* **The Mac's remote worker** ('mac', the remote's name): each failure goes to the run as a `failure` event with the
+  Mac checkout's commit and engine module hash (still printed in its log too).
+* **The farm worker** ('pool'): a dropped game's failure rides in the next records file's header (`"failures"`, a key
+  older readers ignore: no agent or coordinator change); the desktop's pool collector reads it
+  (`zero.farm_pool.header_failures`) with the worker's build_id. A failure after a job's last finished game stays in the
+  worker's log (a records file needs a game). Never a machine id or name in the record.
+* **The file.** `<run>/game_failures.jsonl`, one JSON object a line (`zero.game_failure.record`; 171's steward reads
+  these names): `t`, `iter`, `source` (`local` | `mac` | `pool`), `game`, `game_id`, `driver_seed`, `game_seed`,
+  `players`, `spec` (JSON text), `moves` (the real moves before the panic as a trace record's steps: actions, episode
+  boundaries `{"next": seat|null}`), `phase`, `panic_move`, `tag`, `start`, `branch`, `message`, `site` (the hook's note,
+  else the message's "panicked at", else `unknown`), `engine_commit` (the run checkout's HEAD; the Mac's own; a farm
+  worker plays the run's pinned commit by construction, 155), `build` (the engine module's sha256[:24]; the farm
+  worker's build_id), `repro`.
+* **`repro`** = `python -m mtgz.az.game_failure replay "<the file's absolute path>" --line N`, run from an mtg-zero
+  checkout at `engine_commit` with its module built (the run's own pinned worktree): exit **101** and the panic's text
+  when it panics again (reproduced), **0** when nothing panicked (not reproduced: a search panic may depend on the
+  search's own worlds or tree), **2** when the line cannot be replayed (an archive start or a branch game, an illegal
+  move). The replay (`zero_search::record::replay_failure`): the game from spec + players + game seed, its moves, a
+  `move` panic's action and the single-option steps after it, then 64 random rollouts from that state (every second
+  one determinized from the decider's view, each step building the decider's row and option overrides as a search leaf
+  does: the encodings run too). `python -m mtgz.az.game_failure list <file>` lists a run's failures.
+* **The metric** `selfplay.panics` every iteration (0 included): the aborted rows among the iteration's results (this
+  machine's and the Mac's), or this machine's and the Mac's records if more, plus the pool's records. `game_failures`
+  and the storm limit (more than 5% of an iteration's games, at least 3: a broken build fails the run) are 167.6's.
+* The dedup key for the queue: `zero.game_failure.failure_key(site, message)` = tools/fuzz_farm.py's (the site and the
+  first message line's first 120 characters, digits masked).
+
+### 172.3 The test fault `MTGZ_TEST_PANIC=<game seed>:<turn>`
+
+`MtgAz::new_game` reads it for each game it starts (`matches::test_panic_of`); a game whose seed it names gets
+`MatchState::test_panic` and panics at its first step from that turn on (`MtgAz::match_step`; a real move or a step
+inside a search simulation of it, whichever comes first) with the message `injected test panic [test fault
+MTGZ_TEST_PANIC=<seed>:<turn>]: ...`. Unset - every real run - or naming another seed: None, nothing else read on the
+step path but one `Option` check; the field is classified `Derived` in the public-state table (never read by the rules,
+the encodings or the search). The replay arms a test fault named in the message (`[test fault NAME=VALUE]`, NAME ending
+in `_TEST_PANIC`), so a test's repro reproduces without the fault in its environment.
+
+### 172.4 Tests
+
+* `engine/tests/selfplay_panic.rs` (its own binary: it sets the process environment): zero-core's `Driver<MtgAz>` on
+  the digests' Delver best-of-three spec (constructed, one episode per game, game 2 on: contests cross episode
+  boundaries), 8 games, 2 groups, 2 threads, an evaluator that is a function of each row: unarmed, no failure; armed for
+  game 5's seed at turn 3, `game_panics` 1, game 5's row aborted with reason "panic" and no samples, every other game's
+  row and samples (hashed bit for bit) the unarmed run's, one failure with its ids and seeds and its site in
+  `engine/src/az/matches.rs`; `replay_failure` of it panics again with the fault armed, and plays its moves and
+  rollouts without a panic unarmed.
+* `tests/test_selfplay_panic.py`: the in-process driver through the Python binding (what the run and the Mac's remote
+  worker drive), traced: one game dropped, every other game's record the unarmed run's byte for byte; the run's
+  `failure_metrics` writes the line (`source` local, `game_id`, `game_seed`, `site`, a 40-hex `engine_commit`, `build`)
+  with `selfplay.panics` 1, and the line's `repro`, run as written from this checkout without the fault in its
+  environment, exits 101 printing the panic; a game that never panicked replays "not reproduced". The native worker
+  (`mtgz-worker serve`, a self-play job writing records, the fault armed in its environment): the dropped game in no
+  records file, its failure in a header's `failures` with the worker's build_id and the engine site,
+  `header_failures` reads it, every other game's record the unarmed job's byte for byte, the worker's log names the
+  failure, and the record the pool collector writes reproduces the panic.
+* zero-core: `a_panicking_game_is_dropped_and_the_run_goes_on` (+ the site, the phase, the replay panics again);
+  `tests/test_game_failures.py` (8: the record and its repro lines, the Mac's and the pool's failures with their sources
+  and builds, `panics`, the dedup key, the remote worker's `failure` event reaching the run); `cargo test --release`
+  201 + 3 passed; pytest test_farm_pool / test_farm_trace / test_worker_settings / test_privacy passed.
+* Not covered by a test: a real Mac remote session with the fault armed (the event's transport is tested on both ends
+  without a process: such a test starts worker processes, which the live-run fence keeps off the desktop).
+
+### 172.5 Checks and gates
+
+* Digests EQUAL: full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, constructed e1177d609d6c1aee, eoe
+  2efe956d589840ce, driver 6f7b863096e47dcd (zero-core's driver with the new code), dealt e802d9df793c9993 = the recorded
+  files; zero-core `check_checkpoint_compat` byte-identical against main f76ab8af (visits and cq, 3,272 samples each);
+  farm compat identical (gate 2: 6 games, 2,484 rows, 150 batches; gate 3: 6 games).
+* **GATE PASSED suite 00d9db1d234b in 472s** (2,679 passed in 23 binaries; the sharded 2k fuzz of default,
+  default+hidden, delver_dealt). **GATE PASSED WITH SKIPS engine 00d9db1d234b in 831s** (`--tested-sha 00d9db1d`; the
+  live-run fence only). After merging main 8ec00432 (171, tools and docs): **GATE PASSED WITH SKIPS python f7f29f376d9f
+  in 1215s** and, on the final pin, **GATE PASSED WITH SKIPS python 739b3825c014 in 1009s** (the live-run fence only).
+* **GATE PASSED WITH SKIPS optin-core 739b3825c014 in 2354s** (`--baseline-root` = main f76ab8af; core pytest 694
+  passed, 50 skipped, the live-run fence's 17; feature tests az 54, hidden 28; the three other games build against this
+  core). Two earlier optin-core runs (00d9db1d, f7f29f37) failed only on the core pytest's
+  `test_shard_thread::test_rolling_run_quotas_exact` (97 games for 96), as other branches' cores did the same day: not
+  load but test order - `zero.farm_h2h.record_rows` set `ZERO_INFLIGHT=1` for its recording and never restored it, so
+  after `test_farm_h2h.py` every later run process inherited it (reproduced: the two files together fail, the test alone
+  passes). Fixed at the source in zero-core 8ae31f8 (search.md 2.19), which is the pin above.
+* Not run in a gate: the native worker test of `tests/test_selfplay_panic.py` needs the Windows worker of this checkout
+  (it skips on the Mac, where the gate placed its shard); it passed here by hand on the branch's build.
+
+### 172.6 pb3
+
+Nothing of the live run was touched. pb3 (b309fa08, zero-core 002731c) already drops a panicking game on every executor
+(167.6); this section reaches it at its next restart, staged in its launch script's docstring ("NEXT RESTART: panic
+containment"): a re-pin to the merged main, a new signed release worker (the farm worker's build changes: the records
+header), its CUDA alternate re-signed, the farm gates and the CUDA self-test on pb3's real config, the Mac eval
+checkout.
+
+## 174. The farm pool's per-generation export by weight swap: ~150 s -> ~2 s (branch `feat/fast-farm-export`, zero-core `feat/fast-farm-export`, 2026-11-15)
+
+(Section number: 171 and 172 are main's - the fuzz steward, panic containment - and 173 the hidden-info lane's.)
 
 **Why.** pb3's farm pool exported every gen in 96-175 s beside the live run (the log's `gen N exported`; a profile of
 gen 17: load 0.1 s, `record_rows` 58.3 s - the reference positions' self-play, ~1,490 small CPU forwards -, export
@@ -36264,9 +36640,9 @@ value-dependent rewrite; fingerprint invalidation; refusals on mismatched tensor
 `export_cached` on toy_tail checkpoints, ZERO_INFLIGHT given back); the existing `test_onnx.py`, `test_onnx2.py`,
 `test_farm_pool.py`, `test_farm_h2h.py` pass unchanged.
 
-**Gates.** 171.1.
+**Gates.** 174.1; the merge with main: 174.2.
 
-### 171.1 Gates (b1ee4917, zero-core pin 79a76eb)
+### 174.1 Gates (b1ee4917, zero-core pin 79a76eb)
 
 Tiers: `optin-core` (a zero-core change whose run, search and self-play defaults are byte-identical: checkpoint_compat
 identity, the driver digest, farm compat) and `python` (the run loop, pytest), each in a warm worktree beside the live
@@ -36279,7 +36655,7 @@ runs.
   hidden (28), build-only of the other three games, core pytest (695 passed).
 * `python --offload mac`: **GATE PASSED WITH SKIPS python b1ee4917595f in 494s** (skipped: the live-run fence only).
 * Before it, on the way: the first optin-core runs (3ab3d3f3, f196b083) failed core pytest on
-  `test_shard_thread::test_rolling_run_quotas_exact` (97 games for 96): the ZERO_INFLIGHT leak of 171 above, fixed in
+  `test_shard_thread::test_rolling_run_quotas_exact` (97 games for 96): the ZERO_INFLIGHT leak of 174 above, fixed in
   zero-core 79a76eb. Two optin-core runs of b1ee4917 failed zero-core's Rust `driver::tests::
   queued_setups_fill_every_free_slot_when_the_queue_is_long` (the first full batches' sizes [1, 8] / [8, 1] for [8, 8])
   while the machine was loaded (no Rust changed here; it passed on 3ab3d3f3, f196b083 and the third b1ee4917 run): a
@@ -36291,3 +36667,16 @@ runs.
 * Also on the new pin: the engine digest in the re-pin worktree 8f71ccb0d89031a6 (= main's); `tools/farm_gates.py` with
   pb3's worker build 99a7986f on pb3's config and phase spec (3ab3d3f3; the later commits change no farm or engine
   code): PASSED.
+
+### 174.2 The merge with main 5af07560 (171 the fuzz steward, 172 panic containment)
+
+Main moved while this branch gated: 172 re-pinned zero-core to `feat/panic-queue` 8ae31f8, which made the same
+`record_rows` ZERO_INFLIGHT fix for the same core-pytest failure. zero-core `feat/fast-farm-export` 2c67426 merges
+8ae31f8 (one conflict, that fix: panic-queue's kept, the same behaviour); this branch merges main and pins 2c67426. The
+section number moved from 171 to 174 (171 and 172 are main's, 173 the hidden-info lane's).
+
+What this means for pb3's re-pin: the re-pin goes to a main that also holds 172, whose farm worker build changes (the
+records header carries the failures, 172.6): **pb3's BUILD changes at that restart because of 172, not because of this
+section** - the fast export needs no worker change of its own (174 above: the zero-onnx contract and reference.npz are
+unchanged, and pb3's current worker 99a7986f passed the farm gates on this branch's pin with a swapped graph). The new
+worker build is 172.6's (one release build, one CUDA re-sign, the farm gates and the CUDA self-test), done once for both.

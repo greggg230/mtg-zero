@@ -3,7 +3,7 @@
 //! counts), and the `mtg` spec's `"sealed"` key (reproducible games, the evaluation pairs, the
 //! errors, games played through `MtgAz`).
 //!
-//! `cargo test --release -p engine --test sealed -- --nocapture` prints the builder's spread over
+//! `cargo test --release -p engine --test misc_suite sealed:: -- --nocapture` prints the builder's spread over
 //! 1,000 pools of each collation.
 
 use engine::az::sealed::builder::{self, Build, Settings};

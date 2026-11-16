@@ -28,9 +28,9 @@ Analysis campaigns:
 Fuzz campaigns:
 
     python tools/farm_campaign.py create NAME --build ID --mode M [--env K=V ...] --seed-base N [--chunk N|auto]
-           [--priority P] [--needs-threads N --needs-ram-mb N] [--paused]
+           [--priority P] [--share X|none] [--needs-threads N --needs-ram-mb N] [--paused]
     python tools/farm_campaign.py update NAME [--build ID] [--mode M] [--env K=V ...] [--seed-base N]
-           [--chunk N|auto] [--priority P] [--needs-threads N --needs-ram-mb N | --no-needs]
+           [--chunk N|auto] [--priority P] [--share X|none] [--needs-threads N --needs-ram-mb N | --no-needs]
     python tools/farm_campaign.py pause NAME | resume NAME
     python tools/farm_campaign.py --from-existing NAME
   common: [--url URL] [--token-file F] [--key DATA_KEY] [--farm-release EXE] [--worker EXE] [--dist DIR ...]
@@ -51,7 +51,10 @@ create / update:
    `farm-release define --publish`, unless the newest kept definition already says the same, is the coordinator's
    current one (when it names one) and lasts another 7 days (`--redefine`: always). It expires after
    `--expires-days` (90; 0 = never): re-run `update NAME` (or `--from-existing NAME`) before that.
-4. `PUT /v1/admin/campaign/NAME` with the fields (build_id, mode, env, seed_base, chunk, priority, state, needs).
+4. `PUT /v1/admin/campaign/NAME` with the fields (build_id, mode, env, seed_base, chunk, priority, state, needs,
+   share). `share` (zero-farm PROTOCOL 5.4, rev 14): with a number in (0, 1] the campaign competes with the runs' games
+   within that share of the farm's leases; `none` (the default): the backfill. Not signed: changing it needs no new
+   definition (tools/fuzz_steward.py sets it while a build's daily fuzz is behind its pace).
 
 pause / resume: the campaign put again with state paused / active (no new definition: nothing it allows changes).
 --from-existing NAME: the definition of a live campaign as it is (its build, mode and env from GET), checked and
@@ -81,8 +84,8 @@ from zero import local_config  # noqa: E402
 HOME = os.path.expanduser('~')
 EXPIRES_DAYS = 90
 RENEW_S = 7 * 86400                     # a definition that expires sooner than this is renewed by update / --from-existing
-DEFAULTS = {'env': {}, 'chunk': 'auto', 'priority': 0.2, 'state': 'active', 'needs': None}
-FIELDS = ('build_id', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'state', 'needs')
+DEFAULTS = {'env': {}, 'chunk': 'auto', 'priority': 0.2, 'state': 'active', 'needs': None, 'share': None}
+FIELDS = ('build_id', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'state', 'needs', 'share')
 
 
 def die(msg):
@@ -260,7 +263,7 @@ def current_fields(ans):
         chunk = int(chunk)
     return {'build_id': ans['build_id'], 'mode': ans['mode'], 'env': ans.get('env') or {}, 'seed_base': ans['seed_base'],
             'chunk': chunk if chunk is not None else 'auto', 'priority': ans.get('priority', 0.2),
-            'state': ans.get('state', 'active'), 'needs': ans.get('needs')}
+            'state': ans.get('state', 'active'), 'needs': ans.get('needs'), 'share': ans.get('share')}
 
 
 def put(a, cl, name, c):
@@ -285,6 +288,19 @@ def needs_of(a, old=None):
     if a.needs_ram_mb is not None:
         n['ram_mb'] = a.needs_ram_mb
     return n
+
+
+def share_of(v):
+    """--share X|none -> a number in (0, 1] or None."""
+    if v is None or str(v).lower() in ('none', 'null', ''):
+        return None
+    try:
+        x = float(v)
+    except ValueError:
+        die(f'--share {v!r}: a number in (0, 1] or none')
+    if not 0 < x <= 1:
+        die(f'--share {v!r}: a number in (0, 1] or none')
+    return x
 
 
 def chunk_of(v):
@@ -434,6 +450,8 @@ def main(argv=None, client=None):
     ap.add_argument('--seed-base', type=int)
     ap.add_argument('--chunk')
     ap.add_argument('--priority', type=float)
+    ap.add_argument('--share', help="X in (0, 1]: the campaign competes with the runs' games within that share of the "
+                    'farm (zero-farm PROTOCOL 5.4); none: the backfill (the default)')
     ap.add_argument('--needs-threads', type=int)
     ap.add_argument('--needs-ram-mb', type=int)
     ap.add_argument('--no-needs', action='store_true')
@@ -463,14 +481,14 @@ def main(argv=None, client=None):
             die(f'no campaign {name} on {a.url}')
         cur = current_fields(ans)
         if a.action in ('pause', 'resume'):
-            given = [k for k in ('build', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'needs_threads', 'needs_ram_mb')
-                     if getattr(a, k) is not None]
+            given = [k for k in ('build', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'share', 'needs_threads',
+                                 'needs_ram_mb') if getattr(a, k) is not None]
             if given:
                 ap.error(f'{a.action}: only the state changes (use update for {given})')
             put(a, cl, name, dict(cur, state='paused' if a.action == 'pause' else 'active'))
             return 0
         if a.from_existing:
-            given = [k for k in ('build', 'mode', 'env', 'seed_base', 'chunk', 'priority') if getattr(a, k) is not None]
+            given = [k for k in ('build', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'share') if getattr(a, k) is not None]
             if given:
                 ap.error(f'--from-existing: the campaign as it is (use update for {given})')
             man, _ = check_worker(a, cur['build_id'], cur['mode'], cur['env'])
@@ -491,6 +509,8 @@ def main(argv=None, client=None):
             c['chunk'] = chunk_of(a.chunk)
         if a.priority is not None:
             c['priority'] = a.priority
+        if a.share is not None:
+            c['share'] = share_of(a.share)
         c['needs'] = needs_of(a, cur['needs'])
     else:
         if ans is not None:
@@ -499,7 +519,7 @@ def main(argv=None, client=None):
             ap.error('create: --build, --mode and --seed-base')
         c = dict(DEFAULTS, build_id=a.build, mode=a.mode, env=parse_env(a.env), seed_base=a.seed_base,
                  chunk=chunk_of(a.chunk) or 'auto', priority=a.priority if a.priority is not None else DEFAULTS['priority'],
-                 state='paused' if a.paused else 'active', needs=needs_of(a))
+                 state='paused' if a.paused else 'active', needs=needs_of(a), share=share_of(a.share))
     man, chk = check_worker(a, c['build_id'], c['mode'], c['env'])
     if isinstance(c['chunk'], int) and chk.get('min_chunk') and c['chunk'] < chk['min_chunk']:
         log(f'note: chunk {c["chunk"]} is below the mode\'s minimum chunk {chk["min_chunk"]} (fuzz-check)')

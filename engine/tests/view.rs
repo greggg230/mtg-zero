@@ -100,7 +100,7 @@ fn exporting_and_the_log_change_nothing() {
     }
 }
 
-/// `VIEW_SAMPLE=path cargo test --test view sample -- --ignored`: one heuristic game's views,
+/// `VIEW_SAMPLE=path cargo test --release -p engine --test misc_suite view::sample -- --ignored`: one heuristic game's views,
 /// one JSON per line (for the viewer's development).
 #[test]
 #[ignore]

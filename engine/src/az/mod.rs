@@ -1132,10 +1132,13 @@ impl SearchGame for MtgAz {
         if spec.build.is_some() {
             return MtgAz::from_build(spec, seed);
         }
+        let fault = matches::test_panic_of(seed);
         let seed = spec.seed.unwrap_or(seed);
         let mut az = MtgAz::new(spec, seed)?;
         // (ENGINE.md 168.2: a constructed best-of-three's game log record, when the log is on)
         az.m.glog = game_log::Bo3Log::start(spec, seed);
+        // (a test fault only, ENGINE.md 172: None unless MTGZ_TEST_PANIC names this game's seed)
+        az.m.test_panic = fault;
         Ok(az)
     }
 
