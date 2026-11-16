@@ -36572,3 +36572,122 @@ Nothing of the live run was touched. pb3 (b309fa08, zero-core 002731c) already d
 containment"): a re-pin to the merged main, a new signed release worker (the farm worker's build changes: the records
 header), its CUDA alternate re-signed, the farm gates and the CUDA self-test on pb3's real config, the Mac eval
 checkout.
+
+## 174. The farm pool's per-generation export by weight swap: ~150 s -> ~2 s (branch `feat/fast-farm-export`, zero-core `feat/fast-farm-export`, 2026-11-15)
+
+(Section number: 171 and 172 are main's - the fuzz steward, panic containment - and 173 the hidden-info lane's.)
+
+**Why.** pb3's farm pool exported every gen in 96-175 s beside the live run (the log's `gen N exported`; a profile of
+gen 17: load 0.1 s, `record_rows` 58.3 s - the reference positions' self-play, ~1,490 small CPU forwards -, export
+92.8 s - the dynamo trace ~13 s and onnxscript's optimizer ~50 s of it). The farm's leases stay on the old gen until the
+new one is registered, and the architecture never changes between gens: only the weights do.
+
+**What.** The zero-core pin moves from 002731c (`feat/pb3-teacher`) to 79a76eb (`feat/fast-farm-export`, branched from
+002731c: cba6dbd the fast export, 92642ff a test fix, 79a76eb `record_rows` gives ZERO_INFLIGHT back; Python only: no Rust
+input, no engine, worker, encoding or search change). zero-core docs/az.md 53 has the design; in short:
+
+* The architecture's **weight-swap template** is exported once per architecture fingerprint (the network config, the
+  interface module, every module tensor's name / shape / dtype, the export settings, the exporter's versions, zero-core's
+  Python) under `<run>/pool/<farm run>/export/<fp[:16]>/`: two full exports (random and coded weights) that must be the
+  same graph, each initializer classified as a constant, a weight (a module tensor by name) or a derived weight (elements
+  of the weights the optimizer folded, rebuilt by an index recipe) - anything else refuses the template loudly.
+* **Every gen** swaps its weights into the template (`swap_export`: fingerprint, sha256 of the template files, names,
+  dtypes and shapes checked; refused on any mismatch, never a fallback to a full export), writes the metadata as an export
+  does, checks the graph (`portable` / `int32_slices` find nothing to rewrite, `check_int32`, onnx.checker's full check),
+  then `check_reference` as before.
+* **The reference positions** are recorded once per architecture and spec and kept beside the template; each gen writes
+  its own torch answers on them. reference.npz is unchanged (arrays, dtypes, meta keys; the gen's own checkpoint and
+  sha256 in the meta). Positions from an older gen are a valid self-test of a new one: the self-test compares the graph's
+  answers with the same network's torch answers on fixed inputs of the run's encoding.
+* The log line breaks the time down: `gen 17 exported (2.2 s, ffe2cc54ea77): load 0.11 s, swap 0.39 s, reference 0.43 s,
+  check 1.24 s (graph by weight swap; reference positions of gen 15)`.
+
+**A behaviour change for a run with a farm pool (called out; the user's call at pb3's restart).** zero-core's
+`farm_h2h.record_rows` set `ZERO_INFLIGHT=1` for its recording and left it set in the run process: from the pool's first
+export on, the run's own self-play `drive` went one network batch at a time instead of the default two in flight (pb3's
+run process holds ZERO_INFLIGHT=1 now, read from its environment block). It now gives the setting back, so after the
+re-pin pb3's local self-play drives two batches in flight - the default, what pb1 ran with before the farm pool existed.
+To keep pb3's current one-at-a-time behaviour exactly, launch it with `ZERO_INFLIGHT=1` in its environment (the restart
+notes in the launch script give both). Found through the gate: the leak (from `test_farm_h2h`) made zero-core's
+`test_shard_thread::test_rolling_run_quotas_exact` finish 97 games for 96 in the full core pytest.
+
+**Measured** (pb3 iter_0015..0017 read-only into a scratch pool dir, the live run on the same machine): gen 15 (builds
+the template and records the positions) 179.9 s (template 88.7, record_rows 86.0, swap 0.4, reference 0.5, check 1.4);
+gens 16 and 17 **2.3 s and 2.2 s** (load 0.1, swap 0.4, reference 0.4, check 1.2-1.3). Before: 96-175 s every gen.
+
+**Equivalence.** Against a fresh `export` of the same checkpoint, on pb3's gens 14, 16 and 17: the same metadata, every
+common initializer byte for byte, the same 2,136 nodes except one - pb3's pointer head has a one-column part that is all
+zeros (a widened pointer column, zero in every gen so far), and onnxscript's optimizer drops an all-zero Gemm bias, so
+the fresh graph's Gemm has 2 inputs and the swapped (general) graph's 3 (`slice_161` = [0.0]; 4 node names after it
+shift with the exporter's counter). The raw graph outputs are **bit for bit identical** on each gen's 256 published
+reference rows; `check_reference` gives the fresh graph's max |diff| (3.0e-6, 2.5e-6, 2.0e-6). Where no value-dependent
+rewrite fires (zero-core's tests' random networks) the swapped file is the export's byte for byte. The refactor of
+`export` changes no byte (gen 17's fresh export: sha256 838b36da... before and after). pb3's release worker (build
+99a7986f, its CPU runtime pack) passes its own self-test on the swapped gen 17 (`probe-providers --model --reference`:
+2.9e-6, deterministic).
+
+**The farm worker needs no change.** No zero-onnx input, output or metadata key and no reference.npz array changed, and
+this branch changes no Rust input: the worker build pb3 runs (99a7986f, its CUDA alternate 8295bd63) takes the swapped
+graphs and reference sets as they are. pb3's worker was built at b309fa08; main has since taken the MTGO adapter's
+`build` / `describe` specs (95.11: engine/src/az, no change to play - main's digest stayed 8f71ccb0d89031a6). Checked on
+the new pin: `tools/farm_gates.py --config <pb3 config> --checkpoint iter_0017.pt --model <the swapped gen 17> --worker
+<build 99a7986f> --runtime-dir <its CPU pack> --set spec=<pb3's phase spec: the matchup table's teacher decisions>`:
+**FARM GATES PASSED** (gate 2: 8 games, 1,056 rows, 200 batches identical; gate 3: records -> trainer rows identical);
+the engine digest in the re-pin worktree: 8f71ccb0d89031a6 (= main's).
+
+**Tests.** zero-core `tests/test_farm_export.py` (5: swap equals a full export byte for byte; derived weights and the
+value-dependent rewrite; fingerprint invalidation; refusals on mismatched tensors; reference reuse through
+`export_cached` on toy_tail checkpoints, ZERO_INFLIGHT given back); the existing `test_onnx.py`, `test_onnx2.py`,
+`test_farm_pool.py`, `test_farm_h2h.py` pass unchanged.
+
+**Gates.** 174.1; the merge with main: 174.2.
+
+### 174.1 Gates (b1ee4917, zero-core pin 79a76eb)
+
+Tiers: `optin-core` (a zero-core change whose run, search and self-play defaults are byte-identical: checkpoint_compat
+identity, the driver digest, farm compat) and `python` (the run loop, pytest), each in a warm worktree beside the live
+runs.
+
+* `optin-core --baseline-root <a checkout of main 9bccfd94, built>`: **GATE PASSED WITH SKIPS optin-core b1ee4917595f
+  in 2049s** (skipped: the live-run fence only: 17 core tests). Build, worker build, core build, core tests (204),
+  checkpoint_compat byte identity (3,272 samples), digest formats (constructed e1177d609d6c1aee, EoE 2efe956d589840ce,
+  driver 6f7b863096e47dcd), digest dealt e802d9df793c9993, farm compat (6 games, gate 2 and gate 3 identical), az (54),
+  hidden (28), build-only of the other three games, core pytest (695 passed).
+* `python --offload mac`: **GATE PASSED WITH SKIPS python b1ee4917595f in 494s** (skipped: the live-run fence only).
+* Before it, on the way: the first optin-core runs (3ab3d3f3, f196b083) failed core pytest on
+  `test_shard_thread::test_rolling_run_quotas_exact` (97 games for 96): the ZERO_INFLIGHT leak of 174 above, fixed in
+  zero-core 79a76eb. Two optin-core runs of b1ee4917 failed zero-core's Rust `driver::tests::
+  queued_setups_fill_every_free_slot_when_the_queue_is_long` (the first full batches' sizes [1, 8] / [8, 1] for [8, 8])
+  while the machine was loaded (no Rust changed here; it passed on 3ab3d3f3, f196b083 and the third b1ee4917 run): a
+  timing-sensitive test, noted, not changed. A `python` run with its pytest shards on the desktop failed
+  `test_mac_remote::test_the_macs_selfplay_settings` (MTGZ_MAC_HOME read as `C:/Program Files/Git/Users/...`):
+  `tools/slotd.sh` sources `tools/local_env.sh`, which exports the machine's MTGZ_MAC_HOME, and Git Bash converts the
+  POSIX path when it starts the Windows Python. Main's checkout fails it the same way through slotd and passes it without
+  (pre-existing; the test passes wherever the shard runs on the Mac); hence `--offload mac` above.
+* Also on the new pin: the engine digest in the re-pin worktree 8f71ccb0d89031a6 (= main's); `tools/farm_gates.py` with
+  pb3's worker build 99a7986f on pb3's config and phase spec (3ab3d3f3; the later commits change no farm or engine
+  code): PASSED.
+
+### 174.2 The merge with main 5af07560 (171 the fuzz steward, 172 panic containment)
+
+Main moved while this branch gated: 172 re-pinned zero-core to `feat/panic-queue` 8ae31f8, which made the same
+`record_rows` ZERO_INFLIGHT fix for the same core-pytest failure. zero-core `feat/fast-farm-export` 2c67426 merges
+8ae31f8 (one conflict, that fix: panic-queue's kept, the same behaviour); this branch merges main and pins 2c67426. The
+section number moved from 171 to 174 (171 and 172 are main's, 173 the hidden-info lane's).
+
+What this means for pb3's re-pin: the re-pin goes to a main that also holds 172, whose farm worker build changes (the
+records header carries the failures, 172.6): **pb3's BUILD changes at that restart because of 172, not because of this
+section** - the fast export needs no worker change of its own (174 above: the zero-onnx contract and reference.npz are
+unchanged, and pb3's current worker 99a7986f passed the farm gates on this branch's pin with a swapped graph). The new
+worker build is 172.6's (one release build, one CUDA re-sign, the farm gates and the CUDA self-test), done once for both.
+
+Gates of the merge 7034e8df (zero-core 2c67426), in warm worktrees beside the live runs:
+
+* `optin-core --baseline-root <main 5af07560, built>`: **GATE PASSED WITH SKIPS optin-core 7034e8dfd963 in 2095s**
+  (skipped: the live-run fence only: 17 core tests). Core tests 204; checkpoint_compat byte identity (3,272 samples);
+  digest formats constructed e1177d609d6c1aee, EoE 2efe956d589840ce, driver 6f7b863096e47dcd; dealt e802d9df793c9993;
+  farm compat identical; az 54, hidden 28; the other three games build; core pytest 699 passed.
+* `python`: **GATE PASSED WITH SKIPS python 7034e8dfd963 in 915s** (the live-run fence only), run with
+  `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` in the gate's environment: with the Mac loaded the gate falls back to the desktop
+  for its Mac pytest shards, and there `test_mac_remote::test_the_macs_selfplay_settings` fails without it (174.1's
+  `tools/local_env.sh` / Git Bash path conversion; main's checkout the same; one run of this merge failed so).
