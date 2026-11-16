@@ -35219,7 +35219,7 @@ of its 4 slots were held by other sessions' gates and h2hs, so each step's time 
 |---|---|---|---|
 | suite | 5,993 s (49716d52: suite + 2 pools x 20k, in series) | 1,731 s (d1bc60f8: 3 pools x 2k, consolidated) / **256 s** (e5bd0242: the test binaries already built in its warm worktree, no slot waited for) | 1,680 s / 0 s |
 | engine | 1,476 s (1b2a9cdf) | 1,835 s (d1bc60f8) / **762 s** (38a189f8: the module and the worker from the cache) | 3,620 s / 1,180 s |
-| python, a commit with no Rust change | 1,123 s (72e5a0df) | 1,029 s (3e99e7b0, fresh warm worktree, builds from the cache) / PYF s | 1,520 s / PYW s |
+| python, a commit with no Rust change | 1,123 s (72e5a0df) | 1,029 s (3e99e7b0, fresh warm worktree, builds from the cache) / **703 s** (416c0a2a: module 4 s + worker 3 s from the cache, the slowest shard's own work 296 s: **5.1 min of work**) | 1,520 s / 620 s |
 
 What the numbers say:
 * The build is ~3x faster cold and ~3.4x after an engine change; the worker and the module come from the cache in
@@ -35253,7 +35253,7 @@ What the numbers say:
     sharded fuzz) and **GATE PASSED engine d1bc60f855fa in 1835s** (digests EQUAL, farm compat PASS: gate 2 identical,
     6 games, 2484 rows; gate 3 identical, 2556 rows); **GATE PASSED python 3e99e7b063fe in 1029s** (a fresh warm worktree:
     the module and the worker from the cache).
-  * on the merged branch: **GATE PASSED suite e5bd02420215 in 256s** (2664 passed in 171 binaries = the 2663 of 72e5a0df + fuzz_shard_totals; default 85 s, default+hidden 109 s, delver_dealt 69 s of shards); **GATE PASSED WITH SKIPS engine 38a189f88db5 in 762s** (--tested-sha e5bd0242; digests EQUAL; farm compat PASS: gate 2 identical, 6 games, 2484 rows, 150 batches; the skips: 6 live-run-hazard tests fenced by phase 0 beside the live runs (166); the first try on e5bd0242 failed tests/test_mac_remote.py::test_a_worker_plays_mtg[matches] on its 180 s deadline under load - alone it passes, 102.7 s - and this branch's own test_gate read the machine's shared durations: fixed in 38a189f8); PYLINE.
+  * on the merged branch: **GATE PASSED suite e5bd02420215 in 256s** (2664 passed in 171 binaries = the 2663 of 72e5a0df + fuzz_shard_totals; default 85 s, default+hidden 109 s, delver_dealt 69 s of shards); **GATE PASSED WITH SKIPS engine 38a189f88db5 in 762s** (--tested-sha e5bd0242; digests EQUAL; farm compat PASS: gate 2 identical, 6 games, 2484 rows, 150 batches; the skips: 6 live-run-hazard tests fenced by phase 0 beside the live runs (166); the first try on e5bd0242 failed tests/test_mac_remote.py::test_a_worker_plays_mtg[matches] on its 180 s deadline under load - alone it passes, 102.7 s - and this branch's own test_gate read the machine's shared durations: fixed in 38a189f8); the python tier on the docs commit: **GATE PASSED WITH SKIPS python 416c0a2acc7a in 703s** (the module and the worker from the artifact cache in 4 s and 3 s; four pytest shards 202-296 s of work each after the waits; the run-loop smoke 157 s; the skips: 6 live-run-hazard tests fenced by phase 0).
   * The first suite gate (befcbebb) failed 11 tests of rules_suite: the engine's "one card database per process"
     (az::sample) in a binary of several test files - fixed on the consolidation branch (167.9). The first merged suite gate
     (e95f91ba) failed the fuzz steps' merged checks: the gate's checkout-relative `--out` and the test processes' engine/
