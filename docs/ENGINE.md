@@ -35679,6 +35679,24 @@ with it every one of them needs a line in a suite. `mig/phase1-tests` (e512e720 
   `--test misc_suite build::` the round trip; `bots`, `draft_deferred`, `eoe_net`, `sealed`, `v7_tails`, `view`); no
   gate step, tool or farm repro string ran one of the moved files by name (the gate's `--test` steps are `az`,
   `digest`, `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, all named).
+* **Measured on the merge** (the desktop beside the live pb1 / pb3 runs, ~2 GB of RAM free, each build through
+  `tools/slotd.sh` with CARGO_BUILD_JOBS 10 in a fresh target dir of its own): a cold `cargo test --release -p engine
+  --no-run` takes **717.8 s on main ebf322d5** (173 test executables) and **234.4 s on the merge 96afc516** (21: the
+  20 targets + the lib's unit tests), 3.1x. `dealt_per_seat::dealt_per_seat_digests` (ignored, not a gate step) in
+  `misc_suite`: combined **26c9751332e70c73**, the recorded value.
+* **The gates on 96afc516** (gate.py placing its pure-CPU steps on the Mac beside the live runs, the desktop's heavy
+  steps in `tools/slotd.sh` slots; `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"` for main's Git Bash
+  conversion, 170.7):
+  - `suite`: **GATE PASSED suite 96afc5162b5f in 405s** (the full engine suite 2,678 passed in 22 binaries - main's
+    2,678 in 174 -; the sharded 2k fuzz of default, default+hidden and delver_dealt);
+  - `engine --tested-sha 96afc5162b5f --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`: **GATE PASSED
+    WITH SKIPS engine 96afc5162b5f in 926s** - skipped: one live-run-hazard test fenced (a live run on this machine).
+    Digests EQUAL (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5; constructed e1177d609d6c1aee, EoE
+    2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993 = the recorded files), az 54, limits 13, hidden
+    28, pytest 465 passed in four Mac shards + 44 on the desktop, the smoke config, farm compat PASS (gate 2 identical:
+    6 games, 2,484 rows, 150 batches; gate 3 identical: 2,556 rows);
+  - `python`: **GATE PASSED WITH SKIPS python 96afc5162b5f in 851s** - skipped: two live-run-hazard tests fenced (pytest
+    524 passed in four shards + the desktop part, the run-loop smoke 16 games).
 
 ### 167.10 Deferred, and what it gives pb2
 
