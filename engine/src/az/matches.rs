@@ -485,6 +485,21 @@ pub struct MatchState {
     /// game's deal independent): a later game's deal is chance that has not happened, so `determinize`
     /// reseeds it in every world (`MtgAz::reseed_dealt`), as it reseeds `rng`. Unused (0) without a dealt seat.
     pub dealt_seed: u64,
+    /// A test fault only (ENGINE.md 172, `test_panic_of`): Some((game seed, turn)) in a match `MtgAz::new_game` started
+    /// while MTGZ_TEST_PANIC named its seed - its every game (and every search clone of it) panics at a step from that
+    /// turn on. None in every other match: never read by the rules, the encodings or the search.
+    pub test_panic: Option<(u64, u32)>,
+}
+
+/// The test fault `MTGZ_TEST_PANIC=<game seed>:<turn>` (ENGINE.md 172): `MtgAz::new_game` reads it for each game it
+/// starts, and a game of that seed panics at its first step from that turn on (`MtgAz::match_step`; a real move or
+/// one inside a search simulation, whichever comes first) - what tests of the self-play panic containment drop. Unset
+/// (every real run) or naming another seed: None.
+pub fn test_panic_of(seed: u64) -> Option<(u64, u32)> {
+    let v = std::env::var("MTGZ_TEST_PANIC").ok()?;
+    let (s, t) = v.trim().split_once(':')?;
+    (s.parse::<u64>().ok()? == seed).then_some(())?;
+    Some((seed, t.parse::<u32>().ok()?.max(1)))
 }
 
 /// The game-1 winner of a match with seed `seed` that starts at game 2 (ENGINE.md 130): each seat
@@ -605,6 +620,7 @@ impl MatchState {
             table: [None, None],
             glog: Default::default(),
             dealt_seed: 0,
+            test_panic: None,
         })
     }
 
@@ -749,6 +765,11 @@ impl super::MtgAz {
     /// One action of the match: the game's (and, when it ends the game, the
     /// match's next step: its end or sideboarding) or sideboarding's.
     pub(crate) fn match_step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
+        if let Some((seed, turn)) = self.m.test_panic {
+            if self.g.turn.number >= turn {
+                panic!("injected test panic [test fault MTGZ_TEST_PANIC={seed}:{turn}]: game seed {seed} at turn {} (ENGINE.md 172)", self.g.turn.number);
+            }
+        }
         if self.m.choice.is_some() {
             return self.deck_choice_step(a, chance);
         }
