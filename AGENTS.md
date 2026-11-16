@@ -78,7 +78,7 @@ zero-core's (the test keeps the copies equal to the pinned core's).
   `tests/ir` only when a commit touches the pipeline (`ir/`, `card_ir/`, `data/cards/`, ...; `docs/ENGINE.md` 170.7).
 * **Test files.** `engine/tests/` builds into a few binaries (`docs/ENGINE.md` 167.9): the named ones (`az`, `digest`,
   `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, `support`, the benchmarks and the game log's
-  tests `bo3_game_log`, `deck_choice`, `deck_scorer`, `game_log`: its sink is process-wide) and four suites
+  tests `bo3_game_log`, `deck_choice`, `deck_scorer`, `game_log`, `metagame_log`: its sink is process-wide) and four suites
   whose modules are the other files (`cards_suite`, `rules_suite`, `rulings_suite`, `misc_suite`). A new test file is a
   `#[path = "x.rs"] mod x;` line in its suite (or a `[[test]]` in `engine/Cargo.toml` when it needs its own process:
   a global allocator, process-wide state); tests/test_engine_test_layout.py fails on a file in neither. Run one file
@@ -90,7 +90,7 @@ zero-core's (the test keeps the copies equal to the pinned core's).
   state the old -> new hash. `DIGEST_ENCODING=0` leaves the encodings out, for encoding-only
   changes. Those games are the cube's best-of-one: `--test digest_formats` (same flags) hashes
   constructed best-of-three, the legacy decks, EoE and zero-core's driver against
-  `engine/tests/data/digests_{constructed,eoe,driver}.txt`, with the same rules (`docs/ENGINE.md` 148).
+  `engine/tests/data/digests_{constructed,eoe,driver,metagame}.txt`, with the same rules (`docs/ENGINE.md` 148).
 * **The encoding (what the network sees).** A layout change (feature counts, token objects,
   action slots) makes existing checkpoints incompatible. zero-core's encoding guard refuses to
   resume them (exit 78). New layouts are additive versions (v4 -> v5 only added things, so a

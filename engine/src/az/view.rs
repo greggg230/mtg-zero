@@ -555,6 +555,10 @@ impl MtgAz {
         if self.m.post_board {
             v["match"]["post_board"] = json!(true);
         }
+        // (a metagame's pairing, ENGINE.md 176: which of the spec's 75s each seat plays)
+        if let Some(p) = &self.m.pairing {
+            v["match"]["pairing"] = p.json();
+        }
         if let Some(c) = &self.m.choice {
             // (the deck choice, ENGINE.md 107.2: the game has not begun)
             v["decision"] = json!({

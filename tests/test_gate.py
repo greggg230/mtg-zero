@@ -140,13 +140,14 @@ def DIGEST(d, games=(2000, 500)):
             'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.06s\n')
 
 
-D_FORMATS = {'constructed': '63f58560ad7b3df0', 'eoe': 'b36df9098a38d794', 'driver': '837d42c28214befe'}
+D_FORMATS = {'constructed': '63f58560ad7b3df0', 'eoe': 'b36df9098a38d794', 'driver': '837d42c28214befe',
+             'metagame': '0123456789abcdef'}
 
 
-def FORMATS(digests=None, passed=3):
-    """digest_formats' output as the three tests print it (ENGINE.md 148.1), in the order they finished."""
+def FORMATS(digests=None, passed=4):
+    """digest_formats' output as the four tests print it (ENGINE.md 148.1, 176), in the order they finished."""
     d = dict(D_FORMATS, **(digests or {}))
-    return ('running 3 tests\n'
+    return ('running 4 tests\n'
             'driver (8 threads, 2 groups of 8 games): 20000 batches, 90491 rows, 1251 samples (the first at batch 7532), '
             '5 results (the first at batch 12020); sims 85674, leaves 90491, cache hits 51316, view rows 10061, belief '
             'rows 2159, busy 4.1 s (47.9 us a simulation)\n'
@@ -154,6 +155,8 @@ def FORMATS(digests=None, passed=3):
             'test driver_digest ... ok\n'
             f'constructed: 570 games and matches in 27.9 s; combined digest {d["constructed"]}\n'
             'test constructed_digests ... ok\n'
+            f'metagame: 225 best-of-one games and 63 best-of-three matches in 20.1 s; combined digest {d["metagame"]}\n'
+            'test metagame_digests ... ok\n'
             f'eoe: 160 games in 38.4 s; combined digest {d["eoe"]}\n'
             'test eoe_digests ... ok\n\n'
             f'test result: ok. {passed} passed; 0 failed; 0 ignored; 0 measured; {30 - passed} filtered out; '
@@ -792,21 +795,23 @@ def test_a_failed_retry_fails_the_step(core_step):
 
 
 def test_the_digest_formats_checker():
-    """digest_formats (ENGINE.md 148.1, 157): exactly one line each of constructed, eoe and driver, no re-record, the
-    binary's one "test result: ok. 3 passed" line + exit 0 - the three digests named in the reason and the report."""
+    """digest_formats (ENGINE.md 148.1, 157, 176): exactly one line each of constructed, eoe, driver and metagame, no
+    re-record, the binary's one "test result: ok. 4 passed" line + exit 0 - the four digests named in the reason and the
+    report."""
     check = G.check_digest_formats
     ok, why, extra = check(FORMATS(), 0)
     assert ok and extra['formats'] == D_FORMATS and all(f'{n} {d}' in why for n, d in D_FORMATS.items())
     out = FORMATS()
     assert not check(out.replace('eoe: 160', 'eoe (encodings off): 160'), 0)[0]          # a line missing
     ok, why, _ = check(out + f'constructed: x; combined digest {D_FORMATS["constructed"]}\n', 0)
-    assert not ok and '4 "<name>' in why                                                  # a line twice
-    ok, why, _ = check(out.replace('test result: ok. 3 passed', 'wrote E:/x/engine/tests/data/digests_eoe.txt\n'
-                                   'test result: ok. 3 passed'), 0)
+    assert not ok and '5 "<name>' in why                                                  # a line twice
+    ok, why, _ = check(out.replace('test result: ok. 4 passed', 'wrote E:/x/engine/tests/data/digests_eoe.txt\n'
+                                   'test result: ok. 4 passed'), 0)
     assert not ok and 'RE-RECORDED' in why                                                # DIGEST_WRITE
-    ok, why, _ = check(FORMATS(passed=2), 0)
-    assert not ok and '2 passed, not the 3' in why
-    assert not check(out.replace('test result: ok. 3 passed; 0 failed', 'test result: FAILED. 2 passed; 1 failed'), 101)[0]
+    ok, why, _ = check(FORMATS(passed=3), 0)
+    assert not ok and '3 passed, not the 4' in why
+    assert not check(out.replace('test result: ok. 4 passed; 0 failed', 'test result: FAILED. 3 passed; 1 failed'), 101)[0]
+    assert not check(out.replace('metagame: 225', 'metagame (encodings off): 225'), 0)[0]   # the metagame line missing
     assert not check(out, 1)[0]
     assert 'did it compile' in check('error[E0425]: cannot find value\n', 101)[1]
 
@@ -841,7 +846,7 @@ def test_the_digest_formats_step_runs_in_the_behaviour_tiers_and_reports_its_dig
         assert {'formats', 'dealt'} <= {k for k, _ in gate.fake.calls}, argv
     gate.fake.calls.clear()
     gate.fake.set('formats', FORMATS().replace('test driver_digest ... ok', 'test driver_digest ... FAILED')
-                  .replace('test result: ok. 3 passed; 0 failed', 'test result: FAILED. 2 passed; 1 failed'), 101)
+                  .replace('test result: ok. 4 passed; 0 failed', 'test result: FAILED. 3 passed; 1 failed'), 101)
     rc, out, _, _ = gate(*ENC, '--allow-skip', 'checkpoint-load', capsys=capsys)
     assert rc == 1 and 'digest-formats: the digest_formats tests did not pass' in final(out)
 

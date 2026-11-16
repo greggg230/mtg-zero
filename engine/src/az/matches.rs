@@ -489,6 +489,11 @@ pub struct MatchState {
     /// while MTGZ_TEST_PANIC named its seed - its every game (and every search clone of it) panics at a step from that
     /// turn on. None in every other match: never read by the rules, the encodings or the search.
     pub test_panic: Option<(u64, u32)>,
+    /// A metagame match's pairing (ENGINE.md 176, the spec's `"metagame"`): which of the spec's 75s each seat plays,
+    /// drawn from the match's seed. A setting of the match, the same in every world; the game log's, `record_setup`'s
+    /// and the spectator view's, never read by the rules, the encodings or the search (the 75s it names are the pools).
+    /// None in every other match.
+    pub pairing: Option<super::metagame::Pairing>,
 }
 
 /// The test fault `MTGZ_TEST_PANIC=<game seed>:<turn>` (ENGINE.md 172): `MtgAz::new_game` reads it for each game it
@@ -621,6 +626,7 @@ impl MatchState {
             glog: Default::default(),
             dealt_seed: 0,
             test_panic: None,
+            pairing: None,
         })
     }
 
@@ -789,6 +795,11 @@ impl super::MtgAz {
             }
             if self.g.is_over() {
                 self.end_game(Some(chance));
+            }
+        } else if self.g.is_over() {
+            // (a metagame's best-of-one game, ENGINE.md 176: the live game's log line; no record for any other spec)
+            if let Some(r) = self.m.glog.get().filter(|r| r.is_bo1()) {
+                r.bo1_end(self);
             }
         }
         Ok(())

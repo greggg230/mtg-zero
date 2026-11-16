@@ -51,6 +51,13 @@
 //!   episode of a chained match carries it on, `next_match_episode`); the line is written where the game ends
 //!   (`MatchState::end_game`, before the match scores it). Remote self-play workers and the farm's games (played
 //!   elsewhere, replayed here on copies) write none.
+//! * **A metagame's games** (ENGINE.md 176): a metagame match's spec line adds `"metagame": {"decks": [i, j], "names":
+//!   [name_i, name_j]}` (its pairing: the index of each seat's 75 in the spec's `metagame.decks`, and their names; the
+//!   lists are that pair's, so each pairing has its spec line) and each game line `"pairing": [i, j]`. A metagame's
+//!   best-of-one game writes `{"v": 1, "kind": "bo1", "spec", "seed", "game": 1, "starter", "chooser", "pairing",
+//!   "result", "aborted", "turns", "time"}` after a spec line `{"v": 1, "kind": "bo1-spec", "spec", "lists", "mains",
+//!   "metagame", "max_turns"}` at the step that ends the game (`MtgAz::match_step`); a game a seat resigned (zero-core's
+//!   resign rule ends it outside the game) writes none, as a sealed game's. Every other spec's lines are what they were.
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -168,18 +175,24 @@ impl LiveLog {
     }
 }
 
-/// A constructed best-of-three match's record (module docs).
+/// A constructed best-of-three match's record, or a metagame's best-of-one game's (module docs).
 pub struct Bo3Log {
     spec_key: u64,
     spec: Value,
     seed: u64,
+    /// The metagame's pairing (ENGINE.md 176), else None.
+    pairing: Option<[u8; 2]>,
+    /// A metagame's best-of-one game (`kind` "bo1").
+    bo1: bool,
 }
 
 impl Bo3Log {
-    /// The record of a constructed best-of-three match with spec `spec` and seed `seed`, when the log is on; else
-    /// none (and none for any other spec or a position-lab start).
+    /// The record of a constructed best-of-three match, or of a metagame's best-of-one game (ENGINE.md 176), with spec
+    /// `spec` and seed `seed`, when the log is on; else none (and none for any other spec or a position-lab start).
     pub fn start(spec: &MtgSpec, seed: u64) -> LiveLog {
-        if !ON.load(Ordering::Relaxed) || spec.start.is_some() || !spec.constructed || spec.format != super::matches::Format::Bo3 {
+        let pairing = spec.pairing(seed);
+        let bo1 = spec.format != super::matches::Format::Bo3;
+        if !ON.load(Ordering::Relaxed) || spec.start.is_some() || !spec.constructed || (bo1 && pairing.is_none()) {
             return LiveLog(None);
         }
         let Ok(seats) = spec.try_seats(seed) else { return LiveLog(None) };
@@ -191,14 +204,49 @@ impl Bo3Log {
             lists.push(pool.list.iter().map(|&(d, n)| json!([db.def(d).name, n])).collect::<Vec<_>>());
             mains.push(counts);
         }
-        let dealt = spec.dealt_decks.map(|d| json!({"p": d.p.0, "swaps": [d.swaps.0, d.swaps.1], "per_seat": d.per_seat}));
-        let spec_json = json!({
-            "kind": "bo3-spec", "lists": lists, "mains": mains, "dealt_decks": dealt,
-            "table": spec.sideboard_table.as_ref().map(|t| t.version.clone()), "start_game": spec.start_game,
-            "max_turns": spec.max_turns,
-        });
+        let mut spec_json = if bo1 {
+            json!({"kind": "bo1-spec", "lists": lists, "mains": mains, "max_turns": spec.max_turns})
+        } else {
+            let dealt = spec.dealt_decks.map(|d| json!({"p": d.p.0, "swaps": [d.swaps.0, d.swaps.1], "per_seat": d.per_seat}));
+            json!({
+                "kind": "bo3-spec", "lists": lists, "mains": mains, "dealt_decks": dealt,
+                "table": spec.sideboard_table.as_ref().map(|t| t.version.clone()), "start_game": spec.start_game,
+                "max_turns": spec.max_turns,
+            })
+        };
+        // (ENGINE.md 176: the metagame's pairing, only for a metagame - every other spec line is what it was)
+        if let Some(p) = &pairing {
+            spec_json["metagame"] = p.json();
+        }
         let spec_key = spec_json.to_string().bytes().fold(0x6A3E_B030u64, |h, b| crate::rng::split64(h ^ b as u64));
-        LiveLog(Some(Arc::new(Bo3Log { spec_key, spec: spec_json, seed })))
+        LiveLog(Some(Arc::new(Bo3Log { spec_key, spec: spec_json, seed, pairing: pairing.map(|p| p.decks), bo1 })))
+    }
+
+    /// The live metagame best-of-one game `a` ended (`MtgAz::match_step`, ENGINE.md 176): write its line.
+    pub fn bo1_end(&self, a: &MtgAz) {
+        let g = &a.g;
+        let aborted = g.aborted();
+        let t = g.turn();
+        let result = if aborted {
+            Value::Null
+        } else {
+            match g.outcome().and_then(|o| o.winner) {
+                Some(w) => json!([(w == 0) as u8 as f64, (w == 1) as u8 as f64]),
+                None => json!([0.5, 0.5]),
+            }
+        };
+        let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+        let line = json!({
+            "v": 1, "kind": "bo1", "spec": format!("{:016x}", self.spec_key), "seed": self.seed, "game": 1,
+            "starter": t.starting, "chooser": t.chooser, "pairing": self.pairing, "result": result, "aborted": aborted,
+            "turns": t.number, "time": (time * 1000.0).round() / 1000.0,
+        });
+        write_line(self.spec_key, &self.spec, &line);
+    }
+
+    /// A metagame's best-of-one game (its line is `bo1_end`'s).
+    pub fn is_bo1(&self) -> bool {
+        self.bo1
     }
 
     /// The live match `a`'s current game is over (`end_game`, before the match scores it): write its line.
@@ -228,13 +276,17 @@ impl Bo3Log {
             }
         };
         let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
-        let line = json!({
+        let mut line = json!({
             "v": 1, "kind": "bo3", "spec": format!("{:016x}", self.spec_key), "seed": self.seed, "game": game,
             "starter": t.starting, "chooser": t.chooser, "wins": [m.wins[0], m.wins[1]],
             "dealt": [m.is_dealt(0), m.is_dealt(1)], "mode": [mode(0), mode(1)],
             "decks": [m.decks[0].to_vec(), m.decks[1].to_vec()], "result": result, "aborted": aborted,
             "turns": t.number, "post_board": m.post_board, "time": (time * 1000.0).round() / 1000.0,
         });
+        // (ENGINE.md 176: a metagame match's pairing; no key for any other spec)
+        if let Some(p) = self.pairing {
+            line["pairing"] = json!(p);
+        }
         write_line(self.spec_key, &self.spec, &line);
     }
 }

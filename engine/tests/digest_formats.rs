@@ -2,7 +2,7 @@
 //! on the cube's table; none of them plays constructed play's table, a best-of-three match, its
 //! sideboarding, the constructed prior's hidden 60s, the EoE table with its layout v6 rows, or
 //! zero-core's driver (the searches, the belief and deck deals, the evaluation cache, the records).
-//! Three digests here, each compared with its recorded file in `tests/data/`:
+//! Four digests here, each compared with its recorded file in `tests/data/`:
 //!
 //! * `constructed_digests` (`digests_constructed.txt`): matches of the Delver best-of-three preset's
 //!   spec (`delver-mirror-bo3`, `tests/data/digest_specs.json`: post-sideboard games only, one
@@ -15,6 +15,11 @@
 //!   arena pools, the mixed field `best_share` 0.5, hidden decklists dealt by the sealed prior) - 100
 //!   random, 40 heuristic against random - and 20 of run 2's spec, the deck choice before the game
 //!   (`eoe-2`: 32 candidates, played at random).
+//! * `metagame_digests` (`digests_metagame.txt`, ENGINE.md 176): the three-deck Legacy metagame preset's spec
+//!   (`legacy-meta3`, `tests/data/digest_specs.json`'s `meta3`: best-of-one, the mains, each game's pairing drawn from
+//!   its seed) - 180 games of random play, 45 of `MtgAz`'s heuristic against random play -, 45 matches of its
+//!   best-of-three (the 75s, one episode per game) and 18 post-sideboard matches of its mirrors (`"start_game": 2`,
+//!   weights on the diagonal); each line names the game's pairing.
 //! * `driver_digest` (`digests_driver.txt`): zero-core's `Driver<MtgAz>` on the Delver best-of-three
 //!   preset's spec with a self-play seat as the live run's (fewer simulations: 16, 8 in a fast search,
 //!   4 for a minor decision; 2 groups of 8 games; the completed-Q target, the evaluation cache, root-view leaves with view
@@ -35,7 +40,7 @@
 //! tilt every other time, the deck's where decks are hidden) with its identities and decks; each
 //! game's end (the result, the outcome, the turn), each next episode, and the match's results.
 //!
-//! `cargo test --release -p engine --test digest_formats -- --ignored --nocapture` compares (the three
+//! `cargo test --release -p engine --test digest_formats -- --ignored --nocapture` compares (the four
 //! run at once); `DIGEST_WRITE=1` records instead - only when behaviour is meant to change, stating
 //! the old -> new combined digests. `DIGEST_ENCODING=0` leaves the encodings out of the first two and
 //! prints their combined digests only (compare them across an encoding-only change, run on both
@@ -389,6 +394,57 @@ fn constructed_digests() {
         lines.push(format!("lh {seed} {:016x}", play::<MtgAz>(&bo1(seed), 5000 + seed, Some((seed / 9 % 2) as usize))));
     }
     finish("constructed", "digests_constructed.txt", "300 best-of-three matches and 270 best-of-one games", &lines, t);
+}
+
+/// `legacy-meta3`'s spec (ENGINE.md 176) as the digest plays it: best-of-one as recorded (`meta3`), or best-of-three
+/// with each deck's sideboard (`bo3`), `extra` merged in.
+fn meta3(bo3: bool, extra: serde_json::Value) -> MtgSpec {
+    let mut v: serde_json::Value = serde_json::from_str(&spec_json("meta3")).unwrap();
+    if bo3 {
+        v["format"] = serde_json::json!("bo3");
+        for k in 0..3 {
+            let name = v["metagame"]["decks"][k]["name"].as_str().unwrap().to_string();
+            let d = Decklist::parse(&std::fs::read_to_string(format!("{}/../data/decks/{name}.json", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap();
+            let side: Vec<String> = d.sideboard.iter().flat_map(|(n, c)| std::iter::repeat_n(c.clone(), *n as usize)).collect();
+            v["metagame"]["decks"][k]["sideboard"] = serde_json::json!(side);
+        }
+    }
+    for (k, x) in extra.as_object().unwrap() {
+        // (`weights`: the metagame's)
+        if k == "weights" {
+            v["metagame"]["weights"] = x.clone();
+        } else {
+            v[k] = x.clone();
+        }
+    }
+    MtgSpec::parse(&v.to_string()).unwrap()
+}
+
+#[test]
+#[ignore]
+fn metagame_digests() {
+    let t = std::time::Instant::now();
+    let bo1 = meta3(false, serde_json::json!({}));
+    let bo3 = meta3(true, serde_json::json!({"game_episodes": true}));
+    // (the mirrors only: start_game 2 is for mirrors, ENGINE.md 147.4)
+    let post = meta3(true, serde_json::json!({"game_episodes": true, "start_game": 2, "weights": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]}));
+    let cell = |s: &MtgSpec, seed: u64| s.pairing(seed).map(|p| format!("{}{}", p.decks[0], p.decks[1])).unwrap();
+    let mut lines = Vec::new();
+    for seed in 0..180 {
+        lines.push(format!("mg {seed} {} {:016x}", cell(&bo1, seed), play::<MtgAz>(&bo1, seed, None)));
+    }
+    for seed in 0..45 {
+        lines.push(format!("mh {seed} {} {:016x}", cell(&bo1, 1000 + seed), play::<MtgAz>(&bo1, 1000 + seed, Some((seed % 2) as usize))));
+    }
+    for seed in 0..45 {
+        lines.push(format!("mm {seed} {} {:016x}", cell(&bo3, 2000 + seed), play::<MtgAz>(&bo3, 2000 + seed, None)));
+    }
+    for seed in 0..18 {
+        let c = cell(&post, 3000 + seed);
+        assert_eq!(c[..1], c[1..], "a mirror");
+        lines.push(format!("mp {seed} {c} {:016x}", play::<MtgAz>(&post, 3000 + seed, None)));
+    }
+    finish("metagame", "digests_metagame.txt", "225 best-of-one games and 63 best-of-three matches", &lines, t);
 }
 
 #[test]

@@ -36948,3 +36948,141 @@ the next restart and the lane completes each measurement, slowly.
 **Gate.** **GATE PASSED WITH SKIPS python c45c26fd3a64 in 339s** (pytest 506 passed + 44 on the desktop, the run-loop
 smoke 16 games; the live-run fence only: 2 tests on the desktop - the new end-to-end test among them, which passed on
 the Mac: `tests/test_yardsticks.py` 19 passed there).
+
+## 176. A metagame spec: one spec plays every pairing of a list of 75s (branch `feat/metagame-spec`, 2026-11-16)
+
+**Why.** The planned three-deck Legacy run trains ONE network on all 9 ordered (my deck, opponent's deck) cells of Izzet
+Delver (`data/decks/izzet_delver_8016541`), Legacy Doomsday (`doomsday_8027957`) and Sneak and Show
+(`sneak_show_8014220`), mirrors included. A constructed spec fixed `decks: {p0, p1, ...}` and zero-core takes one
+self-play spec per iteration (the `selfplay_specs` hook, zero-core `docs/az.md` 40), so a run could not mix pairings.
+This lane adds a spec option that does: each game's pairing is drawn by the engine from the game's seed. Existing specs
+are byte-identical (digests EQUAL, 176.6).
+
+### 176.1 The spec (`engine/src/az/metagame.rs`)
+
+```json
+{"constructed": true, "format": "bo1", "max_turns": 60, "mulligans": true,
+ "metagame": {"decks": [{"name": "izzet_delver_8016541", "main": ["..."], "sideboard": ["..."]},
+                        {"name": "doomsday_8027957", "main": ["..."]},
+                        {"name": "sneak_show_8014220", "main": ["..."]}],
+              "weights": [[1, 1, 1], [1, 1, 1], [1, 1, 1]]}}
+```
+
+* `decks`: 1 to 16 named 75s (`name` unique, non-empty: the deck's name in the logs; `main`; optional `sideboard`; no
+  other key), each a constructed deck (CR 100.2a, 100.4a), in best-of-three a main of exactly 60 (120). Every card the
+  table does not know is named at once.
+* `weights` (optional): an n x n matrix of non-negative integers, row = p0's deck, column = p1's, sum in (0, 2^32].
+  Default every cell 1: uniform over the n x n ordered pairs, so each cell gets the same share of games. Relative
+  integers (2 plays a cell twice as often as 1, 0 never) - exact, no float in the draw.
+* **The draw** (`Metagame::pairing`): cell k with probability `w_k / sum w` EXACTLY - a uniform integer below the
+  total by rejection of the top partial block of u64 (no modulo bias) - from `Rng::new(split64(seed ^ SALT))`, a stream
+  of the game's (match's) seed of its own. Everything else of the game (shuffles, play/draw, the match's later seeds,
+  the game-1 coin of `start_game` 2, ...) comes from the seed as before, so **a metagame game IS the game of the same
+  seed whose spec names that pair's lists as `decks`** (`Metagame::pair_json`, `decklists.pair_spec`). Play/draw is
+  whatever the engine does today. Every machine that makes a game makes it with `MtgAz::new_game(spec, seed)` -
+  self-play here, the Mac, the farm's release worker, the replays, the trainer's replay path (records) - so all play
+  the same pairing for a seed.
+* **Formats.** Best-of-one, and constructed best-of-three (120) with `game_episodes` (121) and `start_game` 2 (130) -
+  a whole match keeps one pairing. `start_game` 2 draws game 1's result as a fair coin, exact for a mirror only
+  (147.4): it is accepted only when every cell of positive weight is a mirror (e.g. the diagonal), else refused naming
+  the first non-mirror cell.
+* **Refused, loudly** (checked before any key is read): `decks`, `seed` (one match seed would play one pairing),
+  `start`, `build`, `sealed`, `pools`, `hidden_decklists` (no prior for a hidden constructed deck), `dealt_decks`,
+  `sideboard_table`, `keep_deck`, `keep_known` (all built for one pair of 75s), and the metagame without `"constructed":
+  true`. Each refusal names the key and why.
+* `MtgSpec::eval_json` and `mtgz.az.evaldecks.eval_spec` keep a metagame (no `"decks": "eval"` is added): evaluation
+  plays every pairing as self-play does.
+
+### 176.2 What follows the pairing (the audit)
+
+Nothing of a game reads the spec after `MtgAz::new` made it from the seats of its pairing (`MtgSpec::try_seats` ->
+`cube_seats`: `DeckMode::Metagame` gives the pairing's (main, sideboard) per seat): the open decklists' pools (the
+`OPP_POOL` bag of the encoding), the match pools and sideboarding of a best-of-three, the constructed prior of the hidden
+60s (`hidden_decks::ConstructedPrior` per seat from its seat, `MtgAz::constructed_bo3`), the deck target and the belief
+target (`aux_target`: the game's cards), `determinize` / `determinize_with` (the match's pools and priors) are all the
+match's own state. The spec-level readers were each checked: `MtgSpec::{pools, seats, decks, try_seats}` (pairing-aware),
+`game_log::Bo3Log::start` (`try_seats`), `build.rs` and `lab.rs` (refused: `build`, `start`), the fuzz's `dealt_main`
+(dealt decks refused); in Python `evaldecks.eval_spec` (kept), `replays.main_decks` / `deck_pools` (per game, 176.3),
+`sideboard_census` (through `main_decks`: a metagame spec without a game's state fails loudly), `matchup` (its
+`matchup_every` stays 0), `keep_h2h` (`keep_deck` refused), `delverai_publish` (the publisher is off in the presets).
+`mtgz/az/yardsticks.py` is the per-cell yardstick lane's and is not touched here. The proof is behavioural: the lockstep
+checks (176.5) play the metagame game and its pairing's fixed game side by side.
+
+`MatchState::pairing` (`Option<metagame::Pairing>`: each seat's deck index and the names) is set by `MtgAz::new` for
+both formats, carried by clones, worlds and next episodes; classified `Derived` in `public_state.rs` (a setting of the
+match from spec and seed, the same in every world, never read by the rules, the encodings or the search: the 75s it
+names are the pools, already public). No hidden information can leak through it.
+
+### 176.3 Which pairing each game had
+
+* **The game log** (`az/game_log.rs`, `<run>/games/`): a metagame best-of-one game writes `{"v": 1, "kind": "bo1",
+  "spec", "seed", "game": 1, "starter", "chooser", "pairing": [i, j], "result", "aborted", "turns", "time"}` at the step
+  that ends it (`MtgAz::match_step`), after a spec line `{"kind": "bo1-spec", "lists", "mains", "metagame": {"decks":
+  [i, j], "names": [...]}, "max_turns"}` (one spec line per pairing seen). A metagame best-of-three's `"bo3"` lines add
+  `"pairing"` and its `"bo3-spec"` line `"metagame"`. Every other spec's lines are unchanged (a fixed best-of-one spec
+  still logs nothing). As for sealed games, a game a seat resigned (zero-core's resign rule ends it outside the game)
+  writes no line, and remote self-play and the farm's games write none here.
+* **Game records** (`record_setup`, what the farm's records carry and the trainer's replay compares): `{"decks": ...,
+  "pairing": {"decks": [i, j], "names": [...]}}` for a metagame game; unchanged for every other spec.
+* **The spectator view** (`export_state`): `match.pairing`. The replay viewer's deck reads (`replays.main_decks` /
+  `deck_pools`) take the game's state for a metagame spec and refuse without it (never another game's decks).
+
+### 176.4 Python: `decklists`, presets
+
+* `decklists.metagame_spec(decks=META3, fmt='bo1'|'bo3', weights=None, max_turns, mulligans, game_episodes,
+  start_game)`: the spec above from `data/decks/` names (best-of-one the mains, as `mirror_spec`; best-of-three the
+  75s). `weights`: None (uniform), an n x n integer matrix, or a `{(p0 name, p1 name): w}` dict (unlisted cells 1).
+* `decklists.pair_spec(p0, p1, fmt, ...)`: one fixed pairing (the evaluation cells): exactly the metagame's
+  `pair_json` of that cell (`tests/test_metagame.py`). `SNEAK_SHOW`, `META3` constants.
+* Presets: **`legacy-meta3`** = `delver-mirror` (the Delver line's best-of-one preset, mtg-3's settings: the 128 x 4
+  token network, 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration, GPU) with the
+  best-of-one metagame of the three mains as spec AND evaluation spec, and without the Delver-only companions (`publish`,
+  `yardsticks` = {}: the delverai publisher and the Delver mirror's anchors). A launch adds its own flags as the Delver
+  runs did. **`legacy-meta3-smoke`**: `mtg-smoke`'s tiny network on the same spec (CPU). The per-cell yardstick is
+  another lane's.
+
+### 176.5 The fuzz: `FUZZ_POOL=meta`
+
+Games: the best-of-one metagame's game of the seed (its pairing's mains) with every check of the default mode. Matches:
+the best-of-three metagame (the 75s; odd seeds one episode per game; one match in four 12-turn games) with every check of
+`FUZZ_POOL=delver`'s matches, then post-sideboard matches of the mirrors-only metagame (`start_game` 2; no keeper - the
+metagame refuses `keep_deck`, so `check_post`'s keeper requirement is waived for this pool). Before every game and match
+**its pairing check** (`meta_lockstep`): the metagame spec's game and its pairing's fixed spec's game played in lockstep
+by random actions from the seed - the same pairing as the seed's, the same seats, pools and record (`record_setup`: the
+fixed game's decks + the pairing), then at every step the same decider, legal actions and chance keys, both viewers'
+whole layout v7 rows every third step, and every eighth step both viewers' worlds (`determinize` with one generator: the
+same pools, decks, hand and library identities, the viewer's row; in a best-of-one game the world's cards of the
+opponent exactly its pairing's main), the next episodes and the results. `check_constructed_world` also asserts every
+world keeps the pairing (None = None for every other pool). End-of-run: with 200 games (90 matches, 20 post-sideboard
+matches) every cell (post-sideboard: every mirror, and no other cell) played, and lockstep steps and worlds compared. The
+release worker knows the pool (`worker/src/fuzz.rs`: `meta-games`, `meta-matches`; `FUZZ_DECK_TILT` allowed in its
+matches); `FUZZ_HIDDEN_DECKS=1` is refused with it. Not in the suite tier's default pools (`default,default+hidden,
+delver_dealt`): pass `--fuzz-pools ...,meta`.
+
+### 176.6 Digests
+
+* `digests.txt` (the cube): **EQUAL**, 8f71ccb0d89031a6. `digest_formats`: constructed, EoE and driver **EQUAL** (their
+  recorded files unchanged).
+* **New, recorded on purpose: `metagame_digests`** (`engine/tests/digest_formats.rs`, `tests/data/digests_metagame.txt`,
+  288 lines): `legacy-meta3`'s spec (`digest_specs.json`'s `meta3`, kept equal to the preset by
+  `tests/test_digest_specs.py`) - 180 best-of-one games of random play and 45 of the heuristic against random play -, 45
+  matches of its best-of-three (the 75s, one episode per game) and 18 post-sideboard matches of the mirrors; each line
+  names its pairing. Combined digest **8b2b74f436d338a0** (about 4 s). `tools/gate.py`'s `digest-formats` step now
+  expects four lines (constructed, eoe, driver, metagame) and "4 passed" (`tests/test_gate.py` follows).
+
+### 176.7 Tests
+
+* `engine/tests/metagame.rs` (`misc_suite`): the draw (uniform within bounds over 9,000 seeds, deterministic, the seats
+  the pairing's mains), weights (diagonal-only plays mirrors only, 2:1:1 shares, a single cell), every refusal, the
+  evaluation spec kept, and the lockstep equivalence decision by decision: best-of-one games until every cell is played
+  (27 or more), 9 best-of-three matches, 4 post-sideboard mirror matches.
+* `engine/tests/metagame_log.rs` (its own binary: the log's sink is process-wide): zero-core's self-play driver plays 18
+  best-of-one games and 8 best-of-three matches of the metagame with the log on; one line per played game, each line's
+  pairing the seed's, its spec line naming that pairing with its 75's lists; a fixed best-of-one spec logs nothing.
+* `tests/test_metagame.py`: `metagame_spec` / `pair_spec` (`pair_spec` = the cell of the metagame), the presets, the
+  engine's parse and refusals through the bindings, each game's pairing in its exported state (60 seeds: all 9 cells),
+  the replay viewer's per-game mains.
+* Farm compatibility (`tools/farm_compat.py --preset legacy-meta3`, the release worker of this branch): **PASSED** -
+  gate 2 identical (6 games, 1,640 rows, 150 batches), gate 3 identical (6 games, 944 rows, 6 decks compared); with the
+  best-of-three metagame (`--set spec=<metagame_spec(fmt='bo3', game_episodes=True)>`): **PASSED** - gate 2 identical
+  (4,204 rows, 150 batches), gate 3 identical (3,099 rows, 6 decks compared).

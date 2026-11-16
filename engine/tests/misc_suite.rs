@@ -1,5 +1,5 @@
 //! One test binary for the other engine test files (AZ layer, decks, drafts, interactions, views, ...) (docs/ENGINE.md 167.9): each file a module of it, so the engine is linked once
-//! for all 26 instead of once per file. Run one file's tests with its module name as the filter:
+//! for all 27 instead of once per file. Run one file's tests with its module name as the filter:
 //! `cargo test --release -p engine --test misc_suite autopass_reuse::` (was `--test autopass_reuse`).
 //! A file keeps its own `mod common;` / kit modules: `#[path]` loads it like a crate root, so its modules
 //! resolve beside it as before.
@@ -46,6 +46,8 @@ mod known_face_key;
 mod lab;
 #[path = "match_worlds.rs"]
 mod match_worlds;
+#[path = "metagame.rs"]
+mod metagame;
 #[path = "post_board.rs"]
 mod post_board;
 #[path = "sealed.rs"]
