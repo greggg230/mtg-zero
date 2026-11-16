@@ -98,7 +98,7 @@ fn game_log(path: Option<&str>) -> PyResult<()> {
 }
 
 /// Parse an `mtg` spec as the game does (`MtgSpec::parse`): a ValueError with the engine's refusal, else None (the
-/// matchup model's job checks its choice table with it before publishing, docs/ENGINE.md 167.3).
+/// matchup model's job checks its choice table with it before publishing, docs/ENGINE.md 168.3).
 #[pyfunction]
 fn mtg_spec_check(spec: &str) -> PyResult<()> {
     engine::az::MtgSpec::parse(spec).map(|_| ()).map_err(verr)

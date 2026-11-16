@@ -1,5 +1,5 @@
-//! Dealt decks per seat (ENGINE.md 167.1, `"dealt_decks"` with `"per_seat": true`) and sideboarding by a choice table
-//! (ENGINE.md 167.3, the spec's `"sideboard_table"`): each seat of a constructed best-of-three is dealt independently
+//! Dealt decks per seat (ENGINE.md 168.1, `"dealt_decks"` with `"per_seat": true`) and sideboarding by a choice table
+//! (ENGINE.md 168.3, the spec's `"sideboard_table"`): each seat of a constructed best-of-three is dealt independently
 //! with probability p - none, one or both -, both dealt games begin with nobody deciding, the two seats' deals come
 //! from streams of their own; a seat of the choice table that is not dealt sideboards to its context's 60 by teacher
 //! decisions (zero-core `SearchGame::teacher_policy`), recorded by zero-core's driver as policy targets.

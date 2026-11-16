@@ -3146,7 +3146,7 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     // Dealt decks (ENGINE.md 154): which player's 60s this match deals - public, the same in every world; per
     // player in `globals_v6` (frame seat first), in every row of the match (sideboarding's too: the other
     // player's beliefs about the next 60 depend on it).
-    // (ENGINE.md 167.1: both seats may be dealt)
+    // (ENGINE.md 168.1: both seats may be dealt)
     for d in 0..2u8 {
         if m.is_dealt(d) {
             let side = (d != me) as usize;

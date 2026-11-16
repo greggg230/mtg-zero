@@ -1,4 +1,4 @@
-//! The best-of-three game log (ENGINE.md 167.2, `az/game_log.rs`): every finished game of a live constructed
+//! The best-of-three game log (ENGINE.md 168.2, `az/game_log.rs`): every finished game of a live constructed
 //! best-of-three match writes one line - both 60s, the starter, the score before it, the dealt flags, how each 60 was
 //! made, the result -, worlds and clones never do. zero-core's self-play driver plays the matches (live games from
 //! `new_game`, worlds dealt by every search, chained episodes), so the lines are exactly the matches' played games, and a

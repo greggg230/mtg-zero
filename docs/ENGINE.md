@@ -35014,12 +35014,11 @@ desktop can run three gates at once with pb2 at 4.6-5.0 min when nothing uses th
   not investigated; until fixed it runs on the desktop only and is fenced while a run is live.
 * A Job Object for run trees (S8's first point) and supervisor-alive checks in `tools/watch_run.sh`: not in this phase.
 
-## 167. pb3: wide 60 variety (dealt decks per seat), the in-run matchup model and sideboarding by its choice table (branch `feat/pb3-varied`, zero-core `feat/pb3-teacher`, 2026-11-15)
+## 168. pb3: wide 60 variety (dealt decks per seat), the in-run matchup model and sideboarding by its choice table (branch `feat/pb3-varied`, zero-core `feat/pb3-teacher`, 2026-11-15)
 
-Branch `feat/pb3-varied` from main 72e5a0df, main 90731110 merged in (165 farm campaigns, 166 migration phase 0);
-zero-core `feat/pb3-teacher` from the pin bf229a5, the new pin's mainline-1115 d29b134 merged in. (Section number: the
-next free after 166 on main, the coordinator's call; written as 168 before the merge. `mig/phase1`'s uncommitted work
-still cites "ENGINE.md 165" for its sharded fuzz, which main's 165 now holds.) The run it prepares: **pb3**, approved by the
+Branch `feat/pb3-varied` from main 72e5a0df, then main 90731110 (165 farm campaigns, 166 migration phase 0) and main
+acc00acd (167 migration phase 1) merged in; zero-core `feat/pb3-teacher` from the pin bf229a5, then mainline-1115
+d29b134 and mig/phase1-panic cd47511 merged in. (Section number: the next free after main's 167.) The run it prepares: **pb3**, approved by the
 user 2026-11-15. Not launched here (`E:/mtg-zero-scratch/delver-bo3-launch/launch_pb3.py` and its checklist).
 
 **Why** (the hub notes `value_pregame_check/report.md` and `sideboard_play_analysis_2026-11-15.md`; the user: "what we
@@ -35032,7 +35031,7 @@ speed but misses their reactive uses: it needs more games with the cards. So pb3
 learns the matchup from game results with a model of its own, EoE run 2's pairwise evaluator (111, 112) adapted, and
 (3) sideboards by that model, with the choice recorded as the policy target so the network's prior learns it.
 
-### 167.1 Dealt decks per seat (`"dealt_decks": {..., "per_seat": true}`)
+### 168.1 Dealt decks per seat (`"dealt_decks": {..., "per_seat": true}`)
 
 * **The option.** `DealtDecks::per_seat` (default false: 154's one dealt seat, byte-identical). With it each seat is
   dealt on its own with probability p (`matches::dealt_seats`: two uniforms from a stream of the match's seed of its
@@ -35059,13 +35058,13 @@ learns the matchup from game results with a model of its own, EoE run 2's pairwi
   pairwise pass, 142, and the redrawn sample met three collisions on layout v6 - `mtg_eoe` only - no known gap covers:
   "a permanent gained a triggered ability" against "(the position as it is)", "combat damage is prevented this turn",
   "a permanent loses all abilities", each with `LoseAllAbilities` and a later `Granted` ability on one permanent; a
-  pre-existing v6 gap the old sample never drew, left for the EoE layout's owner, 167.6.) Private: each deal keyed `KEY_DEALT` of
+  pre-existing v6 gap the old sample never drew, left for the EoE layout's owner, 168.6.) Private: each deal keyed `KEY_DEALT` of
   its seat, `HIDDEN` for the other observer - a world of viewer v keys v's own deal in full and the other's hidden
   (`both_dealt_matches_deal_two_independent_60s_and_key_them_privately`). The other player's worlds deal each dealt
   seat's 60 from its restricted prior, untilted (154.2); the aux `deck` target is empty against a dealt 60, so with
   both dealt neither seat's deck head trains in that match (by design: the head learns chosen 60s only).
 
-### 167.2 The best-of-three game log (the matchup model's data)
+### 168.2 The best-of-three game log (the matchup model's data)
 
 `az/game_log.rs` (107.1's process-wide sink, set by `mtgz.az.run` for every run it starts) now also writes every
 finished game of a live constructed best-of-three match on the `mtg` game: a line `{"v": 1, "kind": "bo3", "spec",
@@ -35079,7 +35078,7 @@ encodings or the search (Derived in the public-state gate); off without the sink
 worker, remote workers). Not in the log: remote self-play's games (the Mac's, the farm's - played elsewhere; replays
 on the trainer run on copies). Their share is the data the model misses; local games are the same spec.
 
-### 167.3 Sideboarding by the matchup model: the choice table and teacher decisions
+### 168.3 Sideboarding by the matchup model: the choice table and teacher decisions
 
 **The model** (`mtgz/az/matchup.py`; 111.1's `PairNet` on count deltas):
 
@@ -35159,7 +35158,7 @@ constructed prior). The table changes between iterations, so the spec does: zero
 game package's phase spec (zero-core docs/az.md 52: the Mac's workers through the `phase` message, the farm pool through
 each gen's definition template; records of a known spec accepted and replayed with it).
 
-### 167.4 The rolling retrain, the hook, the settings
+### 168.4 The rolling retrain, the hook, the settings
 
 `mtgz.az.matchup` (EoE's `mtgz.sealed.rolling` design, 112.4): run settings `matchup_every` (0 off), `matchup_window`
 32, `matchup_min_window` 4, `matchup_val_iters` 2, `matchup_half_life` 16, `matchup_threads` 4, `matchup_worlds` 8000
@@ -35181,10 +35180,24 @@ nats) - every version's `index.jsonl` row, `python -m mtgz.az.matchup report RUN
 (2) Its per-copy table (w per card, ensemble mean +- sd) - in each version and `fit`. (3) The census of what the
 chosen-60 seats board - `python -m mtgz.az.matchup census RUN` (the game log: table seats and searched seats, per game)
 and the publisher's network census (132, on the evaluation spec). (4) `keep_h2h` (130) - the network's sideboarding
-against its main. (5) The standing best-of-one and blunder yardsticks (164), unchanged. No new site panel (a panel needs
+against its main. (5) The standing best-of-one and blunder yardsticks (164), unchanged in kind: best of one (mains only)
+against the 3198 anchor named explicitly (`bo1_opponents` ["a3198=<file>", "iter0"]: 'anchors' would now name pb3's
+post-sideboard anchor below), iter0 = pb2's checkpoint pb3 forks from.
+
+**Post-sideboard Elo anchors** (the coordinator's design input, 2026-11-15). A census of the a3198 anchor
+(`E:/mtg-zero-scratch/delver-bo3-launch/sims-probe/a3198_census.json`, 60 starts at 32 simulations) shows its untrained
+sideboarding makes four harmful swaps every game (on the play +3 Force of Negation, +1 Karakas, -3 lands, -1 Prismari
+Charm; on the draw +3 Force of Negation, -2 Murktide Regent 93% of the time): pb1's and pb2's anchored Elo against it
+measures mostly the anchor's self-sabotage. pb3 anchors its post-sideboard ratings to **pb2's checkpoint it forks from**
+(`elo_anchors` pb2fork=<that file> at `elo_anchor_elo` 1000: a new scale, "pb2's last = 1000"), whose sideboarding is
+one mild swap (+Rough // Tumble -Prismari Charm, ~neutral by the outcomes); a3198 stays the best-of-one yardstick only.
+Not built (zero-core): an anchor that keeps its main 60 (a3198 with `keep_deck` / `keep_known` on its own seat) needs a
+per-anchor evaluation spec whose `keep_deck` follows the seat the anchor plays in each game (paired games swap seats) -
+zero-core's anchor matches play one spec for both seats today; the cost is a per-label spec in `elo_anchors` and the
+match drivers' seat-aware spec (a zero-core optin change). A user's choice whether to add it as a second anchor. No new site panel (a panel needs
 the user's screenshot approval).
 
-### 167.5 Checks
+### 168.5 Checks
 
 The desktop was shared with the live run pb2 (its GPU paused for a while by the user: everything here ran on the CPU)
 and the migration / farm-campaign sessions: every heavy command through the slot throttle (`slotd.sh`), this checkout's
@@ -35241,7 +35254,7 @@ own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-
   the smaller dimension: a matchup term at its zero saddle tied the strength alone to 1e-10 and had been picked).
 * **The gates**: in the commit after this text (their last lines).
 
-### 167.6 Left, decisions for the user
+### 168.6 Left, decisions for the user
 
 * **The table only with a held-out gain** (a guard of this branch, `retrain`): a version whose model does not beat
   play / draw on its validation iterations publishes no table, and the chosen-60 seats sideboard by search until one
@@ -35257,7 +35270,7 @@ own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-
   model's exact argmax); (b) a version must also beat its predecessor's held-out loss; (c) a larger
   `matchup_min_window` before the first table (8: ~13,000 logged games). Only 15% of seat-matches choose, so a wrong
   table costs little self-play, but its targets teach the prior.
-* **The belief for a chosen opponent** (167.3): the constructed prior, not the table seat's actual (deterministic)
+* **The belief for a chosen opponent** (168.3): the constructed prior, not the table seat's actual (deterministic)
   choice and not the deck tilt; the exact alternatives are an equilibrium over a shortlist, or the deck tilt through a
   belief row before each teacher decision (the route for game 2's reveals to reach game 3's choice under H3 = A).
 * **Remote games are not in the matchup data** (the Mac's three processes, the farm): the model trains on the
@@ -35268,7 +35281,7 @@ own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-
   run's): `tools/mac.sh --eval-checkout` on the run's commit before the launch (the checklist's step 3).
 * **farm_gates on the table**: run `tools/farm_gates.py` once more after the first table version with
   `--set spec=<that phase's spec>` (the real network and ONNX through teacher decisions).
-* **A layout v6 (`mtg_eoe`) gap found by the pairwise pass** (167.1): a permanent that lost all abilities and later gained
+* **A layout v6 (`mtg_eoe`) gap found by the pairwise pass** (168.1): a permanent that lost all abilities and later gained
   a triggered ability encodes as one without it (three collisions at GATE_SEED 4242 with a redrawn sample). Layout v7
   (`mtg`) is not affected; `mtg_eoe` stays on v6 until EoE run 2 resumes (encoding-options.md 2.8): a known-gap entry or
   the v6 fix is that work's.

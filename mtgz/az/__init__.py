@@ -246,7 +246,7 @@ PRESETS['delver-bo3-smoke'] = dict(PRESETS['delver-smoke'], spec=SPEC_DELVER_BO3
 SPEC_DELVER_BO3_DEALT = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True, start_game=2,
                                                   dealt_decks={'p': 0.5, 'swaps': [1, 8]})
 PRESETS['delver-mirror-bo3-dealt'] = dict(PRESETS['delver-mirror-bo3'], spec=SPEC_DELVER_BO3_DEALT, eval_spec=SPEC_DELVER_BO3)
-# Wide 60 variety and the in-run matchup model (docs/ENGINE.md 167; the run pb3, user-approved 2026-11-15): each seat's
+# Wide 60 variety and the in-run matchup model (docs/ENGINE.md 168; the run pb3, user-approved 2026-11-15): each seat's
 # 60 is dealt on its own with probability 0.85 (swaps uniform over 0..15, then uniform: the constructed prior's base,
 # so a dealt 60 is distributed as the opponent prior), the rest sideboard - by search until the matchup model's first
 # version, then by its choice table (teacher decisions: the table's 60 played and recorded as the policy target). The
@@ -422,7 +422,7 @@ PACKAGE = register(GamePackage(
     # fork's (a side run, its fork record for the lineage)
     # and the run's standing yardsticks (docs/ENGINE.md 164: the run setting `yardsticks`, {} = off; on in the
     # delver-mirror* presets), measured by a second companion process: mtgz.az.companions composes the two
-    # the matchup model of a constructed best-of-three mirror and sideboarding by its choice table (docs/ENGINE.md 167,
+    # the matchup model of a constructed best-of-three mirror and sideboarding by its choice table (docs/ENGINE.md 168,
     # mtgz.az.matchup: matchup_every 0 = off), through `mtg`'s selfplay_specs hook
     settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, publish={}, yardsticks={}),
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',

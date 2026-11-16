@@ -160,11 +160,11 @@ impl Eq for Share {}
 /// that count (`ConstructedPrior::dealt`), each game's deal independent - with no sideboarding decision of its own.
 /// Public (both players know which seat is dealt: `encode::g6::DEALT`); the other player's worlds deal that seat's
 /// 60s from the same restricted prior, untilted. A self-play setting: the evaluation spec drops it (`eval_json`).
-/// Without the key every spec is what it was. `"per_seat": true` (ENGINE.md 167.1; default false): each seat is
+/// Without the key every spec is what it was. `"per_seat": true` (ENGINE.md 168.1; default false): each seat is
 /// dealt independently with probability p (`matches::dealt_seats`), so a match has none, one or two dealt seats; with
 /// two, nobody decides at a sideboarding and seat 1's deals come from a stream of their own.
 ///
-/// Sideboarding by a choice table (ENGINE.md 167.3): `"sideboard_table": {"version": name, "list": [[name, copies],
+/// Sideboarding by a choice table (ENGINE.md 168.3): `"sideboard_table": {"version": name, "list": [[name, copies],
 /// ...], "choices": [[game, first, lead, opp_dealt, [copies per list entry]], ...]}` (a constructed best-of-three
 /// only): every seat whose 75 is the table's list sideboards, when it is not dealt, to the table's 60 for its context
 /// - the next game (2 or 3), whether it sideboards first, its game wins less the other's (-1, 0, 1), whether the other
@@ -228,7 +228,7 @@ pub struct MtgSpec {
     pub keep_deck: [bool; 2],
     /// Dealt decks (ENGINE.md 154): the share of matches with a dealt seat and the dealt 60s' swap range.
     pub dealt_decks: Option<DealtDecks>,
-    /// Sideboarding by a choice table (ENGINE.md 167.3): the 24 contexts' 60s of the table's 75.
+    /// Sideboarding by a choice table (ENGINE.md 168.3): the 24 contexts' 60s of the table's 75.
     pub sideboard_table: Option<std::sync::Arc<sbtable::SideboardTable>>,
     /// The other seat's worlds know the `keep_deck` seats keep (ENGINE.md 141): a keeper's deck is its
     /// real one there, never dealt.
@@ -241,7 +241,7 @@ pub struct MtgSpec {
 pub struct DealtDecks {
     pub p: Share,
     pub swaps: (u8, u8),
-    /// Each seat dealt independently with probability `p` (ENGINE.md 167.1); false: one dealt seat with probability
+    /// Each seat dealt independently with probability `p` (ENGINE.md 168.1); false: one dealt seat with probability
     /// `p`, each seat 1/2 (ENGINE.md 154).
     pub per_seat: bool,
 }
@@ -256,7 +256,7 @@ impl DealtDecks {
         }
         let per_seat = match o.get("per_seat") {
             None => false,
-            Some(v) => v.as_bool().ok_or("mtg spec: dealt_decks.per_seat must be a boolean (ENGINE.md 167.1)")?,
+            Some(v) => v.as_bool().ok_or("mtg spec: dealt_decks.per_seat must be a boolean (ENGINE.md 168.1)")?,
         };
         let p = o
             .get("p")
@@ -559,10 +559,10 @@ impl MtgSpec {
         }
         if s.sideboard_table.is_some() {
             if !constructed_bo3 {
-                return Err("mtg spec: sideboard_table is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"; ENGINE.md 167.3)".into());
+                return Err("mtg spec: sideboard_table is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"; ENGINE.md 168.3)".into());
             }
             if s.keep_deck.iter().any(|&k| k) {
-                return Err("mtg spec: sideboard_table with keep_deck: keep_deck is the evaluation yardstick's, the table a self-play setting (ENGINE.md 167.3)".into());
+                return Err("mtg spec: sideboard_table with keep_deck: keep_deck is the evaluation yardstick's, the table a self-play setting (ENGINE.md 168.3)".into());
             }
         }
         if s.keep_known && !s.keep_deck.iter().any(|&k| k) {
@@ -804,7 +804,7 @@ impl MtgSpec {
             o.insert("decks".into(), Value::String("eval".into()));
         }
         // (dealt decks are a self-play setting, ENGINE.md 154: evaluation plays every seat's own sideboarding; so is
-        // sideboarding by a choice table, ENGINE.md 167.3)
+        // sideboarding by a choice table, ENGINE.md 168.3)
         o.remove("dealt_decks");
         o.remove("sideboard_table");
         Ok(v.to_string())
@@ -823,7 +823,7 @@ pub struct MtgAz {
 }
 
 impl MtgAz {
-    /// The choice table's action at the pending decision (ENGINE.md 167.3): Some when it is a sideboarding decision of
+    /// The choice table's action at the pending decision (ENGINE.md 168.3): Some when it is a sideboarding decision of
     /// a seat of the table (`MatchState::table`; a dealt seat never decides there) - the canonical path's next action
     /// toward the 60 of the decider's context (the next game, whether it sideboards first, its game wins less the
     /// other's, whether the other seat is dealt). None at every other decision.
@@ -879,7 +879,7 @@ impl MtgAz {
             // (ENGINE.md 154: the match's dealt seat, before the first sideboarding - which deals it)
             if let Some(dd) = &spec.dealt_decks {
                 if dd.per_seat {
-                    // (ENGINE.md 167.1: each seat independently)
+                    // (ENGINE.md 168.1: each seat independently)
                     let ds = matches::dealt_seats(seed, dd.p.0);
                     for d in 0..2u8 {
                         if ds[d as usize] {
@@ -890,7 +890,7 @@ impl MtgAz {
                     az.set_dealt(d, dd.swaps, &seats[d as usize], seed);
                 }
             }
-            // (ENGINE.md 167.3: the seats that sideboard by the choice table - its list is their 75)
+            // (ENGINE.md 168.3: the seats that sideboard by the choice table - its list is their 75)
             if let Some(t) = &spec.sideboard_table {
                 az.m.table = [0usize, 1].map(|p| t.fits(&az.m.pools[p]).then(|| t.clone()));
             }
@@ -1102,7 +1102,7 @@ impl SearchGame for MtgAz {
         }
         let seed = spec.seed.unwrap_or(seed);
         let mut az = MtgAz::new(spec, seed)?;
-        // (ENGINE.md 167.2: a constructed best-of-three's game log record, when the log is on)
+        // (ENGINE.md 168.2: a constructed best-of-three's game log record, when the log is on)
         az.m.glog = game_log::Bo3Log::start(spec, seed);
         Ok(az)
     }
@@ -1416,13 +1416,13 @@ impl SearchGame for MtgAz {
         self.m.choice.is_some()
     }
 
-    /// Sideboarding by a choice table (ENGINE.md 167.3, zero-core docs/search.md 3.19): a seat of the table at its
+    /// Sideboarding by a choice table (ENGINE.md 168.3, zero-core docs/search.md 3.19): a seat of the table at its
     /// sideboarding plays the canonical path's next action toward its context's 60 - one-hot over `legal`.
     fn teacher_policy(&self, legal: &[u16], out: &mut Vec<f32>) -> bool {
         match self.table_action() {
             Some(a) => {
                 out.extend(legal.iter().map(|&x| (x == a) as u8 as f32));
-                assert!(out.iter().any(|&w| w > 0.0), "the choice table's action {a} is not legal at {legal:?} (ENGINE.md 167.3)");
+                assert!(out.iter().any(|&w| w > 0.0), "the choice table's action {a} is not legal at {legal:?} (ENGINE.md 168.3)");
                 true
             }
             None => false,
