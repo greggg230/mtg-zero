@@ -36304,3 +36304,119 @@ adds a NOT NEEDED step `pytest-ir` that says why; one or more, or no main to com
 that runs pytest (python, encoding, engine, search-core and the rest share `pytest_step`). The docs tier runs no pytest.
 `tests/test_gate.py::test_the_card_ir_tests_run_only_when_the_commit_touches_the_pipeline` checks both ways, a commit on
 main and no main. By hand: `python -m pytest tests/ir -q` (or `python tools/card_ir.py check` alone, ~5 s).
+
+## 171. The fuzz steward: continuous farm-first fuzz of main's and each live run's build at 50,000 seeds a day, the Mac and the desktop filling in, a failure queue with replay and an alert (`tools/fuzz_steward.py`, `tools/fuzz_local.py`; zero-farm PROTOCOL rev 14; branch `feat/fuzz-steward`, 2026-11-16)
+
+Why: the user's decision D1 of 2026-11-15 (the maintainer's notes, the iteration-speed review's decisions): the gate
+fuzzes ~2,000 games per pool (167.3); the 20k-style depth becomes **continuous farm fuzz of main and of each live run's
+pinned build**, with an automatic failure queue (replayable seeds) and an alert to the user. Settings the user approved:
+a target of **50,000 fuzz games per build per UTC day** (main, plus each live run's pinned build); the farm does it
+when it can, and when the farm is behind pace the Mac and then the desktop fill in; the farm's side-work cap (~25% of
+the farm while a run is live, D5; idle machines always) **may be exceeded while fuzz is behind its daily pace**. No
+engine, encoding, search or run-loop change; digests untouched. (Self-play's own panic containment, D1's
+prerequisite, is 167.6 and section 172.)
+
+### 171.1 Why the coordinator changed (zero-farm PROTOCOL rev 14)
+
+Fuzz campaigns were the backfill: the coordinator leases them only after every run's evaluation and self-play
+(PROTOCOL 3), whatever their `priority`. A live run's farm self-play always has games to give (the pool never holds a
+share of a generation's quota), so beside pb3 the farm fuzzed **0 seeds an hour** (8,600 in the day before, all while
+no run had work). Rev 14 (zero-farm 541820f; coordinator only, migration 0010; deployed 2026-11-16, Worker version
+8c33c87c) gives a campaign an optional `share` (0 < x <= 1): such a campaign competes with the runs' games and goes
+first while its own active leases + 1 are at most x times (all runs' active self-play and eval leases + its own + 1),
+else after every other run job - rev 13's rule for background jobs (165.4), with the campaign's own leases added to the
+total since they are not run leases. It never idles a PC, never takes more than its share from a run that has games
+to give, and without `share` nothing changes. Tests: coordinator `test/fuzz_share.test.ts` (7: the rank function; no
+share -> nothing beside a live run; share 0.25 -> 1 machine in 4; 0.5 -> every other; beyond its share it still gets
+what the runs leave; a share campaign before the backfill; checks, GET, stats, a PUT without it removes it); `npm test`
+23 files, 196 tests; `tsc` clean. `tools/farm_campaign.py create|update --share X|none` (kept by later updates; not
+signed: no new definition; tests/test_farm_campaign.py).
+
+### 171.2 The steward (`tools/fuzz_steward.py run`)
+
+A long-running desktop process, started at logon by the Task Scheduler task "MTG Zero fuzz steward" (`install-task`:
+the current user, interactive token, least privilege, no time limit, restarted after a failure, one instance;
+`pythonw.exe`, so no console window), stopped by `<state>/STOP` (`fuzz_steward.py stop`). It binds no port. State
+`$ZERO_BIG_DISK/mtg-zero-state/fuzz-steward/` (config.json overrides, state.json, queue.jsonl, steward.log, daily.log,
+builds/, jobs/); `--status-file` writes a small JSON for the hub. The repo's scripts run under Git Bash (a console-less
+process's bare `bash` can be WSL's, which reads a CRLF checkout's scripts as broken).
+
+* **Targets.** `main` (the local `main` branch's newest commit) and every live run: a `runs/*/supervisor_state.json`
+  with state running, its supervisor pid alive with the recorded start time, no STOP; its pinned commit is the
+  supervisor's working directory's HEAD. A run that stops being live is retired (its campaigns paused, its local jobs
+  finish); one that comes back with the same build resumes.
+* **Builds.** Each target has its own pinned worktree `mtg-zero-wt/steward-<target>` and target dir
+  `$ZERO_BIG_DISK/cargo-target/mtg-zero/steward-<target>` (one per checkout, never shared); the build is
+  `tools/farm_build.py --profile fuzz --publish` there, through `tools/slotd.sh` (2 min 41 s of cargo on the desktop).
+  An existing signed fuzz build of the same commit, or of a commit with the same **engine hash** (the git tree ids of
+  every Rust input - tools/zcache.py's paths - and the zero-core gitlink: the same executable), is reused. Main is
+  rebuilt when its engine hash changes, at most once per `main_rebuild_min_h` (24 h); a Python or docs commit on main
+  never rebuilds.
+* **Campaigns.** One per (build, mode): `fz-<target>-<sha7>-<alias>`, seeds from 100,000,000, priority 0.3, created
+  with `farm_campaign.py create` (fuzz-check of the mode, a signed definition). Modes and their weights in the quota:
+  main - `games` 0.35, `hidden-games` (FUZZ_HIDDEN_DECKS=1) 0.15, `delver_dealt2-games` 0.3, `delver_dealt2-matches`
+  0.2; a Delver run - `delver_dealt2-games` 0.5, `delver_dealt2-matches` 0.25, `games` 0.15, `hidden-games` 0.1
+  (config.json `main_modes` / `run_modes` change them). A seed is one game or one best-of-three match (2-3 games), so
+  50,000 seeds are at least 50,000 games. A build replaced on main pauses its campaigns.
+* **Progress.** The steward's campaigns' results (credited seed ranges, by upload time; acked), the local jobs' seeds
+  (when they end) and, as in flight, the campaigns' leased seeds and the running local jobs.
+
+### 171.3 Quota, pace and the decisions (pure functions; `tests/test_fuzz_steward.py`)
+
+A build's day is `quota` (50,000) seeds; its first day is prorated from the build's start. The pace at time t is
+`quota` x (seconds since the later of the UTC midnight and the build's start) / 86,400: uniform through the day. Every
+`check_s` (15 min) the deficit in hours of quota, h = (pace - done - in flight) / (quota / 24), decides:
+
+| h | the farm (the campaign of the most-behind mode) | the Mac | the desktop |
+|---|---|---|---|
+| <= 0 | no share: the backfill (idle PCs only) | no new chunk | stops |
+| 0 - 1 h | share 0.25 (the side-work share, D5) | - | - |
+| > 1 h | share 0.5 (past the side-work share: allowed while behind), kept until back on pace | - | - |
+| > 2 h after 30 min at 0.5, or no farm PC online | 0.5 | chunks of ~20 min, `nice 19`, 6 processes | - |
+| > 3 h with the Mac at work for 30 min | 0.5 | chunks | one job of 2 processes, idle priority, through tools/slotd.sh, only while every live run's iteration time stays within 1.10 x its median of before (else it finishes its seed and the desktop waits 2 h) |
+
+The boosted mode is the one furthest behind its own share of the quota (kept unless another is more than 0.5 h
+further behind: no flapping between equals); at most one campaign per build has a share, so the farm's fuzz share is
+bounded by the number of builds x 0.5. The desktop runs the live runs' GPU self-play and training: the steward never
+takes the GPU, never starts more than one desktop job, and the throttle refuses one while RAM is short (on the night
+this was built the desktop had ~1 GB available: the desktop is the last resort by design).
+
+### 171.4 One fuzz loop everywhere: `tools/fuzz_local.py`
+
+The Mac and the desktop run exactly what a farm PC runs: a worker's own `serve` with one fuzz job line (PROTOCOL 5;
+the same chunk processes, crash and hang isolation, failure events, reproduction strings and `fuzz-final.json`).
+`fuzz_local.py --worker EXE --mode M --env K=V --first F --count N --threads T [--stop-file F] [--max-s S] [--idle]`
+prints `FUZZ_LOCAL_HELLO`, one `FUZZ_LOCAL_FAILURE {seed, mode, site, panic, repro, output_tail}` per failing seed as
+it happens, and `FUZZ_LOCAL_SUMMARY {done, covered, failures, unfinished, seconds, build_id, engine_commit}`; a stop
+file, `--max-s` or SIGTERM asks the job to `finish`. The desktop uses the build's signed executable; the Mac builds the
+same commit's worker (`cargo build --profile fuzz -p mtgz_worker` through `tools/mac.sh`: 73 s cold on the M4; the
+file's text is shipped with the command, so the target commit needs no copy of it) - the native worker builds and runs
+on macOS as it is. Local seeds come from their own spaces (Mac from 3e9, desktop from 4e9; one cursor per build and
+mode), so no seed is played twice. A Mac build is unsigned: its repro's `(at unknown)` becomes the build's commit.
+Checked: an injected test panic (`ZERO_FARM_TEST_FAULT=panic:S`, fuzz profile + `ZERO_FARM_ALLOW_TEST_FAULTS=1`) on
+the Mac came back as one `FUZZ_LOCAL_FAILURE` with its site and repro, and all 60 seeds done.
+
+### 171.5 The failure queue and the alert
+
+Sources: the steward's campaigns' failures (`GET /v1/admin/campaign/{id}/failures`), the local jobs' failure lines, and
+every run's `game_failures.jsonl` (self-play games dropped for a panic: 167.6; section 172's record adds the `repro`
+command). One JSON line per failure site in `<state>/queue.jsonl`, keyed as tools/fuzz_farm.py keys a failure (the
+site and its message's first line, digits masked: the id tools/farm_fuzz_pull.py and the Mac's fuzz farm give the same
+panic): id, kind (fuzz | selfplay), site, message, key, mode, seed, repro, build, engine_commit, target, first_seen,
+last_seen, count, seeds (up to 20, with their source), sources, confirmed, confirm_note, alerted_at.
+
+A new site is replayed here before anyone is told: a fuzz seed through the build's own worker over that one seed
+(`fuzz_local.py --first S --count 1`, idle priority; confirmed when it fails at the same site), a self-play failure by
+its record's `repro` in the run's own checkout (confirmed on a non-zero exit; a record without one counts as confirmed
+when it happened on the owner's own machines). A confirmed new site sends ONE short message through the game-alerts
+relay on the Mac (`relay.py --notify-b64`, a one-shot mode added to the relay for this; the address lives in the relay's
+untracked config): `mtg-zero: new engine failure <id> on <target>@<sha7> - <mode> seed <seed> - <file:line>. Queue:
+...` - no machine names or details. `fuzz_steward.py confirm ID` replays an entry on demand. Checked on a real farm
+failure of an older build (eoe-games seed 100000075, `activate.rs:1176`): replayed and confirmed in 2.5 s.
+
+### 171.6 The daily summary and the status
+
+At each UTC day's end `daily.log` gets one line: per build, seeds by source (farm / Mac / desktop) and failures, and
+the queue's size. `--status-file` (the hub's `fuzz_steward_status.json`) holds today's numbers per target (done, in
+flight, quota, pace, hours behind, the boosted mode, the farm share, the local sources, by source), the farm's seeds
+over the last hour and day, the measured local rates and the queue's newest 20 entries.
