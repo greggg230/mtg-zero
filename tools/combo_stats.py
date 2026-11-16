@@ -681,6 +681,94 @@ def report(paths, md=None, js=None, pairs=(), log=say):
     return sums, pr
 
 
+# ====================================================================================== spots
+def find_spots(paths, per_file=None):
+    """The pile spots of played games: each resolving Doomsday's first choice that offers Thassa's Oracle (a 'Find'
+    or graveyard choice while Doomsday is the top of the stack) -> [{source, gid, seed, spec, actions, decider,
+    turn, options, played}] (`actions`: every engine step before the spot, forced ones included)."""
+    import mtgz.az  # noqa: F401
+    from mtgz import _engine as E
+    out = []
+    for path in paths:
+        rec = read_games(path)
+        n = 0
+        for row in rec['rows']:
+            seed = E.game_seed_of(int(rec['driver_seed']), int(row['gid']), False)
+            g = E.Game('mtg', rec['spec'], 2, seed)
+            acts, seen = [], set()
+
+            def look(a):
+                st = json.loads(g.export_state())
+                d = st.get('decision') or {}
+                top = (st.get('stack') or [None])[-1]
+                opts = {o.get('a'): o.get('t') or '' for o in d.get('options') or []}
+                if (top and top.get('name') == DOOMSDAY and top.get('spell') and d.get('kind') in CHOICE_KINDS[:2]
+                        and top['stack'] not in seen and any(ORACLE in t for t in opts.values())):
+                    seen.add(top['stack'])
+                    out.append({'source': os.path.basename(path), 'gid': row['gid'], 'seed': seed, 'spec': rec['spec'],
+                                'actions': list(acts), 'decider': g.to_move, 'turn': st.get('turn'),
+                                'kind': d.get('kind'), 'options': sorted(set(opts.values())),
+                                'played': opts.get(a)})
+
+            def stepa(a):
+                look(a)
+                g.step(int(a))
+                acts.append(int(a))
+            for seat, a, legal in row['moves']:
+                while g.to_move is not None and len(g.legal()) == 1 and not (g.to_move == seat and list(g.legal()) == list(legal)):
+                    stepa(g.legal()[0])
+                stepa(a)
+            n += 1
+            if per_file and n >= per_file:
+                break
+    return out
+
+
+def search_spots(ckpt, spots, sims_list, repeats=8, device='cpu', log=say):
+    """Each spot searched `repeats` times (seeds apart) at each budget by the checkpoint's best-of-one seat
+    (tools/delver_blunders.search_many: the run's move rule, leaf view and root belief, chance_k 2) ->
+    {sims: [per spot {option: searches}]}."""
+    import mtgz.az  # noqa: F401
+    from mtgz import _engine as E
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import delver_blunders as DB
+    from zero.infer import NetEvaluator
+    from zero.net import load
+    from mtgz.az.yardsticks import bo1_seat
+    model, _ = load(ckpt, device, game='mtg')
+    ev = NetEvaluator(model, device)
+    seat = bo1_seat(ckpt)
+    base = []
+    for sp in spots:
+        g = E.Game('mtg', sp['spec'], 2, int(sp['seed']))
+        for a in sp['actions']:
+            g.step(int(a))
+        st = json.loads(g.export_state())
+        sp['_labels'] = {o['a']: o['t'] for o in (st.get('decision') or {}).get('options') or []}
+        if g.to_move != sp['decider'] or sorted(set(sp['_labels'].values())) != sp['options']:
+            raise RuntimeError(f'spot {sp["source"]} {sp["gid"]} does not replay')
+        base.append(g)
+    res = {}
+    for sims in sims_list:
+        t0 = time.time()
+        games, seeds, owner = [], [], []
+        for i, g in enumerate(base):
+            for r in range(repeats):
+                games.append(g.clone())
+                seeds.append(7919 * (i + 1) + r)
+                owner.append(i)
+        chosen = DB.search_many(ev, games, seeds, int(sims), seat, 2)
+        per = [collections.Counter() for _ in spots]
+        for i, a in zip(owner, chosen):
+            per[i][spots[i]['_labels'].get(a, str(a))] += 1
+        res[str(sims)] = [dict(c) for c in per]
+        hit = sum(sum(k for t, k in c.items() if ORACLE in t) for c in per)
+        log(f'{sims} sims: {len(games)} searches in {time.time() - t0:.0f} s; the Oracle chosen in {hit} of {len(games)}')
+    for sp in spots:
+        sp.pop('_labels', None)
+    return res
+
+
 # ====================================================================================== main
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -709,8 +797,31 @@ def main(argv=None):
     r.add_argument('--md', default=None)
     r.add_argument('--json', default=None)
     r.add_argument('--pair', action='append', default=[], help='LABEL_A:LABEL_B (same seeds): paired difference')
+    q = sub.add_parser('spots', help='the pile spots of played games searched at several budgets')
+    q.add_argument('ckpt')
+    q.add_argument('files', nargs='+')
+    q.add_argument('--sims', default='64,1024')
+    q.add_argument('--repeats', type=int, default=8)
+    q.add_argument('--max-spots', type=int, default=None)
+    q.add_argument('--device', default='cpu')
+    q.add_argument('--torch-threads', type=int, default=None)
+    q.add_argument('--out', required=True, help='JSON: the spots and the searches\' choices')
     a = ap.parse_args(argv)
     import mtgz.az  # noqa: F401
+    if a.cmd == 'spots':
+        if a.torch_threads:
+            import torch
+            torch.set_num_threads(a.torch_threads)
+        files = [f for x in a.files for f in (sorted(glob.glob(x)) or [x])]
+        spots = find_spots(files)
+        if a.max_spots:
+            spots = spots[:a.max_spots]
+        say(f'{len(spots)} pile spots offering {ORACLE} in {len(files)} files')
+        res = search_spots(a.ckpt, spots, [int(x) for x in a.sims.split(',')], a.repeats, a.device)
+        with open(a.out, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump({'spots': [{k: v for k, v in sp.items() if k not in ('spec', 'actions')} for sp in spots],
+                       'repeats': a.repeats, 'results': res}, f, indent=1)
+        return
     if a.cmd == 'play':
         if a.torch_threads:
             import torch
