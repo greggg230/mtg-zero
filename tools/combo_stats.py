@@ -724,6 +724,13 @@ def find_spots(paths, per_file=None):
     return out
 
 
+def resolving(st):
+    """A Doomsday (a spell) is the top of the stack and its controller makes one of its choices."""
+    top = (st.get('stack') or [None])[-1]
+    d = st.get('decision') or {}
+    return bool(top and top.get('name') == DOOMSDAY and top.get('spell') and d.get('kind') in CHOICE_KINDS)
+
+
 def search_spots(ckpt, spots, sims_list, repeats=8, device='cpu', log=say):
     """Each spot searched `repeats` times (seeds apart) at each budget by the checkpoint's best-of-one seat
     (tools/delver_blunders.search_many: the run's move rule, leaf view and root belief, chance_k 2) ->
@@ -761,9 +768,37 @@ def search_spots(ckpt, spots, sims_list, repeats=8, device='cpu', log=say):
         per = [collections.Counter() for _ in spots]
         for i, a in zip(owner, chosen):
             per[i][spots[i]['_labels'].get(a, str(a))] += 1
-        res[str(sims)] = [dict(c) for c in per]
+        # the whole resolution searched: every later choice of the resolving Doomsday at the same budget
+        live = list(range(len(games)))
+        first = True
+        nsearch = len(games)
+        while live:
+            for k, a in zip(live, chosen):
+                games[k].step(int(a))
+            nxt = []
+            for k in live:
+                g = games[k]
+                while g.to_move is not None and len(g.legal()) == 1:
+                    st = json.loads(g.export_state())
+                    if not resolving(st):
+                        break
+                    g.step(g.legal()[0])
+                if g.to_move is not None and len(g.legal()) > 1 and resolving(json.loads(g.export_state())):
+                    nxt.append(k)
+            live = nxt
+            if live:
+                chosen = DB.search_many(ev, [games[k] for k in live], [seeds[k] + 104729 for k in live], int(sims), seat, 2)
+                nsearch += len(live)
+        piles = [collections.Counter() for _ in spots]
+        for k, i in enumerate(owner):
+            st = json.loads(games[k].export_state())
+            pile = library_top(st, spots[i]['decider'])
+            piles[i]['oracle' if ORACLE in pile else 'no oracle'] += 1
+        res[str(sims)] = {'first': [dict(c) for c in per], 'pile': [dict(c) for c in piles]}
         hit = sum(sum(k for t, k in c.items() if ORACLE in t) for c in per)
-        log(f'{sims} sims: {len(games)} searches in {time.time() - t0:.0f} s; the Oracle chosen in {hit} of {len(games)}')
+        ph = sum(c['oracle'] for c in piles)
+        log(f'{sims} sims: {nsearch} searches in {time.time() - t0:.0f} s; the Oracle chosen first in {hit} of '
+            f'{len(games)}, in the finished pile in {ph} of {len(games)}')
     for sp in spots:
         sp.pop('_labels', None)
     return res
