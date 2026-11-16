@@ -36811,3 +36811,139 @@ Gates of the merge 7034e8df (zero-core 2c67426), in warm worktrees beside the li
   `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` in the gate's environment: with the Mac loaded the gate falls back to the desktop
   for its Mac pytest shards, and there `test_mac_remote::test_the_macs_selfplay_settings` fails without it (174.1's
   `tools/local_env.sh` / Git Bash path conversion; main's checkout the same; one run of this merge failed so).
+
+## 175. The fuzz steward's second finding was the check's too: a look at the viewer's hand at a card that leaves the hand later in the same step; the yardsticks' farm best of one times out on no progress (branches `fix/hidden-games-look`, `fix/yardstick-farm-progress`, 2026-11-16)
+
+Branches from main 4c7c3b58 (173; zero-core 2c67426, unchanged).
+
+### 175.1 The finding
+
+The failure queue's entry 349c142ff50b (171.7): mode `hidden-games` (`FUZZ_HIDDEN_DECKS=1`, single best-of-one games
+with hidden decklists), site `engine/src/fuzz/games.rs:3898`, "seed 100017685: a hidden-decklist world for P0 (mover
+P1): P1's private key (kind 3) carries the card's identity (337) in a world of P0 (ENGINE.md 141)", found by a farm PC
+on pb3's fuzz build b309fa08 and confirmed by the steward (count 2). Reproduced on the Mac under the `fuzz` profile on
+b309fa08 (the same message at games.rs:3898) and on main 4c7c3b58 (games.rs:3922): **173's fix does not cover it** -
+173 made the match fuzz's walks read the hand before a step that begins the next game; a single game begins none, and
+the hidden-decklist world's walk (`check_determinize_hidden`) and the game fuzz's (`check_determinize`) called the
+plain check, which reads only the hand after the step.
+
+### 175.2 What the failing world was
+
+An instrumented copy of the hidden-decklist walk (a branch-local commit, reverted) printed the failing step: the world
+determinized for P0 (observer `Some(0)`; the decision before it P1's `Target`, "target P0"), turn 27, P1's main phase.
+In one step:
+
+1. P1's Urza's Bauble ability targets P0 and resolves: "P1 looks at a card at random in P0's hand" - a Plains (337),
+   keyed `KEY_LOOK` with its identity on purpose (`Ext::LookAtRandomHandCard`: the owner sees which of its cards was
+   seen, so the key is public, 141.2);
+2. no player has another decision (both pass automatically), so the step runs on into the end step, where **Memory
+   Jar's delayed trigger** ("at the beginning of the next end step, each player discards their hand") discards P0's
+   whole hand: Clarion Conqueror, Necromancy, both Plains, Shadowy Backstreet, Figure of Destiny, Mana Confluence ->
+   graveyard; the step ends at the next turn's upkeep (Urza's Bauble's delayed draw trigger).
+
+The world's keys of the step: `KEY_AUTO`s, the look (3, P1, 337), the discards' `KEY_REVEAL`s of both hands (public:
+the cards went to the graveyard). P0's hand before the step held two Plains (objects 3 and 11); after the step the hand
+is empty and both Plains are in P0's graveyard, known to both players.
+
+The check recognised the public-by-design look as "a card of that identity in the viewer's hand that the looker knows
+after the step" - and after this step the viewer's hand is empty. **No leak**: the identity is the viewer's own card
+(its hand is never resampled in its worlds, so every world of P0 has that Plains to be seen), the look is P1's public
+chance, the world's observer was set, and every other private key of the step was `HIDDEN` or public by its own rule.
+
+### 175.3 The fix: the check reads the hand the look saw (`engine/src/fuzz/games.rs`)
+
+* `check_private_keys_masked_since(keys, viewer, after, before, what)` - `before` is now the viewer's hand before the
+  step as cards with their identities (`game_viewer_hand(g, viewer)`; `viewer_hand(w, viewer)` for a match state, none
+  between games; replaces `viewer_hand_ids`). A look at the viewer's hand in a step that begins no game is accepted
+  when the card is still in the hand after the step and the looker knows it (as before), **or** when it is a card of
+  `before` that has left the hand since (the look saw it, then it moved). A card of `before` still in the hand is
+  recognised only with the looker's knowledge, as before, so the rule is no looser for it. 173's positional rule for a
+  step that ends a game and begins the next is unchanged (the ended game's keys against `before`'s identities, the new
+  game's against `after`).
+* `check_private_keys_masked` (the plain check, the hand after the step only) is gone: the game fuzz's world walk
+  (`check_determinize`) and the hidden-decklist world's (`check_determinize_hidden`) read the hand before each step and
+  call `_since`, as the match fuzz's walks do.
+* A counter, `PK_LEFT_HAND_LOOKS`: of the looks at the viewer's hand, those at a card that left the hand later in the
+  same step; printed in the private-key report.
+
+Engine code outside the fuzz module, the encodings, the search and every run's play are unchanged (no digest moves; the
+engine gate below). The farm worker's fuzz jobs carry the corrected check from its next build; its self-play is the same.
+
+**Regression test** (`engine/tests/fuzz.rs::a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step`):
+game 100017685 of the default pool, `play_hidden` with every check, at the `fuzz` profile's denominator
+(`CHECKPOINT_EVERY_OVERRIDE` 4, 173.2) in every profile; it must check at least one look at a card that left the hand
+in its step (positive evidence). With the new rule switched off (branch-local) it fails in release with the queue's
+message; with it, it passes (release, a few seconds).
+
+### 175.4 pb3
+
+**pb3's search never saw leaked information from this, in any decision: 0 of its decisions, at no decision type.**
+The key the check flagged is the public Bauble look at the viewer's own card, in the viewer's own worlds: its identity
+is the same in every world of that viewer (the viewer's hand is not resampled), so the viewer's tree branches only on
+which of its own cards was seen - real chance it observes, as in the live game; in the looker's worlds the key is the
+card the looker really saw. Nothing changes what either side's search sees or does, so **no engine behaviour change, no
+re-pin, no fork, no farm or Mac change**. pb3's own decks (the Delver 60s) carry Urza's Bauble but not Memory Jar;
+whatever moves the seen card in the same step, the key was right. Until pb3's fuzz target moves to a main with this
+commit, the steward's b309fa08 / 4c7c3b58 fuzz builds keep reporting 349c142ff50b-like entries (a known false
+positive) at the rate below.
+
+### 175.5 Checks and gates
+
+The desktop beside the live runs pb1 (paused) and pb3: every cargo, fuzz and pytest step on the Mac (`tools/mac.sh`,
+`nice`), the gates through `warm_pool.py` and `slotd.sh`, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`.
+
+* **The queue's repro**, `fuzz` profile: fails on b309fa08 (games.rs:3898) and on main 4c7c3b58 (games.rs:3922) with
+  the queue's message; passes on the fix (cb2a0b5e).
+* **The regression test** in release: fails with the new rule switched off (branch-local), passes with it; 173's test
+  still passes beside it.
+* **10,000 fresh hidden-decklist games under the `fuzz` profile** (`tools/fuzz_shards.py --hidden --games 10000
+  --first 175000000 --shards 10 --jobs 6` with the fuzz-profile test binary of cb2a0b5e, the Mac, 936 s): **all shards
+  passed** - 2,221,558 hidden-decklist worlds, 3,798,550 private keys of the other player checked in their walks, 0
+  failures; and **10,000 default-pool games + 20 matches** the same way (712 s): 3,513,350 private keys checked in the
+  game fuzz's worlds (`check_determinize`, the other walk this commit moves to `_since`), 0 failures.
+* **Digests EQUAL** (the engine gate): full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, constructed
+  e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993; farm compat identical
+  (gate 2: 6 games, 2,484 rows, 150 batches; gate 3: 6 games, 2,556 rows).
+* **GATE PASSED suite cb2a0b5eaf3c in 464s** (2,681 passed in 23 binaries; the sharded 2k fuzz of default,
+  default+hidden, delver_dealt, delver_dealt2). **GATE PASSED WITH SKIPS engine cb2a0b5eaf3c in 761s**
+  (`--tested-sha cb2a0b5e`; `az` 54, `limits` 13, `hidden` 28, pytest 493 passed + 44 on the desktop, the 1-config search
+  smoke; the live-run fence only: 5 tests).
+
+### 175.6 The yardsticks' farm best of one: timed out on its age while it delivered (`tools/run_yardsticks.py`)
+
+**The symptom.** pb3's yardsticks companion (164) failed "bo1 of iteration 16 vs gen0" three times and "of iteration
+32 vs gen0" twice, each "timed out after 7200 s", while best of one against a3198 took ~1,300 s each checkpoint.
+
+**Why.** Not a hang, a game that never ends or a wrong spec: the two opponents go to different backends (165.6's auto
+choice). a3198 is played locally on the GPU (`zero.h2h.match`, 400 games in ~1,300 s); gen0 - pb3's generation 0, the
+fork of pb2@166, in pb3's farm pool - is a farm play job (`measure_bo1_farm`, the same spec and seats, checked
+dict for dict). In its wait (`bo1_farm_wait_s` null = 3/4 of `timeout_s` = 5,400 s) the farm delivered 38 of 400 games
+for iteration 16 and 28 for iteration 32 (its leases go to pb3's own farm self-play first; at the deadline: "0 leased,
+362 unissued"); the rest falls to the local fallback - the same worker on this machine's CPU, 4 threads, below normal
+priority beside pb3: ~2,000-2,200 s per 64-game piece (~33 s a game). The watcher's `timeout_s` counted from the
+measurement's start, so the first attempt had ~1,800 s for ~6 h of games; the campaign keeps every finished piece
+(state.json: 38 -> 166 -> 358 games over three attempts for iteration 16) but each kill lost the piece under way
+(~20-40 min of CPU), and each retry waited 300 / 600 / 1200 s first. Iteration 16 needed four attempts (~8.5 h), and
+the farm lane, one measurement at a time, cannot keep up with a checkpoint every ~2.3 h (eval_every 16).
+
+**The fix.** `overdue(item, t0, last, timeout_s)`: a measurement of the farm lane is killed only after `timeout_s`
+without progress - its console unchanged that long, read through the watcher's own handle (a directory entry's size
+lags on Windows); the campaign writes a line for every pull that brought games and every finished local piece, so one
+that is delivering is never killed part way. The GPU and CPU lanes keep the age timeout. `timeout_s`'s description
+says so (mtgz/az/yardsticks.py). Tests (`tests/test_yardsticks.py`):
+`test_a_farm_best_of_one_times_out_on_no_progress_the_others_on_their_age` (the rule) and
+`test_the_watcher_keeps_a_farm_best_of_one_that_delivers_and_kills_one_that_stalls` (end to end with a fake child:
+progress every 0.3 s for 2.4 s finishes under `timeout_s` 1.2 on the farm lane and is killed on the GPU lane; a child
+silent past `timeout_s` is killed "no progress"; live-run fenced: it spawns processes).
+
+**What it does not fix: throughput.** With the fix each gen0 measurement completes in one attempt, but it still takes
+~1.5 h of farm wait plus ~3 h of the desktop's CPU while the farm is this busy - longer than pb3's checkpoint interval,
+so the farm lane falls further behind every checkpoint. **Recommendation for pb3's next restart** (the owner's call; a
+run setting, not code): `"bo1_backend": "local"` in its `--yardsticks` - both opponents on the GPU lane, ~1,300 s each
+per checkpoint. pb3 has no gen0 result yet, so nothing breaks a series (165.8: one backend per run); the two paused
+campaigns (`~/.zero-farm/campaigns/cmp-delver-bo3-pb3-y{16,32}-gen0-*`) are then unused. Kept on 'farm', the fix rides
+the next restart and the lane completes each measurement, slowly.
+
+**Gate.** **GATE PASSED WITH SKIPS python c45c26fd3a64 in 339s** (pytest 506 passed + 44 on the desktop, the run-loop
+smoke 16 games; the live-run fence only: 2 tests on the desktop - the new end-to-end test among them, which passed on
+the Mac: `tests/test_yardsticks.py` 19 passed there).
