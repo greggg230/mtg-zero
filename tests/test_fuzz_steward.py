@@ -149,3 +149,18 @@ def test_the_logon_task_runs_forever_as_this_user():
     assert get('RunLevel') == 'LeastPrivilege' and get('MultipleInstancesPolicy') == 'IgnoreNew'
     assert get('Command') == 'C:/py/pythonw.exe' and 'fuzz_steward.py run --quiet' in get('Arguments')
     assert doc.getElementsByTagName('LogonTrigger')
+
+
+def test_a_selfplay_repro_is_confirmed_only_on_exit_101(tmp_path):
+    """docs/ENGINE.md 172's replay: 101 reproduced, 0 not, 2 cannot replay (no process but the fake repro is started)."""
+    import types
+    a = types.SimpleNamespace(state=str(tmp_path / 'st'), quiet=True, dry_run=True, once=True, status_file=None,
+                              runs_glob=str(tmp_path / 'runs' / '*' / 'supervisor_state.json'))
+    st = S.Steward(a)
+    st.state['targets']['r'] = {'run_wt': str(tmp_path)}
+    for code, want in ((101, True), (0, False), (2, None), (1, None)):
+        e = {'kind': 'selfplay', 'target': 'r', 'sources': ['pool'], 'repro': f'python -c "raise SystemExit({code})"'}
+        assert st.confirm(e)[0] is want, code
+    # a record of 167.6 (no repro): confirmed when it happened on the owner's machines, else unknown
+    assert st.confirm({'kind': 'selfplay', 'target': 'r', 'sources': ['local'], 'repro': None})[0] is True
+    assert st.confirm({'kind': 'selfplay', 'target': 'r', 'sources': ['pool'], 'repro': None})[0] is None

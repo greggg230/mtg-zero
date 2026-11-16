@@ -36407,7 +36407,8 @@ last_seen, count, seeds (up to 20, with their source), sources, confirmed, confi
 
 A new site is replayed here before anyone is told: a fuzz seed through the build's own worker over that one seed
 (`fuzz_local.py --first S --count 1`, idle priority; confirmed when it fails at the same site), a self-play failure by
-its record's `repro` in the run's own checkout (confirmed on a non-zero exit; a record without one counts as confirmed
+its record's `repro` in the run's own checkout (section 172's `python -m mtgz.az.game_failure replay`: confirmed on exit 101,
+not on 0 - the moves replay without the panic -, unknown on 2 - cannot replay; a record without one counts as confirmed
 when it happened on the owner's own machines). A confirmed new site sends ONE short message through the game-alerts
 relay on the Mac (`relay.py --notify-b64`, a one-shot mode added to the relay for this; the address lives in the relay's
 untracked config): `mtg-zero: new engine failure <id> on <target>@<sha7> - <mode> seed <seed> - <file:line>. Queue:

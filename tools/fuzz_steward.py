@@ -50,7 +50,8 @@ queue `<state>/queue.jsonl`: one JSON line per failure site (tools/fuzz_farm.py'
 message's first line, digits masked - the id tools/farm_fuzz_pull.py gives the same panic), with kind, site, message,
 mode, the first seeds, repro command, build, engine commit, target, first / last seen, count, sources and whether it
 was confirmed. A new site is replayed here (a fuzz seed: the build's worker over that one seed, which must fail at the
-same site; a self-play failure: its record's `repro` command in the run's own checkout, which must exit non-zero) and,
+same site; a self-play failure: its record's `repro` command in the run's own checkout - docs/ENGINE.md 172's replay, which exits
+101 when it reproduces the panic) and,
 once confirmed, the owner gets ONE short message through the game-alerts relay on the Mac (`relay.py --notify-b64`;
 no machine details). A self-play panic that has no `repro` (records before docs/ENGINE.md 171's) counts as confirmed
 when it happened on the owner's own machines.
@@ -776,13 +777,13 @@ class Steward:
                                          else 'unknown')
                 fid, k = failure_id(site, lines)
                 tgt = self.state['targets'].get(name) or {}
-                t = r.get('t') or now
+                t = r.get('t') or r.get('time') or now          # (167.6's lines: time, gid, steps, message, iter)
                 e, new = self.touch(fid, name, {'kind': 'selfplay', 'site': site, 'message': lines[:8], 'key': k,
                                                 'mode': 'selfplay', 'seed': r.get('game_seed'), 'repro': r.get('repro'),
                                                 'build': r.get('build') or tgt.get('build_id'),
                                                 'engine_commit': r.get('engine_commit') or tgt.get('commit'),
                                                 'target': name, 'run_dir': rd},
-                                    t, {'seed': r.get('game_seed'), 'game_id': r.get('game_id'), 'iter': r.get('iter'),
+                                    t, {'seed': r.get('game_seed'), 'game_id': r.get('game_id', r.get('gid')), 'iter': r.get('iter'),
                                         'source': r.get('source') or 'local'})
                 if new:
                     self.log(f'NEW self-play failure {fid} ({name} iter {r.get("iter")}, game seed {r.get("game_seed")}): {site}')
@@ -825,14 +826,20 @@ class Steward:
         wt = (self.state['targets'].get(e['target']) or {}).get('run_wt')
         if not wt or not os.path.isdir(wt):
             return None, 'no checkout of the run to replay it in'
+        if repro.startswith('python '):                  # (the run's Python: the steward's own venv's python.exe)
+            repro = subprocess.list2cmdline([self.py()]) + repro[len('python'):]
         try:
             p = subprocess.run(repro, shell=True, cwd=wt, capture_output=True, text=True, timeout=1800,
                                creationflags=NO_WINDOW | (subprocess.IDLE_PRIORITY_CLASS if WIN else 0))
         except subprocess.TimeoutExpired:
             return None, 'the replay timed out'
-        if p.returncode:
-            return True, f'replayed here: the repro exits {p.returncode}'
-        return False, 'replayed here: the repro passes'
+        # mtgz.az.game_failure replay (ENGINE.md 172): 101 reproduced, 0 not reproduced (a panic inside a search's own
+        # state), 2 cannot replay; anything else: the replay itself broke
+        if p.returncode == 101:
+            return True, 'replayed here: the repro reproduces the panic (exit 101)'
+        if p.returncode == 0:
+            return False, 'replayed here: the moves replay without the panic (a search-state panic?)'
+        return None, f'the repro could not replay it (exit {p.returncode}): {(p.stderr or p.stdout).strip()[-200:]}'
 
     def process_queue(self):
         changed = False
