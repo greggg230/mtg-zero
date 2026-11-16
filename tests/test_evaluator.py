@@ -14,6 +14,7 @@ from mtgz.sealed import compare as K
 from mtgz.sealed import engine as SE
 from mtgz.sealed import evaluator as EV
 from mtgz.sealed import games as GL
+from zero import local_config
 
 SEALED = {'set': 'eoe', 'collation': 'arena', 'best_share': 0.5}
 
@@ -354,7 +355,7 @@ def test_the_export_and_its_reference_scorer(tmp_path):
     assert json.load(open(tmp_path / 'cli.json')) == json.load(open(tmp_path / 'pair.json'))
 
 
-V1 = 'E:/mtg-zero/s4a/v1_time'
+V1 = local_config.big_disk_path('mtg-zero/s4a/v1_time', default='')     # private data (the machine's big disk)
 
 
 @pytest.mark.skipif(not os.path.isfile(os.path.join(V1, 'evaluator_set.pt')), reason='evaluator v1 (private data)')

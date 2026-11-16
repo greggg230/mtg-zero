@@ -9,8 +9,9 @@
 # zero-core is pinned (git submodule third_party/zero-core, zero-core docs/pinning.md): a fresh
 # checkout or worktree gets it initialised here at the pinned commit; a checked-out core that
 # differs from the pin is an error (ZERO_CORE_UNPINNED=1 builds it anyway: core development).
-# Target dir: $CARGO_TARGET_DIR, else on Windows E:/cargo-target/mtg-zero/<branch> (C: is
-# full; a detached checkout: detached-<its directory's name>), elsewhere <repo>/target. A target
+# Target dir: $CARGO_TARGET_DIR, else on Windows $ZERO_BIG_DISK/cargo-target/mtg-zero/<branch> when the
+# machine names a big disk (~/.config/zero/local.env; a detached checkout: detached-<its directory's name>),
+# else <repo>/target. A target
 # dir another checkout built in is refused (tools/target_guard.py: docs/ENGINE.md 143).
 # Windows locks a loaded .pyd: if the copy fails, the old file is renamed out of the way
 # (running processes keep using it; new ones get the new build).
@@ -20,6 +21,7 @@
 # MTGZ_ARTIFACT_CACHE=0; never with ZERO_CORE_UNPINNED=1 or uncommitted Rust inputs (they build as before).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tools/local_env.sh"            # the machine's own settings (ZERO_BIG_DISK)
 CORE="$ROOT/third_party/zero-core"
 PIN="$(git -C "$ROOT" rev-parse ":third_party/zero-core")"        # the pinned commit (index = HEAD unless staged)
 if [ ! -e "$CORE/.git" ]; then
@@ -38,7 +40,7 @@ if [ "$HAVE" != "$PIN" ]; then
   fi
 fi
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*|Windows_NT) TDEF=E:/cargo-target/mtg-zero ;;   # the desktop: C: is full
+  MINGW*|MSYS*|CYGWIN*|Windows_NT) TDEF="${ZERO_BIG_DISK:+$ZERO_BIG_DISK/cargo-target/mtg-zero}" ;;   # a small C:
   *) TDEF="" ;;                                                                     # elsewhere: <repo>/target
 esac
 # One target dir per checkout, never shared (AGENTS.md). zero-core's build_engine.sh names the default after the

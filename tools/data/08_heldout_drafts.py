@@ -13,7 +13,7 @@ evaluation's, mtgz/az/human_picks.py):
 
 Output: E:\\mtg-zero\\data\\splits\\cubecobra_heldout_8seat.json (never committed: raw human picks).
 
-  "C:/Users/Gregg Keithley/mtg-zero/.venv/Scripts/python.exe" tools/data/08_heldout_drafts.py [--n 400]
+  .venv/Scripts/python.exe tools/data/08_heldout_drafts.py [--n 400]
 """
 from __future__ import annotations
 

@@ -35,6 +35,7 @@ iterations.
 import json
 import os
 
+from zero import local_config
 from zero.package import GamePackage, register
 
 from . import deck_reader, decklists
@@ -363,6 +364,13 @@ VAST_SELFPLAY = {'infer_device': 'cuda', 'train_device': 'cuda', 'conc': 1536, '
                  'shard_rows': 8192, 'sparse': 1}
 
 
+# The MacBook (remote 'mac', tools/mac.sh): its ssh target and home directory are the machine's own settings, never
+# committed (zero.local_config: MTGZ_MAC / MTGZ_MAC_HOME in ~/.config/zero/local.env; AGENTS.md "Private details").
+# Unset: the ssh alias `mac` and /Users/<the target's user> (a machine without a Mac never uses the remote).
+MAC_HOST = local_config.get('MTGZ_MAC', 'mac')
+MAC_HOME = local_config.get('MTGZ_MAC_HOME') or f"/Users/{MAC_HOST.split('@')[0] if '@' in MAC_HOST else 'user'}"
+
+
 def vast_remote(box, host=None):
     """The rented box `box` (`python tools/vast.py rent <box>` + `prep <box> --checkout <the run's checkout>`, ssh alias
     mtgz-<box>) as a RunCommitRemote: its checkout ~/mtg-zero-wt/run-<sha12> of exactly the run's commit."""
@@ -445,14 +453,14 @@ PACKAGE = register(GamePackage(
     # back off while an evaluation holds ~/mtgz-remote/.eval.lock (always) or the other games' remotes'
     # locks on the Mac (their evaluations share the cores). Dense network batches on the Mac (sparse 0 whatever the
     # run's setting: its CPU evaluators would densify a sparse batch; not measured there, zero-core run setting sparse)
-    remotes={'mac': RunCommitRemote(ROOT, host='greggkeithley@100.95.248.116', home='/Users/greggkeithley',
-                                    python='/Users/greggkeithley/.venvs/dominion-zero/bin/python',
-                                    workdir='/Users/greggkeithley/mtgz-remote', env={'OMP_NUM_THREADS': '4'},
+    remotes={'mac': RunCommitRemote(ROOT, host=MAC_HOST, home=MAC_HOME,
+                                    python=f'{MAC_HOME}/.venvs/dominion-zero/bin/python',
+                                    workdir=f'{MAC_HOME}/mtgz-remote', env={'OMP_NUM_THREADS': '4'},
                                     overrides={'infer_device': 'cpu', 'train_device': 'cpu', 'threads': 12,
                                                'groups': 2, 'infer_workers': 3, 'sparse': 0},
-                                    selfplay={'workdir': '/Users/greggkeithley/mtgz-selfplay', 'procs': 2, 'nice': 5,
-                                              'locks': ['/Users/greggkeithley/kbz-remote/.eval.lock',
-                                                        '/Users/greggkeithley/domz-remote/.eval.lock'],
+                                    selfplay={'workdir': f'{MAC_HOME}/mtgz-selfplay', 'procs': 2, 'nice': 5,
+                                              'locks': [f'{MAC_HOME}/kbz-remote/.eval.lock',
+                                                        f'{MAC_HOME}/domz-remote/.eval.lock'],
                                               'env': {'OMP_NUM_THREADS': '3'},
                                               'overrides': {'infer_device': 'cpu', 'train_device': 'cpu', 'conc': 768,
                                                             'threads': 12, 'groups': 4, 'infer_workers': 4,

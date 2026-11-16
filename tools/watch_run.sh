@@ -4,7 +4,7 @@
 # supervisor pid gone, no write to progress.json/log.txt/stdout.txt for 75 min without PAUSE
 # (progress.json alone is not written during Elo phases), NaN/Inf in an "iter N train" line, and
 # a collapse (heuristic win <= 2% while self-play rounds sit at 150+, runs/mtg4 2026-10-27).
-#   bash tools/watch_run.sh "C:/Users/Gregg Keithley/mtg-zero/runs/mtg5" [hours, default 24]
+#   bash tools/watch_run.sh "C:/Users/<user>/mtg-zero/runs/mtg5" [hours, default 24]
 set -u
 RUN="$1"; HOURS="${2:-24}"
 SUP_PID="$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['pid'])" "$RUN/supervisor_state.json")"

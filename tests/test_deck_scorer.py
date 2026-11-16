@@ -18,9 +18,10 @@ from mtgz.sealed import evaluator as EV
 from mtgz.sealed import games as GL
 from mtgz.sealed import rolling as RO
 from mtgz.sealed import scorer as S
+from zero import local_config
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'engine', 'tests', 'data')
-V2 = 'E:/mtg-zero/s4a/v2_time'
+V2 = local_config.big_disk_path('mtg-zero/s4a/v2_time', default='')     # private data (the machine's big disk)
 
 
 @pytest.fixture(scope='module')

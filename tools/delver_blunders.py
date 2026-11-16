@@ -87,6 +87,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import delver_fingerprints as F  # noqa: E402  (pure Python: the habit metrics, the run lookup)
+from local_config import portable_path  # noqa: E402  (paths recorded in committed files: home as ~)
 
 SUITE_VERSION = 4                          # bump when a metric's definition changes (the baseline records it)
 GAMES_FORMAT = 'delver-blunders-games/1'
@@ -980,7 +981,7 @@ def engine_info(path):
             digest = None
         if digest:
             break
-    return {'checkout': path, 'commit': commit, 'branch': git('rev-parse', '--abbrev-ref', 'HEAD'),
+    return {'checkout': portable_path(path), 'commit': commit, 'branch': git('rev-parse', '--abbrev-ref', 'HEAD'),
             'dirty': bool(git('status', '--porcelain', '--untracked-files=no')), 'engine_sha256': h, 'digest': digest}
 
 
@@ -1066,7 +1067,8 @@ def play(ckpt, out, games=1000, seed=DEFAULT_SEED, opp='self', sims=None, device
                       move_log=1_000_000, rows=True, paired=False, graphs=graphs or None, sparse=sparse)
     wall = time.time() - t0
     rec = {'format': GAMES_FORMAT, 'label': label_for(ckpt) + f'_s{sims}{rule}' + ('' if opp == 'self' else '_vs_' + label_for(opp)),
-           'ckpt': os.path.abspath(ckpt), 'ckpt_sha256': sha256(ckpt)[:16], 'opp': 'self' if opp == 'self' else os.path.abspath(opp),
+           'ckpt': portable_path(os.path.abspath(ckpt)), 'ckpt_sha256': sha256(ckpt)[:16],
+           'opp': 'self' if opp == 'self' else portable_path(os.path.abspath(opp)),
            'spec': spec, 'driver_seed': seed, 'paired': False, 'sims': sims, 'chance_k': chance_k, 'seat_a': sa,
            'seat_b': sb, 'engine': engine_info(engine_path), 'device': device, 'created': int(time.time()),
            'wall_s': round(wall, 1), 'summary': {k: v for k, v in r.items() if k != 'rows'}, 'rows': r['rows']}
@@ -1956,7 +1958,7 @@ def main(argv=None):
         print(library_table(R, L))
         if a.reference:
             lab = label_for(a.ckpts[0]) + eval_seat(a.ckpts[0])[1]
-            L['reference'] = {'checkpoint': label_for(a.ckpts[0]), 'ckpt': a.ckpts[0], 'repeats': a.repeats,
+            L['reference'] = {'checkpoint': label_for(a.ckpts[0]), 'ckpt': portable_path(a.ckpts[0]), 'repeats': a.repeats,
                               'measured': time.strftime('%Y-%m-%d'), 'scores': R['scores'][lab]}
             save_library(L, a.library)
             print(f'{a.library}: reference = {lab}')

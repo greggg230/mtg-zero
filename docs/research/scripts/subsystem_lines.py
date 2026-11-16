@@ -10,7 +10,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 OUTLINE = json.loads((HERE / "_engine_outline.json").read_text(encoding="utf-8"))
-SRC = Path(r"C:/Users/Gregg Keithley/Documents/Claude/Projects/mtg-bot/src/mtg_bot")
+SRC = Path.home() / "Documents/Claude/Projects/mtg-bot/src/mtg_bot"     # the old mtg-bot checkout
 
 SUBSYSTEMS = {
     "Game-state model + copy-on-write cloning": {

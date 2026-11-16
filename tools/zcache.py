@@ -29,7 +29,8 @@ each file's sha256, the commit and checkout it was built from) and the files, wr
 place once (an existing entry is never replaced). A fetch checks the manifest's key and every file's sha256, copies,
 and checks the copy. The cache never serves an entry for another key. Eviction: least recently used first (a fetch
 touches the entry) until the cache is under --max-gb (default MTGZ_ARTIFACTS_MAX_GB or 40), after every store.
-Cache root: $MTGZ_ARTIFACTS, else E:/zero-artifacts/mtg-zero on Windows, ~/.cache/zero-artifacts/mtg-zero elsewhere.
+Cache root: $MTGZ_ARTIFACTS, else $ZERO_BIG_DISK/zero-artifacts/mtg-zero on Windows when the machine names a big
+disk (~/.config/zero/local.env), else ~/.cache/zero-artifacts/mtg-zero.
 MTGZ_ARTIFACT_CACHE=0 turns it off (every fetch misses, nothing is stored).
 
 What the cached builds do not carry: a panic's source location in a zero-core crate names the absolute path of the
@@ -53,6 +54,8 @@ import uuid
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA = 1
 WIN = sys.platform == 'win32'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import local_config  # noqa: E402  (the machine's own settings: ~/.config/zero/local.env, ZERO_BIG_DISK)
 RUST_PATHS = ('engine', 'card_ir', 'py', 'worker', 'data', 'Cargo.toml', 'Cargo.lock', '.cargo', 'rust-toolchain',
               'rust-toolchain.toml')
 ENV_PREFIXES = ('CARGO_PROFILE_', 'CARGO_TARGET_', 'CARGO_BUILD_')
@@ -71,7 +74,8 @@ def cache_root():
     r = os.environ.get('MTGZ_ARTIFACTS')
     if r:
         return r
-    return 'E:/zero-artifacts/mtg-zero' if WIN else os.path.expanduser('~/.cache/zero-artifacts/mtg-zero')
+    big = local_config.big_disk_path('zero-artifacts', 'mtg-zero') if WIN else None
+    return big or os.path.expanduser('~/.cache/zero-artifacts/mtg-zero')
 
 
 def git(root, *args):

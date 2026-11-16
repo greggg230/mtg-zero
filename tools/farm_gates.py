@@ -24,9 +24,13 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import local_config  # noqa: E402  (the machine's own settings: ~/.config/zero/local.env, ZERO_BIG_DISK)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE_TOOLS = os.path.join(ROOT, 'third_party', 'zero-core', 'tools')
-PACK = 'E:/zero-farm-scratch/phase2/pack/c4c4bb776d7f886f5e13474e'      # the runtime pack c4c4bb77 (ORT 1.31.1)
+# the runtime pack c4c4bb77 (ORT 1.31.1), on the machine's big disk (ZERO_BIG_DISK; else give --runtime-dir)
+PACK = local_config.big_disk_path('zero-farm-scratch/phase2/pack/c4c4bb776d7f886f5e13474e')
 
 
 def worker_default():

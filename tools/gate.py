@@ -115,6 +115,7 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import proctree  # noqa: E402  (tools/proctree.py: a timeout that bounds the whole process tree)
+import local_config  # noqa: E402  (tools/local_config.py: the machine's own settings, ~/.config/zero/local.env)
 
 
 def _load_checkout():
@@ -131,6 +132,9 @@ checkout = _load_checkout()
 CORE = os.path.join(ROOT, 'third_party', 'zero-core')
 GATES_DIR = os.path.join(ROOT, 'gates')
 WIN = sys.platform == 'win32'
+# a Windows machine's big scratch disk for build dirs and smoke runs (ZERO_BIG_DISK, e.g. E: on a desktop whose C: is
+# small: the machine's own setting in ~/.config/zero/local.env); '' = this checkout's target/ and gates/tmp
+BIG_DISK = (local_config.get('ZERO_BIG_DISK', '') if WIN else '').rstrip('/\\')
 FLAKY_FILE = 'tests/test_remoteplay.py'   # zero-core AGENTS.md: "times real threads and can fail on a loaded machine"
 
 
@@ -995,6 +999,36 @@ def report_step(r):
     print(f'{TAGS[r.status]:8s}{mac} {r.name} ({r.seconds:.1f}s): {r.reason}', flush=True)
 
 
+# ---------------------------------------------------------------------------- the privacy check
+
+PRIVACY_RE = re.compile(r'^privacy check: (\d+) file\(s\), (\d+) finding\(s\)', re.M)
+
+
+def privacy_scan(root):
+    """tools/privacy_check.py on the checkout's tracked files (AGENTS.md "Private details": no farm machines, host
+    names, tailnet addresses, the Mac's ssh target or home paths with a user name; the machine's own patterns from
+    ~/.config/zero/privacy_patterns.txt) -> (ok, reason). Every tier runs it first, in-process and quick; a finding
+    fails the gate before any step runs. Module-level: tests stub it."""
+    try:
+        p = subprocess.run([python_exe(), os.path.join(root, 'tools', 'privacy_check.py'), '--root', root],
+                           capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, f'tools/privacy_check.py did not run: {type(e).__name__}: {e}'
+    m = PRIVACY_RE.search(p.stdout)
+    if p.returncode == 0 and m and m.group(2) == '0':
+        return True, m.group(0)
+    shown = [x for x in p.stdout.splitlines() if x.strip()][:12]
+    return False, (f'exit {p.returncode}: ' + ' | '.join(shown) + (p.stderr.strip()[-300:] if not shown else '') +
+                   ' (fix the file: AGENTS.md "Private details")')
+
+
+def privacy_result(ctx):
+    t0 = time.time()
+    ok, why = privacy_scan(ctx.root)
+    return StepResult('no private details in the tracked files (tools/privacy_check.py)', 'privacy', [], ctx.root,
+                      time.time() - t0, 0 if ok else 1, None, None, 'passed' if ok else 'failed', why, {})
+
+
 # ---------------------------------------------------------------------------- the final line
 
 def caveats(results, dirty):
@@ -1165,7 +1199,7 @@ class Ctx:
         self.core_head = (git(['rev-parse', 'HEAD'], cwd=CORE, check=False) or None) \
             if os.path.exists(os.path.join(CORE, '.git')) else None
         default_target = os.environ.get('CARGO_TARGET_DIR') or os.path.join(
-            'E:/cargo-target/mtg-zero' if WIN else os.path.join(ROOT, 'target'),
+            f'{BIG_DISK}/cargo-target/mtg-zero' if BIG_DISK else os.path.join(ROOT, 'target'),
             os.path.basename(ROOT) if os.path.basename(ROOT) != 'mtg-zero' else 'gate')
         self.target_dir = os.path.abspath(args.target_dir or default_target)
         self.logs_dir = os.path.join(GATES_DIR, 'logs')
@@ -1221,7 +1255,8 @@ def opted_out(args, step_id):
 # failed there at be9ebfa: platform floating point in the search), so they are valid only here (ENGINE.md 166.2).
 
 THROTTLED = 'desktop, throttled'
-MAC_HOST = os.environ.get('MTGZ_MAC', 'greggkeithley@100.95.248.116')      # mac.sh's default
+# the Mac's ssh target: the machine's own setting, as tools/mac.sh reads it ('' = this machine has no Mac)
+MAC_HOST = local_config.get('MTGZ_MAC', '')
 MAC_NICE = 10                       # below a live run's own Mac work (its evaluation and self-play run at 0)
 MAC_JOBS = 6                        # CARGO_BUILD_JOBS on the Mac (mac.sh's own 12 is for an idle Mac)
 MAC_MIN_FREE_GB = 8                 # the Mac's available memory below this: the desktop runs the steps (throttled)
@@ -1260,6 +1295,8 @@ def mac_probe(host=MAC_HOST, timeout=20):
     """-> (ok, what): the Mac answers over ssh, with its load and available memory; not ok when it does not answer
     or has less than MAC_MIN_FREE_GB available (the desktop then runs the steps, throttled). Module-level: tests
     stub it."""
+    if not host:
+        return False, 'no Mac configured (MTGZ_MAC in ~/.config/zero/local.env: tools/local.env.example)'
     try:
         p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', f'ConnectTimeout={min(timeout, 10)}', host, MAC_PROBE],
                            capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
@@ -1442,8 +1479,10 @@ PYTEST_DURATIONS = 'pytest_durations.json'      # each test file's seconds, from
 
 def durations_dir():
     """Where the pytest durations live: the machine's state dir shared by every checkout (tools/slotd.sh's:
-    $MTGZ_SLOTS_HOME, E:/mtg-zero-state, ~/.mtgz-state - a warm worktree's gates/ is its own), else gates/."""
-    for d in (os.environ.get('MTGZ_SLOTS_HOME'), 'E:/mtg-zero-state' if WIN else None, os.path.expanduser('~/.mtgz-state')):
+    $MTGZ_SLOTS_HOME, $ZERO_BIG_DISK/mtg-zero-state on Windows, ~/.mtgz-state - a warm worktree's gates/ is its own),
+    else gates/."""
+    for d in (os.environ.get('MTGZ_SLOTS_HOME'), f'{BIG_DISK}/mtg-zero-state' if BIG_DISK else None,
+              os.path.expanduser('~/.mtgz-state')):
         if d and os.path.isdir(d):
             return d
     return GATES_DIR
@@ -1717,10 +1756,11 @@ def digest_format_steps():
 
 def core_pytest_base(ctx):
     """pytest's --basetemp for the core suite (it writes runs and checkpoints): off C: on the desktop, as
-    smoke_all.sh does; unique per gate run; NOT created here (--dry-run touches no disk)."""
+    smoke_all.sh does (the machine's big disk, ZERO_BIG_DISK); unique per gate run; NOT created here (--dry-run touches
+    no disk)."""
     name = f'core-{ctx.sha_short}-{uuid.uuid4().hex[:8]}'
-    if WIN:
-        return f'E:/zero-smoke/mtgz-gate-{slug(os.path.basename(ROOT))}-pytest/{name}'
+    if WIN and BIG_DISK:
+        return f'{BIG_DISK}/zero-smoke/mtgz-gate-{slug(os.path.basename(ROOT))}-pytest/{name}'
     return os.path.join(GATES_DIR, 'tmp', f'pytest-{name}')
 
 
@@ -2139,7 +2179,7 @@ def build_only_step(ctx, args):
     if not ctx.core_pin:
         raise GateError('no zero-core pin in HEAD (third_party/zero-core): nothing to build the games against')
     if args.other_games:
-        # (each --other-games value is one checkout path, never split: 'C:/Users/Gregg Keithley/...' has a space)
+        # (each --other-games value is one checkout path, never split: 'C:/Users/<first last>/...' has a space)
         games = [os.path.abspath(p) for p in args.other_games if p]
         bad = [p for p in games if not os.path.isdir(p)]
         if bad:
@@ -2148,7 +2188,7 @@ def build_only_step(ctx, args):
         games = default_other_games()
     names = [repo_name(p) for p in games]
     smoke_target = 'mtgz-gate-' + slug(os.path.basename(ROOT))
-    smoke_dir = (f'E:/zero-smoke/{smoke_target}' if WIN else os.path.join(GATES_DIR, 'tmp', smoke_target))
+    smoke_dir = (f'{BIG_DISK}/zero-smoke/{smoke_target}' if BIG_DISK else os.path.join(GATES_DIR, 'tmp', smoke_target))
     return Step(f'build-only: the other games ({", ".join(names)})',
                 ['bash', os.path.join(CORE, 'tools', 'smoke_all.sh'), '--with-this-core', '--build-only', *games],
                 cwd=CORE, id='build-only', heavy=True, env={'SKIP_CORE': '1', 'SMOKE_TARGET': smoke_target, 'SMOKE_DIR': smoke_dir,
@@ -2190,7 +2230,8 @@ def tier_repin(ctx, args):
 
 
 TIERS = {
-    'docs': (tier_docs, 'docs / tools not on the run path: py_compile of touched tools (~0 min).'),
+    'docs': (tier_docs, 'docs / tools not on the run path: py_compile of touched tools (~0 min). Every tier first '
+             'runs tools/privacy_check.py on the tracked files (step privacy, in-process).'),
     'python': (tier_python, 'Python run-loop/settings: build + the release worker (its pytest tests; both from the '
                'artifact cache when no Rust input changed) + pytest in --pytest-shards shards beside a tiny run-loop smoke '
                '(~5 min).'),
@@ -2367,7 +2408,8 @@ def build_parser():
     ap.add_argument('--jobs', type=int, default=env_jobs(), help='CARGO_BUILD_JOBS (default: the environment\'s '
                     'CARGO_BUILD_JOBS, else 4)')
     ap.add_argument('--target-dir', default=None, help='override CARGO_TARGET_DIR (default: the env var if set, '
-                    'else E:/cargo-target/mtg-zero/<this checkout\'s dir name>)')
+                    'else $ZERO_BIG_DISK/cargo-target/mtg-zero/<this checkout\'s dir name> on Windows when the machine '
+                    'names a big disk (~/.config/zero/local.env), else this checkout\'s target/)')
     ap.add_argument('--step-timeout', type=float, default=3600.0, help='seconds before a single step is killed as '
                     'hung (default 3600)')
     ap.add_argument('--no-mac', action='store_true', help='skip Mac steps (SKIPPED, not failed, and named in the '
@@ -2416,7 +2458,13 @@ def main(argv=None):
     started = iso_now()
     t0 = time.time()
     before = tree_state()
-    results, ok, not_run = run_steps(ctx, steps)
+    privacy = privacy_result(ctx)                # before any step: quick, and a finding fails the gate
+    report_step(privacy)
+    if privacy.passed:
+        results, ok, not_run = run_steps(ctx, steps)
+        results.insert(0, privacy)
+    else:
+        results, ok, not_run = [privacy], False, [s for s in steps if not (s.skip_reason or s.not_needed)]
     if ok:
         # the checkout at the end: the same files (a step that rewrites a tracked file or leaves an untracked one where
         # a build or test picks it up fails the gate) and the same HEAD (a commit made in the checkout during the gate

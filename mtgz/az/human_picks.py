@@ -6,7 +6,7 @@ charts it ("Other yardsticks").
 
 The positions: whole drafts of the CubeCobra test split (docs/data_m1.md 5: held out by draft;
 `tools/data/08_heldout_drafts.py` keeps one seat's 3 x 15 picks consistent with an 8-seat pod,
-`$MTGZ_HUMAN_PICKS`, default E:/mtg-zero/data/splits/cubecobra_heldout_8seat.json), the first
+`$MTGZ_HUMAN_PICKS`, default $ZERO_BIG_DISK/mtg-zero/data/splits/cubecobra_heldout_8seat.json), the first
 `$MTGZ_HUMAN_PICKS_DRAFTS` (default 100) of them. Each pick is a 4v4 `team_draft` position of
 seat 0 built from the draft so far (the spec key `history`: its packs at its picks and its
 picks; ENGINE.md 45). The drafts come from many versions of the cube: a card that is not in
@@ -29,6 +29,7 @@ import json
 import os
 
 import numpy as np
+from zero import local_config
 
 PLAYERS = 8
 BASICS = ('Plains', 'Island', 'Swamp', 'Mountain', 'Forest')
@@ -38,7 +39,8 @@ CAPTION = ('The draft network\'s top-1 pick (its policy, no search) against held
 
 
 def data_path():
-    return os.environ.get('MTGZ_HUMAN_PICKS', r'E:\mtg-zero\data\splits\cubecobra_heldout_8seat.json')
+    return os.environ.get('MTGZ_HUMAN_PICKS') or local_config.big_disk_path(
+        'mtg-zero/data/splits/cubecobra_heldout_8seat.json', default='cubecobra_heldout_8seat.json')
 
 
 def n_drafts():
