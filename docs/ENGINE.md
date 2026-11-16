@@ -35545,7 +35545,22 @@ own target directory (one per checkout, zero-core's its own).
   a scratch converter): held-out (the last third) 0.6693 vs play / draw 0.6960, **+0.027 nats a
   game**, dim 0 at L2 0.1 selected (the grid widened to 0.1-1.0 after the first fit chose its edge, 0.03; near-ties go to
   the smaller dimension: a matchup term at its zero saddle tied the strength alone to 1e-10 and had been picked).
-* **The gates**: in the commit after this text (their last lines).
+* **The 20k fuzz of the new pool, on the final merge b34402a0** (`python tools/fuzz_shards.py --pool delver_dealt2 --games
+  20000 --jobs 3`, throttled): **fuzz shards: PASSED** - 20,000 games, 1,000 whole matches + 1,000 post-sideboard matches
+  in 16 shards, the merged end-of-run checks (the choice-table and dealt counts among them), 8 other fuzz tests, 1,175 s.
+  An earlier 20k run (the Mac, on 2258c9b0) failed match 446: a world's walk across a step that ended game 1 and began
+  game 2 at once (both seats dealt) checked a game-1 look at the viewer's own hand card against game 2's hand - the
+  check, not the engine; fixed in the walk (75fe39b0: the hand before the step, and that new game counted as one the
+  world started) and rerun above.
+* **The gates.** `suite` (the tier's sharded 2k fuzz: default, default+hidden, delver_dealt, delver_dealt2) **GATE PASSED
+  suite 579a2331df4a in 737s** - the merge of main acc00acd, before the fuzz-walk fix and main's 1779035a (comment, doc
+  and the fuzz harness changes only since); the full engine suite on 2258c9b0 (the Mac): 2,671 passed; the 20k fuzz of
+  the default pool and of delver_dealt there: passed. The `engine`, `python` and `optin-core` tiers on the final merge
+  b34402a0 were started and stopped on the user's request (the desktop freed for a while: the throttle set to 0 slots)
+  before they finished - to run when work resumes (the commands in the launch checklist's step 0; `optin-core` with
+  `--baseline-root` a built checkout of main 1779035a). Farm compatibility (the release worker, three configurations)
+  passed on 875644b7, whose engine and worker sources the later commits change only in comments, the fuzz harness and
+  main's merged work.
 
 ### 168.6 Left, decisions for the user
 
