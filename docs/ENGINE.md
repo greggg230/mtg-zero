@@ -36940,7 +36940,8 @@ silent past `timeout_s` is killed "no progress"; live-run fenced: it spawns proc
 ~1.5 h of farm wait plus ~3 h of the desktop's CPU while the farm is this busy - longer than pb3's checkpoint interval,
 so the farm lane falls further behind every checkpoint. **Recommendation for pb3's next restart** (the owner's call; a
 run setting, not code): `"bo1_backend": "local"` in its `--yardsticks` - both opponents on the GPU lane, ~1,300 s each
-per checkpoint. pb3 has no gen0 result yet, so nothing breaks a series (165.8: one backend per run); the two paused
+per checkpoint. pb3 has one gen0 result (iteration 16, 0.510 +- 0.019, its fourth attempt, 2026-11-16 07:42, the farm
+backend), so switching starts the gen0 series over at one point (165.8: one backend per run); the two paused
 campaigns (`~/.zero-farm/campaigns/cmp-delver-bo3-pb3-y{16,32}-gen0-*`) are then unused. Kept on 'farm', the fix rides
 the next restart and the lane completes each measurement, slowly.
 
