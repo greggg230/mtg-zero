@@ -36071,6 +36071,7 @@ log of random post-sideboard matches, a table version, the probe made twice iden
 its options checked, rows for two checkpoints against the newest / live / first tables, keep = main in game 2, one
 position's table prior against the engine stepped by hand, nothing measured twice, the record); matches per hour on
 made-up metrics and a supervisor log (prorated windows, the stop merged with the missing run time, no machine id).
+**GATE PASSED WITH SKIPS python d5f307a5a73a in 552s** (the live-run fence only: 5 live-run-hazard tests fenced, pb1 / pb3 live), in a warm worktree (`tools/warm_pool.py run`).
 
 ## 169. Public cleanup: no farm computer details or machine-specific settings in the repos, the privacy check, licenses (branch `chore/public-cleanup`, zero-core `chore/public-cleanup`, zero-farm `chore/public-cleanup`, 2026-11-15)
 
