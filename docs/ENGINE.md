@@ -36444,7 +36444,7 @@ delver_dealt2 FUZZ_FIRST=52 FUZZ_MATCHES=1 cargo test --profile fuzz -p engine -
 --exact --nocapture`). The release worker passes the same seeds: the check samples determinized worlds 1 in 4 under
 the `fuzz` profile and 1 in 40 in release (`checkpoint_every`), which is why 168.5's release-profile 20k (1,000
 matches) passed. Queue entry c8af53b37bd8: replayed and confirmed, the owner told. Not fixed here (an engine lane; a
-pb3 re-pin decision).
+pb3 re-pin decision). Resolved in 173: the check's, not a leak; no re-pin.
 
 **Gates.** `python tools/warm_pool.py run --sha 954143b4 -- python tools/gate.py python`: **GATE PASSED WITH SKIPS
 python 954143b4198a in 705s** (the live-run fence only: 7 live-run-hazard tests). zero-farm: `npm test` 23 files, 196
@@ -36572,6 +36572,96 @@ Nothing of the live run was touched. pb3 (b309fa08, zero-core 002731c) already d
 containment"): a re-pin to the merged main, a new signed release worker (the farm worker's build changes: the records
 header), its CUDA alternate re-signed, the farm gates and the CUDA self-test on pb3's real config, the Mac eval
 checkout.
+
+## 173. The fuzz steward's first finding was the check's, not a leak: a world that plays on through a game's end checks a look at the viewer's hand against the hand it saw (branch `fix/dealt-hidden-leak`, 2026-11-16)
+
+Branch `fix/dealt-hidden-leak` from main 5af07560 (172; zero-core 8ae31f8, unchanged). The finding: 171.7's, the
+failure queue's entry c8af53b37bd8 (`engine/src/fuzz/games.rs:3898`, "match 52: a world determinized for P1: P0's
+private key (kind 3) carries the card's identity (117) in a world of P1 (ENGINE.md 141)"), in ~2.5% of
+`FUZZ_POOL=delver_dealt2` matches under the `fuzz` profile, on pb3's build b309fa08 and on main.
+
+### 173.1 What the failing worlds were
+
+Reproduced on main 5af07560 (the Mac; the same panic as the queue's). An instrumented copy of the match fuzz printed,
+for the failing step of each world, the world's observer and game number before and after the step, every key of the
+step and the step's game log. **All nine queued seeds** (52, 95, 135, 163, 3,900,000,015 / 026 / 079 / 151 / 197) are
+one situation:
+
+* a whole match (game 1 played, no `game_episodes`) of `delver_dealt2` with **both seats dealt** (168.1: no
+  sideboarding decision, so the step that ends a game also deals both 60s and begins the next game, `dealt_sideboards`
+  -> `next_game`);
+* in the world's walk after `determinize` (the 30 random actions of "the world plays on", `play_match_spec`), one
+  step resolves the other player's **Urza's Bauble** - "P{x} looks at a card at random in P{viewer}'s hand"
+  (`Ext::LookAtRandomHandCard`), keyed `KEY_LOOK` with the card's identity on purpose (141.2: the owner sees which of
+  its cards was seen; resolve_ext keys it public) - and then the game ends in the same step (an auto-declared attack's
+  combat damage after the ability resolved, ...), so the step's keys run on into game n+1 (`KEY_DEALT` x 8, `KEY_GAME`);
+* the world's observer is the viewer before and after (Some(viewer): 141.1's observer is kept by `next_game`), every
+  other private key of the step is `HIDDEN`, and the looked-at identity (DRC, Daze, Force of Will, Unholy Heat, Prismari
+  Charm, Volcanic Island, Murktide Regent, Cori-Steel Cutter, Counterspell) was a card of the viewer's own hand before
+  the step.
+
+The check recognises the public-by-design look as "a card of that identity in the viewer's hand that the looker knows
+after the step" - and after this step the viewer's hand is game n+1's, empty before its draw. 75fe39b0 (168.4) had
+fixed exactly this for the other walk (`check_world_private_keys`: the hand before the step, `before_known`) after
+`delver_dealt2`'s 20k found it there; the match fuzz's own walk kept the plain check. Its determinize checkpoint runs
+1 in 40 decisions in release and 1 in 4 under the `fuzz` profile (`checkpoint_every`), so 168.5's release-profile 20k
+did not reach it and the steward's fuzz-profile runs did.
+
+**No leak.** The engine keyed nothing private: the key's identity is the viewer's own card (it knows its hand), the
+look is the other player's public chance (both players see it), the world's observer was set, and every draw and look
+private to the other player in those steps was `HIDDEN`. 173.4's 20k fuzz-profile run with the corrected check
+(every world's every step, 1 in 4 decisions) found no private key with an identity.
+
+### 173.2 The fix: the check only (`engine/src/fuzz/games.rs`)
+
+* `check_private_keys_masked_since(keys, viewer, after, before_known)` is now **position-aware**: a step that begins a
+  game emits its `KEY_GAME` there, so the keys before the step's last `KEY_GAME` are the game that ended - a look at
+  the viewer's hand among them is checked against `before_known`, the viewer's hand before the step (the hand the look
+  saw) - and the keys after it, and every key of a step that begins no game, against `after`'s hand with the looker's
+  knowledge, as before 168.4. (168.4's version accepted `before_known` for every key of every step; this one only where
+  the hand it names is gone.)
+* `viewer_hand_ids(w, viewer)`: the identities of the viewer's hand before a step (none between games), shared by both
+  walks.
+* The match fuzz's world that plays on (`play_match_spec`) reads the hand before each step and calls the `_since`
+  check - the call 168.4 missed.
+* A counter, `PK_ENDED_GAME_HAND_LOOKS`: of the looks at the viewer's hand, those in a step that began the next game;
+  printed in the private-key report.
+* `CHECKPOINT_EVERY_OVERRIDE` (thread-local, None by default: the profile's rate): `checkpoint_every`'s denominator is
+  drawn from the match's own random stream, so a seed found under the `fuzz` profile is the same match only at 4 - the
+  regression test replays the queue's seeds at 4 in any profile.
+
+Engine code outside the fuzz module, the encodings, the search and every run's play are unchanged: digests EQUAL
+(173.4), no RULES_EPOCH bump, no canary, no farm worker change for self-play (the worker's fuzz jobs carry the
+corrected check from the next build on).
+
+**Regression test** (`engine/tests/fuzz.rs::a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game`): the nine
+queued seeds of `delver_dealt2` (`POOL_OVERRIDE`, `CHECKPOINT_EVERY_OVERRIDE` 4), each a whole match with every check,
+and each must check at least one look in a step that began the next game (positive evidence). Before the fix (the
+play-on call reverted, branch-local) it fails in release on match 52 with the queue's message; with it, it passes
+(release, ~4 s).
+
+### 173.3 pb3
+
+**pb3's search never saw leaked information from this, in any decision: 0 of its decisions, at no decision type.**
+Two independent reasons:
+
+1. Not a leak (173.1): the key the check flagged is the public Bauble look at the viewer's own card, in the viewer's
+   own worlds. Its identity is the same in every world of that viewer (its hand is not resampled), so the viewer's
+   tree branches only on which of its own cards was seen - real chance it observes, as in the live game.
+2. The situation cannot arise in pb3's trees. pb3's spec has `"game_episodes": true` and `"start_game": 2` (each game
+   is its own episode, 121, 130): `end_game` sets `between` and returns, `to_move` is None there (terminal in zero-core's
+   tree), and the next game's deals happen in `next_match_episode` outside any tree. A step whose keys run from one game
+   into the next exists only in whole matches without `game_episodes` (the fuzz's `delver_dealt2` whole matches); no
+   run's self-play or evaluation spec is one.
+
+Nothing for the policy or value to learn from, so no re-pin, no fork, no farm or Mac change for this finding. When pb3
+next restarts for its staged items onto a main with this commit, the steward's pb3 target fuzzes the corrected check;
+until then its b309fa08 fuzz build keeps reporting c8af53b37bd8 (a known false positive) at ~2.5% of
+`delver_dealt2` matches.
+
+### 173.4 Checks and gates
+
+(FILLED BELOW)
 
 ## 174. The farm pool's per-generation export by weight swap: ~150 s -> ~2 s (branch `feat/fast-farm-export`, zero-core `feat/fast-farm-export`, 2026-11-15)
 
