@@ -24,6 +24,11 @@ if [ -f "$_zero_local_file" ]; then
     if [ -z "${!_zero_key:-}" ]; then
       export "$_zero_key=$_zero_val"
     fi
+    # Git Bash (MSYS) rewrites Unix-looking values (MTGZ_MAC_HOME=/Users/...) into Windows paths for every
+    # Windows program it starts; these are settings for other machines, so keep them verbatim
+    case ";${MSYS2_ENV_CONV_EXCL:-};" in *";$_zero_key;"*) ;; *)
+      export MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:+$MSYS2_ENV_CONV_EXCL;}$_zero_key" ;;
+    esac
   done < "$_zero_local_file"
 fi
 unset _zero_local_file _zero_line _zero_key _zero_val

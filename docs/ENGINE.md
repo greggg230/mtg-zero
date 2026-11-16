@@ -157,8 +157,9 @@ order must be deterministic); no threads, callbacks or interior mutability.
 * Two card tables (section 54): `CardDb::cube()` (the cube IR, compiled in: every cube game,
   generator, pool, draft, fuzz pool and digest) and `CardDb::constructed()` (the cube's cards, the
   same definitions at the same ids, then `data/cards/legacy.ir.json`'s, then their tokens and faces;
-  only games with `"constructed": true` use it). Both IR files carry one schema (mtg-bot `cards
-  export-ir --pool cube legacy`), so one `card_ir` crate reads both.
+  only games with `"constructed": true` use it). Both IR files carry one schema (the export of the
+  pools together: `tools/card_ir.py export`, section 170; mtg-bot's `cards export-ir` before), so
+  one `card_ir` crate reads both.
 * Token definitions (CR 111) are lowered from `CreateToken.token_printing` like any printing
   (the "Token" supertype sets `CardDef.token`), interned by equality and stored after the
   cards' (`CardDb::token_def(i)`); `Op::CreateToken` names one by index. They are not in the
@@ -1420,6 +1421,14 @@ M7c commit kept all 2,500 digests; the check caught one wrong fast path on the w
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
+0. The card's IR comes from the oracle-text parser in `ir/mtgz_ir` (section 170; `docs/card_ir.md`).
+   A card outside the pools: its Scryfall record into `ir/data` (`tools/ir_fetch_cards.py`, a
+   name-list pool such as `legacy_delver.sheet.json`). Text the parser doesn't read, or reads
+   against the Oracle text: fix the parser (a parameterized recognizer,
+   `ir/mtgz_ir/cards/parser/AGENTS.md`) with a test in `tests/ir/`, list a defect in
+   `docs/ir_defects.md`; never edit the JSON. Then `python tools/card_ir.py export` rewrites
+   `data/cards/*.ir.json`, the schema and `card_ir/src/generated.rs` in one go, and
+   `python tools/card_ir.py check` proves the committed files are its output.
 1. `cargo test -p engine --test support -- --nocapture` lists blocked cards, the features
    that block most cards on their own, and a greedy staging order (the feature completing
    the most cards next). `SUPPORT_DUMP=path` also writes every blocked card with all its
@@ -35407,7 +35416,7 @@ published ensemble's bootstrap members (`matchup_members`, 20) among the swaps w
 estimate's sampling spread -, until none passes: a shrinkage toward the main, so a swap happens only when its estimated
 gain is clearly positive (`matchup_swap_z` 0 is the plain climb by the mean). The strength term's exact argmax (the 60
 highest-w copies: `strength_optimum`, tested against brute force) is reported beside each context (`argmax_in`). The
-guards' defaults are the coordinator's proposal, **pending the user's approval** (168.6).
+guards' defaults were the coordinator's proposal, **approved by the user 2026-11-15** (168.6).
 
 **What is exact and what is not** (the user's rule: no approximations; stated, with the exact option and its cost):
 * The belief is the model of the deal the search's worlds use (the constructed prior, untilted). For a dealt opponent
@@ -35464,7 +35473,7 @@ each gen's definition template; records of a known spec accepted and replayed wi
 `mtgz.az.matchup` (EoE's `mtgz.sealed.rolling` design, 112.4): run settings `matchup_every` (0 off), `matchup_window`
 32, `matchup_min_window` 8, `matchup_val_iters` 2, `matchup_half_life` 16, `matchup_threads` 4, `matchup_worlds` 8000,
 `matchup_table_min_gain` 0.005, `matchup_swap_z` 2, `matchup_members` 20 (the last three and the min window of 8 are the
-proposed guards, pending the user's approval: 168.6; the farm worker classifies every one trainer-only:
+guards (user-approved 2026-11-15: 168.6); the farm worker classifies every one trainer-only:
 `worker/src/main.rs`). `mtg`'s `selfplay_specs` hook
 (`decklists.selfplay_spec`, which still refuses `keep_deck`, then `matchup.selfplay_spec`): the first answer for an
 iteration is kept (`matchup/used.jsonl`), so the local driver, the Mac's workers and the farm's definition of that
@@ -35586,7 +35595,7 @@ own target directory (one per checkout, zero-core's its own).
 
 ### 168.6 Left, decisions for the user
 
-* **The guards against the first versions' noise - proposed by the coordinator, PENDING THE USER'S APPROVAL** (settings
+* **The guards against the first versions' noise - proposed by the coordinator, APPROVED BY THE USER 2026-11-15 ("Merge pb3")** (settings
   with these defaults in `delver-mirror-bo3-varied`; set them to the old behaviour with `matchup_table_min_gain` 0,
   `matchup_swap_z` 0, `matchup_min_window` 4): (1) a version publishes a table only when its model beats play / draw on
   its held-out games by **0.005 nats** a game (the value head's pre-game margin; the smoke's v0003, -0.018 nats, would
@@ -35669,3 +35678,149 @@ fixture stubs `privacy_scan`), `test_mac_remote.py` (`test_the_macs_address_is_t
 placeholders pass, local patterns, markers, the local.env readers in Python and bash agree), `dashboard/tests`
 (the example config loads, the default config is outside the repo). No engine, encoding or run-loop change: digests
 unchanged.
+
+## 170. The card-IR pipeline in this repo: the oracle-text parser and its IR export moved from mtg-bot (`ir/`, `tools/card_ir.py`; branch `feat/ir-in-repo`, 2026-11-15)
+
+**Why.** mtg-zero reads every card as data (section 3), but the data came from another project: mtg-bot's oracle-text
+parser turned Scryfall's Oracle text into `CardPrinting` trees and its `cards export-ir` wrote the card IR and its
+schema, from which `tools/codegen/gen_card_ir.py` generated `card_ir/src/generated.rs`. Every card port since M3 ran
+through an mtg-bot branch (sections 32, 54, 99.9-99.16, 122-124, 146.1). mtg-bot's Python engine and training are
+retired; the parser was the one live part. With it here, all active code is in this repo and mtg-bot can be archived
+(the user's decision, 2026-11-15).
+
+**Source.** mtg-bot `feature/eoe-station-ir` 68b62ed3 (its newest IR commit: the station striations, 146.1; on
+`feature/delver-sb-ir` 22aa7682, the Delver sideboard, 122, which carries Sneak and Show and Doomsday, 123-124). The
+files were copied from a `git archive` of that commit: none of mtg-bot's history is imported (no subtree, filter-repo or
+merge), because that history holds an unrelated leaked credential. mtg-bot itself is unchanged.
+
+### 170.1 What moved where
+
+| Here | From mtg-bot | What |
+|---|---|---|
+| `ir/mtgz_ir/cards/` (incl. `parser/`), `ir/mtgz_ir/effects/` | `src/mtg_bot/cards/`, `src/mtg_bot/effects/` | the parser, the card model (printings, effects, predicates, conditions, costs), the IR encoder and schema (`cards/ir.py`): all 164 modules, because the IR tags of classes whose names repeat are qualified from a scan of both packages, so the scan must see the same modules |
+| `ir/mtgz_ir/*.py` (14) | `src/mtg_bot/{__init__,actions,alt_casting,conspiracies,engine,evoke,game,keyword_rules,keyword_vocab,legal,opening_hand,roto_board_statics,roto_restrictions,turn}.py` | the modules the export imports: the effect classes are the Python engine's, so their module-level imports reach part of it |
+| `ir/mtgz_ir/export.py` | `src/mtg_bot/cli/cards.py` | `export_ir`, `roundtrip` |
+| `ir/mtgz_ir/cards/parser/AGENTS.md` | `src/mtg_bot/cards/parser/CLAUDE.md` | the parser's rules (parameterized recognizers over literal lines) |
+| `ir/data/` (13 files, 12.5 MB) | `data/` | the inputs: the Scryfall card records of the pools (`cube_power_lsv.json`, `legacy_delver.json`, the four EoE-era dumps, `cube_roto.json` and `cube_roto_custom.json`, which the parser reads to tell EoE-only printings apart), the name lists and sidecars; mtg-bot's blobs byte for byte (LF), kept so on every checkout by `.gitattributes` (`-text`). Card data only: the records carry Scryfall's `image_uris` strings, which nothing reads; no image is fetched or stored |
+| `tools/ir_fetch_cards.py` | `scripts/fetch_cube.py` | fetches a pool's Scryfall records (a CubeCobra list or a name list); card JSON only |
+| `tests/ir/` (138 test files, 7 helpers) | `tests/` | the parser's and the IR's tests (170.3) |
+| `docs/card_ir_format.md` | `docs/CARD_IR.md` | the IR format |
+| `tools/card_ir.py` | new | `export`, `check`, `roundtrip` (170.2) |
+
+The package is renamed `mtg_bot` -> `mtgz_ir` (every `mtg_bot` word in the copied Python; `pools.DATA_DIR` points at
+`ir/data`). Nothing else in the code changed but one thing: the schema names each class's and enum's module, and those
+names are hashed into `schema_sha256` (every IR document carries it, `card_ir::SCHEMA_SHA256` embeds it) and written
+into `generated.rs`'s doc comments. So `ir.schema_module` writes this package's modules as `mtg_bot.<module path>`
+(`SCHEMA_MODULE_PACKAGE`), and the format names stay `mtg-bot-card-ir` / `mtg-bot-card-ir-schema`. Dropping either is a
+deliberate re-export: a new schema hash, all IR files and `generated.rs` rewritten, the engine tier.
+
+**Not moved** (they test or run the retired Python engine, not the parser): mtg-bot's `agents`, `combat`, `layouts`,
+`player_protections`, `creature_statics_wg`, `parity`, `search`, `training`, its CLI dispatcher and UI. Some effect
+classes' runtime methods import those lazily; the export never calls them, and calling one raises `ImportError`. The
+runtime half of the effect classes is inert here: the engine is `engine/` (Rust), which lowers the IR.
+
+The dependency is stdlib only (Python 3.11+): no numpy, torch or network at export time.
+
+### 170.2 `tools/card_ir.py`
+
+* `export`: the three pools with one schema (`export_ir(["cube", "legacy", "eoe"])`), then the EoE filter
+  (`filter_eoe_ir.filter_text`: the EoE set's cards, 483 -> 320), then `gen_card_ir.generate` on the schema; it checks
+  the generated hash equals the export's and writes `data/cards/{powerlsv,legacy,eoe}.ir.json`,
+  `powerlsv.schema.json` and `card_ir/src/generated.rs` (an unchanged file is left alone).
+* `check`: the same into a temporary directory, compared byte for byte with the checked-in files (a checkout whose
+  git turns LF into CRLF is read back as LF; the generated files are LF); it prints each file's sha256 and exits 1
+  naming any file that differs. `tests/ir/test_pipeline.py` runs it, so the python gate fails when the IR, the schema,
+  `generated.rs` and the parser disagree.
+* `roundtrip`: every printing of the three pools decodes back to an equal object, and re-encoding is a fixpoint.
+
+`filter_eoe_ir.py` takes `--data` (default `ir/data`) instead of `--mtg-bot-data`, and `gen_card_ir.py` gains
+`generate(schema_text)`; both CLIs work as before. The tools that read mtg-bot's dumps read `ir/data` now:
+`tools/fetch_rulings.py` (its default cube), `tools/sealed_eoe_set.py` (the EoE dumps; its output, not rerun, still
+labels them `mtg-bot data/...` with the sha256s of mtg-bot's Windows checkout, CRLF, where `ir/data` keeps the LF
+bytes: a rerun records new sha256s for the same records) and `tools/data/common.py` (`MTG_BOT_CUBE_JSON`, which was a
+personal absolute path).
+
+`tools/gate.py`'s `pytest_files` (the files the python tier's pytest shards split, section 167) lists `tests/ir/test_*.py`
+beside `tests/test_*.py` when a commit touches the pipeline (170.7; `tests/test_gate.py` checks it, and that test's
+weight assertions keep to the top-level files they were scaled to).
+
+### 170.3 The tests
+
+mtg-bot's tests of the parser and the IR, renamed like the package (`from tests._helpers` -> `from _helpers`), with
+`tests/ir/conftest.py` putting `ir/` on the path and selecting the parser source as mtg-bot's conftest did. Taken: all
+`test_parser_*`, `test_card_ir`, `test_cards_cli`, `test_legacy_*`, `test_pools`, `test_keyword_vocab`,
+`test_effects_vocab`, `test_precise_grammar`, `test_fetch_cube`, `test_eoe_ir_fixes`, `test_deck_conditions`,
+`test_unclaimed_lines`, `test_pool_coverage`, `test_review_render`. Left in mtg-bot, because they play cards in the
+Python engine (its `agents` / `combat`, not carried): the files `test_doomsday_c_cards`, `test_eoe_fidelity`,
+`test_eoe_fidelity_w6`, `test_parser_dsk_must_be_blocked`, `test_parser_dsk_you_attack`, `test_parser_land_lines`,
+`test_parser_oracle_ir_fixes`, `test_seriema`, `test_tiered_triggers`, and inside the taken files the 85 tests that
+play or run mtg-bot scripts not moved (each file names them in a comment at its top), and `test_cards_cli`'s test of
+mtg-bot's CLI dispatcher. mtg-zero's own engine tests cover those cards' play (e.g. `cards_eoe_striations.rs` for the
+striations). Two adaptations besides: `test_card_ir`'s schema test expects the kept `mtg_bot.` module label, and
+`test_precise_grammar` inlines the one helper it used (the helper module builds Python-engine games). The parser tests
+that read the dumps by path read `ir/data`; `test_fetch_cube` loads `tools/ir_fetch_cards.py`.
+
+`python -m pytest tests/ir`: 2,688 passed, 0 failed, in 515 s on the loaded desktop (one process; most tests parse a
+pool, 1-2 s each). In a gate they spread over the pytest shards, when they run at all (170.7).
+
+New: `tests/ir/test_pipeline.py` (3): the regeneration is byte for byte the checked-in files; the check names a file
+that differs (and exits 1); the schema's module labels (`mtgz_ir.effects.base` -> `mtg_bot.effects.base`, a module
+outside the package as it is).
+
+### 170.4 The proof of a faithful move
+
+* **mtg-bot itself first**: its own export at 68b62ed3 (`cards export-ir --pool cube legacy eoe`, then
+  `filter_eoe_ir.py`, then `gen_card_ir.py`), run from a `git archive` of that commit, gives main's five files byte for
+  byte (compared with the blobs of main 90731110). So 68b62ed3 is exactly the source of what main holds.
+* **The moved pipeline**: `python tools/card_ir.py check` on this branch (and after merging main acc00acd):
+
+  | File | Bytes | sha256 (first 16) | vs main's blob |
+  |---|---|---|---|
+  | `data/cards/powerlsv.ir.json` | 402,200 | `c82df91db1c891a1` | identical |
+  | `data/cards/legacy.ir.json` | 12,757 | `810f8a03a880ccb2` | identical |
+  | `data/cards/eoe.ir.json` | 214,315 | `41bb14156112f5e4` | identical |
+  | `data/cards/powerlsv.schema.json` | 491,490 | `1d76cf44abdfc40c` | identical |
+  | `card_ir/src/generated.rs` | 575,713 | `b91024cf4329c58e` | identical |
+
+  Schema `693d23a4a259b9dc8e5bc0a9dcca52af0cadcfc5152301e8f407bc6116673489`, 728 classes; `eoe` 483 -> 320 cards
+  (Paradox Haze still without IR). `export` rewrites none of them ("unchanged" five times). `roundtrip`: every printing
+  of the three pools decodes back equal.
+* No IR file, schema, `generated.rs` or engine source changes, so the engine plays exactly as on main: behaviour
+  digests EQUAL by construction (`engine/tests/data/digests.txt` untouched; main's combined digest 8f71ccb0d89031a6).
+  Measured anyway, on this branch's merge with main 1779035a (69c5f4d3): `cargo test --release -p engine --test digest
+  -- --ignored --nocapture`: 2,000 random + 500 heuristic games, combined digest **8f71ccb0d89031a6**, EQUAL.
+
+### 170.5 What still uses mtg-bot
+
+Nothing in this repo runs or imports it any more (its name stays in history notes, docs, comments citing old mtg-bot
+commits and the IR's format names). Outside this repo only the maintainer's own launchers for mtg-bot's retired
+services (its coordinator, worker and UIs) point into it; no other project imports `mtg_bot`. The list is in the
+orchestrator's report, not here (machine-specific).
+
+### 170.6 Gates
+
+* **python** on 29a9e1a2 (this branch with main 1779035a merged; it touches the pipeline, so `tests/ir` ran, 170.7):
+  `GATE PASSED WITH SKIPS python 29a9e1a2d389 in 621s - skipped: pytest-desktop: 1 live-run-hazard test(s) (fenced: a
+  live run on this machine)`. The privacy check (924 files, 0 findings), the module and the worker (from the artifact
+  cache), the four pytest shards on the Mac (1,049 + 532 + 596 + 950 passed, `tests/ir` among them), the desktop part
+  (44 passed) and the run-loop smoke (16 games).
+* Earlier runs of the tier failed only off this branch's change: when a shard's Mac push or fetch lost a race with the
+  other shards' (`cannot lock ref`), the shard fell back to the desktop, where `test_mac_remote.py::test_the_macs_selfplay_settings`
+  sees `MTGZ_MAC_HOME` rewritten by Git Bash's path conversion (a Mac-only test) or a worker test times out on the
+  loaded desktop; and on the Mac `test_artifact_cache.py::test_check_scope_reads_cargo_dep_info` (Windows-style
+  dep-info paths, ENGINE.md 167) fails, so it is now in `PYTEST_DESKTOP_ONLY`. Both races are main's, for the gate's
+  owner.
+* No engine tier: no IR file, schema, `generated.rs` or engine source changed (170.4); `card_ir`'s changes are its
+  description and a doc comment. The behaviour digest measured anyway: 8f71ccb0d89031a6, EQUAL.
+
+### 170.7 The gate runs the pipeline's tests only when a commit touches the pipeline
+
+The 2,688 tests cost about 8-9 minutes of CPU per python gate, and almost no commit touches the parser. `gate.py`'s
+`ir_tests_needed(sha)` (the orchestrator's request, 2026-11-15) diffs the gated commit against its merge base with
+`main` (else `origin/main`; a commit already on main against its first parent) and looks for a file under
+`IR_TEST_PATHS`: `ir/`, `card_ir/`, `tests/ir/`, `data/cards/`, `tools/card_ir.py`, `tools/ir_fetch_cards.py`,
+`tools/codegen/`. None: `pytest_step` leaves `tests/ir` out (the shards' file list, or `--ignore=tests/ir` unsharded) and
+adds a NOT NEEDED step `pytest-ir` that says why; one or more, or no main to compare with: the tests run, in every tier
+that runs pytest (python, encoding, engine, search-core and the rest share `pytest_step`). The docs tier runs no pytest.
+`tests/test_gate.py::test_the_card_ir_tests_run_only_when_the_commit_touches_the_pipeline` checks both ways, a commit on
+main and no main. By hand: `python -m pytest tests/ir -q` (or `python tools/card_ir.py check` alone, ~5 s).

@@ -31,10 +31,8 @@ SPLITS_DIR = E_ROOT / "splits"
 
 POWERLSV_CUBE_ID = "786d3a10-43bd-438e-acf4-bb150b881254"
 
-# the old mtg-bot checkout's cube list: $MTGZ_MTG_BOT (its checkout), else ~/Documents/Claude/Projects/mtg-bot
-MTG_BOT_CUBE_JSON = Path(
-    local_config.get("MTGZ_MTG_BOT") or (Path.home() / "Documents" / "Claude" / "Projects" / "mtg-bot")
-) / "data" / "cube_power_lsv.json"
+# The PowerLSV cube's Scryfall dump: the card-IR pipeline's input (docs/ENGINE.md 170; mtg-bot's data/ before).
+MTG_BOT_CUBE_JSON = Path(__file__).resolve().parents[2] / "ir" / "data" / "cube_power_lsv.json"
 
 
 def ensure_dirs() -> None:

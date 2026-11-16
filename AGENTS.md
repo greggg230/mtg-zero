@@ -68,6 +68,13 @@ zero-core's (the test keeps the copies equal to the pinned core's).
   `engine/tests/support.rs::SUPPORTED`. Before merging, the `suite` gate runs the full engine suite and a sharded
   2,000-game fuzz per pool (`python tools/fuzz_shards.py --pool <pool> --games 2000`, hidden decklists included); the
   20k depth runs continuously on the farm, not in the gate (the user's decision, `docs/ENGINE.md` 167).
+* **Card data (the IR).** Cards come from the oracle-text parser in `ir/mtgz_ir` (moved from
+  mtg-bot, `docs/ENGINE.md` 170). A card the parser reads wrong is fixed at the parser, with a
+  test in `tests/ir/`, never patched in the JSON; then `python tools/card_ir.py export`
+  regenerates `data/cards/*.ir.json`, the schema and `card_ir/src/generated.rs` together, and
+  `python tools/card_ir.py check` (run by `tests/ir/test_pipeline.py`) proves they match
+  (`docs/card_ir.md`). A changed IR or `generated.rs` is an engine change (engine tier). The gates run
+  `tests/ir` only when a commit touches the pipeline (`ir/`, `card_ir/`, `data/cards/`, ...; `docs/ENGINE.md` 170.7).
 * **Behaviour digests.** `cargo test --release -p engine --test digest -- --ignored --nocapture`
   hashes 2,500 fixed games against `engine/tests/data/digests.txt`. A change meant to keep
   behaviour (a refactor, a speed-up) must leave it unchanged. A change meant to alter play
@@ -147,7 +154,7 @@ ran in your merge note or PR.
   with why, what, tests, digests and measurements. Append a new section, or a numbered subsection to
   the feature's own section. Numbers can be taken by open branches, so check them first.
 * Rules shortcuts you introduce or remove go in `docs/shortcuts.md`. IR problems you find
-  (wrong data from the parser) go in `docs/ir_defects.md`. Never work around them silently.
+  (wrong data from the parser in `ir/`) go in `docs/ir_defects.md`. Never work around them silently.
 * Milestone status lives in `DESIGN.md` §7 (§8 for the Delver mirror).
 * Commit messages say what changed, which sections document it, and the digests. An agent's
   commit ends with its own `Co-Authored-By:` trailer. Branches are named after the work

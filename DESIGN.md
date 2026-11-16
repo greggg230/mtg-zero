@@ -41,9 +41,10 @@ One engine module registers two games:
 | `mtg` | one match of Magic between two decks (best-of-1 first, best-of-3 later) |
 | `team_draft` | a team-draft event: draft, deckbuilding, then the matches (played by the `mtg` agent) |
 
-The Python engine in `Documents/Claude/Projects/mtg-bot` stays the source of card data (its
+The Python engine of the separate mtg-bot project was the source of card data (its
 oracle-text parser) and a reference for differential tests. Nothing is imported from it at run
-time: cards cross over as a data file (section 3.2).
+time: cards cross over as a data file (section 3.2). Since ENGINE.md 170 the parser and its IR
+export live in this repo (`ir/`, `tools/card_ir.py`); mtg-bot is no longer needed for card data.
 
 ## 2. Team Draft Zero
 

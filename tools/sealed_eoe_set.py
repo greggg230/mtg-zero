@@ -8,8 +8,10 @@ identity, mana value, type line, and whether it is in the engine's card table
 printings of main-set cards that Play Boosters can hold (EOE 277-316: borderless viewport lands,
 triumphant and surreal space cards), which only change how often their card's name comes up.
 
-Sources (read-only): mtg-bot's Scryfall dumps (`data/edge_of_eternities.json`,
-`stellar_sights.json`, `special_guests_eoe.json`) and one Scryfall search for EOE 277-316
+Sources (read-only): the card-IR pipeline's Scryfall dumps (`ir/data/edge_of_eternities.json`,
+`stellar_sights.json`, `special_guests_eoe.json`; mtg-bot's `data/` until ENGINE.md 170, the same records:
+the output still labels them `mtg-bot data/...`, and its sha256s are of mtg-bot's Windows checkout, with CRLF line
+ends, where ir/data keeps the LF bytes, so a rerun records new sha256s for the same cards) and one Scryfall search for EOE 277-316
 (`--treatments`, the saved JSON of SCRYFALL_TREATMENTS_URL). Rerun only when the sources change:
 
     python tools/sealed_eoe_set.py --treatments /path/to/eoe_277_316.json
@@ -21,7 +23,7 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MTG_BOT_DATA = os.path.join(os.path.expanduser('~'), 'Documents', 'Claude', 'Projects', 'mtg-bot', 'data')
+MTG_BOT_DATA = os.path.join(ROOT, 'ir', 'data')      # the card-IR pipeline's dumps (ENGINE.md 170)
 DUMPS = (('edge_of_eternities.json', 'eoe'), ('stellar_sights.json', 'eos'), ('special_guests_eoe.json', 'spg'))
 SCRYFALL_TREATMENTS_URL = ('https://api.scryfall.com/cards/search?q=set%3Aeoe+cn%3E%3D277+cn%3C%3D316'
                            '&unique=prints&order=set')

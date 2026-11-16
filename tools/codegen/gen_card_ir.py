@@ -1,7 +1,7 @@
 """Generate the Rust ``serde`` types of the card IR from its schema.
 
-Input: the schema JSON mtg-bot exports next to the IR
-(``python -m mtg_bot.cli cards export-ir``; checked in at
+Input: the schema JSON the card-IR export writes next to the IR
+(``tools/card_ir.py export``, which also runs this generator; checked in at
 ``data/cards/powerlsv.schema.json``). Output: ``card_ir/src/generated.rs``.
 
     python tools/codegen/gen_card_ir.py \
@@ -290,19 +290,23 @@ class Gen:
         return "\n".join(lines)
 
 
+def generate(schema_text: str, where: str = "schema") -> tuple[str, str]:
+    """The schema's JSON text -> (the Rust source, the schema's sha256)."""
+    schema = json.loads(schema_text)
+    if schema.get("format") != "mtg-bot-card-ir-schema":
+        raise SystemExit(f"{where}: not a card IR schema")
+    canon = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+    sha = hashlib.sha256(canon.encode()).hexdigest()
+    return Gen(schema, sha).emit(), sha
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--schema", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--check", action="store_true", help="fail if --out is stale")
     args = ap.parse_args(argv)
-    raw = args.schema.read_text(encoding="utf-8")
-    schema = json.loads(raw)
-    if schema.get("format") != "mtg-bot-card-ir-schema":
-        raise SystemExit(f"{args.schema}: not a card IR schema")
-    canon = json.dumps(schema, sort_keys=True, separators=(",", ":"))
-    sha = hashlib.sha256(canon.encode()).hexdigest()
-    code = Gen(schema, sha).emit()
+    code, sha = generate(args.schema.read_text(encoding="utf-8"), str(args.schema))
     if args.check:
         current = args.out.read_text(encoding="utf-8") if args.out.exists() else ""
         if current != code:
