@@ -22,6 +22,7 @@
 
 pub mod belief;
 pub mod bots;
+pub mod build;
 pub mod constructed;
 pub mod decks;
 pub mod draft;
@@ -179,6 +180,13 @@ impl Eq for Share {}
 /// setup shuffle is the list in that order, the paired deck comparison's slots, ENGINE.md 104).
 /// Best-of-one only; not with `constructed`, `pools`, `lands` (the builder has its own) or
 /// decklists. Without the key every spec is what it was.
+///
+/// A described position (ENGINE.md 95): `"build"` starts every game at the position it describes from
+/// one seat's view (`build.rs`: the zones by card name, the stack, the turn, the decision), the
+/// decklists partitioned over it and what that seat cannot see dealt from the deal seed; best-of-one
+/// only, not with `"start"` or `"seed"`. `"describe": true` makes `export_state` carry `describe`, each
+/// seat's description of the current position (`build::describe`; an `{"error": ...}` where the schema
+/// does not reach). Without them every game is what it was.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -220,6 +228,10 @@ pub struct MtgSpec {
     /// The other seat's worlds know the `keep_deck` seats keep (ENGINE.md 141): a keeper's deck is its
     /// real one there, never dealt.
     pub keep_known: bool,
+    /// A described position (ENGINE.md 95, `build.rs`): games begin there.
+    pub build: Option<std::sync::Arc<build::Build>>,
+    /// `export_state` carries each seat's description of the position (`build::describe`).
+    pub describe: bool,
 }
 
 /// The spec's `"dealt_decks"` (ENGINE.md 154): `p`, the share of matches with one dealt seat (in (0, 1]), and
@@ -283,6 +295,8 @@ impl Default for MtgSpec {
             keep_deck: [false; 2],
             dealt_decks: None,
             keep_known: false,
+            build: None,
+            describe: false,
         }
     }
 }
@@ -403,6 +417,8 @@ impl MtgSpec {
                     s.deck_tilt_ess = Share(e);
                 }
                 "start" => s.start = Some(std::sync::Arc::new(lab::Start::parse(x, db)?)),
+                "build" => s.build = Some(std::sync::Arc::new(build::Build::parse(x)?)),
+                "describe" => s.describe = x.as_bool().ok_or("mtg spec: describe must be a boolean")?,
                 "chooser" => {
                     let c = int()?;
                     if c > 1 {
@@ -639,6 +655,16 @@ impl MtgSpec {
             // `mtg` game is layout v7, which does (ENGINE.md 125), and `mtg_eoe`, layout v6, refuses a
             // card table with any: `eoe::MtgEoeAz::parse_spec`.)
         }
+        if s.build.is_some() {
+            if s.start.is_some() || s.seed.is_some() || s.format != Format::Bo1 {
+                return Err("mtg spec: build is for best-of-one games without start or a match seed".into());
+            }
+            if !matches!(s.decks, DeckMode::Lists(..)) {
+                return Err("mtg spec: build needs the decklists (decks: {\"p0\": [...], \"p1\": [...]}, no sideboards)".into());
+            }
+            // the description is checked now (a trial build), not at the first game
+            MtgAz::from_build(&s, 0).map_err(|e| format!("mtg spec: {e}"))?;
+        }
         Ok(s)
     }
 
@@ -788,6 +814,8 @@ pub struct MtgAz {
     /// A position-lab game's forced line and follow rule (ENGINE.md 76, `lab.rs`); None in every
     /// other game.
     pub lab: Option<Box<lab::Lab>>,
+    /// The spec's `describe`: `export_state` carries each seat's description (ENGINE.md 95).
+    pub describe: bool,
 }
 
 impl MtgAz {
@@ -862,6 +890,7 @@ impl MtgAz {
         az.m.how = how;
         az.m.choice = choice;
         az.m.game_episodes = spec.game_episodes;
+        az.describe = spec.describe;
         Ok(az)
     }
 
@@ -976,7 +1005,7 @@ impl MtgAz {
         let g = Game::with_sideboards(db, gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
         let mut m = MatchState::new(db, format, gspec, seats, seed)?;
         m.deck_priors = deck_priors;
-        let mut az = MtgAz { g, m, lab: None };
+        let mut az = MtgAz { g, m, lab: None, describe: false };
         az.set_known_pools();
         Ok(az)
     }
@@ -996,7 +1025,7 @@ impl MtgAz {
         m.deck_priors = seats.clone().map(|s| {
             Some(std::sync::Arc::new(hidden_decks::ConstructedPrior::new(&s.deck, &s.sideboard)) as std::sync::Arc<dyn hidden_decks::DeckPrior>)
         });
-        let mut az = MtgAz { g, m, lab: None };
+        let mut az = MtgAz { g, m, lab: None, describe: false };
         az.set_known_pools();
         Ok(az)
     }
@@ -1040,6 +1069,9 @@ impl SearchGame for MtgAz {
         // (A drafted match's spec carries the event's match seed; a lab game's start, its spot.)
         if spec.start.is_some() {
             return MtgAz::from_start(spec, seed);
+        }
+        if spec.build.is_some() {
+            return MtgAz::from_build(spec, seed);
         }
         MtgAz::new(spec, spec.seed.unwrap_or(seed))
     }

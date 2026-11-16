@@ -16425,6 +16425,10 @@ tests on a built state, and a fuzz of built positions played to the end. About a
 their tests; the risk is states no game could reach (inconsistent per-turn counters), which the checks
 reduce but do not rule out.
 
+**Built** (2026-11-05, branch mtgo-build): ENGINE.md 95 - a top-level `build` block rather than `start.build` (a
+described position needs no source game), the stack pushed as engine stack items rather than replayed by actions,
+`describe` as its inverse, the round trip as its test.
+
 ### 76.12 Risks, limits, open questions
 
 * **The scripted lines leak to the opponent's searches** (76.3): small here; a candidate whose point is
@@ -17945,6 +17949,358 @@ x `shard_sparse` in all four combinations, and both branches' shard tests pass o
 E:/mtg-zero-scratch/sparse-shards/merge_check.py). Before turning `shard_sparse` on with the Mac: the repin gate's Mac
 step on this commit, so the Mac's workers write sparse shards too (an older Mac checkout writes dense ones, accepted).
 The pin 3f830c5 exists only in the local zero-core repo (not pushed).
+
+## 95. Building a described position: the engine as the MTGO adapter's board (`build`, `describe`, `mtgz.az.build`; 2026-11-05)
+
+Branch `mtgo-build` (from main 9397d67; sections 93-94 are the open shard branches'). 76.11's assessment, built.
+
+**Why.** To play real Magic Online games with the trained Delver network, MTGO is the source of truth: at each
+decision our seat faces, a Python adapter describes the position as MTGO shows it to our seat, and the engine builds
+it, so the existing search runs on it (`legal()`, `encode(viewer)`, `export_state()`, `search_tree`,
+`zero.parity.search_rs` - the Play tab's path). The lab's `start` block (76) starts from a game seed and actions; this
+starts from a description, and its inverse, `describe`, turns any engine position into one (the round-trip test,
+and the schema's executable documentation).
+
+### 95.1 What it is (`engine/src/az/build.rs`, `mtgz/az/build.py`)
+
+* **`"build": {...}`** in the `mtg` spec (`MtgSpec::build`; `new_game` -> `MtgAz::from_build`): every game starts at
+  the described position. Best-of-one decklists only (`decks.p0` / `p1`, `"constructed": true` for 60-card lists; not
+  with `start` or a match `seed`). `MtgSpec::parse` makes a trial build, so a bad description is an error when the
+  spec is parsed, never at a first game.
+* **A built game** is a `Game` made from nothing (`Game::empty`): every card of both decklists created once in the
+  place the description gives it (95.3), the stack's items pushed as engine stack items (not replayed: their
+  targets, modes, cost choices and events as described; what their costs paid - tapped lands, a pitched card, a
+  returned Island, delved cards - is in the described zones), the turn and the decision's agenda set, `advance` to the decision
+  (never answered internally, even with one option), checked (no state-based action pending, the decision the one
+  described, `check_invariants` including `check_knowledge`), wrapped with the spec's match state; then `then` (95.2)
+  and the deal: `determinize` for the viewer from the deal seed (`deal_seed`, else the driver's game seed; its own
+  salted stream), the determinization observer cleared (the dealt world is a real game, as the lab's, 76.1), checked
+  again.
+* **`describe(viewer)`** (`MtgAz::describe`, `build::describe`): the description of an engine position from one
+  seat's view - everything it sees and knows, nothing it does not. An exhaustive destructuring of `Game`, `Player`,
+  `Obj`, `Turn` and `StackItem` (a new field is a compile error there): each field is described, derived, or refused
+  by name when set (95.7). **`"describe": true`** makes `export_state` carry `describe`: both seats' descriptions
+  (`{"error": ...}` where the schema does not reach).
+* **Python** (`mtgz/az/build.py`): `build_game(description, seed, spec=None, p1_deck=None)` -> an engine `Game` (the
+  Delver mirror's spec unless given; player 1's list replaced by `p1_deck`); `describe_from_engine(game, viewer)` (a
+  game whose spec has `describe`; `build_game`'s have it); `viewer_view(state, viewer, decides)` (export_state as one
+  seat may see it); `round_trip(game, viewer)`; `EXAMPLE` (below).
+* Without the keys every spec and game is what it was (the test `without_build_nothing_changes`: the same states,
+  options and moves for 300 random moves; `describe` adds the field and nothing else).
+
+### 95.2 The schema (`mtg-build/1`)
+
+The example (`mtgz.az.build.EXAMPLE`, the test `the_documented_example_builds`): the opponent (P1) cast Lightning
+Bolt at our Dragon's Rage Channeler; we (P0) hold priority with Daze and Force of Will.
+
+```json
+{"viewer": 0, "turn": 5, "active": 1, "step": "main1", "priority": 0, "passes": 0, "starting": 1,
+ "decision": "priority",
+ "players": [
+   {"life": 18, "hand": ["Daze", "Force of Will", "Brainstorm", {"name": "Lightning Bolt", "known_to_opponent": true}],
+    "library_size": 51, "library_known": [{"pos": 0, "name": "Ponder", "known_by": [0]}],
+    "graveyard": ["Mishra's Bauble", "Ponder"], "spells_game": 2},
+   {"life": 19, "hand_size": 4, "hand": ["Wasteland"], "library_size": 51,
+    "library_known": [{"pos": 0, "known_by": [1]}, {"pos": 1, "known_by": [1]}],
+    "graveyard": ["Brainstorm"], "lands_played": 1, "spells_cast": 1, "noncreature_cast": 1, "spells_game": 3}],
+ "battlefield": [
+   {"name": "Volcanic Island", "owner": 1, "tapped": true, "entered": 1},
+   {"name": "Island", "owner": 0, "entered": 2},
+   {"name": "Polluted Delta", "owner": 1, "entered": 3},
+   {"name": "Dragon's Rage Channeler", "owner": 0, "entered": 2, "control_since": 2},
+   {"name": "Volcanic Island", "owner": 0, "entered": 4},
+   {"name": "Volcanic Island", "owner": 1, "tapped": true, "entered": 5, "control_since": 5}],
+ "exile": [],
+ "stack": [{"spell": "Lightning Bolt", "controller": 1, "targets": [{"req": 0, "obj": "b3"}]}]}
+```
+
+Every key is checked (a misspelt one is an error); the defaults are a fresh object's. **Required**: `viewer`, `turn`,
+`active`, `starting`, `step`, both `players` with `library_size` (and the opponent's `hand_size`), every permanent's and
+exile card's `owner`, every stack item's `controller`.
+
+| Key (top level) | Meaning |
+|---|---|
+| `viewer` | the seat whose view it is (0, 1) |
+| `deal_seed` | the deal's seed (default: the game seed) |
+| `turn`, `active`, `starting`, `chooser` | the turn number (0 = the setup), its player (the starting player's turns are the odd ones: extra turns are not built), who took the first turn, who chose (default `starting`) |
+| `step` | `setup`, `untap`, `upkeep`, `draw`, `main1`, `begin_combat`, `declare_attackers`, `declare_blockers`, `first_strike_damage`, `combat_damage`, `end_combat`, `main2`, `end`, `cleanup` |
+| `priority`, `passes` | who has priority (default `active`); consecutive passes, 0 or 1 (default: 1 when the priority holder is not the active player with an empty stack, or not the top item's controller) |
+| `decision` | `"priority"` (default), or `{"kind": "declare_attackers", "next": 0}`, `"attack_target"` (`next`, `attackers`: the creatures whose target is chosen, the deciding one last), `"declare_blockers"` (`next`: the potential blocker's index), `"cleanup_discard"`, `"play_draw"` (`player`), `"mulligan"` (`player`), `"mulligan_bottom"` (`bottoms`: [[player, cards left], ...], the deciding one first) |
+| `players` | [P0, P1] (below) |
+| `battlefield` | permanents in timestamp order (the order they came under their controller's control; it is the layers' order and the order of each player's permanent action slots) |
+| `exile` | face-up exiled cards in exile order: `name`, `owner`, `counters`, `since` (the turn it was exiled) |
+| `stack` | bottom first (MTGO lists the top first) |
+| `emblems` | `name` (the engine's emblem: "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar emblem"), `controller` |
+| `effects` | continuous effects from resolved spells and abilities: `on` (a reference), `until` (`end_of_turn` default, `your_next_turn`, `forever`, `{"while_on_battlefield": ref}`), `controller`, `ts`, and one of `pt` [p, t], `set_pt`, `keywords` [names], `types` {add, subtypes, replace}, `become_types` {types, subtypes}, `colors` ("WU"), `cant_block`, `cant_be_blocked`, `must_attack`, `exile_if_dies`, `exile_if_leaves`, `must_attack_player`, `goad`, `lose_all_abilities` |
+| `delayed` | delayed triggers (a Bauble's draw): `when` (`next_upkeep`, `next_end_step`, `next_cleanup`, `your_next_main_phase`), `controller`, `source`, `card`, `index`, `ev` |
+| `temp_triggers` | triggers a player has for a while (Tamiyo's +2): `controller`, `source`, `card`, `index`, `this_turn`, `obj` |
+| `marks` | `{"on": ref, "exiled_to_pay": ref}`: a card Murktide Regent's delve exiled (its counters as it enters) |
+| `discarded`, `resolved`, `done_once`, `activations` | this turn's lists: cards discarded (refs); abilities' resolutions per object (`on`, `count`); once-each-turn actions (`on`, `trigger`); activations per permanent and ability (`on`, `ability`, `count`: the engine's cap, 31) |
+| `clouds` | the viewer's partial knowledge of the opponent's cards (ENGINE.md 10): `owner`, `hand`, `library`, `positions` (library positions from the top), `cards` |
+| `then` | actions taken from the built decision on, before the deal: option labels (`export_state`'s words) or action ids |
+| `void`, `had_attackers` | (95.10, 95.11) a nonland permanent left the battlefield or a spell was warped this turn; a creature was declared as an attacker or put onto the battlefield attacking in this declare attackers step (CR 508.8; default: the step is the declare attackers step and a creature is attacking - given only when one left combat since) |
+
+| Key (a player) | Meaning |
+|---|---|
+| `life` | (default 20) |
+| `hand` | the viewer's: every card; the opponent's: the cards the viewer knows (revealed, Urza's Bauble, returned from play). A name or `{"name", "known_to_opponent", "ref"}` (`known_to_opponent`: on the viewer's own cards the opponent knows) |
+| `hand_size` | the hand's size (required for the opponent) |
+| `library_size`, `library_known` | the size; the positions somebody knows: `{"pos": from the top, "known_by": [players], "name"}` - the name exactly when the viewer knows it (our Bauble look at our top: `{"pos": 0, "name": "X", "known_by": [0]}`; their Brainstorm's put-back: `{"pos": 0, "known_by": [1]}, {"pos": 1, "known_by": [1]}`) |
+| `graveyard` | bottom first |
+| `pool` | mana in the pool, letters `WUBRGC` ("UR") |
+| `lands_played`, `drawn`, `draw_step_draws`, `spells_cast`, `noncreature_cast`, `spells_game`, `gained_life`, `lost_life`, `left_battlefield`, `attacked_with` | this turn's (and this game's spells) counts and flags the rules and the encoding read (Cori-Steel Cutter's flurry and prowess read `spells_cast`, Tamiyo's flip `drawn`) |
+| `energy`, `mulligans` | counters (Galvanic Discharge's energy); mulligans taken |
+| `kept`, `mulligan_declared` | the setup's (`turn` 0) mulligan state |
+| `turns` | turns begun (derived from the turn number and the starting player unless given) |
+
+| Key (a permanent) | Meaning |
+|---|---|
+| `name`, `token` | the card's name (a back face's name: the card transformed - "Tamiyo, Seasoned Scholar"; a double-faced or split card's front-face name finds the card); `token: true`: a token's name ("Clue", "Monk") |
+| `owner`, `controller` | (`controller` default `owner`) |
+| `tapped`, `damage`, `counters` | `counters` by kind: `+1/+1`, `-1/-1`, `loyalty`, `stun`, `lore`, a keyword's, a named counter's |
+| `entered`, `control_since`, `sick` | the turn it entered and the turn its controller got it (summoning sickness, CR 302.6: `control_since` >= its controller's last turn); default 0 (long ago); `sick: true` sets both to this turn |
+| `attached_to` | what this Equipment or Aura is attached to (a reference) |
+| `attacking`, `attacks`, `blocked`, `blocking`, `struck_first` | combat: `attacks` a planeswalker (a reference; default the player), `blocking` the attacker (a reference) |
+| `loyalty_turn`, `loyalty_used` | the turn of its last loyalty activations and how many (CR 606.3) |
+| `flips`, `ts`, `ref` | times transformed (CR 701.27f); the timestamp (with effects; else the list's order); an alias for references |
+
+| Key (a stack item) | Meaning |
+|---|---|
+| `controller` | required |
+| `spell` (+ `owner`, `origin`) | the spell's card name (its owner if not the controller; the zone it was cast from, default `hand`) |
+| `ability` + `source` | `{"card": the definition's name, "kind": "activated"/"trigger"/"hand"/"graveyard", "index": k}` (95.8's table) and its source (a reference; a sacrificed source: a stale reference to the card where it is now) |
+| `targets` | `[{"req": target requirement, "player": p}` or `"obj": ref` or `"item": stack ref}]`, in the order chosen |
+| `modes`, `x`, `alt`, `cost_option`, `from`, `delved`, `division`, `times`, `spliced`, `attack_as`, `noted` | as the engine has them: the modes chosen (0-based), X, the alternative cost (`alt: 1` = Force of Will's / Daze's), the additional cost, how it was cast (`hand`, `flashback`, ...), cards delved, divided damage, ... |
+| `ev` | a trigger's event: `player`, `obj`, `obj2` (references), `amount`, `item` (a stack ref, or `"gone"`) |
+
+**References** name objects by place: `b<i>` the i-th entry of `battlefield`, `g<p>.<i>` player p's graveyard card i
+(bottom first), `x<i>` exile card i, `s<i>` stack item i (bottom first; as an object, its spell's card), `e<i>` emblem
+i, `h<p>.<i>` card i of player p's `hand` list; or any entry's `"ref"` alias (an MTGO object id). An earlier object of
+a card (CR 400.7: a fetchland's ability whose source was sacrificed, an effect on a creature that died) is `{"ref":
+"g0.3", "stale": true}`; a token that ceased to exist is `{"gone": "Clue", "owner": 0}`. On a layout v7 engine (95.11)
+a stale reference or a gone token may also carry what it shows (`Game::ref_lki`, ENGINE.md 156): `known_by`, the
+players who knew the object as it left (default both: a departure from or to a public zone), and `was`, its identity
+then where the viewer knew it (default the card's identity now; a transformed permanent that died: its back face).
+
+**`then`** reaches a decision inside a cast or a resolution, which is not built directly: the opponent's Daze
+resolving and asking us to pay {1} is "we have priority, Daze on top, `passes` 1" plus `"then": ["Pass priority"]`
+(the test `test_then_reaches_a_decision_inside_a_resolution`). A label must name exactly one option (two "Tap Volcanic
+Island for mana": give the action id). A resolution that reveals cards to us (Brainstorm's draws, a surveil's look)
+needs them named in `library_known` (`known_by` [us]), or the engine deals them at random.
+
+### 95.3 The deck partition and the deal
+
+Best-of-one decklists are open: each player's 60 are placed exactly once. Every card the description names (hands,
+graveyards, exile, non-token permanents, spells, the viewer's known library positions, its clouds' cards) is taken
+out of its owner's list - one more than the list has is an error ("P0's deck has no Lightning Bolt left to place");
+the rest fill the unknown slots (the opponent's unknown hand cards, both libraries' unknown positions), and their
+numbers must be equal ("P0's deck does not fit the description: 50 of its cards are not named anywhere but the
+description leaves 48 unknown slots"). Never fixed silently. The viewer's clouds' cards go into their domains first.
+Then `determinize` for the viewer deals every slot the viewer does not know (the opponent's unknown hand cards, both
+libraries' unknown positions, uniformly within the clouds) - so the description, which holds none of it, decides the
+encoding, and the deal seed decides only the world. The deal is uniform (the belief deal of 69 is the search's own:
+`search_tree` with the root belief re-deals per simulation).
+
+### 95.4 The round trip (`engine/tests/build.rs`, the acceptance test)
+
+Games of the Delver mirror and of Delver against the MTGO test deck (95.6), half uniformly random moves, half the
+heuristic bot's, 4,000 moves at most; at a sampled share of the multi-option decisions: describe from the decider's
+view (a quarter of them also from the other seat's), build (a new game seed), and require (a) the same legal action
+ids when the viewer decides (the labels are in (c)), (b) the same encoding **bitwise** (`f32::to_bits`), (c) the same
+viewer-visible `export_state` (`viewer_view`: ids replaced by places, the log dropped, the opponent's hand as its size
+and the known cards, libraries as their known positions with names where the viewer knows them, the decision's options
+only for the decider), (d) `check_invariants` and `check_knowledge`, (e) the built game describes back to the same
+description, (f) the same `Game::view_of(viewer)` (the hidden-information tests' vector: every public field and the
+viewer's knowledge). A not-built decision (inside a cast or a resolution) reached from the last built position with no
+chance key on the way (nothing hidden revealed, nothing random) is built from that position's description plus
+`then` = the action ids since, and must match (a)-(c).
+
+At `BUILD_GAMES=400 BUILD_SAMPLE=30` (33 s; the committed default is 40 games at 25%, 2 s):
+
+| | positions sampled | at a decision the schema builds | exact (a)-(f) | `then` trips exact |
+|---|---:|---:|---:|---:|
+| the Delver mirror | 34,614 | 27,817 | **27,817 (100%)** | 1,122 of 1,122 |
+| Delver vs the MTGO test deck | 26,408 | 21,831 | **21,831 (100%)** | 724 of 724 |
+
+No description was refused for an unsupported state. The decisions not built (inside casts and resolutions; mirror):
+PayMana 1,193, Target 1,222, PutInGraveyard 952, SearchLibrary 720, YesNo 583, ChooseHandCard 451, OrderTriggers 448,
+PutOnTop 438, ChooseGraveyardCard 345, BounceCost 137, ExileCost 88, ChooseAltCost 69, ChooseMode 57, LegendRule 44,
+ChooseMana 27, AssignDamage 23. Covered by the exact round trips (mirror): 5,556 with a stack (1,977 with two or
+more items, 2,915 with an ability, 1,965 a trigger, 529 an alternative cost - Force of Will, Daze -, 140 delve), 6,887
+in combat steps (3,134 attacking, 353 blocking), 6,464 with Tamiyo flipped and 2,765 with her emblem, 11,379 with
+tokens, 11,088 with Cori-Steel Cutter attached, 10,227 with counters, 3,442 with effects (prowess), 3,949 with
+Tamiyo's +2 trigger, 521 with a Bauble's delayed draw, 705 with Murktide's exiled-card marks, 2,162 with a stale
+reference and 59 a gone token, 11,885 with a known library card (Baubles, Brainstorm), 3,322 with a known card in the
+opponent's hand, 3,524 with our cards the opponent knows, 311 with clouds, 1,038 at the setup's mulligans.
+
+Found and fixed on the way (each a class of the first runs): the setup's `Turn::normal` (0 until the first turn
+begins), effects' and permanents' timestamps (described as they are: `view_of` reads effect timestamps), the turn
+every move sets on an exiled card (`since`), the turn cap (turn `max_turns` is still played), forced attackers'
+stacked attack-target choices.
+
+### 95.5 The leak test
+
+`other_deal_seeds_give_the_same_encoding` (Rust): at 150 sampled priority decisions of random mirror games, the
+description built with four deal seeds gives the same encoding (bitwise), `view_of`, legal actions and description for
+the viewer, the same deal seed the same world (`fingerprint`), and in at least 90% of the positions the opponent's
+hand or the viewer's library order differs between the deals. In Python (`test_other_seeds_give_the_same_encoding`):
+the example built with eight seeds - one encoding, the opponent's three unknown cards dealt differently, the known
+Wasteland always there; a `deal_seed` in the description wins over the game seed.
+
+### 95.6 The MTGO test deck
+
+4 Duress, 4 Galvanic Discharge, 2 Cut Down, 1 Abrade, 1 Figure of Destiny, 1 Aether Spellbomb, 1 Expedition Map, 2
+Talisman of Creativity, 22 Mountain, 22 Swamp: every card is in the engine's pool and supported (`support.rs`); played
+as player 1's list against Delver (`spec_json(p1_deck=...)`, `decks.p1`). Its round trips (95.4) cover energy (8,169
+positions), Figure of Destiny's effects, Duress's reveals and Expedition Map's search.
+
+### 95.7 Derived, dropped, unsupported
+
+* **Derived** by the builder: each player's last turn and turns begun (no extra turns), the last normal turn's player,
+  `cleanup_again` (a cleanup step's priority), the fast-path counts (`n_static`, `n_self_types`, tokens, the first
+  token slot), the next timestamp and stack id, a stack ability's `flips` (its source's), the agenda of the decision;
+  every slot's incarnation is 1 (0 names "an earlier object": a stale reference).
+* **Dropped** (not described; no rule or encoding at these decks' decisions reads them - the round trip compares
+  `view_of` and the encoding): last known information of objects that left the battlefield this turn (`lki_counters`,
+  `lki_copy`, `lki_damage`, `spell_lki`, `Obj::lki_power`), the knowledge bits of cards in public zones (both),
+  vestigial per-object fields of graveyard and stack cards, `delve_floor`, the opponent's clouds over the viewer's
+  cards (its exact knowledge, `known_by`, is kept: the opponent's encodings inside our search see a little less than
+  the real opponent knows), several stale references to one card (one earlier incarnation), the game's RNG (the deal
+  seeds it), the decision count.
+* **Unsupported** (`describe` refuses by name; the builder has no key): face-down cards, copies (copy effects, copies of
+  spells), cards exiled with a permanent (links), permissions to play from exile, extra turns and combats, the monarch,
+  the initiative, day and night, dungeons, companions and sideboards, best-of-three, poison, experience and the rare
+  player flags (can't gain life, sorceries with flash, graveyard play / exile, the city's blessing, protection),
+  restricted pool mana, triggers waiting to be put on the stack (never at a decision), marks other than Murktide's
+  exiled cards, effects on groups and the rare modifications (protection, P/T per permanent or counter, sacrifice for
+  mana, latent abilities), a spell cast with flashback / evoked / escaped, Mox Diamond's discarded land.
+* **Decisions** built: priority (any step, any stack), declare attackers / attack target / declare blockers, the
+  cleanup discard, play-or-draw, mulligan and the mulligan's bottom. Every other decision is inside a cast or a
+  resolution: `then`.
+
+### 95.8 For the MTGO adapter
+
+* **Card names** are the engine's (`data/decks/*.json`'s names): "Tamiyo, Inquisitive Student // Tamiyo, Seasoned
+  Scholar" or its front face's name; the back face's name on the battlefield is the transformed card. Tokens with
+  `"token": true`.
+* **Required fields** (95.2); the rest defaults to a fresh object (untapped, no counters, long under its controller's
+  control). Give `control_since` (the turn number it came under its controller's control) for every creature that
+  came this turn or on its controller's last turn: summoning sickness reads it.
+* **The battlefield's order** is the order permanents came under control (timestamps), not MTGO's layout: the action
+  ids of permanents (`MY_PERM` slots) follow it. `export_state` lists each player's permanents in that order; its ids
+  name the built game's objects (map them back through the description's order or `ref` aliases).
+* **The stack bottom first**; the opponent's spell at our creature is `{"spell": ..., "controller": 1, "targets": [{"req":
+  0, "obj": "b3"}]}`; Force of Will / Daze for their alternative cost `"alt": 1` (the pitched card in `exile`, the
+  returned Island in its owner's hand - known to both); Murktide on the stack: `"delved": n` and a `marks` entry per
+  instant or sorcery its delve exiled. Abilities by the definition's ability index (`card` the definition's name;
+  every row seen on the stack in the round trips' games, 2 x 120 random games of the probe):
+
+  | What | `ability` / where | `source`, `ev` |
+  |---|---|---|
+  | a fetchland's search (Flooded Strand, Misty Rainforest, Polluted Delta, Scalding Tarn); Expedition Map's | activated 0 | stale: the card in its owner's graveyard |
+  | Mishra's / Urza's Bauble's look | activated 0 | stale (graveyard) |
+  | their draw: a `delayed` entry until the next upkeep, then on the stack | `delayed`: `next_upkeep`, `index` 0; the stack: trigger 0 | stale (graveyard) |
+  | Wasteland's destroy (0 is its mana ability) | activated 1 | stale (graveyard) |
+  | Clue's draw | activated 0 (card "Clue") | `{"gone": "Clue", "owner": p}` |
+  | Cori-Steel Cutter's flurry / equip | trigger 0 / activated 0 | ev of a cast trigger (below) / live |
+  | Dragon's Rage Channeler's surveil; a Monk's prowess (its pump: an effect `pt` [1, 1]) | trigger 0 | ev of a cast trigger |
+  | Murktide Regent's +1/+1 counter | trigger 0 | ev: `player`, `obj` the card that left the graveyard (stale, in exile) |
+  | Tamiyo (front): investigate as she attacks / her flip at the third draw | trigger 0 (ev `obj` Tamiyo) / trigger 1 (ev `player`) | live |
+  | Tamiyo, Seasoned Scholar's +2, -3, -7 (card "Tamiyo, Seasoned Scholar") | activated 0, 1, 2 | live |
+  | the +2's "until your next turn": a `temp_triggers` entry, then on the stack | `temp_triggers` card "Tamiyo, Seasoned Scholar", `index` 0; the stack: trigger 0 | ev `obj`: the attacker |
+  | Thundering Falls's surveil | trigger 0 | ev `obj`: the land |
+  | Figure of Destiny's three abilities | activated 0, 1, 2 | their results: effects `set_pt` + `types` (`forever`), `keywords` for the 8/8's |
+
+  A cast trigger's `ev` is `player` (the caster), `obj` (the spell: its `s<i>`) and `amount`, the spells cast before it
+  this turn by both players (storm's count, omitted when 0).
+* **Hidden information**: our hand in full; the opponent's as `hand_size` plus the cards we know; libraries as sizes
+  plus known positions (`known_by` both ways: what the opponent knows is public, ENGINE.md 72); MTGO's shuffles end
+  all library knowledge - the adapter must track looks, put-backs and shuffles itself.
+* **Decisions inside a resolution**: the priority before it plus `then` (95.2), naming in `library_known` what the
+  resolution will show us. **The mulligan** follows the engine's London mulligan (a taker draws seven and bottoms
+  them at once, then everyone declares again: `mulligan_bottom`, then `mulligan`).
+* **A refused build** is the adapter's bookkeeping or an unsupported state: the error names it; never patch the
+  description to make it fit.
+
+### 95.9 Checks
+
+* `engine/tests/build.rs` 6 (the two round trips, the leak test, the example, the partition and description checks, a
+  spec without the keys), in release and once in a debug build (16 games: the debug-only invariants, e.g.
+  "determinize changed the viewer's decision", hold); `az` 41, `lab` 13, `constructed` 7, `hidden` 16 unchanged.
+* `tests/test_build.py` 7 (through the PyO3 module: the round trips at random decisions of both deck pairs, the
+  example, other seeds the same encoding, the checks, a search on a built game, `then`); with `test_mtg_az.py` 15,
+  `test_delver.py` 5, `test_position_lab.py` 15: 42 passed (22 s).
+* Digests: **f6543eb2b1b8752f** (`cargo test --release -p engine --test digest -- --ignored`: 2,000 random + 500
+  heuristic games, unchanged = main's; the digest games use `Game` directly; no rules change).
+* Tier: an opt-in `mtg` spec key with byte-identical defaults (the lab's tier, 76.10: `optin-core`, no core change);
+  the gate itself (`python tools/gate.py optin-core --baseline-root <a checkout of 9397d67>`) is the merge's: it was
+  not run on this branch (it needs a baseline worktree; the tests above are the tier's feature tests).
+
+### 95.10 On a layout v6 engine (branch `mtgo-build-v6`, 2026-11-15)
+
+The three commits cherry-picked onto 39ef0208 (main 45e65178 + the farm code: the engine of the Delver best-of-three
+run, layout v6), so the MTGO adapter and game reviews can build positions for a v6 network. What the 465 commits in
+between changed, and how `build.rs` follows:
+
+* **New state, described:** `void` (the description's top level; `Game::void_turn` = the turn when true: a nonland
+  permanent left the battlefield or a spell was warped this turn, ENGINE.md 99.4 - v6 encodes it, `g6::VOID`), a
+  player's `artifact_entered` (Mishra's Bauble, Cori-Steel Cutter) and `life_gained` (an amount), a delayed trigger's
+  `turn` (only when it is not the current turn; read by "your next turn's end step"). Loyalty activations moved out of
+  `Obj` (`Game::loyalty_of`): a permanent's `loyalty_turn` / `loyalty_used` keep their names.
+* **Refused unless empty / default:** a paged decision, a simultaneous move or entry in progress (`releasing`, `held`,
+  `entries`), a player controlling another's turn, restricted mana, the lands entered this turn (only kept for
+  Bioengineered Future), phased-out permanents, extra loyalty activations, "the next spell can't be countered"
+  effects, a turn whose combat goes on to another phase than the postcombat main phase (`after_combat`).
+* **Derived or transient, not described:** the payment search's flags, the leave-event fields, `ts_group`, the last
+  known information lists, `moon_game`, EoE W6's state, and `loop_taken` (CR 732.2a's records: a built game starts
+  with none; they prune an action only at a view identical to one where it was taken this turn).
+* **Gone:** the activation counts (the activation cap went with F7's loops, `0a58c14a`): `activations` is still
+  accepted and read by nothing; `group_ts`, `miracle_check`, `may_copies`, `targeting`.
+* Numeric widths follow the engine (amounts `i64` / `u64`, counts `u32`); `Zone::PhasedOut`, `CastFrom::LibraryTopMana`
+  and the three new delayed moments have names; `Task::PriorityAsk` carries its page (built and described on the first).
+
+Checks on this branch: `engine/tests/build.rs` 6 passed (the round trips compare the v6 encoding bitwise), and
+`tests/test_build.py` 7 passed through the PyO3 module. Not run: the digests and the gate (no rules change; an opt-in
+spec key). Not merged into main.
+
+### 95.11 On main's layout v7 engine (branch `mtgo-build-main`, 2026-11-15)
+
+The `mtgo-build-v6` branch (95.10) merged into main f19151ef (main had moved 234 commits past 39ef0208: layout v7
+revision 1 and `tail_encode.rs`, the Fable fixes, the rules check). Two conflicts, both additive (`MtgSpec`'s fields
+and defaults: `dealt_decks` and `keep_known` beside `build` and `describe`; DESIGN.md 8's rows D3 and D4). What main's
+engine added to the state, and how `build.rs` follows (`public_state.rs`'s classification of each field):
+
+* **`Turn::had_attackers`** (Public, CR 508.8, ENGINE.md 151.4; view_of and layout v7's `COMBAT_GOES_ON` read it):
+  described as the top-level `had_attackers` only when it differs from what the attacking creatures show (in the
+  declare attackers step, a creature is attacking: the builder's default) - true with no creature attacking, an
+  attacker that left combat since. Refused (a build error) outside the declare attackers step.
+* **`Game::ref_lki`** (Derived, but written by the encoding: a stale reference's identity, `Cx::ref_def` ->
+  `Game::lki_identity`, ENGINE.md 156): each stale reference and gone token in a description carries its entry -
+  `known_by` (default both; `[]`: nobody knew it, no entry) and `was` (default the card's identity now; only where the
+  viewer knew it - an identity the viewer did not know is the card's, as `determinize` makes it). The builder adds one
+  entry per stale object and refuses two references to one stale object that say different things. Without it the
+  round trip fails: with the entries left out, 9% of the mirror's built positions differed (199 encodings, 80
+  descriptions in 3,161) - the head-only comparison of 95.4 could not see it (95.11's test change below).
+* **Refused unless empty:** `Game::sightings` (Hidden: the viewer's sightings for the hidden deck's deal) and
+  `Game::found` (Public: layout v7's `found` tokens, ENGINE.md 142.12) - both kept only where whole-deck clouds are
+  (hidden decklists, `deck_clouds`), which a build never has (open decklists, 95.3); `Game::loop_open` (a loop action's
+  activation in progress: never at a decision the schema builds).
+* **Derived, not described:** `sight_at` (the sightings' clock), `sightings_lost` (a test's flag).
+* No new `Player`, `Obj` or `StackItem` field (the exhaustive destructurings compiled unchanged).
+
+**The round trip's encoding is the whole layout v7 row.** On main `MtgAz::encode` is the row's head only and refuses a
+state with tail tokens (zero-core R1, ENGINE.md 125), so `engine/tests/build.rs` now compares `Row::of_az(...).flat()`
+(the head, the sealed tail tokens with their segments and slots, the options' pointer overrides) bitwise, lengths
+included (`first_diff`); the leak test and the example's alias check likewise. In Python `mtgz.az.build.row_bits`
+(`mtgz.az.games.row`'s float64 row as bits) replaces `encode` in `round_trip` and `tests/test_build.py`; the search
+test's evaluator takes the rows' `tail` / `ov` keywords (`zero.parity.search_rs` passes them for layout v7 games).
+
+Checks (release, `CARGO_TARGET_DIR` of its own): `engine/tests/build.rs` 6 passed (5 s); at `BUILD_GAMES=400
+BUILD_SAMPLE=30`: the Delver mirror 54,011 positions sampled, 41,047 at a decision the schema builds, **41,047 exact
+(100%)**, `then` trips 6,678 of 6,678 exact (3,330 with a stale reference, 129 with a gone token); Delver vs the MTGO
+test deck 72,036 sampled, 46,667 built, **46,667 exact (100%)**, `then` 21,017 of 21,017 (2,643 stale, 74 gone). Once
+in a debug build (`BUILD_GAMES=16`): 6 passed (the debug-only invariants hold). `tests/test_build.py` 7 passed through
+the rebuilt PyO3 module. No rules change: the digests are main's.
 
 ## 97. Rented GPU boxes (Vast.ai): `tools/vast.py` and the remote `'vast'` (branch `vast`, 2026-11-05)
 
