@@ -137,6 +137,35 @@ fn a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game() {
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
+/// ENGINE.md 175: the fuzz steward's queue entry 349c142ff50b (`FUZZ_HIDDEN_DECKS=1` game 100017685, found under the
+/// `fuzz` profile on b309fa08 and reproduced on main 4c7c3b58): in a hidden-decklist world of P0 played on, one step
+/// resolves P1's Urza's Bauble look at a card at random of P0's hand (a Plains: keyed public by design, 141.2), then
+/// runs on to the end step, where Memory Jar's delayed trigger discards P0's hand - so after the step the hand is empty
+/// and the check, which read the hand after the step, failed "P1's private key (kind 3) carries the card's identity
+/// (337) in a world of P0". The engine keyed nothing private (the card was the viewer's own); the check now reads the
+/// hand the look saw. Replayed at the `fuzz` profile's denominator (4) in every profile, every check of `play_hidden`;
+/// it must check a look at a card that left the hand in its step (positive evidence).
+#[test]
+fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
+    use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_LEFT_HAND_LOOKS};
+    use std::sync::atomic::Ordering::Relaxed;
+    if pool_mode() != PoolMode::Default || sealed_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        let seed = 100_017_685u64;
+        let looks0 = PK_LEFT_HAND_LOOKS.load(Relaxed);
+        std::panic::catch_unwind(|| play_hidden(seed))
+            .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+        assert!(PK_LEFT_HAND_LOOKS.load(Relaxed) > looks0, "seed {seed} checked no look at a card that left the viewer's hand in its step");
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 /// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
 /// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
 /// the checks over the whole run to this test), sums the shards' counters and runs this test with
