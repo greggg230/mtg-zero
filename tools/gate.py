@@ -1450,7 +1450,10 @@ def durations_dir():
 
 
 def pytest_files():
-    return sorted(os.path.relpath(p, ROOT).replace('\\', '/') for p in glob.glob(os.path.join(ROOT, 'tests', 'test_*.py')))
+    """Every test file `pytest tests` collects: tests/test_*.py and the card-IR pipeline's tests/ir/test_*.py
+    (ENGINE.md 169)."""
+    found = glob.glob(os.path.join(ROOT, 'tests', 'test_*.py')) + glob.glob(os.path.join(ROOT, 'tests', 'ir', 'test_*.py'))
+    return sorted(os.path.relpath(p, ROOT).replace('\\', '/') for p in found)
 
 
 def pytest_partition(files, n, weights):
