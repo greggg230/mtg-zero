@@ -68,7 +68,7 @@ Cards newly claimed in this batch:
   in the pool prints it without a tap-state qualifier.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
 # test_manifest_dread_then_attach_self_attaches_to_manifested
 
 from __future__ import annotations

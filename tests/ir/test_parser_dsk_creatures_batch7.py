@@ -4,7 +4,7 @@ This batch claims a cluster of DSK creatures by adding bespoke ETB /
 dies / Survival effect classes plus one new generic primitive.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 12 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, mtgz_ir.player_protections, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 12 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, mtgz_ir.player_protections, not carried into mtgz_ir):
 # test_boilerbilges_ripper_etb_accept_but_no_targets_skips_damage, test_boilerbilges_ripper_etb_accept_sacrifices_and_damages_target, test_boilerbilges_ripper_etb_legal_targets_include_creatures_and_players, test_boilerbilges_ripper_etb_no_legal_sacrifice_skips_damage, test_deal_damage_equal_source_power_legal_targets_includes_creatures_and_players, test_deal_damage_equal_source_power_resolves_to_source_power, test_deal_damage_equal_source_power_zero_power_no_op, test_fanatic_etb_controller_empty_hand_no_draw, test_fanatic_etb_each_player_discards_then_controller_draws, test_house_cartographer_empty_library_no_op, test_house_cartographer_no_land_in_library_no_hand_change, test_house_cartographer_reveals_first_land_to_hand
 
 from __future__ import annotations

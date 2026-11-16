@@ -17,7 +17,7 @@ expressible by the unified effect grammar to claim end-to-end with zero
 new code.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 2 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.layouts, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 2 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.layouts, not carried into mtgz_ir):
 # test_arabella_effect_deals_damage_and_gains_life, test_arabella_effect_excludes_high_power_creatures
 
 from __future__ import annotations

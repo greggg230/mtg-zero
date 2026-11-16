@@ -21,7 +21,7 @@ adds ``"flying"`` to a bearer's keyword set whenever that field is
 positive (CR 122 named-counter grant).
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
 # test_ghost_vacuum_decomposed_recalls_creatures_with_flying_counter
 
 from __future__ import annotations

@@ -12,7 +12,7 @@ choice). The threshold flows through
 ``_play_land`` reads it after applying the default ``enters_tapped``.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_horror_dual_etb_enters_untapped_when_player_low_life
 
 from __future__ import annotations

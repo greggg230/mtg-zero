@@ -15,7 +15,7 @@ events or core data fields are required.
   primitive that's out of scope for this batch).
 """
 
-# mtg-zero (docs/ENGINE.md 169): 10 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 10 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_grant_unblockable_attacking_only_filters_legal_targets, test_grant_unblockable_exclude_self_filters_source, test_grant_unblockable_power_at_most_filters_high_power_targets, test_has_power_at_most_handles_missing_subject, test_has_power_at_most_matches_low_power_creature, test_has_power_at_most_rejects_higher_power_creature, test_has_power_at_most_rejects_player_subject, test_static_unlocked_doors_gate_active_at_threshold, test_static_unlocked_doors_gate_ignores_opponent_rooms, test_static_unlocked_doors_gate_inactive_below_threshold
 
 from __future__ import annotations

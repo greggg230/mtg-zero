@@ -1,6 +1,6 @@
 """``mtgz_ir.cards.review_render`` + ``scripts/render_cube_card_review.py``."""
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they run mtg-bot scripts that stayed there:
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they run mtg-bot scripts that stayed there:
 # test_script_end_to_end
 
 from __future__ import annotations

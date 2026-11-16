@@ -6,7 +6,8 @@
 #   bash tools/slotd.sh --status                 # the slots, who holds them, the settings and the memory headroom
 #
 # State (shared by every checkout and session on the machine, outside any repo):
-#   $MTGZ_SLOTS_HOME, default E:/mtg-zero-state on the desktop (Windows), ~/.mtgz-state elsewhere (the Mac)
+#   $MTGZ_SLOTS_HOME, default $ZERO_BIG_DISK/mtg-zero-state on a Windows machine that names a big disk
+#   (~/.config/zero/local.env: the desktop's E:), ~/.mtgz-state elsewhere (the Mac)
 #     slots.conf   settings, re-read on every look (tune it live), `key=value` lines, `#` comments; a bare number is
 #                  `slots` (the old fable-fix slots.conf format):
 #                    slots=3            how many slots
@@ -18,16 +19,20 @@
 #     slots/slotN  a held slot: pid (this script's), cmd (cwd + command), since
 # A slot whose holder is gone is taken over. MTGZ_SLOT_WAIT_MAX=<seconds> gives up after that long without a slot
 # (exit 75, "[slotd.sh] no slot after ..."; tools/gate.py sets it, so a step's timeout covers its wait).
-# On the desktop, a slot held through the old E:/mtg-zero-scratch/fable-fix/slot*.sh (their slot dirs) counts as held
+# On the desktop, a slot held through the old $ZERO_BIG_DISK/mtg-zero-scratch/fable-fix/slot*.sh (their slot dirs) counts as held
 # until its holder ends: the old scripts are shims to this one now.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/local_env.sh"          # the machine's own settings (ZERO_BIG_DISK)
+BIG="${ZERO_BIG_DISK:-}"; BIG="${BIG%/}"
 if [ -n "${MTGZ_SLOTS_HOME:-}" ]; then STATE="$MTGZ_SLOTS_HOME"
-elif [ -d /e ] && [ "$(uname -o 2>/dev/null)" = Msys ]; then STATE=E:/mtg-zero-state
+elif [ -n "$BIG" ] && [ "$(uname -o 2>/dev/null)" = Msys ]; then STATE="$BIG/mtg-zero-state"
 else STATE="$HOME/.mtgz-state"; fi
 CONF="$STATE/slots.conf"
 DIR="$STATE/slots"
 LEGACY=""
-if [ -z "${MTGZ_SLOTS_HOME:-}" ] && [ "$STATE" = E:/mtg-zero-state ]; then LEGACY=E:/mtg-zero-scratch/fable-fix/slots; fi
+if [ -z "${MTGZ_SLOTS_HOME:-}" ] && [ -n "$BIG" ] && [ "$STATE" = "$BIG/mtg-zero-state" ]; then
+  LEGACY="$BIG/mtg-zero-scratch/fable-fix/slots"
+fi
 mkdir -p "$DIR"
 
 setting() {   # setting <key> <default>

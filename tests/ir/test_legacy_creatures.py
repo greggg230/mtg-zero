@@ -3,7 +3,7 @@ Murktide Regent, Prismari Charm) in the parser and the card IR, and the
 shared-schema export (``mtgz_ir cards export-ir --pool cube legacy``) that
 mtg-zero's ``card_ir`` crate reads."""
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_the_python_engine_refuses_to_play_murktide
 
 from __future__ import annotations

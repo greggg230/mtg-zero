@@ -36,7 +36,7 @@ Cards claimed in this batch:
   targeted creatures.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 4 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, mtgz_ir.combat, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 4 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, mtgz_ir.combat, not carried into mtgz_ir):
 # test_coordinated_clobbering_resolve_one_attacker, test_coordinated_clobbering_resolve_two_attackers, test_coordinated_clobbering_skip_friendly_lost_control, test_vengeful_possession_optional_looter_fires
 
 from __future__ import annotations

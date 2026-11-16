@@ -14,7 +14,7 @@ prints the line without other clauses would claim via the same path
 without further grammar work.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 2 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 2 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
 # test_creature_with_enters_tapped_true_etbs_tapped, test_synthetic_vanilla_etbs_untapped_unchanged
 
 from __future__ import annotations

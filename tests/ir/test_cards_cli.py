@@ -23,7 +23,7 @@ def test_export_ir_writes_document_and_schema(tmp_path, capsys):
 
 def test_export_ir_name_override(tmp_path):
     # mtg-zero: mtg-bot's CLI dispatcher (``mtg_bot cards ...``, ``python -m mtg_bot``) stayed there;
-    # the export is ``mtgz_ir.export`` and tools/card_ir.py (docs/ENGINE.md 169).
+    # the export is ``mtgz_ir.export`` and tools/card_ir.py (docs/ENGINE.md 170).
     cards_cli.main(["export-ir", "--pool", "cube", "--out", str(tmp_path), "--name", "x"])
     assert (tmp_path / "x.ir.json").exists() and (tmp_path / "x.schema.json").exists()
 

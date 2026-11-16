@@ -20,7 +20,7 @@ two trailing-rider gates on ``StaticAbility``.
   semantics as the trigger-side ``StateBound(Delirium())`` predicate.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 7 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 7 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_look_at_top_n_counter_on_miss_false_skips_counter_branch, test_return_creature_from_graveyard_max_mv_filters_legal_targets, test_return_creature_from_graveyard_max_mv_zero_unbounded, test_static_delirium_gate_active_at_threshold, test_static_delirium_gate_ignores_opponent_graveyard, test_static_delirium_gate_inactive_below_threshold, test_static_delirium_gate_requires_state_object
 
 from __future__ import annotations

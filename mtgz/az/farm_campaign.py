@@ -56,6 +56,8 @@ import subprocess
 import sys
 import time
 
+from zero import local_config
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STATE_ROOT = os.path.join(os.path.expanduser('~'), '.zero-farm', 'campaigns')
 EXPORT_CACHE = os.path.join(STATE_ROOT, '_exports')
@@ -573,11 +575,12 @@ def status(d, client=None, opts=None):
 # ------------------------------------------------------------------------------------------------ the local fallback
 def runtime_dll(st):
     """The ONNX Runtime the local worker loads: `ort_dll`, else the runtime pack's next to the build
-    (<builds>/<runtime>/onnxruntime.dll), else the desktop's copy of the registered pack (E:/zero-farm-builds/<id>/)."""
+    (<builds>/<runtime>/onnxruntime.dll), else the desktop's copy of the registered pack ($ZERO_BIG_DISK/zero-farm-builds/<id>/)."""
     if st.get('ort_dll'):
         return st['ort_dll']
     looked = []
-    for base in (os.path.dirname(os.path.dirname(st['worker'])), 'E:/zero-farm-builds'):
+    builds = local_config.big_disk_path('zero-farm-builds')
+    for base in [os.path.dirname(os.path.dirname(st['worker']))] + ([builds] if builds else []):
         p = os.path.join(base, st['runtime'] or '', 'onnxruntime.dll')
         looked.append(p)
         if st['runtime'] and os.path.exists(p):

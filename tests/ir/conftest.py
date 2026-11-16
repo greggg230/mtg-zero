@@ -1,4 +1,4 @@
-"""pytest setup for the card-IR pipeline's tests (docs/ENGINE.md 169): import ``mtgz_ir`` from ``ir/``.
+"""pytest setup for the card-IR pipeline's tests (docs/ENGINE.md 170): import ``mtgz_ir`` from ``ir/``.
 
 The tests came from mtg-bot with its parser (renamed ``mtg_bot`` -> ``mtgz_ir``). They run on the
 parser source (``OracleParserCardSource``), as mtg-bot's own conftest made them; ``MTG_BOT_CARD_SOURCE``

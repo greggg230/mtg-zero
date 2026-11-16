@@ -5,7 +5,7 @@ Progress, Rough // Tumble): their printings, the one recognizer of
 / without <keyword>") and the Python semantics of
 ``effects/generic/legacy_delver_sb.DealNDamageToEachCreatureMatching``."""
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_the_damage_reaches_only_the_matching_creatures
 
 from __future__ import annotations

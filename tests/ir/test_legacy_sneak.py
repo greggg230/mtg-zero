@@ -5,7 +5,7 @@ one recognizer of ``cards/parser/legacy_sneak.py`` ("deals N damage to each
 creature and each planeswalker") and the Python semantics of
 ``effects/generic/legacy_sneak.DealNDamageToEachCreatureAndPlaneswalker``."""
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_the_damage_reaches_each_creature_and_planeswalker_not_players
 
 from __future__ import annotations

@@ -88,7 +88,7 @@ All EoE/DSK artifact creatures from this batch are now migrated.
 Remaining bespoke cards (still in ``_BESPOKE_ARTIFACT_CREATURES``): none.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.combat, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.combat, not carried into mtgz_ir):
 # test_survey_mechan_effect_resolve_damage_and_draw
 
 from __future__ import annotations

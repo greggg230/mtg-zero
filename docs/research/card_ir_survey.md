@@ -5,7 +5,7 @@ Research report, 2026-10-21. This is a read-only survey of `mtg-bot` at `main` @
 It answers one question: is "Python oracle parser -> serializable card IR (JSON) -> Rust interpreter of the primitives" viable for a zero-core `SearchGame` covering the PowerLSV cube? And if it is, how big is the Rust surface?
 
 **Path roots.**
-- `MB/` = `C:\Users\Gregg Keithley\Documents\Claude\Projects\mtg-bot\`
+- `MB/` = `C:\Users\<user>\Documents\Claude\Projects\mtg-bot\`
 - File references without a prefix are relative to `MB/src/mtg_bot/`.
 
 **Method.** The pool was built with `OracleParserCardSource(pool="cube")`, which claims 546 of 546 cards in about 1.8 s (`cards/parser/source.py:189`). Every `CardPrinting` object graph was then walked by reflection: dataclass fields, non-field `__dict__` attributes, tuples, sets, dicts, enums and nested printings (faces, tokens, emblems). Scripts are in `docs/research/scripts/`:

@@ -1,4 +1,4 @@
-"""The card-IR pipeline in mtg-zero (docs/ENGINE.md 169): regenerating at the current inputs reproduces
+"""The card-IR pipeline in mtg-zero (docs/ENGINE.md 170): regenerating at the current inputs reproduces
 the checked-in IR files, the schema and card_ir/src/generated.rs byte for byte."""
 import importlib.util
 import os

@@ -6,7 +6,7 @@ that the Rust rules engine (crate `card_ir`, `docs/card_ir.md`) can load
 the parsed cards without a per-class bridge. Code: `ir/mtgz_ir/cards/ir.py`.
 Tests: `tests/ir/test_card_ir.py`.
 
-This is mtg-bot's `docs/CARD_IR.md`, moved with the pipeline (docs/ENGINE.md 169).
+This is mtg-bot's `docs/CARD_IR.md`, moved with the pipeline (docs/ENGINE.md 170).
 The format's names (`mtg-bot-card-ir`, `mtg-bot-card-ir-schema`) and the
 schema's module labels (`mtg_bot.<module>` for the package now called
 `mtgz_ir`, `ir.SCHEMA_MODULE_PACKAGE`) are the first exporter's, kept so

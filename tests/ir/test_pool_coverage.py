@@ -1,6 +1,6 @@
 """``mtgz_ir.cards.pool_coverage`` + ``scripts/measure_cube_coverage.py``."""
 
-# mtg-zero (docs/ENGINE.md 169): 9 of mtg-bot's tests in this file stayed in mtg-bot: they run mtg-bot scripts that stayed there:
+# mtg-zero (docs/ENGINE.md 170): 9 of mtg-bot's tests in this file stayed in mtg-bot: they run mtg-bot scripts that stayed there:
 # test_committed_doc_is_fresh, test_committed_roto_doc_is_fresh, test_script_default_out_follows_pool, test_script_diagnose_card_gate_kind, test_script_diagnose_card_real_probe, test_script_name_gate_opens_and_restores, test_script_no_write, test_script_roto_headline, test_script_writes_doc
 
 from __future__ import annotations

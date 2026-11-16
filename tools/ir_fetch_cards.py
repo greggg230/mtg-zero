@@ -30,7 +30,7 @@ list provides it) and never faked into the pool. ``--compare-cube ID``
 additionally resolves a CubeCobra cube's ids to oracle names and
 records the two-way difference in the sidecar.
 
-mtg-zero (docs/ENGINE.md 169): this is mtg-bot's ``scripts/fetch_cube.py``. Its ``data/`` is the
+mtg-zero (docs/ENGINE.md 170): this is mtg-bot's ``scripts/fetch_cube.py``. Its ``data/`` is the
 card-IR pipeline's ``ir/data`` (the relative paths above are relative to ``ir/``; ``--out`` and
 ``--names`` take any path). It fetches card data (JSON) only, never images. From the repo root::
 

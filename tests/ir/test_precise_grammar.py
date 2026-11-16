@@ -46,7 +46,7 @@ import functools
 
 
 # mtg-zero: mtg-bot's tests/_spells_a_helpers.cube_printings, inlined (the helper module also builds
-# Python-engine games, which stayed in mtg-bot; docs/ENGINE.md 169).
+# Python-engine games, which stayed in mtg-bot; docs/ENGINE.md 170).
 @functools.lru_cache(maxsize=1)
 def cube_printings():
     from mtgz_ir.cards.parser.source import OracleParserCardSource

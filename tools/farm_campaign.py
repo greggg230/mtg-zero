@@ -42,7 +42,7 @@ create / update:
    flags over it (`--env` replaces the whole env).
 2. The build's signed worker: its build directory (`manifest.json` whose sha256[:24] is the build id, the executable
    checked against the manifest) under the farm_build dist directories (`--dist`, default every
-   E:/cargo-target/mtg-zero/*/farm-build/dist and this checkout's), or `--worker EXE` (its `info` must name the
+   $ZERO_BIG_DISK/cargo-target/mtg-zero/*/farm-build/dist and this checkout's), or `--worker EXE` (its `info` must name the
    build). `info` must list the kind `fuzz`; then `fuzz-check --mode M --env K=V ...` must accept the mode and env
    (PROTOCOL 5.1) and name the manifest's engine commit.
 3. The campaign's definition (zero.farm_def, PROTOCOL 7): kind campaign, builds [the build], the build's runtime pack
@@ -60,7 +60,7 @@ published as in 2-3; nothing else is put.
 
 The admin token: the file ~/.config/zero-farm/admin_token (`--token-file`), handed to farm-release in its
 environment, never on a command line, never printed. The data key: ~/.config/zero-farm/data.key (`--key`).
-farm-release: `--farm-release` (default E:/cargo-target/zero-farm/main/release/farm-release.exe).
+farm-release: `--farm-release` (default $ZERO_BIG_DISK/cargo-target/zero-farm/main/release/farm-release.exe, else on PATH).
 """
 import argparse
 import glob
@@ -76,6 +76,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import mtgz  # noqa: E402,F401  (this checkout's pinned zero-core on sys.path)
 from zero import farm_def as FD  # noqa: E402
+from zero import local_config  # noqa: E402
 
 HOME = os.path.expanduser('~')
 EXPIRES_DAYS = 90
@@ -120,7 +121,8 @@ def parse_env(items):
 def dist_dirs(extra=None):
     if extra:
         return list(extra)
-    out = sorted(glob.glob('E:/cargo-target/mtg-zero/*/farm-build/dist'))
+    big = local_config.big_disk_path('cargo-target', 'mtg-zero')
+    out = sorted(glob.glob(f'{big}/*/farm-build/dist')) if big else []
     try:
         import farm_build
         mine = os.path.join(farm_build.target_dir(), 'dist')
@@ -302,11 +304,12 @@ def chunk_of(v):
 # ---------------------------------------------------------------- analysis campaigns (ENGINE.md 165)
 
 def find_worker(build_id, dists=None):
-    """A signed build's executable and manifest: under the farm_build dist directories, else E:/zero-farm-builds/<id>/
+    """A signed build's executable and manifest: under the farm_build dist directories, else $ZERO_BIG_DISK/zero-farm-builds/<id>/
     (the desktop's copies of registered builds)."""
     bd, man = build_dir_of(build_id, dist_dirs(dists))
-    if bd is None and os.path.exists(os.path.join('E:/zero-farm-builds', build_id, 'manifest.json')):
-        bd, man = build_dir_of(build_id, ['E:/zero-farm-builds'])
+    builds = local_config.big_disk_path('zero-farm-builds')
+    if bd is None and builds and os.path.exists(os.path.join(builds, build_id, 'manifest.json')):
+        bd, man = build_dir_of(build_id, [builds])
     if bd is None:
         die(f'build {build_id}: no signed build directory found (give --worker or --dist)')
     return os.path.join(bd, man.get('entry') or 'mtgz-worker.exe'), man

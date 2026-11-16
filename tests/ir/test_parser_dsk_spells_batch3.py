@@ -61,7 +61,7 @@ Cards newly claimed in this batch:
   the regex prefix accepts the surface form as it lands.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.creature_statics_wg, not carried into mtgz_ir):
 # test_glimmerlight_resolves_etb_glimmer_token_creation
 
 from __future__ import annotations

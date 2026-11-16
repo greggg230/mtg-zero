@@ -6,7 +6,7 @@ single-faced colour indicator, and the Python semantics of
 ``effects/generic/legacy_spells.PayManaOrElse`` and of
 ``ScheduleDelayedEffect``'s ``your_upkeep`` step."""
 
-# mtg-zero (docs/ENGINE.md 169): 3 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 3 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_pay_mana_or_else_declined_or_unpayable_loses, test_pay_mana_or_else_pays, test_your_upkeep_waits_for_the_controllers_next_upkeep
 
 from __future__ import annotations

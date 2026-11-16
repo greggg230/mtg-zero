@@ -1,4 +1,4 @@
-"""The card-IR pipeline: Oracle text -> card IR -> card_ir's Rust types (docs/ENGINE.md 169, docs/card_ir.md).
+"""The card-IR pipeline: Oracle text -> card IR -> card_ir's Rust types (docs/ENGINE.md 170, docs/card_ir.md).
 
 The parser (``ir/mtgz_ir``, moved from mtg-bot) reads the pools' Scryfall dumps in ``ir/data`` and
 encodes every parsed card as the card IR, with one schema over the three pools. This tool writes the

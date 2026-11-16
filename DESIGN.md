@@ -43,7 +43,7 @@ One engine module registers two games:
 
 The Python engine of the separate mtg-bot project was the source of card data (its
 oracle-text parser) and a reference for differential tests. Nothing is imported from it at run
-time: cards cross over as a data file (section 3.2). Since ENGINE.md 169 the parser and its IR
+time: cards cross over as a data file (section 3.2). Since ENGINE.md 170 the parser and its IR
 export live in this repo (`ir/`, `tools/card_ir.py`); mtg-bot is no longer needed for card data.
 
 ## 2. Team Draft Zero

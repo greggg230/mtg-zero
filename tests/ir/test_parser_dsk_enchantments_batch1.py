@@ -49,7 +49,7 @@ Cards newly claimed in this batch:
   offering it through ``legal`` is the unoffered-alt-cost shape.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 2 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.player_protections, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 2 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.player_protections, not carried into mtgz_ir):
 # test_may_discard_yes_no_yes_path_discards_chosen_card, test_sac_other_than_enchanted_excludes_host_from_options
 
 from __future__ import annotations

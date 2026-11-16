@@ -34,7 +34,7 @@ the new printing-level fields, the line recognizers, the engine
 hooks, and the end-to-end claim assertions.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 11 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 11 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_cast_via_hand_cleared_when_returning_via_blink, test_cast_via_hand_default_false_on_new_object, test_creatures_died_this_turn_tracker_clones_via_state_clone, test_creatures_died_this_turn_tracker_increments_on_death, test_creatures_died_this_turn_tracker_no_increment_on_exile, test_creatures_died_this_turn_tracker_no_increment_on_noncreature, test_creatures_died_this_turn_tracker_resets_at_cleanup, test_etb_replacement_minus_one_counters_from_hand_cast_only, test_etb_replacement_minus_one_counters_inactive_when_not_from_hand, test_etb_replacement_plus_one_counter_active_when_creature_died, test_etb_replacement_plus_one_counter_inactive_with_no_deaths
 
 from __future__ import annotations

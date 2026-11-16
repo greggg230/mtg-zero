@@ -35,7 +35,7 @@ creatures-batch-4 / spells-batch-4 work and the four cards stay
 unclaimed end-to-end on this branch.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 9 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 9 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_enduring_dies_via_engine_path_returns_as_enchantment, test_enduring_effect_no_op_for_token_source, test_enduring_effect_no_op_if_no_resolving_source, test_enduring_effect_no_op_if_source_not_in_graveyard, test_enduring_effect_returns_card_to_owners_battlefield, test_enduring_effect_routes_to_owner_not_resolver, test_enduring_second_death_does_not_re_fire, test_is_creature_now_face_down_takes_precedence_over_enduring, test_is_creature_now_false_with_enduring_flag
 
 from __future__ import annotations

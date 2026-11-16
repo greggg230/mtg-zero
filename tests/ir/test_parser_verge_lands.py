@@ -14,7 +14,7 @@ requires_control_of_subtype``; ``legal_actions`` consults
 ``effective_subtypes``.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_verge_gate_activation_requires_subtype
 
 from __future__ import annotations

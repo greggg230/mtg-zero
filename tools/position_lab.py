@@ -16,7 +16,7 @@ Input spots:
 * `--replay` + `--frame`: a zero-replay/1 file (runs/<run>/replays/*.json.gz, mtgz.az.replays) and the
   index of one of its frames - the spot is the state before that frame's move;
 * `--site-id`: a delverai.greggg230.com replay id, mapped to the local file the publisher saved by its
-  log (`--publish-log`, default E:/mtg-zero-scratch/delverai-publish.log: each "recording N games of
+  log (`--publish-log`, default $ZERO_BIG_DISK/mtg-zero-scratch/delverai-publish.log: each "recording N games of
   iteration I (<checkpoint>)" block's "uploaded {... 'id': ...}" lines, in game order, and the files
   <run>/replays/<recorded HHMMSS>_<game>.json.gz whose title is "Generation I");
 * `--record`: a JSON object (or a .jsonl file's line i, `F:i`, every line with `bauble --record F`) with
@@ -72,13 +72,13 @@ import mtgz.az as A                    # noqa: E402,F401  (puts the pinned zero-
 FETCHES = ('Flooded Strand', 'Misty Rainforest', 'Scalding Tarn', 'Polluted Delta')
 BAUBLE = "Mishra's Bauble"
 PASS = 'Pass priority'
-REPLAYS = os.environ.get('MTGZ_LAB_REPLAYS', r'C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/replays')
+REPLAYS = os.environ.get('MTGZ_LAB_REPLAYS', os.path.expanduser('~/mtg-zero/runs/r3-2b-beliefsearch/replays'))
 # The engine's play changed on purpose at this time (epoch seconds): a replay recorded before it
 # can't be rebuilt action for action (the decisions differ: e.g. ENGINE.md 100.3 orders triggers of
 # different objects of one card, which the old engine offered once). Bump it with every commit that
 # re-records the behaviour digests; replays recorded since are the ones `check_spot` must rebuild.
 RULES_EPOCH = 1794687704  # 2026-11-14 12:21:44 -0800: the Fable-review fix campaign integrated (ENGINE.md 140-162, integrate/fable-1112)
-PUBLISH_LOG = r'E:/mtg-zero-scratch/delverai-publish.log'
+PUBLISH_LOG = A.local_config.big_disk_path('mtg-zero-scratch/delverai-publish.log', default='delverai-publish.log')
 MODES = ('belief', 'actual', 'pinned', 'uniform')
 
 

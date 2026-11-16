@@ -12,7 +12,7 @@ again unless `--refresh` is given. Scryfall's limits are respected: at most
     python tools/fetch_rulings.py [--cube PATH] [--refresh]
 
 The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari
-Charm; the card-IR pipeline's pool `legacy`, `ir/data/legacy_delver.json`, ENGINE.md 169) go to
+Charm; the card-IR pipeline's pool `legacy`, `ir/data/legacy_delver.json`, ENGINE.md 170) go to
 their own file:
 
     python tools/fetch_rulings.py --cube ir/data/legacy_delver.json --out data/rulings/legacy.rulings.json
@@ -26,7 +26,7 @@ import time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_CUBE = os.path.join(ROOT, "ir", "data", "cube_power_lsv.json")     # the card-IR pipeline's (ENGINE.md 169)
+DEFAULT_CUBE = os.path.join(ROOT, "ir", "data", "cube_power_lsv.json")     # the card-IR pipeline's (ENGINE.md 170)
 OUT_DIR = os.path.join(ROOT, "data", "rulings")
 CACHE = os.path.join(OUT_DIR, ".cache")
 OUT = os.path.join(OUT_DIR, "powerlsv.rulings.json")

@@ -158,7 +158,7 @@ order must be deterministic); no threads, callbacks or interior mutability.
   generator, pool, draft, fuzz pool and digest) and `CardDb::constructed()` (the cube's cards, the
   same definitions at the same ids, then `data/cards/legacy.ir.json`'s, then their tokens and faces;
   only games with `"constructed": true` use it). Both IR files carry one schema (the export of the
-  pools together: `tools/card_ir.py export`, section 169; mtg-bot's `cards export-ir` before), so
+  pools together: `tools/card_ir.py export`, section 170; mtg-bot's `cards export-ir` before), so
   one `card_ir` crate reads both.
 * Token definitions (CR 111) are lowered from `CreateToken.token_printing` like any printing
   (the "Token" supertype sets `CardDef.token`), interned by equality and stored after the
@@ -1421,7 +1421,7 @@ M7c commit kept all 2,500 digests; the check caught one wrong fast path on the w
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
-0. The card's IR comes from the oracle-text parser in `ir/mtgz_ir` (section 169; `docs/card_ir.md`).
+0. The card's IR comes from the oracle-text parser in `ir/mtgz_ir` (section 170; `docs/card_ir.md`).
    A card outside the pools: its Scryfall record into `ir/data` (`tools/ir_fetch_cards.py`, a
    name-list pool such as `legacy_delver.sheet.json`). Text the parser doesn't read, or reads
    against the Oracle text: fix the parser (a parameterized recognizer,
@@ -6951,7 +6951,7 @@ records, results).
 ## 44. The Mac: offload and remote evaluation
 
 Branch `m6-mac` (from eeb6291; Python, tools and docs only: the engine is eeb6291's). The MacBook
-(Apple M4 Max: 12 performance and 4 efficiency cores, 64 GB, no CUDA; `greggkeithley@100.95.248.116`
+(Apple M4 Max: 12 performance and 4 efficiency cores, 64 GB, no CUDA; `<mac>`
 on the tailnet, key auth) is a second machine for MTG Zero in two ways: CPU-only work (cargo tests,
 fuzz runs, search smokes, pytest) through `tools/mac.sh`, and a run's evaluations (the yardstick and
 random matches, the Elo matches) through zero-core's `eval_remote`, while the desktop keeps
@@ -7121,8 +7121,8 @@ engine is eeb6291's, so its search-smoke gate holds), at an iteration boundary:
    evaluated: `eval_every` 2) self-plays; the run exits after its training and the supervisor with it.
 4. `rm runs/mtg5/STOP`, and from the new worktree: `python tools/launch_hidden.py
    <run>/supervisor_console.txt python tools/supervise.py <run> --preset mtg-4 --seed 1 --eval-every 2
-   --eval-remote mac` (`<run>` = `C:/Users/Gregg Keithley/mtg-zero/runs/mtg5`). The log says `evaluations on the
-   remote 'mac' (greggkeithley@100.95.248.116)`; the first evaluated iteration creates
+   --eval-remote mac` (`<run>` = `C:/Users/<user>/mtg-zero/runs/mtg5`). The log says `evaluations on the
+   remote 'mac' (<mac>)`; the first evaluated iteration creates
    `~/mtgz-remote/mtg5` and logs `iter N vs heuristic (remote mac, ...s)` and `iter N elo ... (remote
    mac)`; `runs/mtg5/evals.jsonl` holds the results. `--eval-remote ''` turns it off (from then the
    run evaluates here again; `elo/` is the Mac's last).
@@ -8233,8 +8233,8 @@ python -m mtgz.az.run --run E:/mtg-zero-scratch/cotrain-remote/td_mac --preset t
   --resolver-cfg '<team_draft-smoke resolver_cfg + "eval_remote": "mac">'
 ```
 
-The log: `[resolver] evaluations on the remote 'mac' (greggkeithley@100.95.248.116, mirror
-/Users/greggkeithley/mtgz-remote/td_mac.resolver)`; the preflight passed. Iterations 0-3, 3 min 2 s,
+The log: `[resolver] evaluations on the remote 'mac' (<mac>, mirror
+/Users/<user>/mtgz-remote/td_mac.resolver)`; the preflight passed. Iterations 0-3, 3 min 2 s,
 `done`:
 
 | | where | iteration 0 | 1 | 2 | 3 |
@@ -8276,7 +8276,7 @@ As for mtg5 (44.5), from the run's pinned worktree at a commit with this branch'
 3. `python tools/launch_hidden.py <run>/supervisor_console.txt python tools/supervise.py <run>
    --preset team_draft-4v4 --resolver-init <the mtg5 checkpoint>`: the preset's `resolver_cfg` has
    `eval_remote` 'mac'. The log says `[resolver] evaluations on the remote 'mac' (..., mirror
-   /Users/greggkeithley/mtgz-remote/<run>.resolver)`; each evaluated iteration of the play network
+   /Users/<user>/mtgz-remote/<run>.resolver)`; each evaluated iteration of the play network
    logs `[resolver] iter N vs heuristic (remote mac, ...s)` and `[resolver] iter N elo ... (remote
    mac)`; `<run>/resolver/evals.jsonl` holds the results.
 4. Off (or on, for a run started without it), at a restart: `--resolver-cfg` with the whole dict (a
@@ -8324,7 +8324,7 @@ Rust is unchanged):
   decisions, parked records at most 11.55 and 16.52 MB.
 * **Refusals at start** in the co-training path (48.2): an uncommitted change in the run's checkout;
   a commit without its Mac checkout (this section's docs commit 049564a, which has no `--eval-checkout`): stopped at start, "eval_remote:
-  greggkeithley@100.95.248.116:/Users/greggkeithley/mtg-zero-wt/run-049564aa0bfa is not the run's
+  <mac>:/Users/<user>/mtg-zero-wt/run-049564aa0bfa is not the run's
   code (049564aa0bfa): zsh:cd:1: no such file or directory: ..." and "prepare it: in <checkout>: bash
   tools/mac.sh --eval-checkout".
 * **zero-core** (`feat/cotrain-remote` af44741): `cargo test --release` 44 passed (unchanged Rust);
@@ -9584,7 +9584,7 @@ network's matches are the bottleneck).
 ### 52.3 End to end with the Mac (`mtg-smoke`, `team_draft-smoke`)
 
 From this worktree (clean, committed), `bash tools/mac.sh --eval-checkout` (~40 s:
-`~/mtg-zero-wt/run-<sha12>`), the mirrors in a test workdir (`ZERO_SELFPLAY_WORKDIR=/Users/greggkeithley/mtgz-selfplay-test`,
+`~/mtg-zero-wt/run-<sha12>`), the mirrors in a test workdir (`ZERO_SELFPLAY_WORKDIR=/Users/<user>/mtgz-selfplay-test`,
 with `MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR`: Git Bash rewrites a POSIX path in the environment of a
 Windows process, which the first attempt showed - its worker could not find its mirror, and ssh had
 created `~/C:/Program Files/Git/...` on the Mac, removed; such a workdir is now refused at start),
@@ -9749,15 +9749,15 @@ commit has none of it), so the switch is a re-pin, as for 48.3:
 4. `rm runs/td1/STOP`, and from the new worktree:
 
    ```
-   python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1/supervisor_console.txt" \
-     python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1" --preset team_draft-4v4 \
+   python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/td1/supervisor_console.txt" \
+     python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/td1" --preset team_draft-4v4 \
      --resolver-cfg '{"preset": "mtg-4", "eval_every": 2, "eval_remote": "mac", "selfplay_remote": "mac"}'
    ```
 
    (`--resolver-cfg` replaces the saved dict: the whole of td1's, plus `selfplay_remote`.) The log
-   says `[resolver] episodes also on the remote 'mac' (greggkeithley@100.95.248.116, 2 worker(s),
-   mirror /Users/greggkeithley/mtgz-selfplay/td1.resolver)`, within seconds `[resolver] remote
-   self-play mac: worker 0 up (pid ... on Greggs-MacBook-Pro.local, ...)`, and after each self-play
+   says `[resolver] episodes also on the remote 'mac' (<mac>, 2 worker(s),
+   mirror /Users/<user>/mtgz-selfplay/td1.resolver)`, within seconds `[resolver] remote
+   self-play mac: worker 0 up (pid ... on <mac-hostname>.local, ...)`, and after each self-play
    phase `[resolver] iter N remote self-play: 2 worker(s), ... games, ... samples in ... shards
    (... MB), ... leaves/s ...; matches ... back, ... assigned, ... outstanding, ...`; the primary's
    `cotrain` row gets `episodes_remote`, the resolver's metrics `selfplay.remote`; progress.json
@@ -9995,13 +9995,13 @@ the CPU for part of the time):
 tools/mac.sh --eval-checkout`, the mirrors in a test workdir beside td1's):
 
 ```
-MSYS2_ENV_CONV_EXCL=ZERO_EVAL_WORKDIR ZERO_EVAL_WORKDIR=/Users/greggkeithley/mtgz-evalstall-test \
+MSYS2_ENV_CONV_EXCL=ZERO_EVAL_WORKDIR ZERO_EVAL_WORKDIR=/Users/<user>/mtgz-evalstall-test \
   python -m mtgz.az.run --run E:/mtg-zero-scratch/eval-stall/td_mac --preset team_draft-smoke --iters 3 \
   --games 8 --draft-eval-net-remote mac
 ```
 
-The log: `eval_yard_net on the remote 'mac' (greggkeithley@100.95.248.116, mirror
-/Users/greggkeithley/mtgz-evalstall-test/td_mac)`; iterations 0 and 2 (`draft_eval_net_every` 2)
+The log: `eval_yard_net on the remote 'mac' (<mac>, mirror
+/Users/<user>/mtgz-evalstall-test/td_mac)`; iterations 0 and 2 (`draft_eval_net_every` 2)
 wrote their metrics rows without `eval_yard_net` and went on; `iter 0 vs consensus (episodes by the
 resolver net; remote mac, 12s): {'win': 0.625, ...}` and `iter 2 ... (remote mac, 11s): {'win':
 0.75, ...}` (8.0 and 7.9 s of play there, the rest shipping and ssh); `evals.jsonl` holds both rows
@@ -10039,17 +10039,17 @@ iteration 8's. Turning it on, when td1 is to resume, is a re-pin as for 48.3 and
    exits 75 at once and the supervisor waits for PAUSE to go):
 
    ```
-   python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1/supervisor_console.txt" \
-     python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1" --preset team_draft-4v4 \
-     --resolver-init "C:/Users/Gregg Keithley/mtg-zero/runs/mtg5/models/iter_0014.pt" \
+   python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/td1/supervisor_console.txt" \
+     python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/td1" --preset team_draft-4v4 \
+     --resolver-init "C:/Users/<user>/mtg-zero/runs/mtg5/models/iter_0014.pt" \
      --resolver-cfg '{"preset": "mtg-4", "eval_every": 2, "eval_remote": "mac", "selfplay_remote": "mac", "selfplay_remote_procs": 3}' \
      --draft-eval-net-every 8 --draft-eval-net-remote mac
    ```
 
    (`--draft-eval-net-remote` is a top-level setting, saved in config.json; the other flags are
    today's, also saved.) Then `python tools/pause_run.py runs/td1 --resume` when the user resumes
-   td1. The log says `eval_yard_net on the remote 'mac' (greggkeithley@100.95.248.116, mirror
-   /Users/greggkeithley/mtgz-remote/td1)`; at iteration 8 the draft network's metrics row is written
+   td1. The log says `eval_yard_net on the remote 'mac' (<mac>, mirror
+   /Users/<user>/mtgz-remote/td1)`; at iteration 8 the draft network's metrics row is written
    without `eval_yard_net` and the iteration goes on to 9 at once; when the Mac is done, `iter 8 vs
    consensus (episodes by the resolver net; remote mac, Ns): {...}` and a row in
    `runs/td1/evals.jsonl` (the dashboard merges it). Iterations 0 and 4 keep their results (nothing is
@@ -10945,9 +10945,9 @@ From this worktree (committed, clean), after `bash tools/mac.sh --eval-checkout`
 batch-bound as in a real run (`auto`):
 
 ```
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/shared-queue"
+cd "C:/Users/<user>/mtg-zero-wt/shared-queue"
 bash tools/build_py.sh && bash tools/mac.sh --eval-checkout
-export MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR ZERO_SELFPLAY_WORKDIR=/Users/greggkeithley/mtgz-selfplay-test
+export MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR ZERO_SELFPLAY_WORKDIR=/Users/<user>/mtgz-selfplay-test
 # co-training: the resolver's matches shared with the Mac (the mode delver1 does not exercise)
 RCFG=$(python -c "import json, mtgz.az as a; print(json.dumps(dict(a.PRESETS['team_draft-smoke']['resolver_cfg'], selfplay_remote='mac', infer_device='cuda')))")
 python -m mtgz.az.run --run E:/mtg-zero-scratch/shared-queue2/td_mac --preset team_draft-smoke --iters 3 --games 8 \
@@ -10964,7 +10964,7 @@ episodes also on the remote 'mac' (...); batch-bound (local): its slots while it
 2 iterations`, `[resolver] iter N shared queue:` (exact event quotas, the caps: the desktop's at
 most its 16 slots by the batch rule, the Mac's its share), `[resolver] iter N remote self-play:`
 (`requeued` 0 + 0 + 0 without a back-off, no `late`, `duplicates_dropped` 0), and `metrics.jsonl`'s
-`selfplay.queue` in `td_mac/resolver/`. Afterwards: `ssh greggkeithley@100.95.248.116 'rm -rf
+`selfplay.queue` in `td_mac/resolver/`. Afterwards: `ssh <mac> 'rm -rf
 ~/mtgz-selfplay-test'`.
 
 ### 56.10 Re-pinning delver1 onto this branch (at an iteration boundary)
@@ -11147,8 +11147,8 @@ worktree of the merged commit, `bash tools/build_py.sh` there, `bash tools/mac.s
 runs/delver1/STOP` during an iteration, then from the new worktree:
 
 ```
-python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/delver1/supervisor_console.txt" \
-  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/delver1" --preset delver-mirror --seed 1 \
+python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/delver1/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/delver1" --preset delver-mirror --seed 1 \
   --games 800 --conc 192 --eval-every 8 --ram-budget-gb 20 --iters 400 \
   --selfplay-remote mac --eval-remote mac --selfplay-remote-linger 1 \
   --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25
@@ -11642,8 +11642,8 @@ and are refused, 57.1), `touch runs/ab2-cqscale03/STOP` during an iteration, the
 worktree the run's current command plus one flag:
 
 ```
-python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/supervisor_console.txt" \
-  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03" --preset delver-mirror --seed 1 \
+python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03" --preset delver-mirror --seed 1 \
   --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --ram-budget-gb 20 --selfplay-remote-linger 1 \
   --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25 \
   --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 \
@@ -11913,20 +11913,20 @@ checkpoint, `ab2v5` the new run's name):
 
 ```
 # 1. the pinned worktree of the merged commit, built; the Mac's checkout of it (evaluation, self-play)
-git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha7>" <sha7>
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha7>"
+git -C "C:/Users/<user>/mtg-zero" worktree add "C:/Users/<user>/mtg-zero-wt/run-<sha7>" <sha7>
+cd "C:/Users/<user>/mtg-zero-wt/run-<sha7>"
 bash tools/build_py.sh
 bash tools/mac.sh --eval-checkout
 # 2. stop the main line at an iteration boundary (it exits after the iteration in progress)
-touch "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/STOP"
+touch "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/STOP"
 # 3. its newest checkpoint widened into a new run; the main line's settings (cq_c_scale 0.3 and the
 #    rest: a flag overrides, the preset fills only what the run has not saved)
-python tools/fork_run.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/models/iter_<K>.pt" \
-  "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5"
-cp "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/config.json" "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5/config.json"
+python tools/fork_run.py "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/models/iter_<K>.pt" \
+  "C:/Users/<user>/mtg-zero/runs/ab2v5"
+cp "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/config.json" "C:/Users/<user>/mtg-zero/runs/ab2v5/config.json"
 # 4. the main line's command (59.3) on the new run, plus the iteration-tied settings at the main line's values
-python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5/supervisor_console.txt" \
-  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5" --preset delver-mirror --seed 1 \
+python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/ab2v5/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/ab2v5" --preset delver-mirror --seed 1 \
   --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --ram-budget-gb 20 --selfplay-remote-linger 1 \
   --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25 \
   --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 \
@@ -12337,24 +12337,24 @@ arms run on the main line's own pinned build (round 3's `worktree`), which loads
 any checkpoint (nothing on the run path changed).
 
 ```
-AB="C:/Users/Gregg Keithley/mtg-zero/runs/ab-r3"
+AB="C:/Users/<user>/mtg-zero/runs/ab-r3"
 MAIN="$(python -c "import json; print(json.load(open(r'$AB/state.json'))['main'].replace(chr(92), '/'))")"
 K=$(python -c "import glob, os; print(max(int(os.path.basename(p)[5:9]) for p in glob.glob(r'$MAIN/models/iter_*.pt')))")
 KK=$(printf %04d $K); K10=$(printf %04d $((K + 10)))
 OUT=E:/mtg-zero-scratch/distill-gpu/k$K; mkdir -p $OUT
-FORK="C:/Users/Gregg Keithley/mtg-zero/runs/r3-big192x6"
+FORK="C:/Users/<user>/mtg-zero/runs/r3-big192x6"
 SPEC="$(python -c "import json; print(json.load(open(r'$MAIN/config.json'))['spec'])")"
 VIEW="$(python -c "import json; print(json.load(open(r'$MAIN/config.json')).get('selfplay_leaf_value_view') or 'mover')")"
 H2H=(--sims 32 --spec "$SPEC" --device cuda --threads 8 --seed 7 --select cq --select-min-visits 4 --a-cq-c-scale 0.3
      --b-cq-c-scale 0.3 --a-leaf-value-view $VIEW --b-leaf-value-view $VIEW)
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha of that main>"     # bash tools/build_py.sh done there
+cd "C:/Users/<user>/mtg-zero-wt/run-<sha of that main>"     # bash tools/build_py.sh done there
 ```
 
 **0. The Mac's real cost** (optional, ~3 minutes, the Mac idle; this checkout pushed): the Mac's
 inference shape (8 workers x 3 threads at batches of 192) on real rows of the main line, the three sizes:
 
 ```
-scp "$(ls "$MAIN/data/iter_$KK"/m00-*_000.npz | head -1)" greggkeithley@100.95.248.116:/tmp/delver_rows.npz
+scp "$(ls "$MAIN/data/iter_$KK"/m00-*_000.npz | head -1)" <mac>:/tmp/delver_rows.npz
 bash tools/mac.sh 'bash tools/build_py.sh && for n in "128 4 4 256" "192 6 6 384" "256 6 8 512"; do set -- $n; python -m mtgz.az.bench infer --game mtg --arch tokens --hidden $1 --blocks $2 --heads $3 --ff $4 --shard /tmp/delver_rows.npz --batches 192 --workers 8 --torch-threads 3 --seconds 10; done'
 ```
 
@@ -15571,7 +15571,7 @@ another checkout, and an older one could not play the anchors); then, from that 
 launch's flags plus the new ones; `--elo-games 24`: paired games need an even count):
 
 ```
-MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/supervisor_console.txt" python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 128 --heldout-shards "C:/Users/Gregg Keithley/mtg-zero/runs/heldout/r3-2b_iter0191_8192.npz"
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/r3-2b-beliefsearch/supervisor_console.txt" python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/r3-2b-beliefsearch" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/<user>/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/<user>/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 128 --heldout-shards "C:/Users/<user>/mtg-zero/runs/heldout/r3-2b_iter0191_8192.npz"
 ```
 
 * `--eval-games 0`: no heuristic games (the pool keeps its old ones: the ordinary `elo` stays linked);
@@ -16051,7 +16051,7 @@ python tools/position_lab.py show   --report R.json
   from the spot, the per-deal results; pooled over spots (equal weight: the mean of the spots' mean
   differences, its se stratified by spot).
 * **The API** (the CLI's own functions, `import position_lab as L`; the lab UI at
-  `C:/Users/Gregg Keithley/delver-lab` builds on it): `build_position` (a replay + frame, a site id, a
+  `C:/Users/<user>/delver-lab` builds on it): `build_position` (a replay + frame, a site id, a
   record, a scenario or an opening seed), `save_scenario` / `load_scenario`, `search_params` +
   `evaluate_position` (prior, value, searches with explicit settings - sims, chance_k, c_puct, the root
   belief, the leaf view, a root floor, the rule, seeds -; results keyed by action id, the label a display
@@ -17434,7 +17434,7 @@ own checkout: from `<checkout>/third_party/zero-core` that is `<checkout>/third_
 (worktree or main checkout alike). It found none, ran the core's cargo test, build and ~12-16 min pytest,
 and printed GREEN. (The `--other-games` help even said the default "finds none from a pinning checkout's
 third_party/zero-core".) Before 40f5655 (2026-10-30) a given `--other-games` was also split on spaces, so
-`C:/Users/Gregg Keithley/...` became path fragments smoke_all skipped silently (one `skip` line each) -
+`C:/Users/<user>/...` became path fragments smoke_all skipped silently (one `skip` line each) -
 GREEN again.
 
 **Consequence** (every `gates/logs/*optin-core-build-only*` log on the desktop: 18, the last run per commit,
@@ -17479,7 +17479,7 @@ and a build against another core, and passes three ok lines; the default games f
 checkout and a missing one refused; the step's argv / env; a `None` env value unsets. zero-core's
 `tests/test_smoke_all.py` 5 passed. The old smoke_all (aa10733) from this worktree's submodule,
 `SKIP_CORE=1 ... --with-this-core --build-only`: an empty summary and GREEN, exit 0; the new one (7d3dbd8)
-finds `C:/Users/Gregg Keithley/{glassroad,caverna,kingdombuilder}-zero` from there (`--dry-run`), and
+finds `C:/Users/<user>/{glassroad,caverna,kingdombuilder}-zero` from there (`--dry-run`), and
 exits 1 without GREEN when they are hidden (`SMOKE_GAMES_ROOT` pointing nowhere). The step itself through
 gate.py's own `build_only_step` / `run_step` / checker (E:/mtg-zero-scratch/gate-fix/gate_step_driver.py,
 the submodule at 7d3dbd8): **PASS in 159 s** - Glass Road 41 s, Caverna 43 s, Kingdom Builder 66 s against
@@ -24925,7 +24925,7 @@ zero-core's co-training refusal concerns `resolver` runs only (an EoE run is a s
 mirror-relative paths formatted with `iter`, a `*` in the last component matching any characters, refused at
 registration if absolute or leaving the mirror; `RemoteEval._fetch_files`; best.pt; a mirror without `models/index.json`
 after an evaluation is an error (Run.elo_update always writes it). No run setting, nothing in self-play, search or local
-evaluation. The branch is pushed to the desktop's `C:/Users/Gregg Keithley/zero-core` (where worktrees initialise the
+evaluation. The branch is pushed to the desktop's `C:/Users/<user>/zero-core` (where worktrees initialise the
 submodule from) and to the Mac's mirror by mac.sh, **not to GitHub** (to do before merging: a pin must exist there).
 
 ### 109.2 The S4 races on the Mac
@@ -25007,7 +25007,7 @@ python tools/launch_hidden.py <run2>/supervisor_console.txt python tools/supervi
   --eval-remote mac --eval-every 2
 ```
 
-Its log then says `evaluations on the remote 'mac' (greggkeithley@100.95.248.116)`; each evaluated iteration logs `iter
+Its log then says `evaluations on the remote 'mac' (<mac>)`; each evaluated iteration logs `iter
 N vs heuristic (remote mac, ...s)` and `iter N elo ... (remote mac)`, and adds a row to `evals.jsonl` and
 `games/eval-iter_NNNN-<pid>.jsonl` to the game log. `--eval-remote ''` at a restart brings the evaluation back.
 
@@ -26275,8 +26275,8 @@ The commits after be674a2 change docs and zero.farm_h2h (Python, the desktop's) 
 **A first live head-to-head** (from this checkout, on the desktop):
 
 ```
-python -m mtgz.az.farm_h2h --a C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt \
-    --b C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt --games 200 \
+python -m mtgz.az.farm_h2h --a C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0080.pt \
+    --b C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0070.pt --games 200 \
     --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e
 ```
 
@@ -26376,9 +26376,9 @@ E:/cargo-target/zero-farm/main/release/ - or `--farm-release <path>` - and defin
 checkout, the venv with onnx / onnxruntime):
 
 ```
-"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" -m mtgz.az.farm_h2h \
-    --a "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt" \
-    --b "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt" --games 200 \
+"C:/Users/<user>/zero-farm/.venv/Scripts/python.exe" -m mtgz.az.farm_h2h \
+    --a "C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0080.pt" \
+    --b "C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0070.pt" --games 200 \
     --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e \
     --worker E:/cargo-target/mtg-zero/farm/farm-build/dist/mtg-be674a2-release/mtgz-worker.exe
 ```
@@ -26386,8 +26386,8 @@ checkout, the venv with onnx / onnxruntime):
 **Re-defining the live fuzz campaign** (its build, mode and env as they are; nothing else is put):
 
 ```
-"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07 --dry-run
-"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
+"C:/Users/<user>/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07 --dry-run
+"C:/Users/<user>/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
 ```
 
 ### 114.6 GPU inference: the Windows ML runtime pack, a zero-core pin with the session factory (zero-farm phase 4, 2026-11-12)
@@ -26411,7 +26411,7 @@ through the self-test) and runtime packs that carry the providers.
 builds that require it are unchanged.
 
 **Tests and checks.** zero-farm-notes phase4-gpu.md (the per-provider gate, CPU fallback nodes and speeds, measured on
-the desktop's RTX 5090 and the Windows 10 canary's RTX 4070 Ti).
+the desktop's RTX 5090 and a Windows 10 test PC's NVIDIA GPU).
 
 ### 114.7 Game records: a worker's self-play as what replays it (zero-farm phase 3, 2026-11-12)
 
@@ -33882,7 +33882,7 @@ fails on this branch (the five spots).
 
 State at this subsection's commit: every merge above committed on `integrate/fable-1112` (mtg-zero, never pushed - the
 orchestrator fast-forwards main); zero-core `integrate/fable-1112` @ 77b31ab pushed to the local origin
-(`C:/Users/Gregg Keithley/zero-core`) and GitHub, the gitlink on it. Known red until the steps below:
+(`C:/Users/<user>/zero-core`) and GitHub, the gitlink on it. Known red until the steps below:
 `tests/test_canary_library.py::test_every_spot_reaches_its_recorded_position` (the five spots, 157.9) and every digest
 comparison (behaviour changed on purpose by A1, A2, E, F, H, I, farm-fuzz, rules F1-F3). Every heavy command goes
 through the throttle (COMMON.md): `S="bash E:/mtg-zero-scratch/fable-fix/slotd.sh"`. On Windows, stopping a
@@ -33890,7 +33890,7 @@ background task can leave its `slotd.sh` loop alive: check `wmic process where "
 ProcessId,CommandLine` and `taskkill //PID <pid> //F //T` only your own.
 
 ```bash
-W="C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable"
+W="C:/Users/<user>/mtg-zero-wt/integrate-fable"
 export CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/integrate-fable
 S="bash E:/mtg-zero-scratch/fable-fix/slotd.sh"
 cd "$W"
@@ -33913,7 +33913,7 @@ git merge --no-ff --no-commit fix/rules-f4-f5           # after B: the leftovers
 If a merge touches zero-core: merge it into `third_party/zero-core` branch `integrate/fable-1112` (renumber colliding
 docs/az.md sections as 157.2 did), run its `cargo test --release` + `bash tools/build_py.sh` + pytest
 (`CARGO_TARGET_DIR=E:/cargo-target/zero-core/integrate-fable`), `git push origin integrate/fable-1112` and
-`git -C "C:/Users/Gregg Keithley/zero-core" push origin integrate/fable-1112`, then `git add third_party/zero-core`.
+`git -C "C:/Users/<user>/zero-core" push origin integrate/fable-1112`, then `git add third_party/zero-core`.
 After each merge: `$S bash tools/build_py.sh`, `$S cargo test --release -p engine --test az --test dealt_integrated`,
 and a fuzz smoke (`$S env FUZZ_GAMES=200 FUZZ_MATCHES=40 cargo test --release -p engine --test fuzz -- --nocapture`,
 also with `FUZZ_POOL=delver`, `cross`, `delver_dealt`, `eoe` and `FUZZ_HIDDEN_DECKS=1`).
@@ -33976,10 +33976,10 @@ $S python tools/gate.py engine --no-mac --tested-sha "$(git rev-parse HEAD)" \
 own:
 
 ```bash
-git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add --detach "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" e076d8f3
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" && git -c protocol.file.allow=always submodule update --init third_party/zero-core \
+git -C "C:/Users/<user>/mtg-zero" worktree add --detach "C:/Users/<user>/mtg-zero-wt/integrate-fable-base" e076d8f3
+cd "C:/Users/<user>/mtg-zero-wt/integrate-fable-base" && git -c protocol.file.allow=always submodule update --init third_party/zero-core \
     && CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/integrate-fable-base $S bash tools/build_py.sh
-cd "$W" && $S python tools/gate.py search-core --no-mac --baseline-root "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" --step-timeout 7200
+cd "$W" && $S python tools/gate.py search-core --no-mac --baseline-root "C:/Users/<user>/mtg-zero-wt/integrate-fable-base" --step-timeout 7200
 ```
 
 Expected there: `check_checkpoint_compat` (now runnable on v7: `--net random` is a random token network, 157.4)
@@ -34447,7 +34447,7 @@ pill and the Status tile; "Training is finished." in Right now), and the Best of
 run when it is a best-of-three one. Tests: worker (the 11-14 case - pb1 posting after pb2 keeps pb2 the default -, final
 states kept, a newer main taking over, validation) and now.js; 68 passed. Before/after screenshots (deviceScaleFactor 2,
 local `wrangler dev` with copies of the live pb1/pb2 records, pb1 posting last as an undemoted main):
-`C:/Users/Gregg Keithley/shots/delverai-run-owned-publisher/` - `1-before-*` (master: pb1 on the front page),
+`C:/Users/<user>/shots/delverai-run-owned-publisher/` - `1-before-*` (master: pb1 on the front page),
 `2-after-*` (pb2), `3-after-pb2-finished-*` (the Finished state). Awaiting the user's approval; the site works with
 either publisher meanwhile.
 
@@ -34488,7 +34488,7 @@ publisher from `mtg-zero-wt/delverai-pb2-pub`. This branch changes no Rust in ei
 is this branch's build.
 
 1. A pinned checkout of this branch's commit (or of main once merged): `git worktree add --detach
-   "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha12>" <sha>`, `git -c protocol.file.allow=always submodule update --init
+   "C:/Users/<user>/mtg-zero-wt/run-<sha12>" <sha>`, `git -c protocol.file.allow=always submodule update --init
    third_party/zero-core`, copy `mtg-zero-wt/run-f49df0c/mtgz/_engine.pyd` into it (or `bash tools/build_py.sh` with its
    own CARGO_TARGET_DIR), then `python tools/gate.py repin --no-mac ...` per AGENTS.md if wanted.
 2. pb2 uses the Mac (`--eval-remote mac --selfplay-remote mac`): the run checks the Mac holds a checkout of the run's
@@ -34610,7 +34610,7 @@ wrong types, odd game counts, a device other than cuda/cpu and a setting that me
   against fixed opponents" (a line per opponent with its +-1 se band, 50% reference) and "Blunder checks passed"; a line
   breaks over an evaluated generation without a result and the caption names those not measured yet and those failing.
   The worker validates the block. NOT deployed: screenshots for the user's approval in
-  `C:/Users/Gregg Keithley/shots/delverai-yardsticks/` (deviceScaleFactor 2; before = a5baa45, after = 72ce38a; pb1's
+  `C:/Users/<user>/shots/delverai-yardsticks/` (deviceScaleFactor 2; before = a5baa45, after = 72ce38a; pb1's
   page with a block built by this branch's code from pb1's REAL by-hand results and canary cache, pb2's with none yet).
 
 ### 164.6 Cost per evaluation (pb2: eval_every 16, ~5 min an iteration -> one evaluated checkpoint every ~80 min)
@@ -34805,15 +34805,15 @@ suite; agent code unchanged.
 
 **End to end on the farm** (2026-11-15, production coordinator rev 12, worker build 74f2279f96327576b2a46bbb = this
 branch's e776e984, runtime d531424b, `min_agent` 0.2.11): campaign `cmp-e2e-pb2-96v0-40` - pb2@96 vs pb2@0, the
-yardsticks' best of one (`--bo1`, 64 simulations, seed 0, paired), 40 games, share 0.25 - played by desktop-g72aptg
-(10 games) and squirrel_basement (30) in 5 leases, 1,908 s from the batch to the last game; every row's digest checked,
+yardsticks' best of one (`--bo1`, 64 simulations, seed 0, paired), 40 games, share 0.25 - played by
+two farm PCs in 5 leases, 1,908 s from the batch to the last game; every row's digest checked,
 the 5% spot check (games 9 and 11, one per machine) and then all 40 replayed here from seed + moves: all equal. Games'
 digest 6692e970083aa484; A 0.55 +- 0.062 over 40 games. Records: 40 games described move by move in 1 s.
 
 **Determinism across machines.** A traced game is bit-identical wherever the worker plays it: games 0-3 of the
-e2e campaign (desktop-g72aptg, i7-7700K) have the digests of the same games played on the desktop (i9-13900K) by the
+e2e campaign (played on a farm PC with an older CPU) have the digests of the same games played on the desktop by the
 same worker in the local test; and all 40 games the e2e campaign shares with the 400-game campaign below (game ids
-0-39, played there by other machine pairs, e.g. squirrel_basement's Ryzen 7 5800X against desktop-g72aptg) have equal
+0-39, played there by other pairs of farm PCs, with Intel and AMD CPUs) have equal
 digests. ONNX Runtime's CPU provider and the engine give the same games on every CPU seen so far, so a farm campaign's
 numbers are a pure function of (build, graphs, settings, seed, ids).
 
@@ -34821,7 +34821,7 @@ numbers are a pure function of (build, graphs, settings, seed, ids).
 the yardsticks' local result, 0.500 over 400 games, pentanomial [38, 0, 124, 0, 38], in runs/delver-bo3-pb2/
 yardsticks.jsonl): not exactly - and it cannot be, because the local result is not reproducible itself. Played
 on the farm (campaign `cmp-eq-pb2-96v0-400`: the same checkpoints, spec, seats - checked dict for dict -, seed 0,
-paired, 400 games; desktop-g72aptg 164 games, squirrel_basement 154, and 82 by the local fallback once the farm went
+paired, 400 games; 318 games by two farm PCs and 82 by the local fallback once the farm went
 quiet after ~3.5 h, `collect --deadline-now`, 8 threads, 51 min): **A 0.490 +- 0.020, pentanomial [33, 0, 138, 0, 29]**,
 games' digest 4c33d172139f1e6f; the spot check (20 games, 6 + 6 farm + 8 local) and then all 400 replayed here: all equal.
 The yardsticks' recorded local result is 0.500, [38, 0, 124, 0, 38]. Re-running exactly the yardsticks' local match
@@ -34867,8 +34867,7 @@ install, launcher_update, selfupdate_e2e, update, release, swap_rollback), unrel
 
 ## 166. Side work off the desktop beside a live run: `tools/slotd.sh`, the gate's Mac placement, the live-run fence (migration phase 0, branch `mig/phase0`, zero-core `mig/phase0`, 2026-11-15)
 
-Phase 0 ("stop the bleeding") of the 2026-11-15 migration plan (`hub/data/mtg_bot/fable_review_iteration_and_farm_2026-11-15.md`
-section 4, S7, S8): side work must stop slowing the live run (delver-bo3-pb2) without waiting for the scheduler of
+Phase 0 ("stop the bleeding") of the 2026-11-15 migration plan (the maintainer's notes, section 4, S7, S8): side work must stop slowing the live run (delver-bo3-pb2) without waiting for the scheduler of
 phase 4. Three pieces, no engine, encoding or run change (digests unchanged; nothing of pb2 was touched).
 
 ### 166.1 `tools/slotd.sh`: the heavy-command throttle in the repo
@@ -35028,8 +35027,8 @@ desktop can run three gates at once with pb2 at 4.6-5.0 min when nothing uses th
 Branch `mig/phase1` from main 72e5a0df, main 90731110 (165 farm campaigns, 166 phase 0) merged in; zero-core pin ->
 `mig/phase1-panic` cd47511 (from bf229a5: the driver's panic containment, zero-core docs/search.md 2.18, merged with
 the pin of main, mainline-1115 d29b134). Why: Fable's review of 2026-11-15
-(hub/data/mtg_bot/fable_review_iteration_and_farm_2026-11-15.md, sections 1 and 2: S1, S2) and the gate speed-up plan
-of 11-14 (gate_speedup_plan_2026-11-14.md, phase 1): a change paid a cold build in every new worktree (14 min for the
+(the maintainer's notes, sections 1 and 2: S1, S2) and the gate speed-up plan
+of 11-14 (the maintainer's notes, phase 1): a change paid a cold build in every new worktree (14 min for the
 engine's test binaries on today's desktop beside the live runs), a 6 h suite tier (20k fuzz per pool, single-threaded,
 pools in series), ~169 test binaries each linking the whole engine, and gate steps one after another; the user approved
 the migration on 2026-11-15 with decision D1 (the gate fuzzes ~2,000 games per affected pool with the
@@ -35317,7 +35316,59 @@ pb2: nothing of the live run was touched (its files, processes, the Mac's run ch
 * Gates take far less of the desktop beside it: the fuzz work per suite tier fell from ~78 min single-threaded to ~3.5
   min of shard time, and every heavy step queues for a slot of the throttle instead of piling up.
 
-## 169. The card-IR pipeline in this repo: the oracle-text parser and its IR export moved from mtg-bot (`ir/`, `tools/card_ir.py`; branch `feat/ir-in-repo`, 2026-11-15)
+## 169. Public cleanup: no farm computer details or machine-specific settings in the repos, the privacy check, licenses (branch `chore/public-cleanup`, zero-core `chore/public-cleanup`, zero-farm `chore/public-cleanup`, 2026-11-15)
+
+**Why.** mtg-zero, zero-core and zero-farm are public (Certum's open-source signing needs them public), and the publish
+audit of 2026-11-15 found a friend's farm PC (its name and CPU) in 165.8, the Mac's ssh target in code, tests and
+fixtures, home paths with the maintainer's name, and no license files in mtg-zero and zero-core. The user's rule: no
+farm computer details in the repos at all; the maintainer's own addresses and paths go to untracked local config.
+History is not rewritten (pins, run worktrees and checkpoint provenance name these commits); this is a fix at HEAD.
+
+**What.**
+* **Farm details out.** 165.8 now says "two farm PCs" (no names, CPU models or per-machine game counts); 114.6's test-PC
+  GPU and the hub links (166, 167) are gone. zero-core: a farm PC's GPU no longer named (az.md 44.5, the worker's
+  provider list). zero-farm: the same in PROTOCOL / DESIGN / the agent's profile and the coordinator's routing.
+* **The machine's own settings** live in the untracked `~/.config/zero/local.env` (`$ZERO_LOCAL_CONFIG`; template
+  `tools/local.env.example`; an environment variable of the same name wins). Readers: zero-core's `zero.local_config`
+  (Python) and `tools/local_env.sh` (bash, parsed, never sourced); mtg-zero's `tools/local_config.py` and
+  `tools/local_env.sh` are copies for tools that run before the submodule exists (`tests/test_privacy.py` keeps them
+  equal to the pinned core's). Keys: `ZERO_BIG_DISK` (the desktop's `E:`; replaces every hard-coded `E:/` default:
+  build_py.sh, gate.py's target, smoke and durations dirs, slotd.sh's state, zcache's cache root, warm_pool's targets,
+  farm_build / farm_campaign / farm_gates, human_picks, tools/data, position_lab, the private-data tests; zero-core's
+  build_py.sh, smoke_all.sh and farm_def), `MTGZ_MAC` / `MTGZ_MAC_HOME` (the `mac` remote in `mtgz/az/__init__.py`,
+  tools/mac.sh, mac_races.sh, fuzz_farm_status.sh, gate.py's Mac placement). Unset, each tool falls back to a generic
+  default: `<repo>/target`, `~/.mtgz-state`, `~/.cache/...`, the ssh alias `mac` for the remote, and no Mac at all for
+  mac.sh (it refuses) and the gate (it runs everything here). On the desktop, whose file sets `ZERO_BIG_DISK=E:` and the
+  Mac's target, every path and host is what it was (checked: gate.py's target, smoke and durations dirs, slotd.sh's
+  state dir, zcache's root, warm_pool's targets, the `mac` remote's spec, farm_def's farm-release). zerodash reads
+  `~/.config/zero/projects.json` (`$ZERODASH_CONFIG`; template `dashboard/projects.example.json`).
+* **Paths in committed files**: docs write `C:/Users/<user>`, `/Users/<user>` and `<mac>`; the canary library's and the
+  blunder baseline's provenance paths are `~/...`; `tools/delver_blunders.py` records paths through
+  `local_config.portable_path` (home as `~`). Tests use `user@mac`, `192.0.2.x` (TEST-NET) and `/Users/user`. zero-core's
+  dashboard fixtures (copies of real run files) are anonymized the same way; the run data in them is unchanged.
+* **The privacy check** (`tools/privacy_check.py`, the same file in zero-core; zero-farm's `tools/privacy-check.mjs` has
+  the same rules): every tracked file against a committed generic set (Tailscale CGNAT addresses and MagicDNS names,
+  farm machine ids `m_` + 26 base32, home paths naming a user, default Windows / macOS PC host names, `user@<IP>`) and
+  the machine's untracked patterns (`~/.config/zero/privacy_patterns.txt`, `$ZERO_PRIVACY_PATTERNS`: the real names of
+  hosts, farm PCs and accounts; never committed). `privacy-check: allow` on a line, or `privacy-check: allow-file` in a
+  file's first 5 lines, spares synthetic data from the generic rules only (zero-farm's redactor). `gate.py` runs it
+  first in every tier (step `privacy`, in-process, ~10 s; a finding fails the gate before any step runs);
+  `tests/test_privacy.py` runs it in pytest (zero-core: `tests/test_privacy.py`; zero-farm: first in `npm test`).
+* **Licenses**: `LICENSE` (MIT, "the mtg-zero authors", as `Cargo.toml` declares); zero-core `LICENSE` (MIT) and
+  `license = "MIT"` in every crate. README: the repos are public (no access needed), "Data sources and credits"
+  (17lands CC BY 4.0, CubeCobra, Scryfall), and the Wizards of the Coast Fan Content Policy notice (unofficial, not
+  approved/endorsed by Wizards; the MIT license covers the code, not WotC material).
+* AGENTS.md (here and zero-core) and zero-farm's README: the "Private details" rule.
+
+**Tests.** `tests/test_privacy.py` (the checkout passes, the copies equal the pinned core's), `test_gate.py`
+(`test_a_privacy_finding_fails_the_gate_before_any_step`, `test_the_privacy_check_runs_the_checkouts_tool`; the
+fixture stubs `privacy_scan`), `test_mac_remote.py` (`test_the_macs_address_is_the_machines_own_setting`: no config ->
+`mac`, `/Users/user`; the file and the environment set it). zero-core `tests/test_privacy.py` (each generic rule fires,
+placeholders pass, local patterns, markers, the local.env readers in Python and bash agree), `dashboard/tests`
+(the example config loads, the default config is outside the repo). No engine, encoding or run-loop change: digests
+unchanged.
+
+## 170. The card-IR pipeline in this repo: the oracle-text parser and its IR export moved from mtg-bot (`ir/`, `tools/card_ir.py`; branch `feat/ir-in-repo`, 2026-11-15)
 
 **Why.** mtg-zero reads every card as data (section 3), but the data came from another project: mtg-bot's oracle-text
 parser turned Scryfall's Oracle text into `CardPrinting` trees and its `cards export-ir` wrote the card IR and its
@@ -35331,7 +35382,7 @@ retired; the parser was the one live part. With it here, all active code is in t
 files were copied from a `git archive` of that commit: none of mtg-bot's history is imported (no subtree, filter-repo or
 merge), because that history holds an unrelated leaked credential. mtg-bot itself is unchanged.
 
-### 169.1 What moved where
+### 170.1 What moved where
 
 | Here | From mtg-bot | What |
 |---|---|---|
@@ -35341,9 +35392,9 @@ merge), because that history holds an unrelated leaked credential. mtg-bot itsel
 | `ir/mtgz_ir/cards/parser/AGENTS.md` | `src/mtg_bot/cards/parser/CLAUDE.md` | the parser's rules (parameterized recognizers over literal lines) |
 | `ir/data/` (13 files, 12.5 MB) | `data/` | the inputs: the Scryfall card records of the pools (`cube_power_lsv.json`, `legacy_delver.json`, the four EoE-era dumps, `cube_roto.json` and `cube_roto_custom.json`, which the parser reads to tell EoE-only printings apart), the name lists and sidecars; mtg-bot's blobs byte for byte (LF), kept so on every checkout by `.gitattributes` (`-text`). Card data only: the records carry Scryfall's `image_uris` strings, which nothing reads; no image is fetched or stored |
 | `tools/ir_fetch_cards.py` | `scripts/fetch_cube.py` | fetches a pool's Scryfall records (a CubeCobra list or a name list); card JSON only |
-| `tests/ir/` (138 test files, 7 helpers) | `tests/` | the parser's and the IR's tests (169.3) |
+| `tests/ir/` (138 test files, 7 helpers) | `tests/` | the parser's and the IR's tests (170.3) |
 | `docs/card_ir_format.md` | `docs/CARD_IR.md` | the IR format |
-| `tools/card_ir.py` | new | `export`, `check`, `roundtrip` (169.2) |
+| `tools/card_ir.py` | new | `export`, `check`, `roundtrip` (170.2) |
 
 The package is renamed `mtg_bot` -> `mtgz_ir` (every `mtg_bot` word in the copied Python; `pools.DATA_DIR` points at
 `ir/data`). Nothing else in the code changed but one thing: the schema names each class's and enum's module, and those
@@ -35359,7 +35410,7 @@ runtime half of the effect classes is inert here: the engine is `engine/` (Rust)
 
 The dependency is stdlib only (Python 3.11+): no numpy, torch or network at export time.
 
-### 169.2 `tools/card_ir.py`
+### 170.2 `tools/card_ir.py`
 
 * `export`: the three pools with one schema (`export_ir(["cube", "legacy", "eoe"])`), then the EoE filter
   (`filter_eoe_ir.filter_text`: the EoE set's cards, 483 -> 320), then `gen_card_ir.generate` on the schema; it checks
@@ -35382,7 +35433,7 @@ personal absolute path).
 beside `tests/test_*.py`, so the gate runs the pipeline's tests too (`tests/test_gate.py` checks it; that test's weight
 assertions keep to the top-level files they were scaled to).
 
-### 169.3 The tests
+### 170.3 The tests
 
 mtg-bot's tests of the parser and the IR, renamed like the package (`from tests._helpers` -> `from _helpers`), with
 `tests/ir/conftest.py` putting `ir/` on the path and selecting the parser source as mtg-bot's conftest did. Taken: all
@@ -35405,7 +35456,7 @@ New: `tests/ir/test_pipeline.py` (3): the regeneration is byte for byte the chec
 that differs (and exits 1); the schema's module labels (`mtgz_ir.effects.base` -> `mtg_bot.effects.base`, a module
 outside the package as it is).
 
-### 169.4 The proof of a faithful move
+### 170.4 The proof of a faithful move
 
 * **mtg-bot itself first**: its own export at 68b62ed3 (`cards export-ir --pool cube legacy eoe`, then
   `filter_eoe_ir.py`, then `gen_card_ir.py`), run from a `git archive` of that commit, gives main's five files byte for
@@ -35427,13 +35478,13 @@ outside the package as it is).
   digests EQUAL by construction (`engine/tests/data/digests.txt` untouched; main's combined digest 8f71ccb0d89031a6).
   DIGEST_LINE
 
-### 169.5 What still uses mtg-bot
+### 170.5 What still uses mtg-bot
 
 Nothing in this repo runs or imports it any more (its name stays in history notes, docs, comments citing old mtg-bot
 commits and the IR's format names). Outside this repo only the maintainer's own launchers for mtg-bot's retired
 services (its coordinator, worker and UIs) point into it; no other project imports `mtg_bot`. The list is in the
 orchestrator's report, not here (machine-specific).
 
-### 169.6 Gates
+### 170.6 Gates
 
 GATES

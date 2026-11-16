@@ -2,7 +2,7 @@
 
 Research report, 2026-10-21. Read-only survey of `mtg-bot/rust` (crate `mtg_bot_engine`) as the possible base for a zero-core `SearchGame` covering the PowerLSV cube (546 cards).
 
-**Path roots.** `MB/` = `C:\Users\Gregg Keithley\Documents\Claude\Projects\mtg-bot\` and `ZC/` = `C:\Users\Gregg Keithley\zero-core\`. Rust paths are relative to `MB/rust/src/`.
+**Path roots.** `MB/` = `C:\Users\<user>\Documents\Claude\Projects\mtg-bot\` and `ZC/` = `C:\Users\<user>\zero-core\`. Rust paths are relative to `MB/rust/src/`.
 
 **What was surveyed.**
 - Local `main` at `46efc8b9`. `origin/main` is 13 commits ahead, but none of them touch `rust/` (`git diff --stat main origin/main -- rust` is empty).

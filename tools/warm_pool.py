@@ -18,7 +18,8 @@ however the command ends. A warm worktree holds nobody's work: never edit in one
 gone (or whose pid now names another process: Windows reuses pids) is taken over.
 
 Pool: worktrees <pool>/warm-1 .. warm-N, <pool> = $MTGZ_WARM_ROOT, else the main checkout's sibling mtg-zero-wt/;
-target dirs $MTGZ_WARM_TARGETS/warm-K, else E:/cargo-target/mtg-zero/warm-K on Windows, <worktree>/target elsewhere.
+target dirs $MTGZ_WARM_TARGETS/warm-K, else $ZERO_BIG_DISK/cargo-target/mtg-zero/warm-K on Windows when the machine
+names a big disk (~/.config/zero/local.env), else <worktree>/target.
 N = --slots, else $MTGZ_WARM_SLOTS, else 4.
 """
 import argparse
@@ -30,6 +31,8 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WIN = sys.platform == 'win32'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import local_config  # noqa: E402  (the machine's own settings: ~/.config/zero/local.env, ZERO_BIG_DISK)
 
 
 def git(args, cwd, check=True):
@@ -60,7 +63,8 @@ def target_of(k):
     base = os.environ.get('MTGZ_WARM_TARGETS')
     if base:
         return os.path.join(base, f'warm-{k}')
-    return f'E:/cargo-target/mtg-zero/warm-{k}' if WIN else os.path.join(slot_path(k), 'target')
+    big = local_config.big_disk_path('cargo-target', 'mtg-zero', f'warm-{k}') if WIN else None
+    return big or os.path.join(slot_path(k), 'target')
 
 
 def lease_path(k):

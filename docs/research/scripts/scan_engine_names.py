@@ -4,7 +4,7 @@ and where printing-level flag fields are consumed.
 Read-only. Run from the mtg-bot repo root:
 
     PYTHONPATH=src .venv-py313/Scripts/python.exe \
-        "C:/Users/Gregg Keithley/mtg-zero/docs/research/scripts/scan_engine_names.py"
+        "<mtg-zero>/docs/research/scripts/scan_engine_names.py"
 
 Writes ``scripts/_engine_name_scan.json``.
 """

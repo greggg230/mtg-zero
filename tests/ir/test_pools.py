@@ -1,6 +1,6 @@
 """``mtgz_ir.cards.pools`` — pool registry + env selection."""
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_roto_helpers_build_through_the_claim_path
 
 from __future__ import annotations

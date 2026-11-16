@@ -2,7 +2,7 @@
  "format": "delver-canary-library/1",
  "what": "Delver mirror canary spots with their right answers (tools/delver_blunders.py, docs/blunders.md 6a)",
  "engine": {
-  "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\integrate-fable",
+  "checkout": "~\\mtg-zero-wt\\integrate-fable",
   "commit": "2d17c659b7f2a4c00de1b693d272d64495df6c1c",
   "branch": "integrate/fable-1112",
   "dirty": true,
@@ -11,7 +11,7 @@
  },
  "reference": {
   "checkpoint": "r3-2b-beliefsearch_0424",
-  "ckpt": "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/models/iter_0424.pt",
+  "ckpt": "~/mtg-zero/runs/r3-2b-beliefsearch/models/iter_0424.pt",
   "repeats": 8,
   "measured": "2026-11-02",
   "scores": {
@@ -4541,7 +4541,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it never activated it (no land destroyed)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "dbf2564739d5045a",
    "added": "2026-11-02",
    "review": {
@@ -4642,7 +4642,7 @@
     "It passed priority here and never Dazed or Forced it: Tamiyo, Inquisitive Student resolved.",
     "The opponent holds Daze (it could fight over the Daze)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "d61ff2d65bf69aa6",
    "added": "2026-11-02",
    "review": {
@@ -4825,7 +4825,7 @@
     "The AI held Daze (Cast Daze was an option) with 1 Island(s) (Volcanic Island) among 1 lands, and cast Force of Will instead, exiling Tamiyo, Inquisitive Student.",
     "Daze costs one card and an Island back to hand (turn 10); Force cost two cards and 1 life."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "7712e0248b956b96",
    "added": "2026-11-02",
    "review": {
@@ -5171,7 +5171,7 @@
     "Thundering Falls left in its library: 1 (the 60-card list has 1; 0 seen in hand / battlefield / graveyard / exile).",
     "That turn it never tapped it."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "4c476362c41caf63",
    "added": "2026-11-02",
    "review": {
@@ -5304,7 +5304,7 @@
     "The AI held Daze (Cast Daze was an option) with 1 Island(s) (Volcanic Island) among 1 lands, and cast Force of Will instead, exiling Daze.",
     "Daze costs one card and an Island back to hand (turn 5); Force cost two cards and 1 life."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "5a26da35d95ad1d8",
    "added": "2026-11-02",
    "review": {
@@ -5655,7 +5655,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it did not crack it."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "6ce8311ad7e8b5e6",
    "added": "2026-11-02",
    "review": {
@@ -5838,7 +5838,7 @@
     "The AI's life: 11; unblocked, this attacker deals 3 (11 -> 8); all attackers' power 6 (Dragon's Rage Channeler, Dragon's Rage Channeler).",
     "Outcome: the blocker died that turn."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "4afb206f1f2d2d07",
    "added": "2026-11-02",
    "review": {
@@ -5984,7 +5984,7 @@
     "The AI's life: 18; unblocked, this attacker deals 6 (18 -> 12); all attackers' power 6 (Murktide Regent).",
     "Outcome: the blocker died that turn."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "2a743625542948bb",
    "added": "2026-11-02",
    "review": {
@@ -6168,7 +6168,7 @@
     "The AI's life: 18; unblocked, this attacker deals 8 (18 -> 10); all attackers' power 8 (Murktide Regent).",
     "Outcome: the blocker died that turn."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "8467253bcd4c45e8",
    "added": "2026-11-02",
    "review": {
@@ -6589,7 +6589,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it did not crack it."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "7dd4d342777935fe",
    "added": "2026-11-02",
    "review": {
@@ -6831,7 +6831,7 @@
     "The AI's life: 16; unblocked, this attacker deals 3 (16 -> 13); all attackers' power 3 (Monk).",
     "Outcome: the blocker died that turn."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "6ad452086c924fe4",
    "added": "2026-11-02",
    "review": {
@@ -7169,7 +7169,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it cracked it at once and found nothing (no Island-type land left to find)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "0a6ce47ce47ca05c",
    "added": "2026-11-02",
    "review": {
@@ -7313,7 +7313,7 @@
     "Thundering Falls left in its library: 1 (the 60-card list has 1; 0 seen in hand / battlefield / graveyard / exile).",
     "That turn it never tapped it."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "5675557622b7db8d",
    "added": "2026-11-02",
    "review": {
@@ -7541,7 +7541,7 @@
     "The AI's life: 12; unblocked, this attacker deals 3 (12 -> 9); all attackers' power 9 (Dragon's Rage Channeler, Murktide Regent, Dragon's Rage Channeler).",
     "Outcome: the blocker died that turn."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "aa5e5b27f3f77c26",
    "added": "2026-11-02",
    "review": {
@@ -7766,7 +7766,7 @@
     "Thundering Falls left in its library: 1 (the 60-card list has 1; 0 seen in hand / battlefield / graveyard / exile).",
     "That turn it never activated it (no land destroyed)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "f41f34c19ea400fe",
    "added": "2026-11-02",
    "review": {
@@ -7944,7 +7944,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it never activated it (no land destroyed)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "1d363ab4ee76099d",
    "added": "2026-11-02",
    "review": {
@@ -8276,7 +8276,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it never activated it (no land destroyed)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "9633dd4a52d3269c",
    "added": "2026-11-02",
    "review": {
@@ -8579,7 +8579,7 @@
     "That turn it cracked it at once for Volcanic Island.",
     "Before the crack it looked at its library this turn: Brainstorm put back Volcanic Island, Force of Will."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "34d7ee1baf19ff21",
    "added": "2026-11-02",
    "review": {
@@ -8902,7 +8902,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it did not crack it."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "10af4fc2e14ce006",
    "added": "2026-11-02",
    "review": {
@@ -9158,7 +9158,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it cracked it at once for Island."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "bd27587fa0cc9473",
    "added": "2026-11-02",
    "review": {
@@ -9479,7 +9479,7 @@
     "Thundering Falls left in its library: 0 (the 60-card list has 1; 1 seen in hand / battlefield / graveyard / exile).",
     "That turn it did not crack it."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "931181021df6ddd3",
    "added": "2026-11-02",
    "review": {
@@ -10154,7 +10154,7 @@
     "That turn it cracked it at once and found nothing (no Island-type land left to find).",
     "Before the crack it looked at its library this turn: Brainstorm put back Polluted Delta, Force of Will."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "b39b9175ffa72a5f",
    "added": "2026-11-02",
    "review": {
@@ -10601,7 +10601,7 @@
     "That turn it cracked it at once for Island.",
     "Before the crack it looked at its library this turn: Brainstorm put back Polluted Delta, Polluted Delta."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "d368937505f93e02",
    "added": "2026-11-02",
    "review": {
@@ -10652,7 +10652,7 @@
     "What it did, in order: played Polluted Delta [main 1]; cracked Polluted Delta for Thundering Falls [main 1]; cast Mishra's Bauble [main 1]; activated the Bauble targeting itself, saw Cori-Steel Cutter [beginning of combat (opponent's turn)]. (Thundering Falls' surveil 1 then showed it the top card: keep or bin.)",
     "The card on top when it looked (beginning of combat of game turn 2, the opponent's turn): Cori-Steel Cutter. The Bauble then drew Cori-Steel Cutter."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "3e878f6cf32bea41",
    "added": "2026-11-03",
    "review": {
@@ -10703,7 +10703,7 @@
     "What it did, in order: played Polluted Delta [main 1]; cracked Polluted Delta for Thundering Falls [main 1]; cast Urza's Bauble [main 1]. (Thundering Falls' surveil 1 then showed it the top card: keep or bin.)",
     "It never looked at its own top card with a Bauble between main 1 and the end of the opponent's next turn."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "23186df5a8d6e3d4",
    "added": "2026-11-03",
    "review": {
@@ -10794,7 +10794,7 @@
     "What it did, in order: cast Lightning Bolt [draw step]; played Polluted Delta [main 1]; cracked Polluted Delta for Volcanic Island [main 1]; cast Mishra's Bauble [main 1]; activated the Bauble targeting itself, saw Brainstorm [end step].",
     "The card on top when it looked (end step of game turn 3): Brainstorm. The Bauble then drew Brainstorm."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "9acee0ce3b580c78",
    "added": "2026-11-03",
    "review": {
@@ -10845,7 +10845,7 @@
     "What it did, in order: played Polluted Delta [main 1]; cracked Polluted Delta for Thundering Falls [main 1]; cast Mishra's Bauble [main 1]; activated the Bauble targeting itself, saw Ponder [end step (opponent's turn)]. (Thundering Falls' surveil 1 then showed it the top card: keep or bin.)",
     "The card on top when it looked (end step of game turn 2, the opponent's turn): Ponder. The Bauble then drew Ponder."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "90d56c8d191f1b04",
    "added": "2026-11-03",
    "review": {
@@ -10915,7 +10915,7 @@
     "What it did, in order: played Volcanic Island [main 1]; cast Lightning Bolt [main 1]; cast Mishra's Bauble [main 1]; activated the Bauble targeting the opponent [main 1]; cast Mishra's Bauble [main 1]; activated the Bauble targeting the opponent [main 1].",
     "It never looked at its own top card with a Bauble between main 1 and the end of the opponent's next turn (it looked at the opponent's, game turn 2)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "48e7e196aa155b6c",
    "added": "2026-11-03",
    "review": {
@@ -11022,7 +11022,7 @@
     "What it did, in order: cast Brainstorm [draw step]; played Misty Rainforest [main 1]. (Brainstorm also works the top: it puts two cards back.)",
     "It never looked at its own top card with a Bauble between main 1 and the end of the opponent's next turn."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "sig": "ab7c41997b3ab4ac",
    "added": "2026-11-03",
    "review": {
@@ -11074,7 +11074,7 @@
     "What it did, in order: played Flooded Strand [main 1]; cracked Flooded Strand for Volcanic Island [main 1]; cast Lightning Bolt [main 1]; cast Mishra's Bauble [main 1]; activated the Bauble targeting the opponent [upkeep (opponent's turn)].",
     "It never looked at its own top card with a Bauble between main 1 and the end of the opponent's next turn (it looked at the opponent's, game turn 3)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "value": 0.479,
    "replaces": "bauble_trick_missed:r3-2b-float550_0550_s32:17:8",
    "id": "bauble_trick_missed:r3-2b-float550_0550_s32:17:7",
@@ -11126,7 +11126,7 @@
     "What it did, in order: played Polluted Delta [main 1]; cracked Polluted Delta for Volcanic Island [main 1]; cast Tamiyo, Inquisitive Student [main 1]; cast Mishra's Bauble [main 1]; activated the Bauble targeting the opponent [main 1].",
     "It never looked at its own top card with a Bauble between main 1 and the end of the opponent's next turn (it looked at the opponent's, game turn 1)."
    ],
-   "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
+   "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0550.pt",
    "value": 0.6458,
    "replaces": "bauble_trick_missed:r3-2b-float550_0550_s32:28:4",
    "id": "bauble_trick_missed:r3-2b-float550_0550_s32:28:3",
@@ -11425,7 +11425,7 @@
  "recorded": [
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\run-1d67542",
+    "checkout": "~\\mtg-zero-wt\\run-1d67542",
     "commit": "1d67542c345e9f095332848c8aa00b441a4f0c8e",
     "branch": "HEAD",
     "dirty": false,
@@ -11437,7 +11437,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-t-fixtures",
+    "checkout": "~\\mtg-zero-wt\\eoe-t-fixtures",
     "commit": "ad675e0a1554e7f1ec3272f6ccdee0627ec35731",
     "branch": "eoe-t-fixtures",
     "dirty": false,
@@ -11453,7 +11453,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-b2-pay",
+    "checkout": "~\\mtg-zero-wt\\eoe-b2-pay",
     "commit": "dd175b5962ef5a15af1fb6697ad87cb55597a015",
     "branch": "eoe-b2-pay",
     "dirty": true,
@@ -11466,7 +11466,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-f7-numbers",
+    "checkout": "~\\mtg-zero-wt\\eoe-f7-numbers",
     "commit": "17e0ebb3eff84d707d104da4c2a0345dafcce811",
     "branch": "eoe-f7-numbers",
     "dirty": true,
@@ -11479,7 +11479,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-f7-numbers",
+    "checkout": "~\\mtg-zero-wt\\eoe-f7-numbers",
     "commit": "0a58c14af27b323f75b3074d479f277c6d772ffc",
     "branch": "eoe-f7-numbers",
     "dirty": true,
@@ -11492,7 +11492,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-d-encoding",
+    "checkout": "~\\mtg-zero-wt\\eoe-d-encoding",
     "commit": "9646ee9feff90648552fc3930da93427d90783cb",
     "branch": "eoe-d-encoding",
     "dirty": true,
@@ -11505,7 +11505,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-d-encoding",
+    "checkout": "~\\mtg-zero-wt\\eoe-d-encoding",
     "commit": "fa6c97cfee4765a05d4baec22250cb4d6f50835b",
     "branch": "eoe-d-encoding",
     "dirty": true,
@@ -11518,7 +11518,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-bot",
+    "checkout": "~\\mtg-zero-wt\\eoe-bot",
     "commit": "026ebd47387ac6f55884dd1331f99819fb2c7b0d",
     "branch": "eoe-bot",
     "dirty": true,
@@ -11531,7 +11531,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-net",
+    "checkout": "~\\mtg-zero-wt\\eoe-net",
     "commit": "5a6646f550ebc939885455e47dd9fe8d3272b834",
     "branch": "eoe-net",
     "dirty": true,
@@ -11544,7 +11544,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-net",
+    "checkout": "~\\mtg-zero-wt\\eoe-net",
     "commit": "8856568f838f9757aa72b7d2e4b1bde414eae021",
     "branch": "eoe-net",
     "dirty": true,
@@ -11557,7 +11557,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-net",
+    "checkout": "~\\mtg-zero-wt\\eoe-net",
     "commit": "4ee5cf7d18384c2d74582deb3baf18ffe804e5b0",
     "branch": "eoe-net",
     "dirty": true,
@@ -11570,7 +11570,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-b7-order",
+    "checkout": "~\\mtg-zero-wt\\eoe-b7-order",
     "commit": "c69b2cda0553f61f519f06858dbcf2013aa6088a",
     "branch": "eoe-b7-order",
     "dirty": true,
@@ -11583,7 +11583,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-b8-pay",
+    "checkout": "~\\mtg-zero-wt\\eoe-b8-pay",
     "commit": "b7807a16dab2ff2be2085378f6a1c7a4f22f932f",
     "branch": "eoe-b8-pay",
     "dirty": true,
@@ -11596,7 +11596,7 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\integrate-fable",
+    "checkout": "~\\mtg-zero-wt\\integrate-fable",
     "commit": "2d17c659b7f2a4c00de1b693d272d64495df6c1c",
     "branch": "integrate/fable-1112",
     "dirty": true,

@@ -6,7 +6,7 @@ the **card IR** (JSON), and the `card_ir` crate deserializes it into typed
 Rust values. No per-card or per-class bridge: the Rust types are generated
 from the schema the export writes alongside the IR (DESIGN.md section 3.2).
 The format is specified in `docs/card_ir_format.md`. The pipeline lived in
-the mtg-bot project until ENGINE.md 169 moved it here (from mtg-bot
+the mtg-bot project until ENGINE.md 170 moved it here (from mtg-bot
 `feature/eoe-station-ir` 68b62ed3, every file reproduced byte for byte);
 the "mtg-bot" commits below are where earlier exports came from.
 
@@ -18,7 +18,7 @@ the "mtg-bot" commits below are where earlier exports came from.
 | `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 124, the Legacy Doomsday deck: Doomsday, Pact of Negation, Personal Tutor, Flow State, 124.1; Misdirection, Flusterstorm, Cavern of Souls, 124.2; Edge of Autumn, Street Wraith, Leyline of the Void, 124.3; ENGINE.md 123, the Legacy Sneak and Show deck: Show and Tell, Omniscience, Mistrise Village, Brotherhood's End, Disruptor Flute, Magus of the Moon; ENGINE.md 122, the Delver 75's sideboard: Consign to Memory, Hydroblast, Meltdown, Price of Progress, Rough // Tumble; mtg-bot's pool `legacy`), the same export and schema |
 | `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.16 the export of mtg-bot `feature/eoe-ir-fixes` f4f2d663 (before it 7c02e5c9, ENGINE.md 99.11; 5362f5ed, ENGINE.md 99.9) |
 | `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
-| `ir/mtgz_ir/` | The pipeline: the oracle-text parser (`cards/parser/`), the card model it builds (`cards/`, `effects/`), the IR encoder and schema (`cards/ir.py`), the export (`export.py`); stdlib Python 3.11+ (ENGINE.md 169) |
+| `ir/mtgz_ir/` | The pipeline: the oracle-text parser (`cards/parser/`), the card model it builds (`cards/`, `effects/`), the IR encoder and schema (`cards/ir.py`), the export (`export.py`); stdlib Python 3.11+ (ENGINE.md 170) |
 | `ir/data/` | Its inputs: the pools' Scryfall card records (JSON; no images), the name lists and sidecars `tools/ir_fetch_cards.py` writes |
 | `tools/card_ir.py` | `export` (regenerate the five files), `check` (a regeneration equals them byte for byte), `roundtrip` |
 | `tools/ir_fetch_cards.py` | Fetches a pool's Scryfall records (CubeCobra list or a name list) into `ir/data` |
@@ -96,9 +96,9 @@ A change to the encoding rules (not to the card vocabulary) bumps
 `ir_version`; `support.rs`, `lib.rs` and the generator may need changes
 too (`docs/card_ir_format.md`, "Versioning").
 
-## Current numbers (in this repo since ENGINE.md 169; before it mtg-bot `feature/eoe-station-ir` 68b62ed3)
+## Current numbers (in this repo since ENGINE.md 170; before it mtg-bot `feature/eoe-station-ir` 68b62ed3)
 
-ENGINE.md 169 moved the pipeline in: `python tools/card_ir.py check` regenerates the five files from `ir/` and
+ENGINE.md 170 moved the pipeline in: `python tools/card_ir.py check` regenerates the five files from `ir/` and
 `ir/data` and finds them identical, byte for byte, to these (schema `693d23a4a259...`).
 
 

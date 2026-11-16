@@ -53,7 +53,7 @@ IR_VERSION = 1
 IR_FORMAT = "mtg-bot-card-ir"
 SCHEMA_FORMAT = "mtg-bot-card-ir-schema"
 # The format names above and the module labels below are the IR's first exporter's (mtg-bot, whose
-# package was ``mtg_bot``): mtg-zero moved the pipeline in as ``mtgz_ir`` (docs/ENGINE.md 169) and kept
+# package was ``mtg_bot``): mtg-zero moved the pipeline in as ``mtgz_ir`` (docs/ENGINE.md 170) and kept
 # them, because they are part of every document and of the schema's hash (each document's
 # ``schema_sha256``, ``card_ir::SCHEMA_SHA256`` and generated.rs's doc comments). The schema names a
 # class's or an enum's module as ``mtg_bot.<the module path below the package>``. Changing either is a

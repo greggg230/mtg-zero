@@ -12,7 +12,7 @@ only pay their own sacrifice activation.
 Currently claims Terramorphic Expanse.
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.agents, not carried into mtgz_ir):
 # test_terramorphic_expanse_resolution_fetches_basic
 
 from __future__ import annotations

@@ -24,7 +24,7 @@ Cards newly claimed in this batch:
   predicate Atomic Microsizer's bespoke factory uses).
 """
 
-# mtg-zero (docs/ENGINE.md 169): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.player_protections, not carried into mtgz_ir):
+# mtg-zero (docs/ENGINE.md 170): 1 of mtg-bot's tests in this file stayed in mtg-bot: they play the Python engine (mtgz_ir.player_protections, not carried into mtgz_ir):
 # test_saw_effect_sacrifices_and_draws
 
 from __future__ import annotations

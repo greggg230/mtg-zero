@@ -18,7 +18,8 @@
 # (one per checkout, never shared) and RUSTFLAGS with macOS's link flags for the PyO3 module
 # (`-undefined dynamic_lookup`: every command gets them, so a target dir never rebuilds for them).
 # Uncommitted changes are NOT sent: commit first (a WIP commit is fine). The command travels
-# base64-encoded (quotes, pipes and semicolons arrive intact). MTGZ_MAC=user@host: another Mac.
+# base64-encoded (quotes, pipes and semicolons arrive intact). The Mac: MTGZ_MAC=user@host, the machine's own
+# setting in ~/.config/zero/local.env (tools/local.env.example; the environment wins), never committed.
 # One command at a time per Mac checkout (a lock beside it: a second mac.sh on the same branch waits);
 # the "[mac] <host> <branch> @ <sha>" line and the "[mac] done @ <sha> (exit N)" line after the command
 # carry the Mac checkout's own HEAD, read there (tools/gate.py checks both; docs/ENGINE.md 143).
@@ -34,10 +35,12 @@
 # job started in it keeps its code and its engine module while the branch's own checkout moves on
 # (--pin again at the same commit re-installs the module there: not while its job runs).
 set -euo pipefail
-HOST="${MTGZ_MAC:-greggkeithley@100.95.248.116}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tools/local_env.sh"
+HOST="${MTGZ_MAC:-}"
+[ -n "$HOST" ] || { echo "$(basename "$0"): no Mac configured: set MTGZ_MAC=user@host in ~/.config/zero/local.env (tools/local.env.example)" >&2; exit 2; }
 cd "$ROOT"
-[ $# -gt 0 ] || { sed -n 2,35p "$0"; exit 2; }
+[ $# -gt 0 ] || { sed -n 2,36p "$0"; exit 2; }
 
 SHA="$(git rev-parse HEAD)"
 PIN="$(git rev-parse HEAD:third_party/zero-core)"            # zero-core's pinned commit
