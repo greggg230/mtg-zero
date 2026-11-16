@@ -36206,9 +36206,9 @@ gen 17: load 0.1 s, `record_rows` 58.3 s - the reference positions' self-play, ~
 92.8 s - the dynamo trace ~13 s and onnxscript's optimizer ~50 s of it). The farm's leases stay on the old gen until the
 new one is registered, and the architecture never changes between gens: only the weights do.
 
-**What.** The zero-core pin moves from 002731c (`feat/pb3-teacher`) to 92642ff (`feat/fast-farm-export`: cba6dbd and a test fix, branched from
-002731c; Python only: no Rust input, no engine, worker, encoding, search or self-play change). zero-core docs/az.md 53
-has the design; in short:
+**What.** The zero-core pin moves from 002731c (`feat/pb3-teacher`) to 79a76eb (`feat/fast-farm-export`, branched from
+002731c: cba6dbd the fast export, 92642ff a test fix, 79a76eb `record_rows` gives ZERO_INFLIGHT back; Python only: no Rust
+input, no engine, worker, encoding or search change). zero-core docs/az.md 53 has the design; in short:
 
 * The architecture's **weight-swap template** is exported once per architecture fingerprint (the network config, the
   interface module, every module tensor's name / shape / dtype, the export settings, the exporter's versions, zero-core's
@@ -36226,6 +36226,15 @@ has the design; in short:
 * The log line breaks the time down: `gen 17 exported (2.2 s, ffe2cc54ea77): load 0.11 s, swap 0.39 s, reference 0.43 s,
   check 1.24 s (graph by weight swap; reference positions of gen 15)`.
 
+**A behaviour change for a run with a farm pool (called out; the user's call at pb3's restart).** zero-core's
+`farm_h2h.record_rows` set `ZERO_INFLIGHT=1` for its recording and left it set in the run process: from the pool's first
+export on, the run's own self-play `drive` went one network batch at a time instead of the default two in flight (pb3's
+run process holds ZERO_INFLIGHT=1 now, read from its environment block). It now gives the setting back, so after the
+re-pin pb3's local self-play drives two batches in flight - the default, what pb1 ran with before the farm pool existed.
+To keep pb3's current one-at-a-time behaviour exactly, launch it with `ZERO_INFLIGHT=1` in its environment (the restart
+notes in the launch script give both). Found through the gate: the leak (from `test_farm_h2h`) made zero-core's
+`test_shard_thread::test_rolling_run_quotas_exact` finish 97 games for 96 in the full core pytest.
+
 **Measured** (pb3 iter_0015..0017 read-only into a scratch pool dir, the live run on the same machine): gen 15 (builds
 the template and records the positions) 179.9 s (template 88.7, record_rows 86.0, swap 0.4, reference 0.5, check 1.4);
 gens 16 and 17 **2.3 s and 2.2 s** (load 0.1, swap 0.4, reference 0.4, check 1.2-1.3). Before: 96-175 s every gen.
@@ -36242,12 +36251,17 @@ rewrite fires (zero-core's tests' random networks) the swapped file is the expor
 2.9e-6, deterministic).
 
 **The farm worker needs no change.** No zero-onnx input, output or metadata key and no reference.npz array changed, and
-no Rust input changed: the worker build pb3 runs (99a7986f, its CUDA alternate 8295bd63) takes the swapped graphs and
-reference sets as they are. The engine digest is main's (8f71ccb0d89031a6, checked in the re-pin worktree below).
+this branch changes no Rust input: the worker build pb3 runs (99a7986f, its CUDA alternate 8295bd63) takes the swapped
+graphs and reference sets as they are. pb3's worker was built at b309fa08; main has since taken the MTGO adapter's
+`build` / `describe` specs (95.11: engine/src/az, no change to play - main's digest stayed 8f71ccb0d89031a6). Checked on
+the new pin: `tools/farm_gates.py --config <pb3 config> --checkpoint iter_0017.pt --model <the swapped gen 17> --worker
+<build 99a7986f> --runtime-dir <its CPU pack> --set spec=<pb3's phase spec: the matchup table's teacher decisions>`:
+**FARM GATES PASSED** (gate 2: 8 games, 1,056 rows, 200 batches identical; gate 3: records -> trainer rows identical);
+the engine digest in the re-pin worktree: 8f71ccb0d89031a6 (= main's).
 
 **Tests.** zero-core `tests/test_farm_export.py` (5: swap equals a full export byte for byte; derived weights and the
 value-dependent rewrite; fingerprint invalidation; refusals on mismatched tensors; reference reuse through
-`export_cached` on toy_tail checkpoints); the existing `test_onnx.py`, `test_onnx2.py`, `test_farm_pool.py`,
-`test_farm_h2h.py` pass unchanged.
+`export_cached` on toy_tail checkpoints, ZERO_INFLIGHT given back); the existing `test_onnx.py`, `test_onnx2.py`,
+`test_farm_pool.py`, `test_farm_h2h.py` pass unchanged.
 
 **Gates.** 171.1 (after the gated commit).
