@@ -144,10 +144,17 @@ def test_the_most_informative_reference_and_the_continuity_one():
     assert [r['label'] for r in CF.active_refs(refs, 10, 3)] == ['gen0']
     ys = Y.normalize({'bo1_games': 0, 'blunders': False, 'cells_games': 400, 'cells_refs': ['iter0'],
                       'cells_mode': 'pool'})
-    assert CF.split_games(ys, True) == (300, 100) and CF.split_games(ys, False) == (400, 0)
+    assert CF.split_games(ys, True) == (300, 100, 0) and CF.split_games(ys, False) == (400, 0, 0)
     seq = dict(ys, cells_target_se=30, cells_batch=40)
-    assert CF.split_games(seq, True) == (320, 80)                                # (whole batches)
-    assert CF.split_games(dict(ys, cells_main_share=1.0), True) == (400, 0)
+    assert CF.split_games(seq, True) == (320, 80, 0)                             # (whole batches)
+    assert CF.split_games(dict(ys, cells_main_share=1.0), True) == (400, 0, 0)
+    # generation 0's fixed share when it is neither member (cells_gen0_share 0.1): taken first, the main leg's share
+    # of the whole, the continuity the rest; at least one batch
+    assert CF.split_games(ys, True, gen0=True) == (300, 60, 40)
+    assert CF.split_games(seq, True, gen0=True) == (320, 40, 40)
+    assert CF.split_games(dict(seq, cells_gen0_share=0.01), True, gen0=True) == (320, 40, 40)
+    assert CF.split_games(dict(ys, cells_gen0_share=0.0), True, gen0=True) == (300, 100, 0)
+    assert CF.split_games(dict(seq, cells_games=40), True, gen0=True) == (40, 0, 0)     # (one batch: no room)
 
 
 def _fit_with(cells_n, cells_r):
@@ -170,9 +177,15 @@ def test_the_promotion_rules_cadence_and_threshold_both_ways(tmp_path):
     up = _fit_with({'a|b': 300.0, 'b|a': 0.0}, {'a|b': 0.0, 'b|a': 0.0})
     up['gens'][1]['sha'] = sha_r
     assert CF.promote_rule(up, refs, 48, 'n', ys) == {'iter': 48, 'why': 'threshold', 'cells': ['a|b'], 'vs': 'g32'}
+    # below 0.20 against the newest reference: regressed - never promoted, not even on the cadence
     down = _fit_with({'a|b': -300.0, 'b|a': 0.0}, {'a|b': 0.0, 'b|a': 0.0})
     down['gens'][1]['sha'] = sha_r
-    assert CF.promote_rule(down, refs, 48, 'n', ys)['cells'] == ['a|b']         # (below 0.20 too)
+    assert CF.promote_rule(down, refs, 48, 'n', ys) is None
+    assert CF.promote_rule(down, refs, 96, 'n', ys) is None
+    assert CF.against_newest(down, refs, 96, 'n', ys) == ('g32', [], ['a|b'])
+    mixed = _fit_with({'a|b': -300.0, 'b|a': 300.0}, {'a|b': 0.0, 'b|a': 0.0})
+    mixed['gens'][1]['sha'] = sha_r
+    assert CF.promote_rule(mixed, refs, 48, 'n', ys) is None                   # (one cell up, one down: regressed)
     inc = _fit_with({'a|b': 300.0}, {'a|b': 0.0})
     inc['gens'][0]['complete'] = False
     inc['gens'][1]['sha'] = sha_r
@@ -195,6 +208,7 @@ class World:
     def __init__(self, salt='w', exploit=None, rho=0.6, couple=0.6):
         self.deals = Deals(salt, rho)
         self.salt, self.couple = salt, couple
+        self.drop = {}                          # {generation: logits lost in every cell} (a regression)
         self.slope = {Y.cell_id(x, y): 0.10 + 0.03 * (i * 3 + j) for i, x in enumerate(Y.CELL_DECKS)
                       for j, y in enumerate(Y.CELL_DECKS)}
         self.m = {(D, S): 0.8, (D, N): -0.5, (S, N): 0.3}
@@ -202,7 +216,7 @@ class World:
         self.exploit = exploit
 
     def a(self, i, x, y):
-        return self.slope[Y.cell_id(x, y)] * i / 16.0
+        return self.slope[Y.cell_id(x, y)] * i / 16.0 - self.drop.get(i, 0.0)
 
     def play(self, a, b, pair, games, ys, seat, log=print, stop=None):
         ga, gb = _gen(a), _gen(b)
@@ -319,17 +333,24 @@ def test_the_pool_watcher_end_to_end_with_automatic_promotion(tmp_path, sim):
     for r, i in first.items():
         assert all(any(d['kind'] == 'cells_base' and d['ref'] == r and tuple(d['pair']) == p for d in done[:i])
                    for p in [(D, S), (D, N), (S, N)])
-    # later checkpoints: a main leg (90 games) against an active reference, a continuity leg (30) against the next older
+    # later checkpoints: a main leg (90 games) against an active reference, a continuity leg against the next older,
+    # and generation 0's fixed share (12) when it is neither (cells_gen0_share 0.1)
     legs = [r for r in rows if r['kind'] == 'cells' and r['iter'] == 112]
-    assert sorted({r['role'] for r in legs}) == ['cont', 'main'] and {r['base_games'] for r in legs} == {120}
+    assert {r['base_games'] for r in legs} == {120}
     pool112 = ['gen0', 'g64', 'g96']                                  # (pool_active 2 + the anchor)
     assert fits[112]['pool'] == pool112
     for r in legs:
         assert r['ref'] in pool112
-        assert r['cells'][next(iter(r['cells']))]['games'] == (90 if r['role'] == 'main' else 30)
     for pair, p in fits[112]['plan'].items():
-        order = [x for x in pool112]
-        assert order.index(p['cont']) == order.index(p['main']) - 1 if p['cont'] else p['main'] == 'gen0'
+        g = p['games']
+        if p['main'] == 'gen0':
+            assert p['cont'] is None and p['gen0'] is None and g == {'gen0': 120}
+        elif p['cont'] == 'gen0':
+            assert p['gen0'] is None and (g[p['main']], g['gen0']) == (90, 30)
+        else:
+            assert (p['main'], p['cont'], p['gen0']) == ('g96', 'g64', 'gen0')
+            assert (g['g96'], g['g64'], g['gen0']) == (90, 18, 12)
+    assert any(p['gen0'] for p in fits[112]['plan'].values())         # (the world's steady gains: g96 is the main)
     # the record: every cell rated, the anchored number, the whole curve in gens, the flags quiet (no exploiter)
     f = fits[128]
     assert f['complete'] and set(f['cells']) == {Y.cell_id(x, y) for x in Y.CELL_DECKS for y in Y.CELL_DECKS}
@@ -408,7 +429,7 @@ def test_the_fit_works_retroactively_on_ladder_mode_records_and_the_switch_remea
     done = drive(run, cfg, pool)
     assert [(d['kind'], d['iter']) for d in done] == [(Y.FIT_KIND, i) for i in (16, 32, 48, 64)]
     f = [r for r in Y.read_rows(run) if r['kind'] == Y.FIT_KIND][-1]
-    assert f['plan'][f'{D},{S}'] == {'main': 'gen0', 'cont': None, 'games': {'gen0': 160}}
+    assert f['plan'][f'{D},{S}'] == {'main': 'gen0', 'cont': None, 'gen0': None, 'games': {'gen0': 160}}
 
 
 def test_a_pool_leg_is_judged_against_the_first_games_of_the_references_baseline(tmp_path, sim):
@@ -528,3 +549,22 @@ def test_the_fit_lane_outlives_the_other_lanes_when_finishing(tmp_path, monkeypa
     w.alive.discard('cpu_bo1')
     t.join(2)
     assert not t.is_alive() and w.alive == set()
+
+
+def test_a_checkpoint_that_regressed_against_the_newest_reference_is_flagged_and_never_promoted(tmp_path, sim):
+    """Generation 64 loses 3 logits in every cell: below 0.20 against g32 (the newest reference), so it is flagged
+    (`below_ref`, its cells in `regressed`) and not promoted although the cadence is due; the next checkpoint is."""
+    world = World('regress')
+    world.drop = {64: 3.0}
+    sim(world)
+    run, cfg = _run(tmp_path, range(0, 81, 16), {
+        'cells_games': 40, 'cells_mode': 'pool', 'cells_auto_promote': True, 'cells_promote_every': 32,
+        'cells_pool_active': 2})
+    drive(run, cfg)
+    fits = {r['iter']: r for r in Y.read_rows(run) if r['kind'] == Y.FIT_KIND}
+    f = fits[64]
+    assert f['promote'] is None and f['flags']['below_ref']['vs'] == 'g32'
+    assert len(f['flags']['below_ref']['cells']) >= 6
+    assert set(f['flags']['below_ref']['cells']) <= set(f['flags']['regressed'])
+    assert fits[80]['promote']['why'] == 'cadence' and fits[80]['promote']['label'] == 'g80'
+    assert [e['label'] for e in json.load(open(Y.ladder_path(run)))['refs']] == ['g32', 'g80']

@@ -98,6 +98,8 @@ The reference pool and the joint fit (docs/ENGINE.md 186; mtgz.az.cells_fit; off
                    1 - cells_promote
   cells_auto_promote    promote by the fit itself (false: suggested, `run_yardsticks.py cells-freeze` does it)
   cells_main_share the main member's share of cells_games (0.75; the rest: the continuity member)
+  cells_gen0_share generation 0's fixed share when it is neither the main nor the continuity member (0.1, at least
+                   one batch; 0 = none): the long-range anchor kept tight
   cells_fit_boot   the fit's bootstrap resamples over deals (200)
 
 Results: one JSON line each in <run>/yardsticks.jsonl (append-only; the watcher is the only writer, under the lock
@@ -162,7 +164,7 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             'sparse': True,
             # the reference pool and the joint fit (docs/ENGINE.md 186)
             'cells_mode': 'ladder', 'cells_pool_active': 3, 'cells_promote_every': 64, 'cells_auto_promote': False,
-            'cells_main_share': 0.75, 'cells_fit_boot': 200}
+            'cells_main_share': 0.75, 'cells_gen0_share': 0.1, 'cells_fit_boot': 200}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)
 DELVER_YARDSTICKS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter0'], 'blunders': True}
@@ -178,7 +180,7 @@ KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': 
         'bo1_every': int, 'blunders_every': int, 'cells_every': int, 'cells_gen_every': int, 'bo1_target_se': _NUM,
         'bo1_sprt': list, 'bo1_batch': int, 'cells_target_se': _NUM, 'cells_batch': int, 'sparse': bool,
         'cells_mode': str, 'cells_pool_active': int, 'cells_promote_every': int, 'cells_auto_promote': bool,
-        'cells_main_share': _NUM, 'cells_fit_boot': int}
+        'cells_main_share': _NUM, 'cells_gen0_share': _NUM, 'cells_fit_boot': int}
 # a kind's cadence setting (docs/ENGINE.md 182)
 EVERY = {'bo1': 'bo1_every', 'blunders': 'blunders_every', 'cells': 'cells_every', 'cells_gen': 'cells_gen_every'}
 SEQ_SEED = 7919                           # batch k's seed offset (zero.h2h.sequential's)
@@ -339,6 +341,9 @@ def _normalize_cells(out):
                          'cells_fit_boot >= 0')
     if not 0 < out['cells_main_share'] <= 1:
         raise ValueError(f"yardsticks: cells_main_share {out['cells_main_share']}: in (0, 1]")
+    if not 0 <= out['cells_gen0_share'] < 1 or out['cells_main_share'] + out['cells_gen0_share'] > 1:
+        raise ValueError(f"yardsticks: cells_gen0_share {out['cells_gen0_share']}: in [0, 1), with cells_main_share "
+                         f"at most 1")
     if out['cells_mode'] == 'pool' and not out['cells_games']:
         raise ValueError('yardsticks: cells_mode pool needs cells_games (the games against the pool, docs/ENGINE.md 186)')
 
@@ -1217,9 +1222,9 @@ class CellsWant:
 
     def plan(self, it, pool):
         """Checkpoint `it`'s games per pair -> {pair: [(reference, games, role)]}: the most informative member
-        ('main', cells_main_share of cells_games) and the next-older one ('cont', the rest; none when the main one is
-        the anchor). Fixed once played: a pair with a result row keeps its references (a row of the ladder mode, no
-        role: as it was measured)."""
+        ('main', cells_main_share of cells_games), the next-older one ('cont', the rest; none when the main one is
+        the anchor) and, when the anchor is neither, the anchor ('gen0', cells_gen0_share). Fixed once played: a
+        pair with a result row keeps its references (a row of the ladder mode, no role: as it was measured)."""
         from . import cells_fit as CF
         fixed = {}
         for r in self.res().values():
@@ -1239,8 +1244,11 @@ class CellsWant:
             order = [r for r in self.refs if r in pool or r['label'] == main]
             if cont is None:
                 cont = CF.continuity(order, main)
-            gm, gc = CF.split_games(self.ys, cont is not None)
-            out[pair] = [(main, gm, 'main')] + ([(cont, gc, 'cont')] if cont and gc else [])
+            anchor = self.refs[0]['label']
+            g0 = anchor not in (main, cont) and anchor in self.by_label
+            gm, gc, gz = CF.split_games(self.ys, cont is not None, gen0=g0)
+            out[pair] = ([(main, gm, 'main')] + ([(cont, gc, 'cont')] if cont and gc else [])
+                         + ([(anchor, gz, 'gen0')] if gz else []))
         return out
 
     def _pool(self, it):
@@ -1592,7 +1600,7 @@ def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, ba
     """Checkpoint `ck` against reference `ref` in the pair's cells (its baseline from the cache; none for a mirror)
     -> the 'cells' / 'cells_gen' row. The pool mode (docs/ENGINE.md 186): `games` a share of the pair's, against the
     baseline of `base_games` (the reference's one baseline, cells_games: its first game ids are these games' seeds)
-    cut to the same first units; `role` ('main' | 'cont') goes in the row."""
+    cut to the same first units; `role` ('main' | 'cont' | 'gen0') goes in the row."""
     for p in (ck, ref):
         if not os.path.exists(p):
             raise FileNotFoundError(p)
@@ -1912,6 +1920,8 @@ def measure_cells_fit(run, it, cfg=None, ys=None, log=print):
     refs = cell_refs(run, cfg, ys)
     pool = CF.active_refs(refs, int(it), ys['cells_pool_active'])
     prom = CF.promote_rule(fit, refs, int(it), sha, ys) if cells_pool(ys) else None
+    a = CF.against_newest(fit, refs, int(it), sha, ys) if cells_pool(ys) else None
+    below = {'vs': a[0], 'cells': a[2]} if a and a[2] else None     # (regressed against it: never promoted)
     if prom is not None:
         prom['auto'] = bool(ys['cells_auto_promote'])
         if prom['auto']:
@@ -1923,7 +1933,7 @@ def measure_cells_fit(run, it, cfg=None, ys=None, log=print):
             except (ValueError, OSError) as ex:
                 prom['error'] = str(ex)[-400:]
                 log(f'cells pool: iteration {it} not promoted: {ex}')
-    return CF.fit_row(fit, int(it), sha, ys, rows, pool=pool, promote=prom, seconds=time.time() - t0)
+    return CF.fit_row(fit, int(it), sha, ys, rows, pool=pool, promote=prom, seconds=time.time() - t0, below=below)
 
 
 def newest_fit(rows):

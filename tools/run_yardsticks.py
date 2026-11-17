@@ -772,7 +772,7 @@ def main(argv=None):
     o.add_argument('--ref', default=None)
     o.add_argument('--pair', default=None)
     o.add_argument('--games', type=int, default=None)
-    o.add_argument('--role', choices=['main', 'cont'], default=None)
+    o.add_argument('--role', choices=['main', 'cont', 'gen0'], default=None)
     o.add_argument('--yardsticks', default=None)
     c = sub.add_parser('cells', help='the metagame cells\' report (docs/ENGINE.md 177)')
     c.add_argument('run')

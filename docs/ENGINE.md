@@ -38091,7 +38091,10 @@ piloting Y:
   in the pair, else the newest measured checkpoint's before N (its proxy). The main leg gets `cells_main_share` (0.75)
   of `cells_games`, rounded to whole batches (sequential cells) or an even number; the rest goes to the **continuity**
   member, the next-older one in the pool (the anchor at the end of the chain); when the main member is the anchor, it
-  gets every game. With 400 games: 300 + 100; with 182.5's batches of 40: 320 + 80.
+  gets every game. With 400 games: 300 + 100; with 182.5's batches of 40: 320 + 80. **Generation 0's fixed share**
+  (186.10): when the anchor is neither the main nor the continuity member, a third leg against it takes
+  `cells_gen0_share` (0.1) of the games first, at least one batch (or two games): 300 + 60 + 40 with 400 games, 320 + 40
+  + 40 with batches of 40 (none when the games are a single batch).
 * **Fixed once played.** The plan of a pair is recomputed at each look only until a result row of N in that pair lands;
   then it keeps the rows' references (`role` 'main' / 'cont'). A pair measured before the switch to the pool (a
   ladder-mode row, no `role`) keeps its row: switching never re-measures a measured checkpoint (tested).
@@ -38116,8 +38119,10 @@ piloting Y:
 * **The rule** (`promote_rule`, read at each checkpoint's fit): checkpoint N, rated by the fit in all 9 cells and newer
   than the newest reference R, is promoted when N - R's `since` >= `cells_promote_every` (64; 0 = the threshold only)
   ('cadence'), or sooner when any cell's expected score against R - the logistic of the fit's rating difference, the
-  cell's own terms as 177's `vs_ref` - passes `cells_promote` (0.80) or falls below 1 - `cells_promote` (0.20)
-  ('threshold').
+  cell's own terms as 177's `vs_ref` - passes `cells_promote` (0.80) ('threshold'). **A checkpoint with any cell
+  below 1 - `cells_promote` (0.20) against R has regressed** (186.10): it is never promoted, not even on the cadence
+  (the cadence goes on to the next checkpoint), and its record flags it (`flags.below_ref`, its cells added to
+  `flags.regressed`).
 * **`cells_auto_promote`** (default false): the fit child promotes N itself (`freeze_pool`) and says so in its record
   (`promote.auto`, `promote.label`); off, the record and `run_yardsticks.py cells` suggest it (`SUGGESTED: ...
   cells-freeze RUN --iter N`) and `cells-freeze` does it, exactly as in the ladder mode.
@@ -38194,10 +38199,11 @@ and `cells_report()['fit']` are that row (pool mode). Fields:
  "overall": {"elo", "se"} | null,                       # mean of the 9 (null unless complete)
  "anchored": {"elo", "se"} | null,                      # base_elo + overall: zero-core's anchored-Elo slot
  "flags": {"transitivity": [{"cell", "iter", "prev", "obs", "obs_se", "pred", "pred_se", "z"}],   # N's flagged
-           "stalled": ["X|Y", ...], "regressed": ["X|Y", ...]},
+           "stalled": ["X|Y", ...], "regressed": ["X|Y", ...],         # (regressed: the reading rule's and below_ref's)
+           "below_ref"?: {"vs": <newest ref>, "cells": ["X|Y", ...]}},   # below 1 - cells_promote against it
  "promote": null | {"iter", "why": "cadence" | "threshold", "cells", "vs": <newest ref>, "auto": bool,
                     "label"?, "elo"?, "elo_se"?, "error"?},          # label: promoted by the fit itself
- "plan": {"X,Y": {"main": <label>, "cont": <label> | null, "games": {<label>: <games a cell>}}},
+ "plan": {"X,Y": {"main": <label>, "cont": <label> | null, "gen0": <label> | null, "games": {<label>: <games a cell>}}},
  "pool": [<labels of N's pool, oldest first>],
  "pairs": {"X,Y": {"games", "clusters", "players", "m": [elo, se], "c": [elo, se]}},   # (mirrors: no m)
  "gens": [{"iter", "sha", "labels"?, "cells": {"X|Y": [elo, se]}, "decks": {"X": [elo, se]},
@@ -38208,7 +38214,7 @@ and `cells_report()['fit']` are that row (pool mode). Fields:
 
 Elo values are rounded to 0.1. A cell absent from `cells` / `gens[].cells` is unrated (no game in that role against
 another generation). In the pool mode a `cells` row (177.5's format, unchanged) gains two fields: `role` ('main' |
-'cont') and `base_games` (the baseline its leg was judged against); its `games` is the leg's. The ladder file's pool
+'cont' | 'gen0') and `base_games` (the baseline its leg was judged against); its `games` is the leg's. The ladder file's pool
 entries have `from_ref` 'pool-fit'. `run_yardsticks.py cells-fit RUN --json` prints the fit itself (`gens` with the
 full per-cell dicts, `transitivity` with every check, `pairs`, `method`), not a row.
 
@@ -38216,7 +38222,7 @@ full per-cell dicts, `transitivity` with every check, `pairs`, `method`), not a 
 
 * `yardsticks` options (all new; off by default): `cells_mode` ('ladder' | 'pool'; 'pool' needs `cells_games`),
   `cells_pool_active` (3), `cells_promote_every` (64), `cells_auto_promote` (false), `cells_main_share` (0.75),
-  `cells_fit_boot` (200). `cells_promote` (0.80) is the pool's threshold too. Everything else is 177's and 182's.
+  `cells_gen0_share` (0.1; 0 = none; with cells_main_share at most 1), `cells_fit_boot` (200). `cells_promote` (0.80) is the pool's threshold too. Everything else is 177's and 182's.
   For the metagame run, 182.5's setting plus `"cells_mode": "pool"` (and `"cells_auto_promote": true` to promote
   without a hand).
 * `run_yardsticks.py cells RUN [--json] [--fit] [--boot B]`: in the pool mode the pool, the joint fit's table per
@@ -38284,11 +38290,26 @@ full per-cell dicts, `transitivity` with every check, `pairs`, `method`), not a 
 
 ### 186.9 Open questions
 
-* The reference is chosen per deck pair, not per cell: one match plays both of a pair's cells (A in seat gid % 2).
-  Choosing per cell needs a match per cell (twice the matches, half the games each).
-* Generation 0 is in every pool but played only when it is the most informative member or the end of the
-  continuity chain; a fixed small share against it every time ("played lightly") would be one more setting.
-* The reading rule's reading (186.5), and whether a threshold promotion below 0.20 (a checkpoint much worse than the
-  newest reference) should promote at all.
+Answered by the orchestrator (2026-11-17), built in 186.10: the reference stays per deck pair; generation 0 gets a
+fixed share; the reading rule is as read (stalled + regressed); below 0.20 is a regression, not a promotion. Left
+documented as they are:
+
 * A transitivity flag also trips on the neighbour of an exploiter (186.5); pred_se is the full fit's.
 * Sequential stopping (182) is optional stopping: the fit ignores it (a small bias, as the ladder's cells did).
+
+### 186.10 The orchestrator's decisions: generation 0's fixed share, no promotion on a regression
+
+* **`cells_gen0_share`** (0.1): every measurement plays a small fixed share against generation 0 when it is neither
+  the main nor the continuity member (`split_games(..., gen0=True)`: taken first, at least one batch; the main leg keeps
+  its share of the whole, the continuity leg the rest; a leg of `role` 'gen0', judged against gen0's one baseline's
+  first units like the others), so the long-range anchor stays tight however far the pool has moved. 0 turns it off.
+* **Below 0.20 is a regression** (`against_newest`, `promote_rule`): promotion only on a cell past `cells_promote`
+  (0.80) or on the cadence; a checkpoint with a cell below 1 - `cells_promote` against the newest reference is never
+  promoted (cadence included) and its record says so (`flags.below_ref` {vs, cells}; the cells also in
+  `flags.regressed`).
+* Tests (`tests/test_cells_pool.py`, now 16): the split with and without the gen0 leg (400 games: 300 + 60 + 40;
+  batches of 40: 320 + 40 + 40; a single batch: none); the end-to-end pool run's iteration 112 plays g96 90 + g64 18 +
+  gen0 12 where gen0 is neither member, 90 + 30 where it is the continuity one, all 120 where it is the main one; the
+  promotion rule refuses a checkpoint below 0.20 (a cell down and one up included) on the threshold and on the
+  cadence; a simulated run whose generation 64 loses 3 logits: its record flags `below_ref` against g32 in its cells,
+  it is not promoted though its cadence is due, and generation 80 is (ladder g32, g80).

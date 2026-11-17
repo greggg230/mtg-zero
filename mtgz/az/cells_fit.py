@@ -539,16 +539,23 @@ def predict(fits, pair, c_sha, r_sha):
     return out, info
 
 
-def split_games(ys, two):
-    """A checkpoint's games per cell of one pair split between the main reference (cells_main_share) and the
-    continuity one -> (main, continuity): whole batches (sequential) or even numbers, at least one unit each."""
+def split_games(ys, two, gen0=False):
+    """A checkpoint's games per cell of one pair split between the main reference (cells_main_share), the
+    continuity one (the rest) and, with `gen0` (generation 0 neither of them), generation 0's fixed share
+    (cells_gen0_share; at least one batch / unit) -> (main, continuity, gen0): whole batches (sequential cells) or
+    even numbers."""
     g = int(ys['cells_games'])
-    if not two:
-        return g, 0
     gran = int(ys['cells_batch']) if Y.cells_sequential(ys) else 2
+    share0 = float(ys.get('cells_gen0_share') or 0.0)
+    g0 = 0
+    if gen0 and share0 > 0 and g >= 2 * gran:
+        g0 = max(gran, int(round(share0 * g / gran)) * gran)
+    rest = g - g0
+    if not two:
+        return rest, 0, g0
     main = int(round(float(ys['cells_main_share']) * g / gran)) * gran
-    main = min(max(main, gran), g)
-    return (g, 0) if main >= g else (main, g - main)
+    main = min(max(main, gran), rest)
+    return main, rest - main, g0
 
 
 def choose(fits, pair, c_sha, pool):
@@ -572,12 +579,10 @@ def continuity(pool, main):
     return labels[i - 1] if i > 0 else None
 
 
-def promote_rule(fit, refs, it, sha, ys):
-    """The pool's promotion rule for measured checkpoint `it` (`sha`) -> {'iter', 'why': 'cadence' | 'threshold',
-    'cells', 'vs'} or None: every cells_promote_every iterations after the newest reference's `since`, or sooner when
-    a cell's expected score against the newest reference (the logistic of the fit's rating difference) passes
-    cells_promote or falls below 1 - cells_promote. Only a checkpoint rated in all its cells, newer than the newest
-    reference."""
+def against_newest(fit, refs, it, sha, ys):
+    """Measured checkpoint `it` (`sha`) against the newest reference R, per cell, by the fit -> (R's label, cells
+    whose expected score - the logistic of the rating difference - passes cells_promote, cells below 1 -
+    cells_promote) or None (only a checkpoint newer than R, rated in all its cells, not R itself)."""
     if not refs:
         return None
     new = refs[-1]
@@ -594,20 +599,39 @@ def promote_rule(fit, refs, it, sha, ys):
         return None
     rg = gen_of(fit, rsha) if rsha else None
     thr = float(ys['cells_promote'])
-    cells = []
+    up, down = [], []
     if rg is not None:
         for cid, c in g['cells'].items():
             rc = rg['cells'].get(cid)
             if rc is None or c['elo'] is None or rc['elo'] is None:
                 continue
             p = Y.expected_score(c['elo'] - rc['elo'])
-            if p > thr or p < 1.0 - thr:
-                cells.append(cid)
+            if p > thr:
+                up.append(cid)
+            elif p < 1.0 - thr:
+                down.append(cid)
+    return new['label'], up, down
+
+
+def promote_rule(fit, refs, it, sha, ys):
+    """The pool's promotion rule for measured checkpoint `it` (`sha`) -> {'iter', 'why': 'cadence' | 'threshold',
+    'cells', 'vs'} or None: every cells_promote_every iterations after the newest reference's `since`, or sooner when
+    a cell's expected score against the newest reference passes cells_promote. A checkpoint with a cell below
+    1 - cells_promote against it has regressed: never promoted, not even on the cadence (the fit row flags it,
+    `below_ref`; the cadence goes on to the next checkpoint). Only a checkpoint rated in all its cells, newer than
+    the newest reference."""
+    a = against_newest(fit, refs, it, sha, ys)
+    if a is None:
+        return None
+    label, up, down = a
+    if down:
+        return None
+    new = refs[-1]
     every = ys.get('cells_promote_every') or 0
     if every and it - new['since'] >= every:
-        return {'iter': it, 'why': 'cadence', 'cells': cells, 'vs': new['label']}
-    if cells:
-        return {'iter': it, 'why': 'threshold', 'cells': cells, 'vs': new['label']}
+        return {'iter': it, 'why': 'cadence', 'cells': up, 'vs': label}
+    if up:
+        return {'iter': it, 'why': 'threshold', 'cells': up, 'vs': label}
     return None
 
 
@@ -616,7 +640,7 @@ def _pair2(d):
     return None if d is None else [d['elo'], d['se']]
 
 
-def fit_row(fit, it, sha, ys, rows, refs=None, pool=None, promote=None, seconds=None):
+def fit_row(fit, it, sha, ys, rows, refs=None, pool=None, promote=None, seconds=None, below=None):
     """The 'cells_fit' record of measured checkpoint `it` (docs/ENGINE.md 186.6) from a fit_run result."""
     g = gen_of(fit, sha) or {'cells': {}, 'decks': {}, 'overall': None, 'anchored': None, 'complete': False,
                              'flags': {}}
@@ -627,9 +651,9 @@ def fit_row(fit, it, sha, ys, rows, refs=None, pool=None, promote=None, seconds=
         if r['kind'] == 'cells' and r.get('iter') == it and r.get('sha') == sha:
             for cid, st in (r.get('cells') or {}).items():
                 used.setdefault(cid, {})[r['ref']] = st.get('games')
-            p = plan.setdefault(','.join(r['pair']), {'main': None, 'cont': None, 'games': {}})
+            p = plan.setdefault(','.join(r['pair']), {'main': None, 'cont': None, 'gen0': None, 'games': {}})
             p['games'][r['ref']] = next(iter((r.get('cells') or {}).values()), {}).get('games')   # (a cell's)
-            p['cont' if r.get('role') == 'cont' else 'main'] = r['ref']
+            p[r.get('role') if r.get('role') in ('cont', 'gen0') else 'main'] = r['ref']
     cells = {cid: dict(c, refs=used.get(cid, {})) for cid, c in g['cells'].items()}
     trans = [{k: t[k] for k in ('cell', 'iter', 'prev', 'obs', 'obs_se', 'pred', 'pred_se', 'z')}
              for t in fit['transitivity'] if t['sha'] == sha and t['flag']]
@@ -649,9 +673,11 @@ def fit_row(fit, it, sha, ys, rows, refs=None, pool=None, promote=None, seconds=
            'anchor': fit['anchor'], 'base_elo': fit['base_elo'], 'complete': bool(g.get('complete')),
            'cells': cells, 'decks': g['decks'], 'overall': g['overall'], 'anchored': g['anchored'],
            'flags': {'transitivity': trans, 'stalled': g['flags'].get('stalled', []),
-                     'regressed': g['flags'].get('regressed', [])},
+                     'regressed': sorted(set(g['flags'].get('regressed', [])) | set((below or {}).get('cells', [])))},
            'promote': promote, 'plan': plan, 'pairs': fit['pairs'], 'gens': gens, 'method': fit['method'],
            'games': fit['games'], 'time': round(time.time())}
+    if below:                                    # (cells below 1 - cells_promote against the newest reference)
+        row['flags']['below_ref'] = below
     if pool is not None:
         row['pool'] = [r['label'] for r in pool]
     if fit['missing_bases']:
