@@ -36873,3 +36873,12 @@ byte-identical, on classic jobs).
   `low` at 3 ids, a lower `extend` ignored, `extend` to 40, a checkpoint to gen 143 built in the background (`selftest`
   gen 143, 2.6e-6) while the games went on, four records files cut by `flush_s` (rows of nets 142 and 143), `finish` ->
   `end` `finish`, `unfinished` [7007, 7040) (7 of 40 released ids played), 191 s.
+
+### 178.2 Re-pin to zero-core feat/rolling-farm 1338d49: the farm pool's lock-order fix (ENGINE.md 180 on main)
+
+zero-core `feat/rolling-farm` 1338d49 merges `fix/pool-lock-order` d32bf98, the deadlock fix that hung pb3 (main's
+ENGINE.md 180, zero-core docs/az.md 55). In the merge, rolling's per-row staleness moved into `Pool._head`, which runs
+under `Pool.mu`. `accept_pool` is called without `Pool.mu`. zero-core `tests/test_farm_pool.py` passes on 1338d49 (13
+tests, including the deadlock regression and the rolling tests). The change is Python only and touches none of the
+worker's Rust inputs, so farm builds 769143b4 and 4741ab3a stay. The rolling re-pin should be gated again when it
+merges.
