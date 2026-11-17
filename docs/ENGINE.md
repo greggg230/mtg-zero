@@ -37393,3 +37393,33 @@ the backlog, with a thread switch interval of 10 us and one 30 s deadline for bo
 The fix touches no Rust and none of the worker's inputs. `git diff 2c67426 d32bf98` lists only
 `python/zero/farm_pool.py`, `python/zero/remoteplay.py`, `tests/test_farm_pool.py` and `docs/az.md`. pb3 therefore keeps
 release BUILD 88c69488 and CUDA alternate e182abd5.
+
+### 180.4 Gates
+
+The gates ran on 5eee4461 in warm worktrees beside the live pb3, with
+`MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`:
+
+* **optin-core**, `--baseline-root` <main e2811d25, built>: **GATE PASSED WITH SKIPS optin-core 5eee44613460 in
+  1818s**. The skips are the live-run fence only (17 core tests). Results:
+  * core tests: 204 passed;
+  * checkpoint_compat: byte-identical (visits 3,272 samples, cq 3,272 samples);
+  * digests EQUAL to the recorded ones: constructed e1177d609d6c1aee, EoE 2efe956d589840ce, driver 6f7b863096e47dcd,
+    metagame 8b2b74f436d338a0, dealt e802d9df793c9993;
+  * farm compat: identical;
+  * az 54 and hidden 28;
+  * the other three games build;
+  * core pytest: 700 passed.
+
+  The first run of this gate failed only at checkpoint_compat, because the baseline checkout's `mtgz/_engine.pyd` was
+  stale for its own layout (`RowsMismatch` raised in the baseline's process). A baseline worktree rebuilt at e2811d25
+  passed.
+* **python**: **GATE PASSED WITH SKIPS python 5eee44613460 in 986s**. The skips are the live-run fence only (8 tests).
+  Results: pytest 542 passed across the 4 shards and the desktop part; the run-loop smoke played 16 games, 0
+  unfinished.
+* **pb3's worker**: `tools/farm_gates.py` ran on pb3's config.json + iter_0146.pt WITH THE EXISTING WORKER 88c69488
+  against this checkout, and **FARM GATES PASSED**:
+  * gate 2: 8 games, 722 rows, 200 batches identical;
+  * gate 3: the records replayed bit for bit.
+
+  pb3 therefore keeps BUILD 88c69488 and CUDA alternate e182abd5 on this pin, including main's engine commits since
+  4c7c3b58, which are additive and digest-equal.
