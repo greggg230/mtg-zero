@@ -37634,8 +37634,9 @@ resolutions and every other decision record as before.
 * **-> the trainer.** A row without options is a value-only row (zero-core docs/az.md 16, the `view_samples` rows'
   path): no policy loss, its value, margin and auxiliary losses as any row's; once a window holds any, the policy loss
   and the entropy are means over the rows with options (`window_view_samples` in the training metrics counts them, with
-  any other value-only rows; the run's `selfplay_view_samples` is 0 in the ddwheel presets, so there they are exactly
-  these). Distillation and the held-out sets count them among their 'view' rows. Nothing changes in the shards.
+  the other seat's value-only samples: `legacy-meta3-ddwheel` inherits `selfplay_view_samples` 0.5 from legacy-meta3;
+  the smoke preset has 0, so there they are exactly these). Distillation and the held-out sets count them among their
+  'view' rows. Nothing changes in the shards.
 
 **`tools/combo_stats.py rows`** (the proof, module docs): `--games` self-play games of two decks with the forced find at
 `--p`, both players one recording self-play seat of the checkpoint (every search full), traced as the farm's worker
@@ -37663,7 +37664,47 @@ cast nor after; the same in every world of either viewer - and `the_search_game_
 Doomsday-mirror self-play games at p 1 with uniform priors - drawn: no policy row, value-only rows; undrawn and
 other: policy rows only; the trainer's path rebuilds exactly those option-less rows.
 
-**Checks.** PENDING
+**Checks** (code at c13eb8eb, pin 6146e21; the next commit is these numbers, docs only; scratch in
+`E:/mtg-zero-scratch/ddwheel/`, never `runs/`):
+
+* **Digests: every one EQUAL** (no option in any digest spec, and the hook's default is false): cube
+  **8f71ccb0d89031a6**, encoding-free 41e27319acdae5b5; `digest_formats` constructed e1177d609d6c1aee, eoe
+  2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993. No wheel digest
+  (open, as in 180.11).
+* zero-core: `cargo test --release --workspace` 202 + 48 passed (the golden self-play records unchanged), the new test
+  passed. `misc_suite forced_find::` 14 passed; `tests/test_forced_find.py` 8 passed.
+* **The fuzz, `FUZZ_POOL=meta_wheel`** (the hook checked at every step): 200 games locally - resolution decisions
+  value-only 122, with their policy 210 (resolutions voluntary 5, forced 15, in hand 8, not findable 1, missed 11);
+  2,000 games in the suite gate: passed (the merged checks require both counts > 0).
+* **`combo_stats.py rows`** on the 180.11 smoke network (iteration 3, 8 simulations a side, every search full):
+  - Doomsday mirror, p 0.5, 200 games: drawn resolutions' decisions **policy rows 0, value-only rows 415**; undrawn
+    resolutions' **policy rows 786, value-only 0**; other decisions policy 57,340, value-only 0; replayed by the
+    trainer's path: 58,541 rows, 415 without options - OK.
+  - Doomsday vs Delver, p 1, 200 games: drawn **policy 0, value-only 191**; undrawn (in hand, not findable) **policy
+    68, value-only 0**; other policy 51,580; replayed 51,839 rows, 191 without options - OK.
+* **The run loop** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/ddwheel/mask-smoke --preset
+  legacy-meta3-ddwheel-smoke --yardsticks '{}'`, CPU, 3 iterations of 16 games): `done`; the trainer's windows of
+  iterations 2 and 3 held `window_view_samples` 2 (the smoke preset has no view samples: these are drawn resolutions'
+  decision rows, trained without a policy loss); iteration 1's games had no drawn resolution with a decision.
+* **Farm compatibility on the wheel**: `tools/farm_compat.py --preset legacy-meta3-ddwheel --games 40 --set spec=<the
+  metagame with the Doomsday cells, forced find p 1>` with the release worker of c13eb8eb: **PASSED** - gate 2 identical
+  (9,462 rows, 150 batches), gate 3 identical (9,195 rows, 40 decks); the worker's 40 records, counted by `policy_rows`:
+  drawn resolutions' decisions policy 0, value-only **9**; other decisions policy 6,094; the preset's view samples
+  3,092 (legacy-meta3's `selfplay_view_samples` 0.5) - the worker records the value-only decisions exactly as the
+  Python run does, and the trainer's replay accepts them.
+* `python tools/privacy_check.py`: 0 findings (both repos).
+* **suite**: **GATE PASSED suite c13eb8eb3ab8 in 1323s** (the full engine suite, 2,702 passed, 24 binaries; the sharded
+  2k fuzz of `default`, `default+hidden`, `delver_dealt` and `meta_wheel`).
+* **engine `--tested-sha c13eb8eb`**: twice **failed** on `tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`
+  alone (no games within its 180 s on the loaded desktop: another agent's gate ran beside it). The test takes 158 s
+  alone on main 0df9f188 and on this branch (both params pass alone on both): a timing margin, not this change. With
+  `--offload mac`: **GATE PASSED engine c13eb8eb3ab8 in 651s** - digests above (= expected / the recorded files), `az`
+  54, `limits` 13, `hidden` 28, pytest 1 + 132 + 192 + 192 on the Mac and 45 on the desktop, the smoke, farm compat on
+  the Delver dealt preset identical, the suite evidence of c13eb8eb.
+* **optin-core** (`--baseline-root` <main 0df9f188, built>, `--offload mac`): **GATE PASSED optin-core c13eb8eb3ab8 in
+  2109s** - core tests 205 passed; checkpoint_compat byte-identical (visits 3,272 samples, cq 3,272); digest formats and
+  dealt as above; feature tests `az` 54, `hidden` 28; the other games (glassroad-zero, caverna-zero,
+  kingdombuilder-zero) build against this core; core pytest 675 passed (37 skipped); farm compat identical.
 
 ## 181. The farm pool's lock-order deadlock that hung pb3 (zero-core `fix/pool-lock-order` d32bf98, docs/az.md 55; branch `fix/pool-lock-order`, 2026-11-16)
 
