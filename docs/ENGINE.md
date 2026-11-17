@@ -36853,3 +36853,23 @@ checkpoint switches while the games go on; `proto.rs` unit tests: the job line, 
 `keep_rows` on tails / overrides / sparse rows), the full core pytest, `tools/smoke_all.sh --with-this-core
 --build-only`. Here: the `optin-core` gate (its farm-compat step: the release worker vs zero-core's Python worker,
 byte-identical, on classic jobs).
+
+### 178.1 The gate, the builds and the checks of e6c84c9e (docs only)
+
+* `optin-core` on e6c84c9eb9de: **GATE PASSED WITH SKIPS** (the live-run fence only: 17 live-run-hazard tests of the
+  core pytest; 662 passed). checkpoint_compat identical (visits and cq, 3,272 samples each); digests = the recorded
+  files (constructed e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993); farm compat
+  identical (gate 2: 6 games, 2,484 rows, 150 batches; gate 3: 6 games); core tests 204, az 54, hidden 28; the other
+  games built against the core.
+* Farm builds of e6c84c9e: release worker **769143b41098727bd70744ec** (CPU pack d531424b) and its CUDA re-sign
+  **4741ab3a1218ad3a446bbfbe** (pack 855d2162, min_agent 0.2.11): the same executable (sha256 236d65af...), which
+  announces `features: ["rolling"]`.
+* `tools/farm_gates.py` on the live best-of-three run's config with its iter 143 checkpoint and published gen-143 graph:
+  FARM GATES PASSED (gate 2: 8 games, 1,714 rows, 200 batches identical; gate 3: 12 games, nets 143 / 144, identical),
+  and again with gen 143's phase spec (gate 2: 1,957 rows; gate 3: 12 games, identical).
+* The CUDA build's self-test on gen 143 (`probe-providers --providers cuda,cpu`): cuda max abs 2.3e-6, cpu 1.8e-6, both
+  deterministic.
+* A rolling job end to end through `serve` with the release worker on the CPU (gens 142 and 143, conc 2, flush_s 30):
+  `low` at 3 ids, a lower `extend` ignored, `extend` to 40, a checkpoint to gen 143 built in the background (`selftest`
+  gen 143, 2.6e-6) while the games went on, four records files cut by `flush_s` (rows of nets 142 and 143), `finish` ->
+  `end` `finish`, `unfinished` [7007, 7040) (7 of 40 released ids played), 191 s.
