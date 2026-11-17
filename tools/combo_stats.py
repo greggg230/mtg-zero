@@ -653,10 +653,15 @@ def paired(ra, rb):
             'a': sum(a[k] for k in ks) / len(ks), 'b': sum(b[k] for k in ks) / len(ks)}
 
 
-def report(paths, md=None, js=None, pairs=(), log=say):
+def report(paths, md=None, js=None, pairs=(), merge=(), log=say):
     rows, errors = read_stats(paths)
+    alias = {}
+    for m in merge:                     # NEW=A,B,...: labels read as one (the same pairing and budgets, other seeds)
+        new, _, olds = m.partition('=')
+        alias.update({o: new for o in olds.split(',')})
     by = collections.defaultdict(list)
     for r in rows:
+        r['label'] = alias.get(r['label'], r['label'])
         by[r['label']].append(r)
     sums = [summarize(by[k]) for k in sorted(by)]
     text = '\n\n'.join(table(s) for s in sums)
@@ -832,6 +837,7 @@ def main(argv=None):
     r.add_argument('--md', default=None)
     r.add_argument('--json', default=None)
     r.add_argument('--pair', action='append', default=[], help='LABEL_A:LABEL_B (same seeds): paired difference')
+    r.add_argument('--merge', action='append', default=[], help='NEW=LABEL,LABEL,...: labels read as one')
     q = sub.add_parser('spots', help='the pile spots of played games searched at several budgets')
     q.add_argument('ckpt')
     q.add_argument('files', nargs='+')
@@ -874,7 +880,7 @@ def main(argv=None):
             sys.exit(1)
     else:
         files = [f for x in a.files for f in (sorted(glob.glob(x)) or [x])]
-        report(files, a.md, a.json, a.pair)
+        report(files, a.md, a.json, a.pair, a.merge)
 
 
 if __name__ == '__main__':
