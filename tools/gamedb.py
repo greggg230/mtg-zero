@@ -305,8 +305,12 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
         k = nxt['log_n'] - st['log_n']
         lines = nxt['log'][-k:] if k > 0 else []
         if k > len(nxt['log']):
+            # (a step that wrote more lines than the exported tail - a resolving Doomsday exiling a library: the
+            # oldest are gone, as for combo_stats; an event says how many)
             lost += k - len(nxt['log'])
             lines = ['(log lines lost)'] + lines
+            events.append((len(events), i, nxt.get('turn'), nxt.get('step'), None, 'lines_lost', None, None, None,
+                           {'n': k - len(nxt['log'])}))
         R.step(st, d.get('kind'), text, lines, nxt)
         lines_ev([ln for ln in lines if ln != '(log lines lost)'], nxt, i)
         prev, st = st, nxt

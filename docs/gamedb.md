@@ -53,7 +53,7 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 | score0, score1 | the result per seat (1 / 0 / 0.5) |
 | detailed | replayed in full (its events and combo rows exist) |
 | last_attackers | JSON {turn, attackers} of the winner's last attack (detailed games) |
-| lines_lost | play-by-play lines lost to the 40-line tail (detailed games; 0 normally) |
+| lines_lost | play-by-play lines lost to the engine's 40-line exported tail (detailed games): a step that writes more (Doomsday exiling a library, ~50 lines) keeps its newest 40; ~6 a real self-play game |
 
 **events** - one row per play-by-play line and per choice of a detailed game.
 
@@ -63,7 +63,7 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 | action | the index of the action that produced it (-1: before the first action, the opening hands) |
 | turn, step | the turn and the step name (`Main1`, `Upkeep`, `DeclareAttackers`, `Setup`, ...) |
 | player | the seat (for a zone move: the seat whose destination zone holds the card, when exactly one does) |
-| type | `cast`, `land` (a land played), `activate`, `mana` (a mana ability), `move` (a zone change), `find` (a search's pick), `trigger` (a trigger put on the stack), `counter` (a spell countered), `attack`, `look`, `choose`, `turn` (a turn begins), `forced_find` (the wheel's draw line), `empty_draw`, `choice` (a decision with two or more options other than priority and mana payment: mulligans, targets, modes, piles, Brainstorm's put-backs, ...), `other` |
+| type | `cast`, `land` (a land played), `activate`, `mana` (a mana ability), `move` (a zone change), `find` (a search's pick), `trigger` (a trigger put on the stack), `counter` (a spell countered), `attack`, `look`, `choose`, `turn` (a turn begins), `forced_find` (the wheel's draw line), `empty_draw`, `lines_lost` (detail `n`: a step wrote more lines than the engine's exported 40-line tail - a resolving Doomsday exiling the rest of a library - and its oldest `n` are not in `events`; `combo_stats` reads the same tail, and the `doomsday` rows come from the state, not the lines), `choice` (a decision with two or more options other than priority and mana payment: mulligans, targets, modes, piles, Brainstorm's put-backs, ...), `other` |
 | card | the card the line names (cast / land / activate / mana / find / move / trigger / counter / attack: the attacker); a choice's chosen option text |
 | from_zone, to_zone | a move's zones (`Library`, `Hand`, `Battlefield`, `Graveyard`, `Stack`, `Exile`); a cast's zone it was cast from (`Hand`, `Graveyard`, ...) |
 | detail | JSON: a choice's `kind` (`Mulligan`, `ChooseTarget`, `SearchLibrary`, `PutOnTop`, ...) and `n_options` (and `source` while a spell resolves); an activation's `ability`; the forced find's `class` and `drawn`; an `other` line's `text` |

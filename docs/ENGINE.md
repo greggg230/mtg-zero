@@ -38482,6 +38482,13 @@ Exact agreement with `combo_stats.py scan` (the truth), game by game and field b
   (forced 2, missed 2, in_hand 1), no difference against `scan_row`.
 The light replay's `games` rows equal the full replay's on all 1,200 probe games (every column it fills).
 
+One limit found on the way, documented rather than worked around: the engine exports the play-by-play's newest 40 lines
+with each state (`view.rs` LOG_TAIL), and a resolving Doomsday exiles the rest of its caster's library and graveyard in
+one step (~50 lines), so that step's oldest lines - exile moves - are not in `events` (`games.lines_lost`, a
+`lines_lost` event with the count: 2,735 lines in the probe's 1,200 games, ~6 a real self-play game). `combo_stats`
+reads the same tail (its "(log lines lost)"); the `doomsday` rows come from the state, not the lines. Exporting the whole
+step's lines would be an engine (view) change: left for a later branch if the exile moves are ever wanted.
+
 ### 187.4 Measured
 
 The desktop's CPU, 2026-11-17, beside the live metagame run (its GPU busy).
