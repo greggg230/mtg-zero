@@ -7,6 +7,7 @@ Measuring only: no rule, encoding or search change. Read-only for runs (writes o
   python tools/combo_stats.py selfplay CKPT --p 0.5 --decks ... (the same flags)   # with the forced find: NOT a measurement
   python tools/combo_stats.py scan DIR/L.b000.games.json.gz [...] [--jobs 4]   # rebuild + per-game stats
   python tools/combo_stats.py report DIR/*.stats.jsonl [--md OUT.md] [--json OUT.json]
+  python tools/combo_stats.py rows CKPT --p 1 --decks ... --sims 16 --games 20 [--out ROWS.json]   # the wheel's rows
 
 play. Player 0 plays the first deck's main, player 1 the second's (open decklists: data/decks/<name>.json, the
 constructed best-of-one spec of `mtgz.az.decklists.mirror_spec` with a deck per seat, ENGINE.md 120). Both players
@@ -46,6 +47,15 @@ engine's; without it the state's (the same order). A drawn resolution whose Orac
 pick reads `forced` (the decision had one option): the warm-up's voluntary share is exact on the undrawn resolutions
 (`undrawn`); `play`'s games have no draw. The exit gate (the user's): the Oracle in the network's own piles (`voluntary`)
 in at least 50% of resolutions, plus Oracle wins against Delver.
+
+rows. The training rows the forced find's self-play makes (docs/ENGINE.md 180.12): `--games` self-play games of the
+two decks with the forced find at --p, both players one recording self-play seat of the checkpoint (`--sims`, every
+search full: every decision of two or more options recorded), traced as the farm's worker traces them; each game's
+record is replayed by the trainer's path (`replay_rows`) and rebuilt with the play-by-play on to count its samples by
+class: a pile or order decision of a resolving Doomsday whose resolution the draw applied to (`drawn`: drawn, the pile
+holding the Oracle, none in the caster's hand) or not (`undrawn`), any other decision (`other`), another seat's
+value-only sample (`view`) - each as policy rows (a policy target) and value-only rows (none). The wheel's rule: the
+drawn class has no policy row; every other decision has its policy.
 
 report. Per label: games, player 0's score (+- binomial se), each deck's score on the play and on the draw, the win
 methods per winning deck, the turn of the win, mulligans, decisions and seconds per game, unfinished games and
@@ -906,6 +916,137 @@ def search_spots(ckpt, spots, sims_list, repeats=8, device='cpu', log=say):
     return res
 
 
+# ====================================================================================== rows
+ROW_CLASSES = ('drawn', 'undrawn', 'other', 'view')
+
+
+def selfplay_records(ckpt, decks, sims, games, p, seed=1, threads=4, groups=2, max_turns=60, device='cpu',
+                     max_steps=20000, log=say):
+    """Traced self-play of `games` games of decks[0] vs decks[1] with the forced find at share `p`, both players one
+    RECORDING self-play seat (`sims` simulations, full searches: every decision of two or more options is recorded;
+    the seat's other settings zero's defaults) of checkpoint `ckpt` ('uniform': uniform priors and values, for
+    tests) -> (the spec, the games' records as the farm's worker writes them: zero_search::record::game_json)."""
+    from zero import games as G
+    from zero.infer import NetEvaluator, UniformEvaluator, drive
+    from mtgz.az import forced_find as FF
+    spec = FF.with_forced_find(deck_spec(decks[0], decks[1], max_turns=max_turns), p)
+    if ckpt == 'uniform':
+        ev = UniformEvaluator()
+    else:
+        from zero.net import load
+        model, _ = load(ckpt, device, game='mtg')
+        ev = NetEvaluator(model, device)
+    seat = G.nn_seat('a', int(sims), selfplay=True)
+    drv = G.Driver('mtg', [[seat, seat]], spec=spec, concurrency=min(games, 16), seed=int(seed), record=True,
+                   threads=threads, groups=groups, rolling=True, max_steps=max_steps)
+    drv.set_trace(True)
+    recs = []
+    while len(recs) < games:
+        drv.resume(games - len(recs), 0)
+        drive(drv, {'a': ev})
+        _, texts, _ = drv.take_game_records()
+        recs += [json.loads(t) for t in texts if t]
+        log(f'rows: {len(recs)}/{games} self-play games recorded')
+    return spec, recs
+
+
+def policy_rows(E, spec, rec):
+    """One self-play game record -> its samples counted by class and kind (module docs, docs/ENGINE.md 180.12):
+    {class: {'policy': n, 'value_only': n}} over ROW_CLASSES - 'drawn' / 'undrawn': a decision of the seat to move
+    while a Doomsday resolves (one of its pile or order choices: `resolving`) whose resolution the forced find's draw
+    applied to (drawn, the pile holding the Oracle, none in the caster's hand with `unless_in_hand`: the engine's
+    play-by-play line "P<p>'s forced find: <class> (drawn <bool>)" and the state) or not; 'other': any other decision
+    of the seat to move; 'view': another seat's value-only sample. Read from the game rebuilt from its seed and moves
+    with the play-by-play on - not from the hook that chose the rows. Raises when it does not replay."""
+    sp = json.loads(spec)
+    unless = (sp.get('forced_find') or {}).get('unless_in_hand', True)
+    sp['log'] = True
+    g = E.Game('mtg', json.dumps(sp), 2, int(rec['seed']))
+    st = json.loads(g.export_state())
+    at, to_move, res, lines = {}, [], {}, {}
+    for k, a in enumerate(rec['steps']):
+        if not isinstance(a, int):
+            raise ValueError(f'game {rec["gid"]}: step {k} is not an action ({a!r}): constructed best-of-one only')
+        to_move.append(g.to_move)
+        top = (st.get('stack') or [None])[-1]
+        dd = top if top and top.get('name') == DOOMSDAY and top.get('spell') else None
+        if resolving(st):
+            res.setdefault(dd['stack'], {'hand': ORACLE in names_of(st['players'][dd['controller']].get('hand'))})
+            at[k] = dd['stack']
+        g.step(int(a))
+        nxt = json.loads(g.export_state())
+        n = nxt['log_n'] - st['log_n']
+        # (the line comes with the pile's last pick: the resolving Doomsday is the stack's top after the step while its
+        # order is asked - the resolution's first decisions when the engine answered every pick, in a step that began
+        # with another object on top or a priority pass - else the top before it)
+        ntop = (nxt.get('stack') or [None])[-1]
+        sid = (ntop['stack'] if ntop and ntop.get('name') == DOOMSDAY and ntop.get('spell')
+               else dd['stack'] if dd is not None else None)
+        if sid is not None and n > 0:
+            for ln in nxt['log'][-n:]:
+                m = re.search(r"P(\d)'s forced find: (\w+) \(drawn (true|false)\)", ln)
+                if m:
+                    lines[sid] = (m.group(2), m.group(3) == 'true')
+        st = nxt
+    to_move.append(g.to_move)
+    for sid, r in res.items():
+        if sid not in lines:
+            raise ValueError(f'game {rec["gid"]}: Doomsday {sid} made choices but has no forced-find line')
+        r['ff'], r['drawn'] = lines[sid]
+    out = {c: {'policy': 0, 'value_only': 0} for c in ROW_CLASSES}
+    s = rec['samples']
+    for k, p, kind in zip(s['step'], s['player'], s['kind']):
+        if to_move[k] != p:
+            cls = 'view'
+        elif k in at:
+            r = res[at[k]]
+            applied = r['drawn'] and r['ff'] in ('forced', 'voluntary') and not (unless and r['hand'])
+            cls = 'drawn' if applied else 'undrawn'
+        else:
+            cls = 'other'
+        out[cls]['value_only' if kind else 'policy'] += 1
+    return out
+
+
+def rows(ckpt, decks, sims, games, p, out=None, seed=1, threads=4, groups=2, device='cpu', max_turns=60, log=say):
+    """`rows` (module docs): self-play records, each replayed by the trainer's path (`replay_rows`: the record
+    accepted, its rows rebuilt - those without options counted) and counted by `policy_rows` -> the totals, with
+    'ok' = no drawn resolution's decision holds a policy target, every other decision of the seat to move does,
+    and the replayed rows without options are the records' value-only samples."""
+    import mtgz.az  # noqa: F401
+    from mtgz import _engine as E
+    spec, recs = selfplay_records(ckpt, decks, sims, games, p, seed, threads, groups, max_turns, device, log=log)
+    tot = {c: {'policy': 0, 'value_only': 0} for c in ROW_CLASSES}
+    replayed = {'rows': 0, 'without_options': 0}
+    for rec in recs:
+        text = json.dumps(rec, separators=(',', ':'))
+        smp, info = E.replay_rows('mtg', spec, text, False)
+        replayed['rows'] += info['rows']
+        if smp is not None:
+            import numpy as np
+            replayed['without_options'] += int(np.count_nonzero(np.diff(np.asarray(smp['opt_off'])) == 0))
+        for c, v in policy_rows(E, spec, rec).items():
+            for k in v:
+                tot[c][k] += v[k]
+    value_only = sum(v['value_only'] for v in tot.values())
+    ok = (tot['drawn']['policy'] == 0 and tot['undrawn']['value_only'] == 0 and tot['other']['value_only'] == 0
+          and replayed['without_options'] == value_only)
+    res = {'decks': list(decks), 'p': p, 'sims': int(sims), 'games': len(recs), 'seed': seed, 'rows': tot,
+           'replayed': replayed, 'ok': ok}
+    log(f'rows ({decks[0]} vs {decks[1]}, forced find p {p:g}, {len(recs)} self-play games, {sims} simulations): '
+        f'Doomsday pile/order decisions of drawn resolutions: policy rows {tot["drawn"]["policy"]}, value-only rows '
+        f'{tot["drawn"]["value_only"]}; of undrawn resolutions: policy rows {tot["undrawn"]["policy"]}, value-only '
+        f'{tot["undrawn"]["value_only"]}; other decisions: policy {tot["other"]["policy"]}, value-only '
+        f'{tot["other"]["value_only"]}; other seats\' value-only samples {tot["view"]["value_only"]}; replayed by the '
+        f'trainer\'s path: {replayed["rows"]} rows, {replayed["without_options"]} without options - '
+        + ('OK' if ok else 'NOT OK'))
+    if out:
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        with open(out, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(res, f, indent=1)
+    return res
+
+
 # ====================================================================================== main
 def _play_args(p):
     p.add_argument('ckpt')
@@ -951,6 +1092,19 @@ def main(argv=None):
     q.add_argument('--device', default='cpu')
     q.add_argument('--torch-threads', type=int, default=None)
     q.add_argument('--out', required=True, help='JSON: the spots and the searches\' choices')
+    w = sub.add_parser('rows', help='the forced find\'s self-play rows by class (docs/ENGINE.md 180.12)')
+    w.add_argument('ckpt', help='a checkpoint, or "uniform" (uniform priors and values)')
+    w.add_argument('--p', type=float, required=True, help='the forced find\'s share of Doomsday\'s resolutions')
+    w.add_argument('--decks', required=True, help='DECK0,DECK1 (data/decks names)')
+    w.add_argument('--sims', type=int, default=16)
+    w.add_argument('--games', type=int, default=20)
+    w.add_argument('--seed', type=int, default=1)
+    w.add_argument('--threads', type=int, default=4)
+    w.add_argument('--groups', type=int, default=2)
+    w.add_argument('--device', default='cpu')
+    w.add_argument('--max-turns', type=int, default=60)
+    w.add_argument('--torch-threads', type=int, default=None)
+    w.add_argument('--out', default=None, help='JSON: the counts')
     a = ap.parse_args(argv)
     import mtgz.az  # noqa: F401
     if a.cmd == 'spots':
@@ -966,6 +1120,17 @@ def main(argv=None):
         with open(a.out, 'w', encoding='utf-8', newline='\n') as f:
             json.dump({'spots': [{k: v for k, v in sp.items() if k not in ('spec', 'actions')} for sp in spots],
                        'repeats': a.repeats, 'results': res}, f, indent=1)
+        return
+    if a.cmd == 'rows':
+        if a.torch_threads:
+            import torch
+            torch.set_num_threads(a.torch_threads)
+        decks = a.decks.split(',')
+        if len(decks) != 2:
+            ap.error('--decks takes two values')
+        r = rows(a.ckpt, decks, a.sims, a.games, a.p, a.out, a.seed, a.threads, a.groups, a.device, a.max_turns)
+        if not r['ok']:
+            sys.exit(1)
         return
     if a.cmd in ('play', 'selfplay'):
         if a.torch_threads:

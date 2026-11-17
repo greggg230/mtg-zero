@@ -1548,6 +1548,13 @@ impl SearchGame for MtgAz {
             .is_some_and(|d| matches!(d.kind, crate::decision::DecisionKind::PayMana | crate::decision::DecisionKind::PayPool))
     }
 
+    /// The forced find's drawn resolutions (ENGINE.md 180.12, `Game::ff_value_only`): every pile and order decision of
+    /// a resolution the training wheel forces is recorded without its policy target (zero-core's value-only decision,
+    /// its docs/search.md 3.20) - its searches know the forcing. Never outside a game, and never without the option.
+    fn value_only_decision(&self) -> bool {
+        self.m.choice.is_none() && self.m.sb.is_none() && self.g.ff_value_only()
+    }
+
     /// The spectator view (`view.rs`): what the replay recorder stores at every step.
     fn export_state(&self) -> String {
         self.spectator_json()

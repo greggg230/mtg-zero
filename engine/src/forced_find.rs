@@ -17,7 +17,9 @@
 //! * **No policy target.** The forced pick has one option, so the engine answers it itself (`GameSpec::auto_single`,
 //!   `flow.rs` `ask_options`): no decision reaches zero-core, which searches and records nothing for it (zero-core's
 //!   rows are its decisions). Its answer is keyed `KEY_AUTO` like every forced answer (the other player's worlds see a
-//!   searched card's place masked, ENGINE.md 161).
+//!   searched card's place masked, ENGINE.md 161). Nor from the resolution's other decisions (ENGINE.md 180.12): every
+//!   pick and order decision of a resolution the forcing applies to is searched and played, and recorded without its
+//!   policy target (`Game::ff_value_only`, zero-core's value-only decision) - its searches know the Oracle is coming.
 //! * **Not encoded.** Nothing of the spec's option or of `FfState` is read by an encoding: neither player is told that a
 //!   resolution was forced (the user's decision: a warm-up mismatch, ENGINE.md 180).
 //! * Without the option (`GameSpec::forced_find` None) nothing here runs: `FfState` stays empty.
@@ -201,6 +203,44 @@ impl crate::game::Game {
             }
         };
         self.ff.recs.push(FfRec { player: p, drawn, class, pile });
+    }
+
+    /// Whether the pending decision is one of a **drawn** resolution's pile or order decisions (ENGINE.md 180.12):
+    /// zero-core then records it without its policy target (`SearchGame::value_only_decision`, its docs/search.md
+    /// 3.20) - searched and played as any decision, its row a value-only row of the decider. "Drawn" here is the
+    /// forcing applying to the resolution: the draw forces it (`ff_draw`), no card of the spec's is in the caster's
+    /// hand (with `unless_in_hand`) and one can be found (in the library or the graveyard) - exactly the resolutions
+    /// whose pile is sure to hold the card, which every search at their picks knows (the draw is the same in every
+    /// world). Every decision of such a resolution: each pick of the graveyard part (`DdA::PileFromGraveyard`) and the
+    /// library part (`DdA::PileFromLibrary`, before `ff_record`: the draw is the running resolution's), and each pick
+    /// of the order (`Op::PileTo`, after it: the newest record's - drawn, its pile holding the card, the hand still
+    /// without one). A function of the state the decider sees: the same in every world, never encoded. False without
+    /// the option, with no decision pending, and outside the spell's resolution.
+    pub fn ff_value_only(&self) -> bool {
+        use crate::doomsday_a::DdA;
+        use crate::program::{Ext, Op};
+        let Some(ff) = self.spec.forced_find else { return false };
+        if self.pending.is_none() {
+            return false;
+        }
+        // (The asking task is the agenda's last while a decision is pending: `ask_options`.)
+        let Some(crate::flow::Task::Run(f)) = self.agenda.last() else { return false };
+        if f.source_def != ff.spell {
+            return false;
+        }
+        let p = f.controller;
+        let exempt = ff.unless_in_hand && self.ff_in_hand(p, ff.card);
+        match self.db.ability(f.ability).program.get(f.pc as usize) {
+            Some(Op::Ext(Ext::DdA(DdA::PileFromGraveyard { .. } | DdA::PileFromLibrary { .. }))) => {
+                let pl = &self.players[p as usize];
+                let findable = pl.library.iter().chain(&pl.graveyard).any(|&c| self.objs[c.i()].def == ff.card);
+                self.ff_draw() == Some(true) && !exempt && findable
+            }
+            Some(Op::PileTo { .. }) => {
+                !exempt && self.ff.recs.last().is_some_and(|r| r.player == p && r.drawn && matches!(r.class, FfClass::Forced | FfClass::Voluntary))
+            }
+            _ => false,
+        }
     }
 }
 

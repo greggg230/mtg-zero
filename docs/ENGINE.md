@@ -37433,9 +37433,10 @@ decision is the order, the Oracle in the pile, the answer keyed) and by the fuzz
 reaches a player). The game's other rows keep their policy and value targets: the value targets of the positions
 after a forced pile are the point of the wheel.
 
-Known consequence (accepted by the design: the draw is the same in every world): a search at an earlier pick of a drawn
-resolution plays through the forced last pick, so it sees the Oracle arrive whether or not it picks it; its policy
-targets at those picks are the drawn resolution's. The share of drawn resolutions falls with the schedule.
+Known consequence (the draw is the same in every world): a search at an earlier pick of a drawn resolution plays
+through the forced last pick, so it sees the Oracle arrive whether or not it picks it. **No longer recorded as policy
+targets (180.12):** every pile and order decision of a drawn resolution is a value-only row (no policy target; its
+value and auxiliary targets kept).
 
 ### 180.4 Not encoded; the opponent is not told
 
@@ -37579,6 +37580,90 @@ commands under `tools/slotd.sh`, the gate's CPU steps on the Mac, scratch in `E:
   2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0 and dealt e802d9df793c9993 (each = the recorded
   file); `az` 54, `limits` 13, `hidden` 28 passed; pytest 80 + 99 + 217 + 120 + 44 passed; the desktop smoke; farm
   compat on the Delver dealt preset identical; the suite evidence of aab500d7.
+
+### 180.12 No policy target from a drawn resolution: its pile and order decisions are value-only rows (branch `feat/wheel-policy-mask`, zero-core `feat/value-only-decisions`, 2026-11-16)
+
+Branch `feat/wheel-policy-mask` from main 0df9f188; zero-core `feat/value-only-decisions` e6e89a4 (the hook) from main's
+pin 2c67426, with `fix/pool-lock-order` d32bf98 merged in (6146e21, the pin here: main's 9d1193d0 pinned d32bf98, and
+0df9f188, a docs-only commit, set the gitlink back to 2c67426 - the merge keeps the lock-order fix whichever main
+means). Subsection of 180 (main's 181 is the pool lock order; no branch had 180.12).
+
+**Why.** 180.3's known consequence, not accepted after all (the user's rule: no policy target from a forced pick). On a
+resolution the draw applies to, the forcing is a function of the game's seed, the same in every search world, so the
+Doomsday player's own search at the earlier picks plays through the forced last pick and sees the Oracle arrive
+whether it picks it or not: at the pick that offers the Oracle the search is roughly indifferent between the Oracle and
+the other cards, and those visit counts as policy targets train the policy NOT to prefer the Oracle - against the exit
+gate (the Oracle in the network's own piles in >= 50% of resolutions). With the schedule starting at p 1.0, early on
+nearly every pile policy target comes from a drawn resolution. The rest of such a pile (and its order) is chosen
+knowing "the Oracle is guaranteed", a different situation from play without the wheel. The value targets of those
+positions are the point of the wheel (the value net learning that an Oracle in a five-card library wins), so the rows
+stay - without their policy targets.
+
+**What.** On a drawn resolution, NO policy target for ANY of its pile or order decisions; the value rows and the
+auxiliary targets stay; the decisions are searched and played exactly as before (the game needs a move); undrawn
+resolutions and every other decision record as before.
+
+* **"Drawn"** (`Game::ff_value_only`, `engine/src/forced_find.rs`): the forcing applies to the resolution - the draw
+  forces it (`ff_draw`), no Oracle in the caster's hand (with `unless_in_hand`) and one can be found (library or
+  graveyard). Exactly the resolutions whose pile is sure to hold the Oracle, which every search at their picks knows. A
+  resolution whose draw says yes but whose Oracle is in the hand (`in_hand`) or nowhere (`not_findable`) is not forced:
+  its searches know nothing is coming, so its picks keep their policy targets. Its record is `FfRec::drawn` with class
+  `forced` or `voluntary` (and no Oracle in hand): an Oracle the network picked itself before the last pick reads
+  voluntary, and its resolution is still value-only (its earlier picks knew the Oracle was coming).
+* **Which decisions**: every decision the spell's resolution asks (its frame the asking task): each pick of the
+  graveyard part (`DdA::PileFromGraveyard`) and of the library part (`DdA::PileFromLibrary`; before the record, so the
+  draw is the running resolution's), and each pick of the order (`Op::PileTo`, after it: the newest record's - drawn,
+  forced or voluntary, the hand still without an Oracle). A function of what the decider sees (the draw is the game's;
+  the hand is its own; the library and graveyard are what the search reveals): the same in every world (tested), never
+  encoded (180.4 holds: nothing new is read by an encoding). False without the option.
+* **The engine -> zero-core.** `MtgAz::value_only_decision` (zero-core's new opt-in hook, its docs/search.md 3.20) is
+  `Game::ff_value_only` while a game is in progress (not the deck choice, not sideboarding). zero-core's driver asks the
+  real game at a recording self-play seat's searched decision, after the search; when true it records the decider's row
+  (the head and tail tokens; no options, so no pointer overrides) with no options and no policy - a value-only row of the
+  seat to move - its q the search's root value (as any decision's), its auxiliary targets the decider's. The search, the
+  move, the temperature, root noise, the branch reservoir and the resignation count are untouched: a game plays move for
+  move as without the hook (zero-core's test: the same games, the same rows bit for bit but those two fields).
+  `Stats::value_only_decisions` counts them (the binding's stats dict carries the key only when non-zero). The hook's
+  default is false, so every other game and spec is byte-identical: no digest moves.
+* **zero-core rows -> the farm worker.** Nothing new in the record format (zero-core docs/search.md 2.17): the row is a
+  value-only sample (kind 1) of the seat to move. The farm's release worker runs the same driver and `game_json` on the
+  same engine, so it records the same rows. `record::replay` (the trainer's replay path and the desktop's spot checks)
+  accepts a value-only sample of the seat to move only where the replayed game says the decision is a value-only
+  decision with two or more options, and refuses a leaf sample there (unless a teacher decision, 168.3, names the
+  policy): a record from a build that disagrees about the hook (a worker without it) is refused, never trained on.
+* **-> the trainer.** A row without options is a value-only row (zero-core docs/az.md 16, the `view_samples` rows'
+  path): no policy loss, its value, margin and auxiliary losses as any row's; once a window holds any, the policy loss
+  and the entropy are means over the rows with options (`window_view_samples` in the training metrics counts them, with
+  any other value-only rows; the run's `selfplay_view_samples` is 0 in the ddwheel presets, so there they are exactly
+  these). Distillation and the held-out sets count them among their 'view' rows. Nothing changes in the shards.
+
+**`tools/combo_stats.py rows`** (the proof, module docs): `--games` self-play games of two decks with the forced find at
+`--p`, both players one recording self-play seat of the checkpoint (every search full), traced as the farm's worker
+traces them; each game's record is replayed by the trainer's path (`replay_rows`: accepted, its rows rebuilt, those
+without options counted) and rebuilt with the play-by-play on to count its samples by class - a pile or order decision
+of a resolving Doomsday whose resolution the draw applied to (`drawn`: the engine's line "P<p>'s forced find: <class>
+(drawn <bool>)" and the state's hand, not the hook) or not (`undrawn`), any other decision (`other`), another seat's
+value-only sample (`view`) - as policy rows and value-only rows. Exit 1 unless the drawn class has no policy row, every
+other decision of the seat to move has its policy and the replayed option-less rows are the records' value-only samples.
+`rows uniform ...` uses uniform priors and values (the test).
+
+**The fuzz** (`FUZZ_POOL=meta_wheel`, 180.9): `wheel_walk` asks `MtgAz::value_only_decision` at every step - never true
+outside a resolving Doomsday (its frame asking), and all of one resolution's decisions alike, equal to what its record
+says (drawn, forced or voluntary, no Oracle in hand); it counts the resolution decisions recorded value-only and with
+their policy (`wheel_value_only`, `wheel_pile_free`: both > 0 over 200 games or more, in the merged checks; the
+report line gains them).
+
+**Tests.** zero-core `value_only_decisions_play_the_same_games_and_record_the_rows_without_their_policy` (its
+docs/search.md 3.20). `engine/tests/forced_find.rs` (`misc_suite`, 14 now):
+`a_drawn_resolution_records_no_policy_target_at_any_pile_or_order_decision` - p 1: every pick and order decision of a
+forced resolution, of one whose Oracle the player picked itself (voluntary) and of the graveyard part's; p 0 (missed),
+the Oracle in hand (drawn, in_hand), none to find (drawn, not_findable) and without the option: none; not before the
+cast nor after; the same in every world of either viewer - and `the_search_game_hook_is_the_engines_and_off_outside_a_game`.
+`tests/test_forced_find.py::test_a_drawn_resolutions_decisions_are_recorded_without_their_policy` (8 now): `rows` on 20
+Doomsday-mirror self-play games at p 1 with uniform priors - drawn: no policy row, value-only rows; undrawn and
+other: policy rows only; the trainer's path rebuilds exactly those option-less rows.
+
+**Checks.** PENDING
 
 ## 181. The farm pool's lock-order deadlock that hung pb3 (zero-core `fix/pool-lock-order` d32bf98, docs/az.md 55; branch `fix/pool-lock-order`, 2026-11-16)
 

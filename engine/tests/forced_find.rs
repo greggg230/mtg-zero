@@ -512,3 +512,116 @@ fn the_draw_is_a_share_p_of_games_deterministic_by_seed() {
         }
     }
 }
+
+// ---- no policy target from a drawn resolution (ENGINE.md 180.12) -------------------------------------------------
+
+/// The rest of a cast Doomsday's resolution from `g`, `ff_value_only` asked at every decision: the library picks
+/// `picks` (in the search's order) while offered, else each decision's first option -> (the answers, the kinds asked).
+fn value_only_through(g: &mut Game, picks: &[&str]) -> (Vec<bool>, Vec<DecisionKind>) {
+    let mut want: Vec<u16> = picks.iter().map(|n| def(n)).collect();
+    want.sort_unstable();
+    want.reverse();
+    let (mut vo, mut kinds) = (Vec::new(), Vec::new());
+    while !(g.stack().is_empty() && at_priority(g)) {
+        let d = g.pending_decision().expect("a decision").clone();
+        vo.push(g.ff_value_only());
+        kinds.push(d.kind);
+        let ch = match want.last() {
+            Some(&x) if d.kind == DecisionKind::SearchLibrary && g.has_option(Choice::Def(x)) => {
+                want.pop();
+                Choice::Def(x)
+            }
+            _ => d.options[0].choice,
+        };
+        g.choose(ch);
+    }
+    assert!(!g.ff_value_only(), "at priority after the resolution");
+    (vo, kinds)
+}
+
+#[test]
+fn a_drawn_resolution_records_no_policy_target_at_any_pile_or_order_decision() {
+    // Drawn (p 1, the self-play setting): every pick and every order decision is a value-only decision - zero-core
+    // searches and plays it, and records its row without options or policy (its docs/search.md 3.20); not before.
+    let mut g = dd_game(LIB, &[], &[], Some(1.0), true);
+    assert!(!g.ff_value_only(), "before the cast");
+    cast_doomsday(&mut g);
+    let (vo, kinds) = value_only_through(&mut g, &["Brainstorm", "Consider", "Dark Ritual", "Island"]);
+    assert_eq!(g.forced_finds()[0].class, FfClass::Forced);
+    assert!(kinds.contains(&DecisionKind::SearchLibrary) && kinds.contains(&DecisionKind::PutOnTop), "{kinds:?}");
+    assert!(vo.iter().all(|&v| v), "{vo:?} at {kinds:?}");
+    // an Oracle the player picks itself in a drawn resolution: the same (the earlier picks knew it was coming)
+    // (Personal Tutor and Flow State are legacy cards, after the Oracle in definition order: the Oracle is not the last pick)
+    const LIB2: &[&str] = &["Brainstorm", "Ponder", "Consider", "Daze", ORACLE, "Dark Ritual", "Lotus Petal", "Island", "Personal Tutor", "Flow State"];
+    let mut picks: Vec<&str> = LIB2.iter().copied().filter(|&n| def(n) < def(ORACLE)).take(3).collect();
+    picks.extend([ORACLE, *LIB2.iter().find(|&&n| def(n) > def(ORACLE)).unwrap()]);
+    let mut g = dd_game(LIB2, &[], &[], Some(1.0), true);
+    cast_doomsday(&mut g);
+    let (vo, _) = value_only_through(&mut g, &picks);
+    assert_eq!(g.forced_finds()[0].class, FfClass::Voluntary);
+    assert!(vo.len() >= 5 && vo.iter().all(|&v| v), "{vo:?}");
+    // the graveyard's Oracle: the graveyard part's picks too
+    let gy = ["Daze", ORACLE, "Ponder", "Consider", "Dark Ritual", "Lotus Petal"];
+    let mut g = dd_game(&["Island", "Island"], &gy, &[], Some(1.0), true);
+    cast_doomsday(&mut g);
+    let (vo, kinds) = value_only_through(&mut g, &[]);
+    // (the first option each time: the graveyard's Oracle is picked in position order, voluntary)
+    assert_eq!(g.forced_finds()[0].class, FfClass::Voluntary);
+    assert!(kinds.contains(&DecisionKind::ChooseGraveyardCard) && vo.iter().all(|&v| v), "{vo:?} at {kinds:?}");
+    // undrawn (p 0): every decision with its policy target, the Oracle missed
+    let mut g = dd_game(LIB, &[], &[], Some(0.0), true);
+    cast_doomsday(&mut g);
+    let (vo, _) = value_only_through(&mut g, &["Brainstorm", "Ponder", "Consider", "Daze", "Island"]);
+    assert_eq!(g.forced_finds()[0].class, FfClass::Missed);
+    assert!(!vo.is_empty() && vo.iter().all(|&v| !v), "{vo:?}");
+    // drawn but the forcing does not apply - an Oracle in hand (unless_in_hand), none to find - and without the option:
+    // with their policy targets
+    let mut g = dd_game(&["Brainstorm", "Ponder", "Consider", "Daze", "Dark Ritual", "Lotus Petal", ORACLE], &[], &[ORACLE], Some(1.0), true);
+    cast_doomsday(&mut g);
+    let (vo, _) = value_only_through(&mut g, &["Brainstorm", "Ponder", "Consider", "Daze", "Lotus Petal"]);
+    assert_eq!((g.forced_finds()[0].drawn, g.forced_finds()[0].class), (true, FfClass::InHand));
+    assert!(!vo.is_empty() && vo.iter().all(|&v| !v), "{vo:?}");
+    let mut g = Scenario::new(db())
+        .spec(|s| s.forced_find = Some(ff(1.0)))
+        .battlefield(0, &["Swamp", "Swamp", "Swamp"])
+        .hand(0, &[DD])
+        .library(0, &["Brainstorm", "Ponder", "Consider", "Daze", "Dark Ritual", "Lotus Petal"])
+        .exile(0, &[ORACLE])
+        .library(1, &["Island"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    cast_doomsday(&mut g);
+    let (vo, _) = value_only_through(&mut g, &["Brainstorm", "Ponder", "Consider", "Daze", "Lotus Petal"]);
+    assert_eq!((g.forced_finds()[0].drawn, g.forced_finds()[0].class), (true, FfClass::NotFindable));
+    assert!(!vo.is_empty() && vo.iter().all(|&v| !v), "{vo:?}");
+    let mut g = dd_game(LIB, &[], &[], None, true);
+    cast_doomsday(&mut g);
+    let (vo, _) = value_only_through(&mut g, &["Brainstorm", "Ponder", "Consider", "Daze", "Island"]);
+    assert!(g.forced_finds().is_empty() && !vo.is_empty() && vo.iter().all(|&v| !v));
+    // the same in every world of either viewer (a function of what the decider sees)
+    let mut g = dd_game(LIB, &[], &[], Some(1.0), true);
+    cast_doomsday(&mut g);
+    choose_def(&mut g, "Brainstorm");
+    assert!(g.ff_value_only());
+    let mut rng = Rng::new(11);
+    for viewer in 0..2u8 {
+        for _ in 0..8 {
+            let mut w = g.clone();
+            w.determinize(viewer, &mut rng);
+            assert!(w.ff_value_only(), "P{viewer}'s world");
+        }
+    }
+}
+
+#[test]
+fn the_search_game_hook_is_the_engines_and_off_outside_a_game() {
+    // MtgAz's `value_only_decision` is `Game::ff_value_only` during a game: a spec's game at its first decision (not a
+    // resolution) answers false, with the option and without.
+    for v in [dd_delver(), with_ff(dd_delver(), wheel(1.0))] {
+        let sp = parse(&v).unwrap();
+        for seed in 0..5 {
+            let a = MtgAz::new_game(&sp, 2, seed).unwrap();
+            assert!(!a.value_only_decision() && !a.g.ff_value_only());
+        }
+    }
+}

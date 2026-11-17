@@ -170,8 +170,10 @@
 //! option (every third step and at every pick), every world of either viewer keeps the draw and the records at a pick,
 //! the decider's worlds take the real pick to the same keys and records, no pile decision with one option reaches the
 //! player, each record's class agrees with its pile, its draw and (where the library is the pile) the library, and the
-//! game replays to the same state and records. With 200 games or more forced and missed resolutions must have been
-//! seen and worlds, rows and libraries compared.
+//! game replays to the same state and records; zero-core's value-only decisions (`value_only_decision`, ENGINE.md
+//! 180.12) are exactly a drawn resolution's decisions (all of a resolution's alike, as its record says; none outside a
+//! resolving Doomsday). With 200 games or more forced and missed resolutions, value-only decisions and resolution
+//! decisions with their policy must have been seen and worlds, rows and libraries compared.
 //!
 //! The information-set walks (ENGINE.md 148): two worlds `determinize` deals for a viewer, played on
 //! the same random actions while their keys, next decider and legal actions agree (zero-core's child
@@ -744,6 +746,10 @@ struct WheelSeen {
     rows: u64,
     /// Records whose pile was compared with the caster's library.
     libraries: u64,
+    /// Decisions of a resolving Doomsday (its frame asking) that zero-core records without their policy target
+    /// (`value_only_decision`, ENGINE.md 180.12: a drawn resolution's), and those it records as usual.
+    value_only: u64,
+    pile_free: u64,
 }
 
 /// `FUZZ_POOL=meta_wheel`'s walk of game `seed` (module docs, ENGINE.md 180): the metagame spec's game with the forced
@@ -765,6 +771,21 @@ fn wheel_walk(seed: u64) -> WheelSeen {
     let mut rng = Rng::new(seed ^ 0xF0_4CED_0180_1);
     let (mut legal, mut keys, mut wkeys, mut actions) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut step = 0u64;
+    // (ENGINE.md 180.12: the hook's answers at the running resolution's decisions, and what its record says they must be)
+    let (mut frame_vo, mut expect): (Vec<bool>, Option<bool>) = (Vec::new(), None);
+    let flush = |frame_vo: &mut Vec<bool>, expect: &mut Option<bool>, seen: &mut WheelSeen, what: &dyn Fn() -> String| {
+        if frame_vo.is_empty() {
+            return;
+        }
+        let e = expect.take().unwrap_or_else(|| panic!("{}: a resolution's decisions without its record", what()));
+        assert!(frame_vo.iter().all(|&v| v == e), "{}: the resolution's decisions recorded value-only {frame_vo:?}, its record says {e}", what());
+        if e {
+            seen.value_only += frame_vo.len() as u64;
+        } else {
+            seen.pile_free += frame_vo.len() as u64;
+        }
+        frame_vo.clear();
+    };
     let strip_rows = |a: &MtgAz, seen: &mut WheelSeen, what: &dyn Fn() -> String| {
         let mut s = a.clone();
         s.g.strip_forced_find();
@@ -784,6 +805,17 @@ fn wheel_walk(seed: u64) -> WheelSeen {
         });
         if step % 3 == 0 || pick {
             strip_rows(&a, &mut seen, &what);
+        }
+        // zero-core's value-only decisions (ENGINE.md 180.12): only a resolving Doomsday's (its frame asking), and all of
+        // one resolution's the same - drawn, the pile holding the Oracle, none in the hand (the record's; checked at the
+        // resolution's end)
+        let vo = a.value_only_decision();
+        let in_frame = matches!(a.g.agenda.last(), Some(crate::flow::Task::Run(f)) if f.source_def == ff.spell);
+        assert!(!vo || in_frame, "{}: a value-only decision outside the spell's resolution", what());
+        if in_frame {
+            frame_vo.push(vo);
+        } else {
+            flush(&mut frame_vo, &mut expect, &mut seen, &what);
         }
         let before = a.g.forced_finds().len();
         keys.clear();
@@ -839,11 +871,14 @@ fn wheel_walk(seed: u64) -> WheelSeen {
             }
             let k = [FfClass::Voluntary, FfClass::Forced, FfClass::InHand, FfClass::NotFindable, FfClass::Missed].iter().position(|&c| c == r.class).unwrap();
             seen.classes[k] += 1;
+            let in_hand = a.g.player(r.player).hand.iter().any(|&c| a.g.obj(c).def == ff.card);
+            expect = Some(r.drawn && matches!(r.class, FfClass::Voluntary | FfClass::Forced) && !(ff.unless_in_hand && in_hand));
         }
         step += 1;
         assert!(step < 300_000, "seed {seed}: the wheel game does not end");
     }
     strip_rows(&a, &mut seen, &|| format!("seed {seed} (FUZZ_POOL=meta_wheel) the end"));
+    flush(&mut frame_vo, &mut expect, &mut seen, &|| format!("seed {seed} (FUZZ_POOL=meta_wheel) the end"));
     // the seed and actions replay to the same state and records
     let mut b = MtgAz::new_game(&spec, 2, seed).unwrap();
     for &x in &actions {
@@ -3334,6 +3369,8 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
                     wheel.stepped += w.stepped;
                     wheel.rows += w.rows;
                     wheel.libraries += w.libraries;
+                    wheel.value_only += w.value_only;
+                    wheel.pile_free += w.pile_free;
                 }
                 p
             }
@@ -3529,8 +3566,8 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     if wheel_mode() {
         let c = wheel.classes;
         println!(
-            "FUZZ_POOL=meta_wheel (ENGINE.md 180): Doomsday resolutions voluntary {} forced {} in hand {} not findable {} missed {}; worlds compared {}, the decider's worlds stepped {}, rows without the option compared {}, libraries checked {}",
-            c[0], c[1], c[2], c[3], c[4], wheel.worlds, wheel.stepped, wheel.rows, wheel.libraries
+            "FUZZ_POOL=meta_wheel (ENGINE.md 180): Doomsday resolutions voluntary {} forced {} in hand {} not findable {} missed {}; worlds compared {}, the decider's worlds stepped {}, rows without the option compared {}, libraries checked {}; resolution decisions value-only {} (180.12), with their policy {}",
+            c[0], c[1], c[2], c[3], c[4], wheel.worlds, wheel.stepped, wheel.rows, wheel.libraries, wheel.value_only, wheel.pile_free
         );
         for (k, name) in ["voluntary", "forced", "in_hand", "not_findable", "missed"].iter().enumerate() {
             t.set(&format!("wheel_{name}"), c[k]);
@@ -3539,6 +3576,8 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         t.set("wheel_stepped", wheel.stepped);
         t.set("wheel_rows", wheel.rows);
         t.set("wheel_libraries", wheel.libraries);
+        t.set("wheel_value_only", wheel.value_only);
+        t.set("wheel_pile_free", wheel.pile_free);
     }
     end_of_run("games", first, n, &t, check_games);
     Run::Done
@@ -3653,7 +3692,7 @@ pub fn check_games(n: u64, t: &Totals) {
     meta_check(t, "g", n, 200, false);
     // (`FUZZ_POOL=meta_wheel`, ENGINE.md 180: forced and missed resolutions seen, worlds and rows compared)
     if wheel_mode() && n >= 200 {
-        for k in ["wheel_forced", "wheel_missed", "wheel_worlds", "wheel_stepped", "wheel_rows", "wheel_libraries"] {
+        for k in ["wheel_forced", "wheel_missed", "wheel_worlds", "wheel_stepped", "wheel_rows", "wheel_libraries", "wheel_value_only", "wheel_pile_free"] {
             assert!(t.get(k) > 0, "FUZZ_POOL=meta_wheel: {k} is 0 in {n} games");
         }
     }

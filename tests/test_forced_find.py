@@ -184,3 +184,18 @@ def test_combo_stats_reads_the_oracle_at_each_resolution():
         if n >= 3:
             break
     assert n >= 1
+
+
+def test_a_drawn_resolutions_decisions_are_recorded_without_their_policy():
+    """docs/ENGINE.md 180.12: self-play records (a recording seat, uniform priors and values, traced as the farm's worker
+    traces them) of the Doomsday mirror at p 1 - every decision of a drawn resolution is a value-only row (no options,
+    no policy target), every other decision of the seat to move has its policy; the trainer's path (`replay_rows`)
+    accepts the records and rebuilds exactly those rows without options. The classes are read from the rebuilt game's
+    play-by-play, not from the hook. A recording driver with a uniform evaluator in this process: no network."""
+    import combo_stats as C
+    r = C.rows('uniform', [DD, DD], 2, 20, 1.0, threads=2, log=lambda *a: None)
+    t = r['rows']
+    assert r['ok'], r
+    assert t['drawn']['policy'] == 0 and t['drawn']['value_only'] > 0, t
+    assert t['undrawn']['value_only'] == 0 and t['other']['value_only'] == 0 and t['other']['policy'] > 0, t
+    assert r['replayed']['without_options'] == t['drawn']['value_only'], r
