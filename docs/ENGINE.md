@@ -37458,7 +37458,10 @@ far)`, which writes iteration `it`'s p into the spec's `forced_find` - a pure fu
 so every call for one iteration answers the same and the farm's per-iteration phase spec (zero-core docs/az.md 52)
 plays it. Refused at the first self-play phase (zero.run's `EncodingMismatch`: exit 78, not restarted): a schedule
 without `forced_find` in the self-play spec, a malformed schedule, and a run whose own `eval_spec` carries the option.
-The log says `iter N self-play: forced_find p = X ...` whenever p changes. zero-core's remote self-play (the Mac's
+The log says `iter N self-play: forced_find p = X ...` whenever p changes. The release worker's `check-config` lists the
+setting as the trainer's (`worker/src/main.rs` `PACKAGE_SETTINGS`: it reaches the worker through the spec's
+`forced_find`, which the worker plays; `tests/test_worker_farm.py` keeps the list equal to the package's - the first
+engine gate on ccbd0c5b failed there, fixed in the next commit). zero-core's remote self-play (the Mac's
 workers) refuses a changed spec (docs/az.md 40): a scheduled run self-plays here and on the farm. A copied fork
 (`fork_run --copy`) keeps its iteration numbers: set `from` to its first iteration.
 
