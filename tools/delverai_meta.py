@@ -17,7 +17,10 @@ The record's `run_kind` is 'metagame' and its `metagame` block holds:
 * `cells` - the cells yardstick (docs/ENGINE.md 177): mtgz.az.yardsticks.cells_report without local paths or error
   text - the reference ladder, every measured checkpoint's 9 cells against its reference (gain, se, ...), the per-deck
   and overall means and the anchored Elo, gen over gen, the suggested promotion - plus the cells still missing or
-  failing.
+  failing; and `fit` when the run's yardsticks.jsonl has rows of the joint fit against a reference pool (kind
+  `cells_fit`, another lane's, additive): per measured checkpoint the 9 cell ratings +- se (each with the reference it
+  was rated against), per-deck, overall, anchored and its flags (`fit_row`: a pluggable reader of the fields it knows;
+  the site prefers them to the cells' gains when present).
 * `selfplay` - the run's own self-play results by ordered pairing, per iteration (`selfplay_tally`): read from the
   iteration's training shards (<run>/data/iter_NNNN/*.npz, the rows every self-play game wrote - local, the Mac's, the
   farm's; resigned games included, which the game log leaves out: docs/ENGINE.md 176.9). See `shard_games`.
@@ -152,6 +155,7 @@ def cells(run, cfg):
         return None
     rep = c['report']
     ys = YS.of_run(run, cfg) or {}
+    fit = cells_fit(run, ys.get('cells_decks') or [])
     keep = lambda r: {k: r[k] for k in ('iter', 'ref', 'item', 'pair', 'base', 'attempts') if k in r}  # noqa: E731
     return {'refs': [{k: r[k] for k in ('label', 'since', 'sha', 'elo', 'se', 'how') if k in r and r[k] is not None}
                      for r in rep['refs'] if 'label' in r],
@@ -163,7 +167,93 @@ def cells(run, cfg):
             'settings': {k: ys[k] for k in ('cells_games', 'cells_gen_games', 'cells_every',
                                                         'cells_gen_every', 'cells_sims', 'cells_target_se',
                                                         'cells_promote', 'cells_base_elo', 'cells_decks')
-                         if ys.get(k) is not None}}
+                         if ys.get(k) is not None},
+            **({'fit': fit} if fit else {})}
+
+
+# The joint fit of the cells against a reference pool (another lane's `cells_fit` rows in <run>/yardsticks.jsonl, an
+# additive kind; the cells / cells_gen / cells_base rows stay): read when present, else the site shows the cells
+# above. A pluggable reader: the fields it knows are taken, anything else of the row is left out (so no path or error
+# text reaches the site), a row that does not read is skipped and said once.
+FIT_KIND = 'cells_fit'
+FIT_FLAGS = ('transitivity', 'transitive', 'no_improvement', 'improved', 'flags')
+PATHISH = re.compile(r'[/\\]')          # (a flag's text with a slash may be a path: left out)
+
+
+def _es(v):
+    """{elo, se} of a rating (its `elo` or `rating`, its `se` or `elo_se`) or None."""
+    if not isinstance(v, dict):
+        return None
+    e = v.get('elo', v.get('rating'))
+    se = v.get('se', v.get('elo_se'))
+    if not isinstance(e, (int, float)) or not isinstance(se, (int, float)) or se < 0:
+        return None
+    out = {'elo': round(float(e), 1), 'se': round(float(se), 1)}
+    for k in ('games', 'score'):
+        if isinstance(v.get(k), (int, float)):
+            out[k] = v[k]
+    if isinstance(v.get('ref'), str) and len(v['ref']) <= 64:
+        out['ref'] = v['ref']
+    return out
+
+
+def _flag(v):
+    if isinstance(v, bool) or (isinstance(v, (int, float)) and math.isfinite(v)):
+        return v
+    if isinstance(v, str) and len(v) <= 120 and not PATHISH.search(v):
+        return v
+    if isinstance(v, list):
+        return [x for x in (_flag(y) for y in v[:20]) if x is not None]
+    if isinstance(v, dict):
+        return {str(k)[:40]: x for k, y in list(v.items())[:20] if (x := _flag(y)) is not None}
+    return None
+
+
+def fit_row(r, decks):
+    """One `cells_fit` row -> {iter, ref, scale: 'rating', summary {cells {'X|Y': {elo, se, ref?}}, decks, overall,
+    anchored, missing, complete}, flags} or None when it does not read."""
+    if not isinstance(r, dict) or r.get('kind') != FIT_KIND or not isinstance(r.get('iter'), int) or r.get('error'):
+        return None
+    raw = r.get('cells') or r.get('ratings') or {}
+    if not isinstance(raw, dict):
+        return None
+    cells = {k: x for k, v in raw.items() if isinstance(k, str) and '|' in k and (x := _es(v))}
+    if not cells:
+        return None
+    ids = [f'{x}|{y}' for x in decks for y in decks]
+    dk = r.get('decks') if isinstance(r.get('decks'), dict) else {}
+    out = {'iter': r['iter'], 'ref': str(r.get('ref') or r.get('pool') or 'pool')[:64], 'scale': 'rating',
+           'summary': {'cells': cells, 'decks': {k: x for k, v in dk.items() if (x := _es(v))},
+                       'overall': _es(r.get('overall')), 'anchored': _es(r.get('anchored')),
+                       'missing': [c for c in ids if c not in cells], 'complete': all(c in cells for c in ids)}}
+    flags = {k: f for k in FIT_FLAGS if k in r and (f := _flag(r[k])) is not None}
+    if flags:
+        out['flags'] = flags
+    return out
+
+
+def cells_fit(run, decks):
+    """The run's `cells_fit` rows for the site, newest last (the last row of an iteration wins)."""
+    from mtgz.az import yardsticks as YS
+    by, bad = {}, 0
+    try:
+        with open(YS.rows_path(run), encoding='utf-8') as f:
+            for line in f:
+                if FIT_KIND not in line:
+                    continue
+                try:
+                    r = fit_row(json.loads(line), decks)
+                except ValueError:
+                    r = None
+                if r is None:
+                    bad += 1
+                    continue
+                by[r['iter']] = r
+    except OSError:
+        return []
+    if bad:
+        print(f'cells_fit: {bad} row(s) not read (an unknown shape): left out', flush=True)
+    return [by[k] for k in sorted(by)]
 
 
 # ------------------------------------------------------------------------------------- self-play by pairing

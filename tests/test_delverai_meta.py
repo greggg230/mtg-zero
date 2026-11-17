@@ -216,3 +216,24 @@ def test_the_publishers_record_of_a_metagame_run(tmp_path):
     (run / 'config.json').write_text(json.dumps({'spec': decklists.mirror_spec()}))
     q = P.progress(str(run), 8, {}, {}, str(tmp_path / 'state'))
     assert 'run_kind' not in q and 'metagame' not in q and q['deck']['main']
+
+
+def test_the_cells_fit_reader_takes_what_it_knows(tmp_path):
+    """Another lane's joint fit (`cells_fit` rows, additive): read when present, its known fields only."""
+    decks = list(decklists.META3)
+    cells = {f'{x}|{y}': {'rating': 1000 + 10 * i + j, 'elo_se': 12.5, 'ref': 'gen0', 'path': 'C:/x.pt'}
+             for i, x in enumerate(decks) for j, y in enumerate(decks)}
+    rows = [{'kind': 'cells_fit', 'iter': 32, 'cells': cells, 'overall': {'elo': 1015, 'se': 4.2},
+             'decks': {decks[0]: {'elo': 1001, 'se': 7}}, 'anchored': {'rating': 1015, 'se': 4.2},
+             'transitivity': {'violations': 0, 'worst': 'gen0 > gen32'}, 'no_improvement': False, 'error_log': 'E:/x'},
+            {'kind': 'cells_fit', 'iter': 64, 'cells': {'a|b': {'elo': 'x'}}},
+            {'kind': 'cells', 'iter': 32}]
+    (tmp_path / 'yardsticks.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+    out = M.cells_fit(str(tmp_path), decks)
+    assert [r['iter'] for r in out] == [32]
+    r = out[0]
+    assert r['scale'] == 'rating' and r['summary']['complete'] and r['summary']['overall'] == {'elo': 1015.0, 'se': 4.2}
+    assert r['summary']['cells'][f'{decks[1]}|{decks[2]}'] == {'elo': 1012.0, 'se': 12.5, 'ref': 'gen0'}
+    assert r['flags'] == {'transitivity': {'violations': 0, 'worst': 'gen0 > gen32'}, 'no_improvement': False}
+    assert not PATH_RE.search(json.dumps(out))
+    assert M.cells_fit(str(tmp_path / 'none'), decks) == []
