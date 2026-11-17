@@ -8,6 +8,16 @@ Measuring only: no rule, encoding or search change. Read-only for runs (writes o
   python tools/combo_stats.py scan DIR/L.b000.games.json.gz [...] [--jobs 4]   # rebuild + per-game stats
   python tools/combo_stats.py report DIR/*.stats.jsonl [--md OUT.md] [--json OUT.json]
   python tools/combo_stats.py rows CKPT --p 1 --decks ... --sims 16 --games 20 [--out ROWS.json]   # the wheel's rows
+  python tools/combo_stats.py run RUN --iters 1-60:10 --games 60 [--gate-games 100] --out DIR   # a wheel run's windows
+
+run. A forced-find run's Doomsday numbers per iteration window. A run keeps no move records of its self-play (shards
+only), so each window's self-play is played again: iteration N's self-play played checkpoint N - 1 at the schedule's p
+of N (the run's config.json `forced_find_schedule`, `mtgz.az.forced_find.p_at`), so `selfplay` of models/iter_<N-1>.pt
+at that p, --games games of each Doomsday pairing (--pairs; default DD vs Delver, DD vs Sneak and Show, the DD mirror),
+labelled it<N>_<decks>_ff<p>; with --gate-games, `play` of the same checkpoint (no forced find: the exit gate's games)
+on DD vs Delver, labelled it<N>_DD-Delver_gate. Then scan (new games files only) and report over every file in --out
+(<out>/report.md, report.json). The seats are the evaluation seat (`seats_for`), not self-play's (no root noise or
+temperature): the run's network at the run's p, not its exact games. Read-only for the run.
 
 play. Player 0 plays the first deck's main, player 1 the second's (open decklists: data/decks/<name>.json, the
 constructed best-of-one spec of `mtgz.az.decklists.mirror_spec` with a deck per seat, ENGINE.md 120). Both players
@@ -793,6 +803,62 @@ def report(paths, md=None, js=None, pairs=(), merge=(), log=say):
     return sums, pr
 
 
+# ====================================================================================== run
+RUN_PAIRS = ('doomsday_8027957,izzet_delver_8016541', 'doomsday_8027957,sneak_show_8014220',
+             'doomsday_8027957,doomsday_8027957')
+GATE_PAIR = 'doomsday_8027957,izzet_delver_8016541'
+
+
+def run_windows(run, iters, games=60, sims=(64, 64), pairs=RUN_PAIRS, gate_games=0, out=None, seed=1, batch=20,
+                threads=4, groups=2, device='cpu', max_turns=60, log=say):
+    """A forced-find run's Doomsday numbers per iteration window (module docs, `run`). The run's own self-play keeps
+    no move records (shards only), so each window's self-play is played again: iteration `it`'s self-play played
+    checkpoint it - 1 at the schedule's p of `it` (mtgz.az.forced_find.p_at of the run's forced_find_schedule), so
+    `selfplay` of models/iter_<it-1>.pt at that p, `games` games of each Doomsday pairing in `pairs`; with
+    `gate_games`, `play` of the same checkpoint (no forced find: the exit gate's games) on GATE_PAIR. Then scan +
+    report over everything in `out`. Read-only for the run. -> report's (sums, pairs)."""
+    from mtgz.az import forced_find as FF
+    with open(os.path.join(run, 'config.json'), encoding='utf-8') as f:
+        cfg = json.load(f)
+    sched = cfg.get('forced_find_schedule') or {}
+    out = out or os.path.join(run, '..', os.path.basename(os.path.normpath(run)) + '-combo')
+    os.makedirs(out, exist_ok=True)
+    for it in iters:
+        ck = os.path.join(run, 'models', f'iter_{it - 1:04d}.pt')
+        if not os.path.exists(ck):
+            raise SystemExit(f'{ck}: no checkpoint for iteration {it}\'s self-play')
+        p = FF.p_at(sched, it)
+        if p is None:
+            p = json.loads(cfg['spec']).get(FF.KEY, {}).get('p')
+        if p is None:
+            raise SystemExit(f'{run}: no forced find in its spec or schedule')
+        log(f'iteration {it}: {os.path.basename(ck)} at the forced find\'s p {p:g}')
+        for pr in pairs:
+            d = pr.split(',')
+            play(ck, d, list(sims), games, out, f'it{it:04d}_{short(d[0])}-{short(d[1])}_ff{p:g}', seed, batch,
+                 threads, groups, device=device, max_turns=max_turns, log=log, forced_find=p)
+        if gate_games:
+            d = GATE_PAIR.split(',')
+            play(ck, d, list(sims), gate_games, out, f'it{it:04d}_{short(d[0])}-{short(d[1])}_gate', seed, batch,
+                 threads, groups, device=device, max_turns=max_turns, log=log)
+    files = sorted(glob.glob(os.path.join(out, '*.games.json.gz')))
+    todo = [f for f in files if not os.path.exists(f[:-len('.games.json.gz')] + '.stats.jsonl')]
+    if todo:
+        scan(todo, jobs=min(4, len(todo)), log=log)
+    stats = sorted(glob.glob(os.path.join(out, '*.stats.jsonl')))
+    return report(stats, md=os.path.join(out, 'report.md'), js=os.path.join(out, 'report.json'), log=log)
+
+
+def iter_list(s):
+    """'3' / '1,2' / '1-4' / '1-40:8' (every 8th) -> [ints]."""
+    out = []
+    for part in s.split(','):
+        rng, _, step = part.partition(':')
+        a, _, b = rng.partition('-')
+        out += list(range(int(a), int(b or a) + 1, int(step or 1)))
+    return out
+
+
 # ====================================================================================== spots
 def find_spots(paths, per_file=None):
     """The pile spots of played games: each resolving Doomsday's first choice that offers Thassa's Oracle (a 'Find'
@@ -1105,8 +1171,30 @@ def main(argv=None):
     w.add_argument('--max-turns', type=int, default=60)
     w.add_argument('--torch-threads', type=int, default=None)
     w.add_argument('--out', default=None, help='JSON: the counts')
+    u = sub.add_parser('run', help='a forced-find run\'s Doomsday numbers per iteration window (module docs)')
+    u.add_argument('run', help='the run directory (read only: config.json, models/)')
+    u.add_argument('--iters', required=True, help="iterations whose self-play to replay: '3', '1,2', '1-4', '1-40:8'")
+    u.add_argument('--games', type=int, default=60, help='games per pairing per iteration (selfplay at its p)')
+    u.add_argument('--gate-games', type=int, default=0, help='plus `play` games of DD vs Delver (the exit gate)')
+    u.add_argument('--pairs', default=';'.join(RUN_PAIRS), help='DECK0,DECK1;... the selfplay pairings')
+    u.add_argument('--sims', default='64,64')
+    u.add_argument('--out', required=True)
+    u.add_argument('--seed', type=int, default=1)
+    u.add_argument('--batch', type=int, default=20)
+    u.add_argument('--threads', type=int, default=4)
+    u.add_argument('--groups', type=int, default=2)
+    u.add_argument('--device', default='cpu')
+    u.add_argument('--max-turns', type=int, default=60)
+    u.add_argument('--torch-threads', type=int, default=None)
     a = ap.parse_args(argv)
     import mtgz.az  # noqa: F401
+    if a.cmd == 'run':
+        if a.torch_threads:
+            import torch
+            torch.set_num_threads(a.torch_threads)
+        run_windows(a.run, iter_list(a.iters), a.games, [int(x) for x in a.sims.split(',')], a.pairs.split(';'),
+                    a.gate_games, a.out, a.seed, a.batch, a.threads, a.groups, a.device, a.max_turns)
+        return
     if a.cmd == 'spots':
         if a.torch_threads:
             import torch

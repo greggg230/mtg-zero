@@ -86,3 +86,32 @@ def test_paired_difference_over_common_deals():
     b = [{'driver_seed': 1, 'gid': g, 'result': [r, 1 - r]} for g, r in enumerate([1, 1, 0, 1])]
     p = C.paired(a, b)
     assert p['n'] == 4 and abs(p['diff'] - 0.5) < 1e-9 and p['se'] > 0
+
+
+def test_iter_list():
+    assert C.iter_list('3') == [3]
+    assert C.iter_list('1,2') == [1, 2]
+    assert C.iter_list('1-4') == [1, 2, 3, 4]
+    assert C.iter_list('1-40:8,60') == [1, 9, 17, 25, 33, 60]
+
+
+def test_run_windows_replays_iteration_n_with_checkpoint_n_minus_1_at_the_schedules_p(tmp_path, monkeypatch):
+    run = tmp_path / 'run'
+    (run / 'models').mkdir(parents=True)
+    for i in range(3):
+        (run / 'models' / f'iter_{i:04d}.pt').write_bytes(b'')
+    spec = json.dumps({'constructed': True, 'forced_find': {'spell': 'Doomsday', 'card': "Thassa's Oracle", 'p': 1.0}})
+    (run / 'config.json').write_text(json.dumps({'spec': spec, 'forced_find_schedule':
+                                                 {'start': 1.0, 'end': 0.0, 'from': 1, 'iters': 60}}))
+    calls = []
+    monkeypatch.setattr(C, 'play', lambda ck, d, sims, games, out, label, *a, forced_find=None, **k:
+                        calls.append((os.path.basename(ck), tuple(d), games, label, forced_find)))
+    monkeypatch.setattr(C, 'scan', lambda *a, **k: [])
+    monkeypatch.setattr(C, 'report', lambda paths, **k: (paths, []))
+    C.run_windows(str(run), [1, 3], games=5, pairs=['doomsday_8027957,izzet_delver_8016541'], gate_games=7,
+                  out=str(tmp_path / 'out'), log=lambda *a: None)
+    assert calls == [
+        ('iter_0000.pt', ('doomsday_8027957', 'izzet_delver_8016541'), 5, 'it0001_DD-Delver_ff1', 1.0),
+        ('iter_0000.pt', ('doomsday_8027957', 'izzet_delver_8016541'), 7, 'it0001_DD-Delver_gate', None),
+        ('iter_0002.pt', ('doomsday_8027957', 'izzet_delver_8016541'), 5, 'it0003_DD-Delver_ff0.966667', 0.966667),
+        ('iter_0002.pt', ('doomsday_8027957', 'izzet_delver_8016541'), 7, 'it0003_DD-Delver_gate', None)]

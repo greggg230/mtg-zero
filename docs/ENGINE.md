@@ -37344,6 +37344,19 @@ simulations alike (the same two spots), 2 of 16 spots at 4096 and 3 of 16 at 16,
 mirror spots at 64 and 1024. A larger budget does not find the pile: the value the search backs up does not know that
 an Oracle in a five-card library wins. No engine panic, no game that did not replay, no unfinished game (1,200 games).
 
+### 179.3 `run`: a forced-find run's Doomsday numbers per iteration window (branch `feat/combo-stats-run`, 2026-11-17)
+
+A run keeps no move records of its self-play (local and Mac shards; the farm's records become shards), so the
+metagame run's per-window Doomsday numbers (180.7's classes, "in its own piles a/N", Oracle wins) cannot be read
+from the run itself. `python tools/combo_stats.py run RUN --iters 1-60:10 --games 60 [--gate-games 100] --out DIR`
+plays each window again: iteration N's self-play played checkpoint N - 1 at the schedule's p of N (the run's
+`forced_find_schedule`, `forced_find.p_at`), so `selfplay` of `models/iter_<N-1>.pt` at that p on each Doomsday
+pairing (default DD vs Delver, DD vs Sneak and Show, the DD mirror), and with `--gate-games` `play` (no forced find:
+the exit gate's games) of the same checkpoint on DD vs Delver; then scan and one report over `--out`. The seats are the
+evaluation seat, not self-play's (no root noise, no temperature): the run's network at the run's p, not its exact
+games. Read-only for the run. Test: `tests/test_combo_stats.py` (the iteration list; iteration N plays checkpoint N - 1
+at p_at(N), the gate games without the option). Tier: python.
+
 ## 180. The forced find: a self-play training wheel for Doomsday - a share of Doomsday's piles must hold Thassa's Oracle (`"forced_find"`; branch `feat/doomsday-wheel`, 2026-11-16)
 
 Branch `feat/doomsday-wheel` from main e2811d25 (zero-core pin 2c67426c unchanged: no zero-core change). Section number:
