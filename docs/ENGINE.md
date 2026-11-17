@@ -37979,3 +37979,62 @@ kingdombuilder built against the core.
   different copies' logits (step 1, B 64, row 54: action 11 written twice, logits 0.34157 against 0.34117).
   Tolerances not loosened. In MTG the same holds for duplicate cards in hand (their logits differ only through their
   slots); a deterministic rule (e.g. max over the copies) would change the answers and needs its own decision.
+
+## 184. Duplicate action claims reduced by their largest: `dup_action_reduce` 'max' (zero-core `fix/dup-action-reduce`, docs/az.md 58; 2026-11-17)
+
+183.4 found the token-graph tests' tolerance failures: two tokens claiming one action make the policy scatter write it
+twice, and which write CUDA keeps is undefined. The user decided (2026-11-17) to fix it opt-in, for the next fork.
+Re-pins zero-core from `feat/precision` 216942b to `fix/dup-action-reduce` (216942b + three commits).
+
+### 184.1 What arrives (zero-core docs/az.md 58; opt-in, defaults byte-identical)
+
+* **`dup_action_reduce`** 'legacy' (default) | 'max': a token network scores an action several of its tokens claim by
+  the largest claim - order-free and exact, so CPU, CUDA (eager and the graphs) and the farm's ONNX export answer it bit
+  for bit from the same logits; the export stays GPU-safe (every scatter unique: the writes sorted by value, then the
+  explicit last writer of 41.2).
+* **A network property, versioned in the checkpoint** (`config['dup_reduce']`, absent for legacy): the run's
+  evaluators, Elo / league seats, h2h, the yardsticks and the farm pool's export all follow the checkpoint they load. A
+  new run's network is built with it; a run resumed or forked with 'max' records it in the checkpoint its next training
+  loads (weights untouched; the run log says "iter N: checkpoint N-1 reduces duplicate action claims by 'max'"). 'legacy'
+  never strips it.
+* **Farm**: no worker rebuild. The graph carries the reduction in ordinary operators; check-config classifies the key
+  `trainer` (an older build calls it unknown, and the pool drops a key the core calls trainer-only, as
+  `infer_precision`). A 'max' checkpoint gets a new export template (its config differs: one full export).
+
+### 184.2 What it changes for MTG Zero: nothing measurable in constructed
+
+The constructed layout (v7) has no `id_actions` and no static action shared by two slots - a hand slot's cast action
+is the slot's own, so two copies of a card in hand are two actions - and the pointer overrides are one per option. 183.4's
+"the same holds for duplicate cards in hand" was wrong. Measured on pb3 iteration 155 against the same weights with
+'max' (the best-of-one yardstick's spec and seats, paired, 64 simulations, the Mac's CPU, a spy on the policy scatter):
+**0 duplicate claims in 186,644 network rows** on each side; with no duplicate 'max' is the plain scatter bit for bit
+(forward and gradient), so both sides played the same games - 16 games, every pair split, score 0.500. A longer h2h
+could only repeat it (no strength change is possible), so it was not run. Layouts with `id_actions` (team draft, the
+core's toy fixtures and probe network) are the ones it changes.
+
+For new runs and forks: `"dup_action_reduce": "max"` (or `--dup-action-reduce max`; a continuation fork:
+`fork_run.py --source ... --set dup_action_reduce=max`). For constructed it buys the guarantee (a future layout with
+identity actions, or two slots sharing an action, would be deterministic from the start); never set it in a live run's
+config.
+
+### 184.3 Gates and checks
+
+Tier **optin-core** (opt-in core feature, byte-identical defaults) on bb756db5 (pinning 5ddb976; the next commit's
+core change, 06647c5, is docs only), against `warm-2` (d918b35c) as the baseline, the GPU hidden (the metagame run's),
+Mac steps offloaded: **GATE PASSED WITH SKIPS AND FLAKY RETRIES optin-core bb756db5bc7d in 1835s**. zero-core cargo test
+205 passed; core pytest 685 passed, 68 skipped (CUDA and onnx tests; 17 live-run-hazard tests fenced by the live run),
+`test_remoteplay.py::test_backoff_moves_the_quota_to_this_machine` failed once and passed alone (its known timing
+flake); check_checkpoint_compat identical (visits 3,272 samples, cq 3,272); digests equal to the recorded ones
+(constructed e1177d609d6c1aee, EoE 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt
+e802d9df793c9993); `--test az` 54 and `--test hidden` 28 passed; farm compat identical on the Delver best-of-three
+dealt preset (a worker built from this commit); glassroad / caverna / kingdombuilder built against the core.
+
+* The ONNX tests on the CPU, with onnx / onnxruntime 1.31.1 (the zero-farm venv; the gate's Python has no onnx):
+  `test_onnx.py`, `test_onnx2.py`, `test_net_data.py`, `test_tail_net.py`, `test_token_graphs.py`, `test_precision.py`,
+  `test_dup_reduce.py`: 111 passed, 15 skipped (CUDA) on 3b279d8 (5ddb976 and 06647c5 change no Python).
+* **Needs a GPU window** (not run: the desktop GPU is the metagame run's; the CUDA graphs are CUDA-only, so the Mac
+  cannot stand in): `tests/test_dup_reduce.py::test_max_is_deterministic_on_cuda_and_matches_the_cpu` and
+  `tests/test_token_graphs.py`'s `test_graphs_match_eager_and_follow_new_weights[legacy|max]` /
+  `test_absent_slots_are_never_read[legacy|max]` (`CUDA_VISIBLE_DEVICES=0 python -m pytest tests/test_dup_reduce.py
+  tests/test_token_graphs.py -q` in zero-core at 06647c5; a few seconds of GPU). Expected: 'max' bit-identical over
+  repeats and within 2e-5 of the CPU; legacy deterministic on its duplicate-free rows.
