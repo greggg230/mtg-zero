@@ -37659,3 +37659,20 @@ The gates ran on 5eee4461 in warm worktrees beside the live pb3, with
 
   pb3 therefore keeps BUILD 88c69488 and CUDA alternate e182abd5 on this pin, including main's engine commits since
   4c7c3b58, which are additive and digest-equal.
+
+### 181.5 The merge into main, and pb3's re-pin
+
+Main moved during the gates: the forced find (180) merged first, so this branch merged as 9d1193d0 and its section is
+181. The merge passed its own gate: **GATE PASSED python 9d1193d052ce in 582s**.
+
+**pb3's re-pin goes to the branch head 93d359ed, not to main.** The forced find added the package setting
+`forced_find_schedule`. pb3's release worker 88c69488 (built at 4c7c3b58) does not know it: its `check-config` calls
+the setting "unknown" and `farm_pool.play_settings` refuses the run's settings, so on main the pool would not publish
+and the farm would sit idle. I checked both checkouts with pb3's config.json and that worker:
+
+* 93d359ed: the worker takes the settings;
+* 9d1193d0: the worker refuses them.
+
+93d359ed is the gated 5eee4461 plus docs, and it is in main's history. It keeps BUILD 88c69488 and CUDA alternate
+e182abd5 (181.4's farm gates). A later move of pb3 to main needs a release worker built from main, a CUDA re-sign and
+the farm gates.
