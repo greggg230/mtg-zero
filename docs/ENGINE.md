@@ -37998,7 +37998,10 @@ A run whose spec has `"metagame"` gets `run_kind: 'metagame'` (the site's page f
 module's docstring has the shapes): `decks` (the 75s with their provenance, the sideboards of data/decks/ for the
 pictures), `weights`, `wheel` (the forced find's p by iteration: `forced_find.p_at` of the run's schedule - the p its
 self-play spec carries), `cells` (177's `cells_report` without paths or error text, plus missing and failing items and
-the cells settings), `selfplay` (185.2), `combo` (185.3). `deck` is None for such a run. A Delver run's record is
+the cells settings; `fit` when yardsticks.jsonl has rows of the cells' joint fit against a reference pool - kind
+`cells_fit`, another lane's additive kind, not on main on 2026-11-17: `fit_row` is a pluggable reader taking the fields
+it knows, each cell a rating +- se with its reference, per-deck, overall, anchored and the flags; the site prefers them
+to the gains), `selfplay` (185.2), `combo` (185.3). `deck` is None for such a run. A Delver run's record is
 unchanged (tested).
 
 ### 185.2 Self-play by ordered pairing, from the training shards
@@ -38059,5 +38062,8 @@ the supervisor.
 the opponent's deck on 120 engine games (all 9 cells); `segment` on synthetic rows (results, decks, the deck target's
 reset, a one-player game unread); an iteration's tally from stored and compressed shards and the pass's state; the
 covering seed against the real recorder; a recorded game's seat labels and listing pairing; the combo entry and its
-gate; the publisher's record of a metagame run (kind, block, no paths) and a Delver run's (unchanged).
+gate; the publisher's record of a metagame run (kind, block, no paths) and a Delver run's (unchanged); the cells_fit
+reader (known fields only, a bad row skipped). Gate: `python tools/warm_pool.py run --sha c8bbc4b4 -- python
+tools/gate.py python` beside the live run - **GATE PASSED WITH SKIPS python c8bbc4b4a686 in 529s** (the live-run fence
+only); the fit reader's commit and this line after it.
 `tests/test_delverai_publish.py` and `tests/test_run_publisher.py` pass unchanged.
