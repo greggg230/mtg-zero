@@ -36991,9 +36991,9 @@ the end's methods; the paired difference).
 | Doomsday at 256 / 1024 vs Delver | 50 / 50 | 0.000 / 0.000 | none; paired with the 64-sim deals: +0.000 |
 | Doomsday at 256 / 1024 vs Sneak and Show | 50 / 50 | 0.140 / 0.110 | 2 / 1 Oracle wins; paired: -0.030 +- 0.066 / -0.060 +- 0.060 |
 
-The piles: of 286 Doomsday resolutions at 64 simulations, 8 piles held the Oracle (6 of them in the mirror); the
+The piles: of 270 Doomsday resolutions at 64 simulations, 8 piles held the Oracle (6 of them in the mirror); the
 network fills the pile with Edge of Autumn, Lotus Petal, fetchlands, Personal Tutor and Doomsday itself. The searched
 spots (31 against Delver, 4 searches each): the finished pile held the Oracle in 8 of 124 at 64, 256 and 1024
 simulations alike (the same two spots), 2 of 16 spots at 4096 and 3 of 16 at 16,384 (one search each); 0 of 120 for 30
 mirror spots at 64 and 1024. A larger budget does not find the pile: the value the search backs up does not know that
-an Oracle in a five-card library wins. No engine panic, no game that did not replay, no unfinished game (1,650 games).
+an Oracle in a five-card library wins. No engine panic, no game that did not replay, no unfinished game (1,200 games).
