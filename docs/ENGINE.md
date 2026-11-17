@@ -37952,3 +37952,30 @@ bf16 0.0 +- 6.4 Elo against float32. Test: `tests/test_yardstick_cost.py::test_a
 `"infer_precision": "bf16"` and `"train_tf32": 1` in the run's config (or `--infer-precision bf16 --train-tf32 1`).
 Expected from the measurements: self-play +26-33% leaves/s at conc 1536, training -20 to -25% a step (T2 + TF32), a
 clean iteration ~-21%. `--conc 2048` is a separate decision (RAM).
+
+### 183.4 Gates and checks
+
+Tier **optin-core** (opt-in core feature, byte-identical defaults), against `warm-2` (d918b35c, built) as the baseline,
+the GPU visible and otherwise idle: **GATE PASSED optin-core 4e837e960880 in 1525s**. zero-core cargo test 205 passed;
+core pytest 696 passed, 43 skipped (with `tests/test_precision.py`'s CUDA tests); check_checkpoint_compat identical
+(visits 3,272 samples, cq 3,272); digests equal to the recorded ones (constructed e1177d609d6c1aee, EoE
+2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993); `--test az` 54 and
+`--test hidden` 28 passed; farm compat identical on the Delver best-of-three dealt preset; glassroad / caverna /
+kingdombuilder built against the core.
+
+* **GPU smoke** (delver-smoke, CUDA inference and training, token graphs, `train_static` 1, `sparse` 1,
+  `window_sparse` 1, `--infer-precision bf16 --train-tf32 1`): 3 iterations, every evaluator "token network CUDA
+  graphs on (bfloat16 autocast ...)" (self-play, heuristic / random games, Elo matches), each training row
+  `"tf32": true` with the window's tails fed (the flat path, auto on CUDA).
+* **The bf16 start-up segfault** (one exit 139 in 11 bfloat16 processes on 11-16): 34 more starts of the 11-16 harness
+  (pb3's build and settings, iter 155, `TokenGraphRunner(amp=True)`, conc 1536, 200 finished matches each, 52 s,
+  ~107k leaves/s), plus the smoke and a trial: 0 crashes in 36. Not reproduced; no guard added. Watch the first
+  bfloat16 launches (watch_run): an exit 139 with an empty log is the signature.
+* **The two token-graph tolerance failures** of 182.6 (`test_token_graphs.py::test_graphs_match_eager_and_follow_new_weights`,
+  `::test_absent_slots_are_never_read`, 3.66e-5 against 2e-5) also fail on a quiet GPU, on 1cd546f as on this pin, in
+  about half the runs (the gate's run passed). They are not rounding and not GPU contention: the fixture's rows have two
+  tokens claiming the same identity action (two equal cards), the policy scatter writes that action twice, and which
+  write wins on CUDA is undefined (zero-core docs/az.md 41's "repeated indices"), so eager and the graphs can keep
+  different copies' logits (step 1, B 64, row 54: action 11 written twice, logits 0.34157 against 0.34117).
+  Tolerances not loosened. In MTG the same holds for duplicate cards in hand (their logits differ only through their
+  slots); a deterministic rule (e.g. max over the copies) would change the answers and needs its own decision.
