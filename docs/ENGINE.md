@@ -37471,6 +37471,9 @@ workers) refuses a changed spec (docs/az.md 40): a scheduled run self-plays here
   yardstick's specs (`_cell_spec`: `pair_spec` never has it - a guard), `tools/combo_stats.py play`.
 * `tools/combo_stats.py selfplay CKPT --p P ...`: `play` with the forced find (labelled SELF-PLAY, not a measurement), to
   watch the network's own piles at a given p.
+* Not guarded: zero-core's own tools that take an explicit `--spec` (`mtgz.az.h2h` IS `zero.h2h`, `mtgz.az.replays`'s
+  `--spec`): README's "pass the run's config.json spec" reads, for a warm-up run, its `eval_spec` (zero-core is
+  unchanged here). The run's own evaluations use the evaluation spec.
 
 ### 180.7 `tools/combo_stats.py`: the Oracle at each resolution
 
@@ -37488,7 +37491,8 @@ report's "Oracle wins").
 
 * **`legacy-meta3-ddwheel`** = `legacy-meta3` with `forced_find` (Doomsday, Thassa's Oracle, p 1.0, `unless_in_hand`)
   in the self-play spec only - the evaluation spec is legacy-meta3's - and `forced_find_schedule {"start": 1.0, "end":
-  0.0, "from": 0, "iters": 100}`; the metagame's weights uniform. The launch sets the weights, the length
+  0.0, "from": 0, "iters": 100}` (a run's first self-play phase is iteration 1: p 0.99 there); the metagame's weights
+  uniform. The launch sets the weights, the length
   (`--forced-find-schedule '{"start": 1.0, "end": 0.0, "from": 0, "iters": N}'`, or `{"start": p}` held) and the
   rest, as for legacy-meta3.
 * **`legacy-meta3-ddwheel-smoke`** = `legacy-meta3-smoke` with the same spec and `{"start": 1.0, "end": 0.5, "from": 0,
@@ -37528,4 +37532,40 @@ Oracle, never missed, the report's lines) and without it (the state's classes, n
 
 ### 180.11 Checks
 
-RESULTS-180
+Code at aab500d7 (the next commit is this section's numbers, docs only). Beside the live run delver-bo3-pb3: heavy
+commands under `tools/slotd.sh`, the gate's CPU steps on the Mac, scratch in `E:/mtg-zero-scratch/ddwheel/` (never
+`runs/`).
+
+* **Digests: every one EQUAL** (no option in any digest spec): cube **8f71ccb0d89031a6**; `digest_formats` constructed
+  e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0 (their recorded files
+  unchanged). No new digest file: the forced find's behaviour is pinned by `forced_find.rs`' exhaustive outcomes, the
+  fuzz walk and farm compat (a recorded wheel digest would be a fifth `digest_formats` line and a `gate.py` change - open).
+* `cargo test --release -p engine --test misc_suite forced_find::` 12 passed; `--test az` 54 passed (the public-state
+  gate with `Game::ff` classified). `tests/test_forced_find.py` 7 passed; `test_combo_stats`, `test_metagame`,
+  `test_dealt_decks`, `test_digest_specs`, `test_cells_yardstick`, `test_yardsticks` 48 passed (4 skipped: private data).
+* **The fuzz, `FUZZ_POOL=meta_wheel`**: 400 games locally (39 forced, 9 voluntary, 19 in hand, 5 not findable, 25
+  missed); 300 games under the `fuzz` profile (debug assertions: the refreshed decision equal to the asked one at every
+  `determinize`): passed (29 forced, 7 voluntary, 12 in hand, 3 not findable, 20 missed; 1,268 worlds). In the suite
+  gate (2,000 games, 8 shards on the Mac): **passed** - 538 Doomsday resolutions: voluntary 44, forced 219, in hand 81,
+  not findable 42, missed 152; 9,768 worlds compared at picks, 4,884 decider worlds stepped with the real pick (keys
+  and records equal), 207,695 rows compared with the option stripped, 538 records checked against the library (every
+  one), every game replayed from its seed and actions.
+* **`suite`**: **GATE PASSED suite aab500d74d97 in 427s** - the full engine suite (2,700 passed, 24 binaries) and the
+  sharded 2k fuzz of `default`, `default+hidden`, `delver_dealt` and `meta_wheel`.
+* **Farm compatibility** (the release worker of aab500d7, `tools/farm_compat.py`): `--preset legacy-meta3-ddwheel` (p
+  1, 12 games): **PASSED** - gate 2 identical (3,186 rows, 150 batches), gate 3 identical (2,000 rows, 12 decks); no
+  Doomsday resolved in those 12 games, so again with a Doomsday deck in every game (`--set spec=` the metagame with the
+  Doomsday cells' weights, forced find p 1; 40 games): **PASSED** - gate 2 identical (9,462 rows, 150 batches), gate 3
+  identical (9,195 rows, 40 decks), the records holding 4 forced resolutions (counted by replaying them with the log on).
+* **The smoke run** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/ddwheel/smoke --preset legacy-meta3-ddwheel-smoke
+  --yardsticks '{}'`, CPU, 3 iterations of 16 games): `done`, no panic; the hook logged `iter 1 self-play: forced_find p
+  = 0.75` and `iter 2 ... p = 0.5` (the schedule 1.0 -> 0.5 over 2 iterations from 0; iteration 3 held 0.5); the
+  evaluations played the spec without the option (the eval_spec).
+* **`tools/combo_stats.py` on the smoke's iteration 3** (8 simulations a side; every game scanned, none failed to
+  replay - 260 games): `selfplay --p 0.5` Doomsday vs Delver (100 games): 6 resolutions - voluntary 0, **forced 2**, in
+  hand 2, missed 2 (drawn 3, undrawn 3); `selfplay --p 0.5` the Doomsday mirror (60 games): p0 11 resolutions -
+  **voluntary 1, forced 5**, in hand 1, missed 4 (drawn 6); p1 5 - forced 1, in hand 2, missed 2; `play` Doomsday vs
+  Delver (50 games, no forced find): 2 resolutions, in hand 1, missed 1. (A three-iteration smoke network: the numbers
+  show the classes, not a measurement.)
+* `python tools/privacy_check.py`: 0 findings.
+* **`engine --tested-sha aab500d7`**: on the commit that adds this text (docs only): its last line is in the agent's report.
