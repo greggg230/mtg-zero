@@ -37803,12 +37803,13 @@ and the farm would sit idle. I checked both checkouts with pb3's config.json and
 e182abd5 (181.4's farm gates). A later move of pb3 to main needs a release worker built from main, a CUDA re-sign and
 the farm gates.
 
-## 182. Iteration speed and run safety: the yardsticks' cost settings, the Mac's cap spiral, anchor-only Elo, the boundary pause, the stall alarm (branch `feat/speed-wins`, zero-core `feat/speed-wins` 104888c, docs/az.md 56; 2026-11-16)
+## 182. Iteration speed and run safety: the yardsticks' cost settings, the Mac's cap spiral, anchor-only Elo, the boundary pause, the stall alarm (branch `feat/speed-wins`, zero-core `feat/speed-wins` 1cd546f, docs/az.md 56; 2026-11-16)
 
 Branch `feat/speed-wins` implements the top three items of the 11-16 iteration-speed review of pb3 (the maintainer's
 notes): yardsticks off the critical path (E1-E3, E6), the Mac's in-flight cap spiral (SP1), and run safety (P1). It
-re-pins zero-core from main's 6146e21 (value-only decisions + 181's lock order d32bf98) to `feat/speed-wins` 104888c:
-b0ee98c (d32bf98 + docs/az.md 56) merged with 6146e21.
+re-pins zero-core from main's 6146e21 (value-only decisions + 181's lock order d32bf98) to `feat/speed-wins` 1cd546f:
+b0ee98c (d32bf98 + docs/az.md 56) merged with 6146e21, then two test and docs commits (the linger test's bound, 56.1's
+test list).
 
 ### 182.1 The yardsticks' cost settings (mtgz/az/yardsticks.py; all off by default)
 
