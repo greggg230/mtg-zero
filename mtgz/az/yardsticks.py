@@ -87,6 +87,19 @@ other, against the reference piloting both on the same seeds (common random numb
   cells_cache      the reference-vs-reference baselines' cache directory (default <run>/yardsticks/cells_base)
   cells_boot       bootstrap resamples of each cell's paired seeds (1000; 0 = the delta method only)
 
+The reference pool and the joint fit (docs/ENGINE.md 186; mtgz.az.cells_fit; off unless cells_mode is 'pool'):
+
+  cells_mode       'ladder' (177: one reference at a time, chained) or 'pool': each deck pair of a checkpoint played
+                   against the pool member whose predicted score is nearest 0.5 and the next-older one, every cells
+                   game fitted in one model per pair (a 'cells_fit' row per measured checkpoint)
+  cells_pool_active     promoted references kept active beside generation 0 (3)
+  cells_promote_every   a checkpoint is promoted this many iterations after the newest reference (64; 0 = never on
+                   the cadence), or sooner when a cell's expected score against it passes cells_promote / falls below
+                   1 - cells_promote
+  cells_auto_promote    promote by the fit itself (false: suggested, `run_yardsticks.py cells-freeze` does it)
+  cells_main_share the main member's share of cells_games (0.75; the rest: the continuity member)
+  cells_fit_boot   the fit's bootstrap resamples over deals (200)
+
 Results: one JSON line each in <run>/yardsticks.jsonl (append-only; the watcher is the only writer, under the lock
 <run>/yardsticks/lock.json):
 
@@ -100,6 +113,9 @@ Results: one JSON line each in <run>/yardsticks.jsonl (append-only; the watcher 
    of each chooser spec, '0' / 'h' / '1'}, "sims", "select", "seed", "spec_sha", "backend", "seconds", "time"}
   {"kind": "cells_base", "ref", "ref_sha", "pair", "base" (its cache key), "games", "score", "sims", "select",
    "seconds", "time"} - the reference-vs-reference games themselves are in its cache file
+  the pool mode: a cells row also has "role" ('main' | 'cont') and "base_games"; and {"kind": "cells_fit", "iter",
+   "sha", "fit_v", the checkpoint's "cells" / "decks" / "overall" / "anchored" ratings, "flags", "promote", "plan",
+   "pool", "pairs", "gens" (every measured generation's), "method", ...} - docs/ENGINE.md 186.6
   a failure: {"kind", "iter", ("opp"), "error" (its last lines), "attempt", "retry_at", "time"} - said loudly on the
    watcher's console, tried again (in order: the oldest pending measurement first, a failed one once its wait is
    over), never dropped; status() lists it as failed until a result lands, and an evaluated checkpoint without a
@@ -143,7 +159,10 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             # the cost settings (docs/ENGINE.md 182): cadences, sequential stopping, sparse rows
             'bo1_every': None, 'blunders_every': None, 'cells_every': None, 'cells_gen_every': None,
             'bo1_target_se': None, 'bo1_sprt': None, 'bo1_batch': 100, 'cells_target_se': None, 'cells_batch': 100,
-            'sparse': True}
+            'sparse': True,
+            # the reference pool and the joint fit (docs/ENGINE.md 186)
+            'cells_mode': 'ladder', 'cells_pool_active': 3, 'cells_promote_every': 64, 'cells_auto_promote': False,
+            'cells_main_share': 0.75, 'cells_fit_boot': 200}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)
 DELVER_YARDSTICKS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter0'], 'blunders': True}
@@ -157,7 +176,9 @@ KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': 
         'cells_seed': int, 'cells_device': str, 'cells_backend': str, 'cells_format': str, 'cells_max_turns': int,
         'cells_promote': _NUM, 'cells_base_elo': _NUM, 'cells_cache': str, 'cells_boot': int,
         'bo1_every': int, 'blunders_every': int, 'cells_every': int, 'cells_gen_every': int, 'bo1_target_se': _NUM,
-        'bo1_sprt': list, 'bo1_batch': int, 'cells_target_se': _NUM, 'cells_batch': int, 'sparse': bool}
+        'bo1_sprt': list, 'bo1_batch': int, 'cells_target_se': _NUM, 'cells_batch': int, 'sparse': bool,
+        'cells_mode': str, 'cells_pool_active': int, 'cells_promote_every': int, 'cells_auto_promote': bool,
+        'cells_main_share': _NUM, 'cells_fit_boot': int}
 # a kind's cadence setting (docs/ENGINE.md 182)
 EVERY = {'bo1': 'bo1_every', 'blunders': 'blunders_every', 'cells': 'cells_every', 'cells_gen': 'cells_gen_every'}
 SEQ_SEED = 7919                           # batch k's seed offset (zero.h2h.sequential's)
@@ -165,7 +186,9 @@ SEQ_SEED = 7919                           # batch k's seed offset (zero.h2h.sequ
 CELL_DECKS = ['izzet_delver_8016541', 'doomsday_8027957', 'sneak_show_8014220']
 CELLS_FORMATS = ('bo1',)                  # ('bo3' cells: the extension point, _cell_spec)
 CELL_KINDS = ('cells', 'cells_gen', 'cells_base')
-KINDS = ('bo1', 'blunders') + CELL_KINDS
+FIT_KIND = 'cells_fit'                    # the pool mode's joint fit, one row per measured checkpoint (ENGINE.md 186)
+CELLS_MODES = ('ladder', 'pool')
+KINDS = ('bo1', 'blunders') + CELL_KINDS + (FIT_KIND,)
 # best-of-three keys of a spec (docs/ENGINE.md 120, 121, 130, 154): dropped for the run's game 1
 BO3_KEYS = ('format', 'game_episodes', 'start_game', 'dealt_decks')
 PASS, REPEATS = 5, 8                      # delverai_blunders' rule (a spot passes when right in 5 of 8 searches)
@@ -309,6 +332,20 @@ def _normalize_cells(out):
         _ref_entry(r)                           # (ValueError for a bad one)
     if out['cells_games'] and not out['cells_refs']:
         raise ValueError("yardsticks: cells_games without cells_refs (the first reference: 'iter0' or 'LABEL=PATH')")
+    if out['cells_mode'] not in CELLS_MODES:
+        raise ValueError(f"yardsticks: cells_mode {out['cells_mode']!r}: {list(CELLS_MODES)}")
+    if out['cells_pool_active'] < 1 or out['cells_promote_every'] < 0 or out['cells_fit_boot'] < 0:
+        raise ValueError('yardsticks: cells_pool_active >= 1, cells_promote_every >= 0 (0: the threshold only) and '
+                         'cells_fit_boot >= 0')
+    if not 0 < out['cells_main_share'] <= 1:
+        raise ValueError(f"yardsticks: cells_main_share {out['cells_main_share']}: in (0, 1]")
+    if out['cells_mode'] == 'pool' and not out['cells_games']:
+        raise ValueError('yardsticks: cells_mode pool needs cells_games (the games against the pool, docs/ENGINE.md 186)')
+
+
+def cells_pool(ys):
+    """Whether the cells are measured against a reference pool with the joint fit (docs/ENGINE.md 186)."""
+    return (ys or {}).get('cells_mode') == 'pool' and bool(ys.get('cells_games'))
 
 
 def cfg_of(run):
@@ -515,6 +552,8 @@ def key_of(row_or_item, lib=None):
         return (r['kind'], r['iter'], r['ref'], tuple(r['pair']))
     if r['kind'] == 'cells_base':
         return ('cells_base', r['base'])
+    if r['kind'] == FIT_KIND:
+        return (FIT_KIND, r['iter'])
     return ('blunders', r['iter'], r.get('library', lib))
 
 
@@ -537,13 +576,13 @@ def backoff(ys, attempts):
     return min(float(ys['retry_s']) * 2 ** max(0, attempts - 1), float(ys['retry_max_s']))
 
 
-def wanted(run, cfg, ys, lib=None, now=None, settle=None):
+def wanted(run, cfg, ys, lib=None, now=None, settle=None, rows=None):
     """Every measurement the run's evaluated checkpoints call for, in order (by iteration; bo1 in opponent order) ->
     [{'lane', 'kind', 'iter', 'opp'?, 'library'?}]. `lib`: the canary library's id (None: no readable library with
     kept spots - its measurements are wanted all the same and fail loudly until there is one)."""
     its = evaluated(run, cfg, ys, now, settle)
     opps = opponents(run, cfg, ys) if ys['bo1_games'] else []
-    cw = CellsWant(run, cfg, ys, now) if (ys['cells_games'] or ys['cells_gen_games']) else None
+    cw = CellsWant(run, cfg, ys, now, rows) if (ys['cells_games'] or ys['cells_gen_games']) else None
     out = []
     for it in its:
         for o in (opps if due(ys, 'bo1', it) else []):
@@ -562,8 +601,9 @@ def pending(run, cfg, ys, lane, rows=None, lib=None, now=None, settle=None):
     """The lane's next measurement: the oldest wanted one without a result whose retry wait (after a failure) is
     over -> item or None."""
     now = time.time() if now is None else now
-    res, fails = tally(read_rows(run) if rows is None else rows)
-    for item in wanted(run, cfg, ys, lib, now, settle):
+    rows = read_rows(run) if rows is None else rows
+    res, fails = tally(rows)
+    for item in wanted(run, cfg, ys, lib, now, settle, rows=rows):
         if item['lane'] != lane:
             continue
         k = key_of(item, lib)
@@ -571,6 +611,8 @@ def pending(run, cfg, ys, lane, rows=None, lib=None, now=None, settle=None):
             continue
         if not item_ready(run, ys, item):
             continue                            # (a cell waiting for its baseline, which comes first in the lane)
+        if any(a not in res for a in item.get('after') or ()):
+            continue                            # (a checkpoint's fit waiting for its measurements)
         f = fails.get(k)
         if f and now < f[-1].get('retry_at', 0):
             continue
@@ -595,12 +637,13 @@ def status(run, cfg=None, ys=None, lib=None, rows=None, now=None):
     rows = read_rows(run) if rows is None else rows
     res, fails = tally(rows)
     miss, failed, cmiss, cfailed = [], [], [], []
-    for item in wanted(run, cfg, ys, lib, now, settle=0):
+    for item in wanted(run, cfg, ys, lib, now, settle=0, rows=rows):
         k = key_of(item, lib)
         if k in res or item_done(run, ys, item):
             continue
-        cell = item['kind'] in CELL_KINDS          # (the cells' own lists: the site's block knows bo1 and blunders)
-        x = {kk: item[kk] for kk in ('kind', 'iter', 'opp') + (('ref', 'pair', 'base') if cell else ()) if kk in item}
+        cell = item['kind'] in CELL_KINDS or item['kind'] == FIT_KIND         # (the cells' own lists: the site's block knows bo1 and blunders)
+        x = {kk: item[kk] for kk in ('kind', 'iter', 'opp') + (('ref', 'pair', 'base', 'games', 'role') if cell else ())
+             if kk in item}
         f = fails.get(k)
         if f:
             (cfailed if cell else failed).append(dict(x, attempts=len(f), error=str(f[-1].get('error'))[-400:],
@@ -614,6 +657,8 @@ def status(run, cfg=None, ys=None, lib=None, rows=None, now=None):
     cells = None
     if ys['cells_games'] or ys['cells_gen_games']:
         cells = {'report': cells_report(run, cfg, ys, rows), 'missing': cmiss, 'failed': cfailed}
+        if cells_pool(ys):                      # (the newest joint fit, docs/ENGINE.md 186.6)
+            cells['fit'] = cells['report'].get('fit')
     return {'expected': evaluated(run, cfg, ys, now, settle=0), 'cells': cells,
             'bo1': sorted((r for r in res.values() if r['kind'] == 'bo1'), key=lambda r: (r['iter'], r['opp'])),
             'blunders': sorted((r for r in res.values() if r['kind'] == 'blunders' and r.get('library') == lib),
@@ -913,12 +958,18 @@ def _cell_spec(x, y, chooser, ys):
     the statistics take one result per game id, a match's as well as a game's - not turned on yet (cells_format)."""
     if ys['cells_format'] != 'bo1':
         raise NotImplementedError(f"cells_format {ys['cells_format']!r}: best-of-three cells are not built yet")
-    from . import decklists as D
-    spec = json.loads(D.pair_spec(x, y, fmt='bo1', max_turns=int(ys['cells_max_turns'])))
-    spec['chooser'] = int(chooser)
-    from .forced_find import refuse
-    refuse(spec, 'the cells yardstick')         # (never: pair_spec has no forced find, docs/ENGINE.md 180)
-    return json.dumps(spec, separators=(',', ':'))
+    k = (x, y, int(chooser), int(ys['cells_max_turns']))
+    if k not in _SPECS:                         # (memoized: the pool's watcher asks for every member's keys each look)
+        from . import decklists as D
+        spec = json.loads(D.pair_spec(x, y, fmt='bo1', max_turns=int(ys['cells_max_turns'])))
+        spec['chooser'] = int(chooser)
+        from .forced_find import refuse
+        refuse(spec, 'the cells yardstick')     # (never: pair_spec has no forced find, docs/ENGINE.md 180)
+        _SPECS[k] = json.dumps(spec, separators=(',', ':'))
+    return _SPECS[k]
+
+
+_SPECS = {}
 
 
 def pair_seed(ys, pair):
@@ -972,16 +1023,28 @@ def _seat_keys(ref):
     return _SEATKEYS[k]
 
 
-def base_key(ref, pair, games, ys, seat):
+def base_key(ref, pair, games, ys, seat, sha=None, eng=None):
     """The cache key of a pair's reference-vs-reference baseline -> (16 hex, the dict it hashes): the reference's
     network and its own seat keys, the two specs, the seed, the games, sims, the seat (move rule) and the engine
-    build. OSError when the reference file is missing."""
-    d = {'v': 1, 'ref': sha12(ref), 'ref_seat': _seat_keys(ref), 'pair': list(pair), 'seed': pair_seed(ys, pair),
+    build. OSError when the reference file is missing. `sha` / `eng`: the reference's sha12 and engine_sha() when
+    the caller has them (memoized on everything the key reads)."""
+    sha = sha or sha12(ref)
+    eng = engine_sha() if eng is None else eng
+    mk = (os.path.normcase(os.path.abspath(ref)), sha, tuple(pair), games, json.dumps(seat, sort_keys=True, default=str),
+          ys['cells_sims'], ys['cells_seed'], ys['cells_batch'] if cells_sequential(ys) else None, ys['cells_format'],
+          ys['cells_max_turns'], eng)
+    if mk in _BKEY:
+        return _BKEY[mk][0], dict(_BKEY[mk][1])
+    d = {'v': 1, 'ref': sha, 'ref_seat': _seat_keys(ref), 'pair': list(pair), 'seed': pair_seed(ys, pair),
          'specs': [hashlib.sha256(j['spec'].encode()).hexdigest()[:12] for j in pair_jobs(pair, games, ys)],
-         'games': games, 'sims': ys['cells_sims'], 'seat': seat, 'chance_k': 2, 'c_puct': 1.0, 'engine': engine_sha()}
+         'games': games, 'sims': ys['cells_sims'], 'seat': seat, 'chance_k': 2, 'c_puct': 1.0, 'engine': eng}
     if cells_sequential(ys):
         d['batch'] = ys['cells_batch']          # (batch k seeded seed + 7919 k: other games than the plain match's)
-    return hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:16], d
+    _BKEY[mk] = (hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:16], d)
+    return _BKEY[mk][0], dict(d)
+
+
+_BKEY = {}
 
 
 def cache_dir(run, ys):
@@ -1051,6 +1114,8 @@ def lanes(run, cfg, ys):
         out |= {cells_lane(run, cfg, ys, r['path']) for r in cell_refs(run, cfg, ys)}
     if ys['cells_gen_games']:
         out.add(cells_lane(run, cfg, ys, model_path(run, 0)))
+    if cells_pool(ys):
+        out.add('fit')                          # (the joint fit of each measured checkpoint, docs/ENGINE.md 186)
     if ys['blunders']:
         out.add('cpu')
     return sorted(out)
@@ -1059,11 +1124,16 @@ def lanes(run, cfg, ys):
 class CellsWant:
     """The cells measurements of each evaluated checkpoint (wanted): per deck pair, its baseline (once per cache key,
     before the first measurement that needs it) and the checkpoint's measurement; against the current reference
-    ('cells') and against the previously evaluated checkpoint ('cells_gen')."""
+    ('cells') and against the previously evaluated checkpoint ('cells_gen'). The pool mode (docs/ENGINE.md 186): the
+    pool's baselines, each pair against its most informative member and the continuity one, then the fit."""
 
-    def __init__(self, run, cfg, ys, now=None):
+    def __init__(self, run, cfg, ys, now=None, rows=None):
         self.run, self.cfg, self.ys = run, cfg, ys
         self.refs = cell_refs(run, cfg, ys) if ys['cells_games'] else []
+        self.by_label = {r['label']: r for r in self.refs}
+        self.rows, self._res, self._fits = rows, None, None
+        self._shas, self._eng = {}, None
+        self.prev_fit = None                    # (the previous checkpoint's fit item: items() goes oldest first)
         # (cells_gen's chain: the evaluated checkpoints on its cadence)
         self.all = [x for x in evaluated(run, cfg, dict(ys, **{'from': 0}), now, settle=0) if due(ys, 'cells_gen', x)] \
             if ys['cells_gen_games'] else []
@@ -1081,10 +1151,7 @@ class CellsWant:
         for pair in cell_pairs(self.ys):
             key = None
             if pair[0] != pair[1]:
-                try:
-                    key = base_key(path, pair, games, self.ys, self.seat())[0]
-                except OSError:                 # (no reference file: the measurement fails loudly, retried)
-                    key = None
+                key = self._key(path, pair, games)
                 if key and key not in self.seen:
                     self.seen.add(key)
                     out.append({'lane': lane, 'kind': 'cells_base', 'ref': label, 'pair': list(pair), 'games': games,
@@ -1092,10 +1159,125 @@ class CellsWant:
             out.append({'lane': lane, 'kind': kind, 'iter': it, 'ref': label, 'pair': list(pair), 'base': key})
         return out
 
+    def res(self):
+        if self._res is None:
+            self._res = tally(read_rows(self.run) if self.rows is None else self.rows)[0]
+        return self._res
+
+    def _key(self, path, pair, games):
+        try:
+            if path not in self._shas:
+                self._shas[path] = sha12(path)
+            if self._eng is None:
+                self._eng = [engine_sha()]
+            return base_key(path, pair, games, self.ys, self.seat(), sha=self._shas[path], eng=self._eng[0])[0]
+        except OSError:                         # (no reference file: the measurement fails loudly, retried)
+            return None
+
+    def fits(self):
+        """The point fit of every recorded game (memoized by the rows: every lane looks each poll)."""
+        if self._fits is None:
+            from . import cells_fit as CF
+            rows = read_rows(self.run) if self.rows is None else self.rows
+            k = (os.path.normcase(os.path.abspath(self.run)), len(rows), rows[-1].get('time') if rows else None,
+                 json.dumps(self.ys, sort_keys=True, default=str))
+            if k not in _POINT:
+                _POINT.clear()
+                _POINT[k] = CF.point_fits(self.run, self.cfg, self.ys, rows)
+            self._fits = _POINT[k]
+        return self._fits
+
+    def choose(self, it, pair, pool):
+        """The pool member whose predicted scores against checkpoint `it` are nearest 0.5 in the pair (its own
+        ratings once rated in the pair, else the newest measured checkpoint's before it)."""
+        from . import cells_fit as CF
+        if len(pool) == 1:
+            return pool[0]['label']
+        fits, col = self.fits()
+        f = fits.get(tuple(pair))
+        roles = ('X',) if pair[0] == pair[1] else ('X', 'Y')
+
+        def rated(sha):
+            return f is not None and sha is not None and all(f['count'].get((r, sha)) for r in roles)
+        try:
+            c = sha12(model_path(self.run, it))
+        except OSError:
+            c = None
+        if not rated(c):
+            olds = sorted(((n['iter'], s) for s, n in col['names'].items() if s in col['measured']
+                           and n['iter'] is not None and n['iter'] < it and rated(s)), reverse=True)
+            c = olds[0][1] if olds else None
+        cands = []
+        for r in pool:
+            try:
+                cands.append(dict(r, sha=sha12(r['path'])))
+            except OSError:
+                cands.append(dict(r, sha=None))
+        return CF.choose(fits, tuple(pair), c, cands)[0]
+
+    def plan(self, it, pool):
+        """Checkpoint `it`'s games per pair -> {pair: [(reference, games, role)]}: the most informative member
+        ('main', cells_main_share of cells_games) and the next-older one ('cont', the rest; none when the main one is
+        the anchor). Fixed once played: a pair with a result row keeps its references (a row of the ladder mode, no
+        role: as it was measured)."""
+        from . import cells_fit as CF
+        fixed = {}
+        for r in self.res().values():
+            if r['kind'] == 'cells' and r.get('iter') == it:
+                fixed.setdefault(tuple(r['pair']), []).append(r)
+        out = {}
+        G = self.ys['cells_games']
+        for pair in cell_pairs(self.ys):
+            rs = fixed.get(pair, [])
+            if any(r.get('role') is None for r in rs):
+                out[pair] = [(r['ref'], G, None) for r in rs]
+                continue
+            main = next((r['ref'] for r in rs if r.get('role') == 'main'), None)
+            cont = next((r['ref'] for r in rs if r.get('role') == 'cont'), None)
+            if main is None:
+                main = self.choose(it, pair, [r for r in pool if r['label'] != cont] or pool)
+            order = [r for r in self.refs if r in pool or r['label'] == main]
+            if cont is None:
+                cont = CF.continuity(order, main)
+            gm, gc = CF.split_games(self.ys, cont is not None)
+            out[pair] = [(main, gm, 'main')] + ([(cont, gc, 'cont')] if cont and gc else [])
+        return out
+
+    def _pool(self, it):
+        from . import cells_fit as CF
+        ck = model_path(self.run, it)
+        pool = [r for r in CF.active_refs(self.refs, it, self.ys['cells_pool_active']) if not same_file(ck, r['path'])]
+        if not pool:
+            return []
+        G = self.ys['cells_games']
+        out = []
+
+        def base(r, pair):
+            key = self._key(r['path'], pair, G) if pair[0] != pair[1] else None
+            if key and key not in self.seen:
+                self.seen.add(key)
+                out.append({'lane': cells_lane(self.run, self.cfg, self.ys, r['path']), 'kind': 'cells_base',
+                            'ref': r['label'], 'pair': list(pair), 'games': G, 'base': key})
+            return key
+        for r in pool:                          # (every member's baselines, once: its games' and the fit's links)
+            for pair in cell_pairs(self.ys):
+                base(r, pair)
+        for pair, legs in self.plan(it, pool).items():
+            for label, games, role in legs:
+                r = self.by_label.get(label)
+                if r is None:
+                    continue                    # (a reference no longer in the ladder: its row stays a record)
+                key = base(r, pair)
+                out.append({'lane': cells_lane(self.run, self.cfg, self.ys, r['path']), 'kind': 'cells', 'iter': it,
+                            'ref': label, 'pair': list(pair), 'base': key, 'games': games, 'role': role})
+        return out
+
     def items(self, it):
         out = []
         ck = model_path(self.run, it)
-        if self.ys['cells_games'] and due(self.ys, 'cells', it):
+        if self.ys['cells_games'] and due(self.ys, 'cells', it) and cells_pool(self.ys):
+            out += self._pool(it)
+        elif self.ys['cells_games'] and due(self.ys, 'cells', it):
             r = ref_for(self.refs, it)
             if r is not None and not same_file(ck, r['path']):      # (the reference itself measures nothing)
                 out += self._pairs('cells', it, r['label'], r['path'], self.ys['cells_games'])
@@ -1104,7 +1286,17 @@ class CellsWant:
             if prev is not None and not same_file(ck, model_path(self.run, prev)):
                 out += self._pairs('cells_gen', it, f'iter_{prev:04d}', model_path(self.run, prev),
                                    self.ys['cells_gen_games'])
+        if cells_pool(self.ys) and any(x['kind'] == 'cells' for x in out):
+            # (once its measurements are in, and after the previous checkpoint's fit: promotions go in order)
+            after = [key_of(x) for x in out if x['kind'] in ('cells', 'cells_gen')]
+            if self.prev_fit is not None:
+                after.append((FIT_KIND, self.prev_fit))
+            out.append({'lane': 'fit', 'kind': FIT_KIND, 'iter': it, 'after': after})
+            self.prev_fit = it
         return out
+
+
+_POINT = {}
 
 
 # ---------------------------------------------------------------- the statistics
@@ -1395,15 +1587,21 @@ def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', 
             'time': round(time.time())}
 
 
-def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print):
+def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print,
+                       base_games=None, role=None):
     """Checkpoint `ck` against reference `ref` in the pair's cells (its baseline from the cache; none for a mirror)
-    -> the 'cells' / 'cells_gen' row."""
+    -> the 'cells' / 'cells_gen' row. The pool mode (docs/ENGINE.md 186): `games` a share of the pair's, against the
+    baseline of `base_games` (the reference's one baseline, cells_games: its first game ids are these games' seeds)
+    cut to the same first units; `role` ('main' | 'cont') goes in the row."""
     for p in (ck, ref):
         if not os.path.exists(p):
             raise FileNotFoundError(p)
+    base_games = int(base_games or games)
+    if games > base_games or games % 2:
+        raise ValueError(f'cells {pair}: {games} games against a baseline of {base_games}')
     key, bunits, bres = None, None, None
     if pair[0] != pair[1]:
-        key, _ = base_key(ref, pair, games, ys, seat)
+        key, _ = base_key(ref, pair, base_games, ys, seat)
         data = load_base(cdir, key)
         if data is None:
             raise RuntimeError(f'cells {pair}: no baseline {key} in {cdir} (measured first: kind cells_base)')
@@ -1431,6 +1629,8 @@ def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, ba
            'backend': backend, 'seconds': round(time.time() - t0, 1), 'time': round(time.time())}
     if p.get('farm'):
         row['farm'] = p['farm']
+    if role is not None:                        # (the pool mode's legs, docs/ENGINE.md 186.2)
+        row.update(role=role, base_games=base_games)
     if cells_sequential(ys):
         row.update(stop=p.get('stop'), batches=p.get('batches'), batch=ys['cells_batch'], max_games=games,
                    target_se=ys['cells_target_se'])
@@ -1443,18 +1643,21 @@ def _farm(run, cfg, rule_ck, kind, it, ref, pair, games, ys):
             'name': f"{os.path.basename(os.path.normpath(run))[:24]}-{kind.replace('_', '')}-{h.hexdigest()[:10]}"}
 
 
-def measure_cells(run, it, label, pair, cfg=None, ys=None, kind='cells', log=print):
+def measure_cells(run, it, label, pair, cfg=None, ys=None, kind='cells', log=print, games=None, role=None):
     """A run's checkpoint `it` in one deck pair's cells against reference `label` (a ladder reference, or 'iter_NNNN'
-    for the gen-over-gen kind) -> the row."""
+    for the gen-over-gen kind) -> the row. `games` / `role`: a pool leg (docs/ENGINE.md 186: part of cells_games,
+    against the reference's baseline of cells_games)."""
     cfg = cfg if cfg is not None else cfg_of(run)
     ys = ys if ys is not None else of_run(run, cfg)
     pair = tuple(pair)
-    games = ys['cells_games'] if kind == 'cells' else ys['cells_gen_games']
+    full = ys['cells_games'] if kind == 'cells' else ys['cells_gen_games']
+    games = int(games or full)
     ref = ref_path(run, cfg, ys, label)
     backend = cells_backend(run, cfg, ys, ref)
     ck = model_path(run, it)
     return measure_cells_core(kind, ck, int(it), ref, label, pair, games, ys, cells_seat(run), cache_dir(run, ys),
-                              backend, _farm(run, cfg, ck, kind, it, ref, pair, games, ys), log)
+                              backend, _farm(run, cfg, ck, kind, it, ref, pair, games, ys), log, base_games=full,
+                              role=role)
 
 
 def measure_cells_base(run, label, pair, games, cfg=None, ys=None, log=print):
@@ -1567,6 +1770,14 @@ def cells_report(run, cfg, ys, rows=None):
     for (it, lb), g in sorted(_groups(rows, 'cells_gen').items()):
         out['gen'].append({'iter': it, 'prev': int(lb[5:]), 'sha': g['sha'],
                            'summary': summarize(g['cells'], ys['cells_decks'], promote=ys['cells_promote'])})
+    out['mode'] = ys.get('cells_mode', 'ladder')
+    if cells_pool(ys):                          # (docs/ENGINE.md 186: the joint fit's newest record, its promotion)
+        f = newest_fit(rows)
+        out['fit'] = f
+        out['promote'] = None
+        p = (f or {}).get('promote')
+        if p and not p.get('label') and not (refs and refs[-1]['since'] >= p['iter']):
+            out['promote'] = {'iter': p['iter'], 'ref': p.get('vs'), 'cells': p.get('cells') or [], 'why': p['why']}
     return out
 
 
@@ -1580,6 +1791,8 @@ def freeze_ref(run, it, label=None, to=None, cfg=None, ys=None, rows=None):
     ys = ys if ys is not None else of_run(run, cfg)
     if ys is None or not ys['cells_games']:
         raise ValueError('cells-freeze: the run measures no cells (cells_games 0)')
+    if cells_pool(ys):
+        return freeze_pool(run, it, label, to, cfg, ys, rows)
     it = int(it)
     refs = cell_refs(run, cfg, ys)
     cur = ref_for(refs, it)
@@ -1604,17 +1817,24 @@ def freeze_ref(run, it, label=None, to=None, cfg=None, ys=None, rows=None):
     base = lad[cur['label']]
     if base['elo'] is None:
         raise ValueError(f"cells-freeze: the reference {cur['label']} is not chained")
+    e = {'label': label, 'since': it, 'iter': it, 'sha': g['sha'],
+         'from_ref': cur['label'], 'gain': s['overall']['elo'], 'gain_se': s['overall']['se'],
+         'elo': round(base['elo'] + s['overall']['elo'], 1),
+         'elo_se': round(math.sqrt(base['se'] ** 2 + s['overall']['se'] ** 2), 1), 'time': round(time.time())}
+    return _install_ref(run, src, label, to, e)
+
+
+def _install_ref(run, src, label, to, e):
+    """A frozen reference: `src` copied (default <run>/yardsticks/cells_refs/<label>.pt, sha256 checked against
+    e['sha']) and entry `e` (with its path) appended to the ladder file -> the entry."""
     dst = to or os.path.join(run, DIR, 'cells_refs', f'{label}.pt')
     if os.path.exists(dst):
         raise ValueError(f'cells-freeze: {dst} exists')
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
     shutil.copy2(src, dst)
-    if sha12(dst) != g['sha']:
+    if sha12(dst) != e['sha']:
         raise RuntimeError(f'cells-freeze: the copy {dst} differs from {src}')
-    e = {'label': label, 'path': os.path.abspath(dst), 'since': it, 'iter': it, 'sha': g['sha'],
-         'from_ref': cur['label'], 'gain': s['overall']['elo'], 'gain_se': s['overall']['se'],
-         'elo': round(base['elo'] + s['overall']['elo'], 1),
-         'elo_se': round(math.sqrt(base['se'] ** 2 + s['overall']['se'] ** 2), 1), 'time': round(time.time())}
+    e = dict(e, path=os.path.abspath(dst))
     try:
         with open(ladder_path(run), encoding='utf-8') as f:
             d = json.load(f)
@@ -1627,6 +1847,89 @@ def freeze_ref(run, it, label=None, to=None, cfg=None, ys=None, rows=None):
         json.dump(d, f, indent=1)
     os.replace(tmp, ladder_path(run))
     return e
+
+
+def sha_of_iter(run, it, rows=None):
+    """Checkpoint `it`'s sha12: its file's, else its rows' (a pruned checkpoint), else None."""
+    try:
+        return sha12(model_path(run, it))
+    except OSError:
+        pass
+    for r in (read_rows(run) if rows is None else rows):
+        if r.get('kind') in ('cells', 'cells_gen') and r.get('iter') == int(it) and r.get('sha'):
+            return r['sha']
+    return None
+
+
+def freeze_pool(run, it, label=None, to=None, cfg=None, ys=None, rows=None, fit=None):
+    """The pool mode's promotion (docs/ENGINE.md 186.3; `cells-freeze` in the pool mode, or the fit's own with
+    cells_auto_promote): checkpoint `it`, rated in all its cells by the joint fit, joins the pool as the newest
+    reference - copied as freeze_ref does, its ladder entry's elo / elo_se the fit's anchored Elo (from_ref
+    'pool-fit'). Its earlier measurement games are its links to the pool; its baselines are wanted from `since` on."""
+    from . import cells_fit as CF
+    cfg = cfg if cfg is not None else cfg_of(run)
+    ys = ys if ys is not None else of_run(run, cfg)
+    it = int(it)
+    refs = cell_refs(run, cfg, ys)
+    if refs and refs[-1]['since'] >= it:
+        raise ValueError(f"cells-freeze: the newest reference {refs[-1]['label']} starts at {refs[-1]['since']} >= {it}")
+    label = label or f'g{it}'
+    _ref_entry({'label': label, 'path': 'x'})
+    if any(r['label'] == label for r in refs):
+        raise ValueError(f'cells-freeze: a reference labelled {label!r} exists')
+    src = model_path(run, it)
+    sha = sha12(src)
+    for r in refs:
+        try:
+            if sha12(r['path']) == sha:
+                raise ValueError(f"cells-freeze: iteration {it} is reference {r['label']} already")
+        except OSError:
+            pass
+    rows = read_rows(run) if rows is None else rows
+    fit = fit or CF.fit_run(run, cfg, ys, rows)
+    g = CF.gen_of(fit, sha)
+    if g is None or not g['complete']:
+        raise ValueError(f"cells-freeze: iteration {it} is not rated in all its cells by the fit "
+                         f"(rated: {sorted((g or {}).get('cells', {}))})")
+    e = {'label': label, 'since': it, 'iter': it, 'sha': sha, 'from_ref': 'pool-fit',
+         'elo': g['anchored']['elo'], 'elo_se': g['anchored']['se'], 'time': round(time.time())}
+    return _install_ref(run, src, label, to, e)
+
+
+def measure_cells_fit(run, it, cfg=None, ys=None, log=print):
+    """The pool mode's record of measured checkpoint `it` (docs/ENGINE.md 186.6): the joint fit of every recorded
+    cells game (bootstrap cells_fit_boot), its ratings, flags and the reference pool's promotion rule - done here
+    when cells_auto_promote, else suggested -> the 'cells_fit' row."""
+    from . import cells_fit as CF
+    cfg = cfg if cfg is not None else cfg_of(run)
+    ys = ys if ys is not None else of_run(run, cfg)
+    t0 = time.time()
+    rows = read_rows(run)
+    fit = CF.fit_run(run, cfg, ys, rows)
+    sha = sha_of_iter(run, it, rows)
+    if sha is None:
+        raise FileNotFoundError(model_path(run, it))
+    refs = cell_refs(run, cfg, ys)
+    pool = CF.active_refs(refs, int(it), ys['cells_pool_active'])
+    prom = CF.promote_rule(fit, refs, int(it), sha, ys) if cells_pool(ys) else None
+    if prom is not None:
+        prom['auto'] = bool(ys['cells_auto_promote'])
+        if prom['auto']:
+            try:
+                e = freeze_pool(run, it, cfg=cfg, ys=ys, rows=rows, fit=fit)
+                prom.update(label=e['label'], elo=e['elo'], elo_se=e['elo_se'])
+                log(f"cells pool: iteration {it} promoted ({prom['why']}) as {e['label']}, Elo {e['elo']} +- "
+                    f"{e['elo_se']}")
+            except (ValueError, OSError) as ex:
+                prom['error'] = str(ex)[-400:]
+                log(f'cells pool: iteration {it} not promoted: {ex}')
+    return CF.fit_row(fit, int(it), sha, ys, rows, pool=pool, promote=prom, seconds=time.time() - t0)
+
+
+def newest_fit(rows):
+    """The newest 'cells_fit' row (the highest iteration's, then the latest), or None."""
+    fs = [r for r in rows if r.get('kind') == FIT_KIND and r.get('error') is None]
+    return max(fs, key=lambda r: (r['iter'], r.get('time') or 0)) if fs else None
 
 
 # ------------------------------------------------------------------------------------------------ the companion

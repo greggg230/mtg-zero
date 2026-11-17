@@ -7,7 +7,10 @@ opponents and the canary library, on every evaluated checkpoint, once each, in o
                                                                                         watcher's child process)
   python tools/run_yardsticks.py one RUN --kind cells|cells_gen --iter N --ref LABEL --pair X,Y
   python tools/run_yardsticks.py one RUN --kind cells_base --ref LABEL --pair X,Y --games G
-  python tools/run_yardsticks.py cells RUN [--json]          (the metagame cells' report: docs/ENGINE.md 177)
+  python tools/run_yardsticks.py one RUN --kind cells_fit --iter N        (the pool mode's joint fit: ENGINE.md 186)
+  python tools/run_yardsticks.py cells RUN [--json] [--fit] [--boot B]   (the metagame cells' report: ENGINE.md 177;
+                                 the joint fit's table in the pool mode, or with --fit: ENGINE.md 186)
+  python tools/run_yardsticks.py cells-fit RUN [--json] [--boot B]       (the joint fit from the records only: no games)
   python tools/run_yardsticks.py cells-freeze RUN --iter N [--label L] [--to PATH]    (the next reference)
   python tools/run_yardsticks.py cells-match CKPT --ref PATH [--games G] [--sims S] [--decks a,b,c] [--cache DIR]
                                  [--out FILE.jsonl] [--device cpu|cuda] [--json]      (standalone, local games)
@@ -28,6 +31,11 @@ watcher per run (<run>/yardsticks/lock.json: pid and process creation time).
     yardsticks over (its supervisor alive with a companion that runs them: the measurement under way is finished,
     then this one exits), or the run has finished and nothing is due. Another watcher holding the lock: refused.
   * --once: measure everything due now (no settling wait), then exit (the smoke).
+  * --take-over (by hand, docs/ENGINE.md 186.7): the run's own companion watcher (an older checkout's) holds the
+    lock - it is stopped (its process tree; the measurement under way is done again) and this one takes the lock and
+    keeps it (no hand-back to the companion: the supervisor restarts its companion, which waits for the lock) until
+    <run>/yardsticks/STOP or the run's end. With --yardsticks '{..., "cells_mode": "pool"}' it switches a live run's
+    cells to the pool without stopping training. A lock held by anything but the run's companion: refused.
 
 `status`: what is measured, missing (an evaluated checkpoint without a result) and failing.
 """
@@ -143,6 +151,21 @@ def overdue(item, t0, last, timeout_s, now=None):
     return None
 
 
+def kill_pid_tree(pid):
+    import psutil
+    try:
+        q = psutil.Process(pid)
+        for k in q.children(recursive=True):
+            try:
+                k.kill()
+            except psutil.NoSuchProcess:
+                pass
+        q.kill()
+        q.wait(30)
+    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+        pass
+
+
 def tail(path, n=15):
     try:
         with open(path, encoding='utf-8', errors='replace') as f:
@@ -200,6 +223,12 @@ def item_key(item):
 
 def result_line(row):
     k = row['kind']
+    if k == Y.FIT_KIND:
+        o = row.get('overall')
+        return (f"fit of {row.get('games')} games: overall " + (f"{o['elo']:+.1f} +- {o['se']:.1f}, anchored "
+                f"{row['anchored']['elo']:.1f}" if o else 'incomplete') +
+                (f"; promote ({row['promote']['why']}) {row['promote'].get('label') or 'suggested'}"
+                 if row.get('promote') else '') + f", {row.get('seconds', 0):.0f} s")
     if k == 'bo1':
         return f"{row['score']:.4f} +- {row['se']:.4f} (Elo {row.get('elo_diff')}), {row['seconds']:.0f} s"
     if k == 'blunders':
@@ -213,8 +242,9 @@ def result_line(row):
 
 class Watcher:
     def __init__(self, run, supervised=False, once=False, override=None, log=say, python=None, poll=None,
-                 child_cmd=None):
+                 child_cmd=None, take_over=False):
         self.run = os.path.abspath(run)
+        self.take_over = take_over             # (by hand: the run's companion stopped, never handed back to)
         self.supervised, self.once, self.override = supervised, once, override
         self.log = log
         self.python = python or sys.executable
@@ -225,6 +255,7 @@ class Watcher:
         self.stop = threading.Event()          # kill the measurement under way and end
         self.write = threading.Lock()
         self.procs = {}
+        self.alive = set()                     # (the lanes still running: the fit lane outlives them when finishing)
         self.tick = 5.0                        # seconds between looks at the measurement under way (tests: less)
 
     # the run's setting, read at every look (a restart may change it)
@@ -255,6 +286,8 @@ class Watcher:
             cmd += ['--ref', item['ref'], '--pair', ','.join(item['pair'])]
             if item['kind'] == 'cells_base':
                 cmd += ['--games', str(item['games'])]
+            elif item.get('role'):             # (a pool leg, docs/ENGINE.md 186)
+                cmd += ['--games', str(item['games']), '--role', item['role']]
         if self.override is not None:
             cmd += ['--yardsticks', json.dumps(self.override)]
         return cmd
@@ -325,6 +358,12 @@ class Watcher:
 
     def lane(self, name):
         """One lane's loop: its oldest due measurement, in order, until the watcher ends."""
+        try:
+            self._lane(name)
+        finally:
+            self.alive.discard(name)
+
+    def _lane(self, name):
         while not self.stop.is_set() and not self.draining:
             try:
                 cfg, ys = self.settings()
@@ -341,6 +380,9 @@ class Watcher:
                 self.measure(item, ys)
                 continue
             if self.finishing:
+                if name == 'fit' and self.alive - {'fit'}:
+                    self.stop.wait(min(self.tick, 2.0))     # (the fits wait on the other lanes' measurements)
+                    continue
                 return                         # (nothing due: failures still waiting stay failed / missing)
             self.stop.wait(self.poll_override or (ys or Y.DEFAULTS)['poll'])
 
@@ -380,7 +422,7 @@ class Watcher:
                     self.stop.set()
                     return
                 try:
-                    if self.handed_over():
+                    if not self.take_over and self.handed_over():
                         self.log('the run\'s own companion runs the yardsticks now: finishing the measurement under '
                                  'way, then exiting')
                         self.draining = True
@@ -392,7 +434,37 @@ class Watcher:
                     self.log(f'end watch: {ex!r}')
             self.stop.wait(poll)
 
+    def seize(self, wait_s=10.0):
+        """--take-over: the lock from the run's own companion watcher -> True when this process holds it. The
+        companion (the pid in the supervisor's state, a run_yardsticks.py command, the lock's owner) is killed with its
+        measurement and the lock taken at once (the supervisor restarts its companion, which then waits for the lock);
+        anything else holding the lock is refused."""
+        from zero import runctl
+        for _ in range(3):
+            if take_lock(self.run):
+                return True
+            pid = lock_owner(self.run)
+            if pid is None:
+                continue
+            c = (runctl.read_state(self.run, 'supervisor') or {}).get('companion') or {}
+            if c.get('pid') != pid or not any('run_yardsticks.py' in x for x in c.get('cmd') or []):
+                self.log(f'--take-over: the lock is held by pid {pid}, not the run\'s companion watcher: refused '
+                         f'(stop it first: {Y.DIR}/STOP)')
+                return False
+            self.log(f"--take-over: stopping the run's companion watcher pid {pid} (its measurement under way is "
+                     f"measured again) and taking its lock")
+            kill_pid_tree(pid)
+            t0 = time.time()
+            while time.time() - t0 < wait_s:
+                if take_lock(self.run):
+                    return True
+                time.sleep(0.05)
+        return False
+
     def main(self):
+        if self.take_over and not self.seize():
+            self.log('--take-over: the lock was not taken')
+            return 2
         if not take_lock(self.run):
             if not self.supervised:
                 self.log(f'another watcher (pid {lock_owner(self.run)}) measures this run ({lock_path(self.run)}): '
@@ -418,6 +490,7 @@ class Watcher:
             if not self.once:
                 ew = threading.Thread(target=self.end_watch, daemon=True)
                 ew.start()
+            self.alive = set(lanes)
             ts = [threading.Thread(target=self.lane, args=(n,), daemon=True) for n in lanes]
             for t in ts:
                 t.start()
@@ -460,9 +533,11 @@ def cmd_one(a):
         else:
             if a.iter is None:
                 raise SystemExit(f'one --kind {a.kind} needs --iter')
-            row = Y.measure_cells(run, a.iter, a.ref, pair, cfg, ys, kind=a.kind)
+            row = Y.measure_cells(run, a.iter, a.ref, pair, cfg, ys, kind=a.kind, games=a.games, role=a.role)
     elif a.iter is None:
         raise SystemExit(f'one --kind {a.kind} needs --iter')
+    elif a.kind == Y.FIT_KIND:
+        row = Y.measure_cells_fit(run, a.iter, cfg, ys)
     elif a.kind == 'bo1':
         if not a.opp:
             raise SystemExit('one --kind bo1 needs --opp')
@@ -501,10 +576,12 @@ def cmd_status(a):
         print(f"  cells: {len(c['report']['cells'])} measured against a reference, {len(c['report']['gen'])} "
               f"gen-over-gen (run_yardsticks.py cells RUN)")
         for m in c['missing']:
-            print(f"  MISSING {m['kind']} {m.get('iter', '')} vs {m['ref']} in {' / '.join(m['pair'])}")
+            print(f"  MISSING {m['kind']} {m.get('iter', '')}" + (f" vs {m['ref']} in {' / '.join(m['pair'])}"
+                                                                  if m.get('pair') else ''))
         for f in c['failed']:
-            print(f"  FAILING {f['kind']} {f.get('iter', '')} vs {f['ref']} in {' / '.join(f['pair'])} "
-                  f"({f['attempts']} attempts): {f['error'][-200:]}")
+            print(f"  FAILING {f['kind']} {f.get('iter', '')}" + (f" vs {f['ref']} in {' / '.join(f['pair'])}"
+                                                                  if f.get('pair') else '')
+                  + f" ({f['attempts']} attempts): {f['error'][-200:]}")
     return 0
 
 
@@ -535,6 +612,60 @@ def print_summary(s, decks, title):
         print(f"  * vs_ref above the threshold in {', '.join(s['promote'])}: a new reference is suggested")
 
 
+def print_fit(fit, decks, only=None):
+    """The joint fit's table per measured generation (docs/ENGINE.md 186): each cell's rating over the anchor (Elo
+    +- the bootstrap se), the per-deck and overall means, the anchored Elo, the flags."""
+    m = fit['method']
+    print(f"joint fit (v{fit['fit_v']}): {fit['games']} games, anchor {', '.join(fit['anchor'].get('labels') or [])} "
+          f"{fit['anchor'].get('sha')} at {fit['base_elo']:.0f}; se {m['se']}"
+          + (f" ({m['boot']} resamples)" if m['boot'] else '') + f"; prior sd {m['prior_sd_elo']} Elo")
+    for k, p in sorted(fit['pairs'].items()):
+        print(f"  pair {' / '.join(_short(x) for x in k.split(','))}: {p['games']} games on {p['clusters']} deals"
+              + (f", matchup m {p['m'][0]:+.0f} +- {p['m'][1]:.0f}" if p.get('m') else '')
+              + (f", chooser c {p['c'][0]:+.0f} +- {p['c'][1]:.0f}" if p.get('c') else ''))
+    w = 16
+    for g in fit['gens']:
+        if not g['measured'] or (only is not None and g['iter'] not in only):
+            continue
+        print(f"generation {g['iter']}" + (f" ({', '.join(g['labels'])})" if g['labels'] else '') + f" {g['sha']}:")
+        print('  ' + 'pilot / opp'.ljust(12) + ''.join(_short(y).rjust(w) for y in decks) + 'deck'.rjust(w))
+        for x in decks:
+            line = '  ' + _short(x).ljust(12)
+            for y in decks:
+                c = g['cells'].get(f'{x}|{y}')
+                line += (f"{c['elo']:+.0f} +-{c['se']:.0f}" if c else '-').rjust(w)
+            d = g['decks'].get(x)
+            line += (f"{d['elo']:+.0f} +-{d['se']:.0f}" if d else '-').rjust(w)
+            print(line)
+        if g['overall']:
+            print(f"  overall {g['overall']['elo']:+.1f} +- {g['overall']['se']:.1f};  anchored "
+                  f"{g['anchored']['elo']:.1f} +- {g['anchored']['se']:.1f}")
+        for k, v in sorted(g['flags'].items()):
+            print(f"  FLAG {k}: {', '.join(v)}")
+    for t in fit['transitivity']:
+        if t['flag']:
+            print(f"  TRANSITIVITY: iteration {t['iter']} vs {t['prev']} in {t['cell']}: observed {t['obs']:+.0f} +- "
+                  f"{t['obs_se']:.0f}, the fit predicts {t['pred']:+.0f} +- {t['pred_se']:.0f} (z {t['z']:+.1f}): "
+                  f"exploitation of a reference?")
+
+
+def cmd_fit(a):
+    """The joint fit from the records only (no games): docs/ENGINE.md 186."""
+    from mtgz.az import cells_fit as CF
+    run = os.path.abspath(a.run)
+    cfg = Y.cfg_of(run)
+    ys = _ys_of(a, run, cfg)
+    if ys is None or not (ys['cells_games'] or ys['cells_gen_games']):
+        print('yardsticks: no cells for this run')
+        return 0
+    fit = CF.fit_run(run, cfg, ys, boot=a.boot)
+    if a.json:
+        print(json.dumps(fit, indent=1))
+    else:
+        print_fit(fit, ys['cells_decks'])
+    return 0
+
+
 def cmd_cells(a):
     run = os.path.abspath(a.run)
     cfg = Y.cfg_of(run)
@@ -543,8 +674,25 @@ def cmd_cells(a):
         print('yardsticks: no cells for this run')
         return 0
     rep = Y.cells_report(run, cfg, ys)
+    fit = None
+    if Y.cells_pool(ys) or a.fit:
+        from mtgz.az import cells_fit as CF
+        fit = CF.fit_run(run, cfg, ys, boot=a.boot)
     if a.json:
-        print(json.dumps(rep, indent=1))
+        print(json.dumps(dict(rep, joint=fit) if fit else rep, indent=1))
+        return 0
+    if Y.cells_pool(ys):
+        print(f"reference pool (cells_mode pool; {ys['cells_pool_active']} active + the anchor, promotion every "
+              f"{ys['cells_promote_every']} or past {ys['cells_promote']}, auto {ys['cells_auto_promote']}):")
+        for r in rep['refs']:
+            print(f"  {r.get('label')}: since {r.get('since')}, sha {r.get('sha')}"
+                  + (f", Elo {r['elo']:.1f} +- {r['se']:.1f} ({r['how']})" if r.get('elo') is not None else ''))
+        print_fit(fit, ys['cells_decks'])
+        if rep.get('promote'):
+            p = rep['promote']
+            print(f"SUGGESTED: a new reference - iteration {p['iter']} ({p['why']}"
+                  + (f": {', '.join(p['cells'])} past {ys['cells_promote']} against {p['ref']}" if p['cells'] else '')
+                  + f"):  python tools/run_yardsticks.py cells-freeze {a.run} --iter {p['iter']}")
         return 0
     print('reference ladder:')
     for r in rep['refs']:
@@ -561,6 +709,8 @@ def cmd_cells(a):
         print(f"SUGGESTED: a new reference - iteration {p['iter']} scores above {ys['cells_promote']} against "
               f"{p['ref']} in {', '.join(p['cells'])}:  python tools/run_yardsticks.py cells-freeze {a.run} "
               f"--iter {p['iter']}")
+    if fit is not None:
+        print_fit(fit, ys['cells_decks'])
     return 0
 
 
@@ -608,6 +758,8 @@ def main(argv=None):
     w.add_argument('--once', action='store_true')
     w.add_argument('--yardsticks', default=None, help='the setting as JSON (default: the run\'s)')
     w.add_argument('--poll', type=float, default=None)
+    w.add_argument('--take-over', action='store_true', help='stop the run\'s companion watcher and keep its lock '
+                   '(by hand; docs/ENGINE.md 186.7)')
     s = sub.add_parser('status')
     s.add_argument('run')
     s.add_argument('--json', action='store_true')
@@ -620,11 +772,19 @@ def main(argv=None):
     o.add_argument('--ref', default=None)
     o.add_argument('--pair', default=None)
     o.add_argument('--games', type=int, default=None)
+    o.add_argument('--role', choices=['main', 'cont'], default=None)
     o.add_argument('--yardsticks', default=None)
     c = sub.add_parser('cells', help='the metagame cells\' report (docs/ENGINE.md 177)')
     c.add_argument('run')
     c.add_argument('--json', action='store_true')
     c.add_argument('--yardsticks', default=None)
+    c.add_argument('--fit', action='store_true', help='the joint fit\'s table too (always in the pool mode)')
+    c.add_argument('--boot', type=int, default=None, help='bootstrap resamples (default cells_fit_boot)')
+    cf = sub.add_parser('cells-fit', help='the cells\' joint rating fit from the records only (docs/ENGINE.md 186)')
+    cf.add_argument('run')
+    cf.add_argument('--json', action='store_true')
+    cf.add_argument('--boot', type=int, default=None)
+    cf.add_argument('--yardsticks', default=None)
     f = sub.add_parser('cells-freeze', help='freeze a checkpoint as the next cells reference (explicit; never automatic)')
     f.add_argument('run')
     f.add_argument('--iter', type=int, required=True)
@@ -651,14 +811,18 @@ def main(argv=None):
         return cmd_status(a)
     if a.cmd == 'cells':
         return cmd_cells(a)
+    if a.cmd == 'cells-fit':
+        return cmd_fit(a)
     if a.cmd == 'cells-freeze':
         return cmd_freeze(a)
     if a.cmd == 'cells-match':
         return cmd_match(a)
     if not os.path.exists(os.path.join(a.run, 'config.json')):
         ap.error(f'{a.run}: no config.json (not a run directory)')
+    if a.take_over and a.supervised:
+        ap.error('--take-over is for a watcher started by hand')
     return Watcher(a.run, a.supervised, a.once, json.loads(a.yardsticks) if a.yardsticks else None,
-                   poll=a.poll).main()
+                   poll=a.poll, take_over=a.take_over).main()
 
 
 if __name__ == '__main__':

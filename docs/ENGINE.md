@@ -38038,3 +38038,224 @@ dealt preset (a worker built from this commit); glassroad / caverna / kingdombui
   `test_absent_slots_are_never_read[legacy|max]` (`CUDA_VISIBLE_DEVICES=0 python -m pytest tests/test_dup_reduce.py
   tests/test_token_graphs.py -q` in zero-core at 06647c5; a few seconds of GPU). Expected: 'max' bit-identical over
   repeats and within 2e-5 of the CPU; legacy deterministic on its duplicate-free rows.
+
+## 186. The cells yardstick's reference pool and one joint rating fit: every cells game in one model per deck pair, the most informative reference, bootstrap standard errors over deals, transitivity flags (branch `feat/cells-pool`, 2026-11-17)
+
+Branch `feat/cells-pool` from main be9075dd (zero-core pin 06647c5 unchanged; no Rust change: digests untouched).
+Section number: 185 is `feat/publish-metagame`'s; every other branch's headings stop at 184.
+
+**Why.** 177's cells measure each checkpoint against one frozen reference at a time and chain the references' Elo
+(the ladder). Two weaknesses: a reference the network has outgrown gives scores near 100% (little information per game),
+and the chain's links add their errors without ever using the other games (gen over gen, the older references) that
+say the same thing. The design the user approved (2026-11-17): a POOL of references, each checkpoint measured mostly
+against the member whose predicted score is nearest 0.5, and ONE joint rating fit of every cells game ever recorded.
+It is opt-in (`cells_mode` 'pool'; default 'ladder' = 177 and 182, number for number), the existing record kinds and
+fields are unchanged, and the fit reads ladder-mode records as well (`cells-fit RUN`, `cells RUN --fit`).
+
+### 186.1 The model (mtgz/az/cells_fit.py)
+
+Per unordered deck pair {X, Y} (X before Y in `cells_decks`), every game of generation g piloting X against generation h
+piloting Y:
+
+    logit P(X's side wins) = m_XY + a[g, X|Y] - a[h, Y|X] + c_XY s
+
+* a[g, X|Y] is g's rating in cell X|Y; Elo = a x 400 / ln 10.
+* **The anchor** is the run's first cells reference (`'iter0'`: generation 0, a permanent pool member): a[anchor, .] = 0.
+  m_XY (the matchup's offset) is then identified by the anchor against itself (its cached baseline games), and every
+  rating is Elo over generation 0 in that cell. The model is additive in logits, so a rating does not depend on whom it
+  was measured against: that is the transitivity assumption 186.5 checks.
+* **s** = +1 when X's side chose play or draw (the chooser spec 0: X is seat 0), -1 when Y's did; c_XY is the chooser's
+  edge. Every measurement plays each seed from both sides (177.1), so the design balances it; fitting it keeps the
+  ratings the average over the choice and takes its variance out of them.
+* **Mirrors** {X, X}: m = 0 and one rating a[g, X|X].
+* A draw (an unfinished game's 0.5) counts half a win: the binomial log-likelihood with a fractional outcome.
+* **The estimate**: maximum likelihood with a weak Gaussian prior N(0, 4^2) logits (sd ~695 Elo) on every parameter,
+  by Newton's method with step halving (the objective is concave). The prior moves an identified rating by well under
+  1 Elo; it keeps a cell at 100% finite and an unidentified parameter at 0. A generation is rated in a cell only when it
+  played that role against another generation (`count`); otherwise the cell is absent, never a prior's 0.
+* **The games** (`collect`): the newest result row of every 'cells' / 'cells_gen' measurement (the row's `results`,
+  A = its `sha`, B = its `ref_sha`, A in seat gid % 2) and the R-vs-R games of every baseline a row names (the cache
+  file's `results`, `ref`, `seed`, `batch`). A reference copied by cells-freeze has its checkpoint's sha12: one
+  player. Ladder-mode rows are as good as pool-mode ones; a baseline whose cache file is gone is listed
+  (`missing_bases`), its games left out.
+
+### 186.2 The pool and the most informative reference
+
+* **The pool for checkpoint N** (`active_refs`): the anchor plus the newest `cells_pool_active` (3) promoted
+  references whose `since` N reached (the ladder file's order). Members are 177.3's references; nothing else changes
+  about them (the cache, the farm backend, `ref_path`).
+* **The plan per deck pair** (`CellsWant.plan`): one match of a pair plays both of its cells (A in seat gid % 2), so the
+  reference is chosen per pair: the member whose predicted scores against N, averaged over the choice, are nearest 0.5 -
+  the largest sum over the pair's cells of mean p(1 - p), the Fisher information per game (`choose`; ties: the newer).
+  The prediction uses the current point fit (no bootstrap; memoized by the rows) and N's own ratings once N is rated
+  in the pair, else the newest measured checkpoint's before N (its proxy). The main leg gets `cells_main_share` (0.75)
+  of `cells_games`, rounded to whole batches (sequential cells) or an even number; the rest goes to the **continuity**
+  member, the next-older one in the pool (the anchor at the end of the chain); when the main member is the anchor, it
+  gets every game. With 400 games: 300 + 100; with 182.5's batches of 40: 320 + 80.
+* **Fixed once played.** The plan of a pair is recomputed at each look only until a result row of N in that pair lands;
+  then it keeps the rows' references (`role` 'main' / 'cont'). A pair measured before the switch to the pool (a
+  ladder-mode row, no `role`) keeps its row: switching never re-measures a measured checkpoint (tested).
+* **The same deals every time.** A leg of G games plays the pair's seeds' first game ids (plain: game ids 0..G-1 of the
+  pair's seed; sequential: its first G / cells_batch batches), the same for every checkpoint and every reference: the
+  checkpoints measured against one reference are paired, and every reference's games share the deals too. Each member
+  has one baseline per non-mirror pair at `cells_games` (the same cache key as the ladder's: a ladder run's gen0
+  baselines are reused), and a leg is judged against its first units (`base_games` in the row; a leg longer than its
+  baseline is refused). The pool's baselines are wanted, once each, before the first checkpoint whose pool holds the
+  member (`_pool`): a promoted reference's R-vs-R games are its first links, as the user asked.
+* **Sequential stopping** (182) applies per leg, as per measurement before.
+* **The fit item.** After a checkpoint's legs (and its gen-over-gen cells, 177.3, still played when
+  `cells_gen_games` > 0) have result rows, the watcher wants `{"kind": "cells_fit", "iter": N}` in a lane of its own,
+  `fit` (a child `one RUN --kind cells_fit --iter N`, retries and failure rows as every measurement), and after the
+  previous checkpoint's fit: fits, and so automatic promotions, go in checkpoint order (a first smoke promoted iteration
+  3 before 1 and 2 were measured, its fit being ready first). A fit that keeps failing holds the later fits back, said
+  loudly (missing / failing) as any measurement. Under `--once` and at the run's end the fit lane outlives the others
+  (its items wait on their measurements).
+
+### 186.3 Promotion (manual by default)
+
+* **The rule** (`promote_rule`, read at each checkpoint's fit): checkpoint N, rated by the fit in all 9 cells and newer
+  than the newest reference R, is promoted when N - R's `since` >= `cells_promote_every` (64; 0 = the threshold only)
+  ('cadence'), or sooner when any cell's expected score against R - the logistic of the fit's rating difference, the
+  cell's own terms as 177's `vs_ref` - passes `cells_promote` (0.80) or falls below 1 - `cells_promote` (0.20)
+  ('threshold').
+* **`cells_auto_promote`** (default false): the fit child promotes N itself (`freeze_pool`) and says so in its record
+  (`promote.auto`, `promote.label`); off, the record and `run_yardsticks.py cells` suggest it (`SUGGESTED: ...
+  cells-freeze RUN --iter N`) and `cells-freeze` does it, exactly as in the ladder mode.
+* **`freeze_pool`** (cells-freeze in the pool mode): copies models/iter_N.pt as 177.3 (sha256 checked) and appends
+  `{label, path, since N, iter N, sha, from_ref 'pool-fit', elo, elo_se, time}` to `cells_ladder.json` - elo / elo_se
+  the fit's anchored Elo, so a ladder-mode reader of the same file sees an ordinary frozen entry. Refused: a checkpoint
+  not rated in all its cells, not newer than the newest reference, already a reference, a label taken.
+* A promoted checkpoint's earlier games (its own legs against the pool) are its links; its baselines come next.
+
+### 186.4 The standard errors: a bootstrap over deals (and why not the inverse Hessian)
+
+The likelihood treats every game as independent. They are not: a deal (the pair, the match's seed, the game id) is
+played by every generation and reference, from both sides of the choice, on the same shuffles (177.1's common random
+numbers). The inverse Hessian (`se_model`, reported beside) is therefore wrong both ways: it **overstates** the se of a
+rating measured straight against the anchor (the anchor's own baseline on the same deals cancels most of the noise: the
+pairing's gain, 177.2) and **understates** the se of a chained rating (two generations measured on the same deals
+share those deals' luck, so the chain's links are positively correlated and their errors add up faster than
+independent games would). The reported `se` is a **cluster bootstrap over deals** (`cells_fit_boot` 200 resamples):
+whole deals resampled with replacement, every game on a drawn deal kept with its multiplicity, the model refitted from
+the estimate (Newton, a few steps). That keeps every correlation - within a unit, between the checkpoint's and the
+reference's games, across generations. Pairs are fitted independently (their seeds are disjoint), so replicate b of
+every pair together is a replicate of the whole fit: the per-deck means and the 9-cell overall (whose cells X|Y and Y|X
+share a pair's games) take their se from the same replicates, as do the differences of 186.5. The bootstrap is seeded
+(186 + the pair's hash): a refit of the same rows gives the same numbers. With fewer than two deals in a pair (a smoke)
+the se falls back to the inverse Hessian.
+
+**Checked on simulated games** (`tests/test_cells_pool.py`): five generations with known skills (0 to 1.2 logits per
+cell), a matchup offset and a chooser edge, measured on a pool's shape (everything against generation 0 early, then a
+promoted reference as the main leg and the next-older one as the continuity leg, baselines of both) on 400 deals; each
+deal's two choices draw their uniforms through a Gaussian copula (rho 0.7), so every generation playing that deal sees
+the same uniform - CRN, the marginal win probability exactly the model's. Over 100 replications (800 rating x
+replication cases): the bootstrap's 95% intervals cover **95.1%**, the inverse Hessian's **79.5%**; mean z +0.05;
+per rating, the bootstrap se against the estimates' spread across replications (Elo): 12.8 / 13.5 (a rating measured
+against the anchor; Hessian 18.3), 20.2 / 20.1, 29.8 / 30.0, 44.2 / 42.4 (two chain links from the anchor; Hessian
+22.9), the bias at most 5.6 Elo (a tenth of an se, the prior's and the logit's small-sample pull).
+
+### 186.5 The flags
+
+* **Transitivity** (`transitivity`): for each gen-over-gen measurement (N against P, 177.3) and each of its cells, the
+  observed gain (the row's Elo against the P-vs-P baseline on the same deals, an estimate of a[N] - a[P] in the cell's
+  terms) against the fit's prediction K (a[N] - a[P]) from a **refit with that measurement left out** (an honest
+  out-of-sample prediction: N's and P's ratings from their games against the references); z = (obs - pred) / sqrt(
+  obs_se^2 + pred_se^2), pred_se the full fit's bootstrap se of the difference (the left-out fit's would be a little
+  larger), obs_se the row's delta se raised to at least 2K / units (one unit's change near 50%: a cell whose every unit
+  came out the same for both checkpoints has a delta se of 0, which says no deal told them apart). |z| > 2.5 flags
+  the cell ("exploitation of a reference?"). Tested on a simulated exploiter: a generation that gains 1.5 logits against
+  generation 0 only is flagged in all 9 cells (z -6 to -11), the largest |z| of the run; its inflated rating leans on
+  the previous generation's through their direct games, so that one's own check can trip too (z ~ -3): the flag says
+  where the ratings stop being transitive, not who is to blame. The same world without the exploiter: 27 checks, none
+  flagged, max |z| < 2.5.
+* **The reading rule** (`reading_rule`, on the measured generations in order): a cell whose rating rose by no more
+  than 2 se (of the step's difference, from the replicates) over each of the two steps up to a generation - three
+  consecutive measured checkpoints - is **stalled** there; a cell whose rating fell by more than 2 se in the last step
+  is **regressed**. (The user's words: "flag a cell whose rating fails to improve across two consecutive measured
+  checkpoints by more than 2 SE"; read as two steps in a row without a significant gain, plus the regression flag. An
+  open question in the report.)
+
+### 186.6 The record: `cells_fit` (for readers of yardsticks.jsonl, e.g. the Delver AI site's metagame view)
+
+The pool mode appends one row per measured checkpoint to `<run>/yardsticks.jsonl` (read_rows reads kind `cells_fit`;
+a reader older than this section skips it: it filters on the kinds it knows). The **newest** `cells_fit` row (highest
+`iter`, then `time`) is the current best curve: `gens` re-estimates every generation from all games so far, and earlier
+rows are snapshots (a generation's numbers move a little as games against it accumulate). `status()['cells']['fit']`
+and `cells_report()['fit']` are that row (pool mode). Fields:
+
+```
+{"kind": "cells_fit", "iter": N, "sha": <N's sha12>, "fit_v": 1, "mode": "pool",
+ "anchor": {"sha": <sha12>, "labels": ["gen0"]}, "base_elo": 1000.0,
+ "complete": true,                                      # N rated in all 9 cells
+ "cells": {"X|Y": {"elo", "se", "se_model", "games", "refs": {<ref label>: <games in this cell>}}},
+                                                        # N's ratings, Elo over the anchor; se = bootstrap,
+                                                        # se_model = inverse Hessian; refs = whom N played there
+ "decks": {"X": {"elo", "se"}},                         # mean of X's 3 cells as the measured side's deck
+ "overall": {"elo", "se"} | null,                       # mean of the 9 (null unless complete)
+ "anchored": {"elo", "se"} | null,                      # base_elo + overall: zero-core's anchored-Elo slot
+ "flags": {"transitivity": [{"cell", "iter", "prev", "obs", "obs_se", "pred", "pred_se", "z"}],   # N's flagged
+           "stalled": ["X|Y", ...], "regressed": ["X|Y", ...]},
+ "promote": null | {"iter", "why": "cadence" | "threshold", "cells", "vs": <newest ref>, "auto": bool,
+                    "label"?, "elo"?, "elo_se"?, "error"?},          # label: promoted by the fit itself
+ "plan": {"X,Y": {"main": <label>, "cont": <label> | null, "games": {<label>: <games a cell>}}},
+ "pool": [<labels of N's pool, oldest first>],
+ "pairs": {"X,Y": {"games", "clusters", "players", "m": [elo, se], "c": [elo, se]}},   # (mirrors: no m)
+ "gens": [{"iter", "sha", "labels"?, "cells": {"X|Y": [elo, se]}, "decks": {"X": [elo, se]},
+           "overall": [elo, se] | null, "anchored": [elo, se] | null, "flags"?: {...}}],   # every measured generation
+ "method": {"model", "se", "boot", "prior_sd_elo", "flag_z", "stall_se"}, "games": <in the fit>,
+ "missing_bases"?: [<cache keys>], "seconds", "time"}
+```
+
+Elo values are rounded to 0.1. A cell absent from `cells` / `gens[].cells` is unrated (no game in that role against
+another generation). In the pool mode a `cells` row (177.5's format, unchanged) gains two fields: `role` ('main' |
+'cont') and `base_games` (the baseline its leg was judged against); its `games` is the leg's. The ladder file's pool
+entries have `from_ref` 'pool-fit'. `run_yardsticks.py cells-fit RUN --json` prints the fit itself (`gens` with the
+full per-cell dicts, `transitivity` with every check, `pairs`, `method`), not a row.
+
+### 186.7 The settings, the commands, switching a live run
+
+* `yardsticks` options (all new; off by default): `cells_mode` ('ladder' | 'pool'; 'pool' needs `cells_games`),
+  `cells_pool_active` (3), `cells_promote_every` (64), `cells_auto_promote` (false), `cells_main_share` (0.75),
+  `cells_fit_boot` (200). `cells_promote` (0.80) is the pool's threshold too. Everything else is 177's and 182's.
+  For the metagame run, 182.5's setting plus `"cells_mode": "pool"` (and `"cells_auto_promote": true` to promote
+  without a hand).
+* `run_yardsticks.py cells RUN [--json] [--fit] [--boot B]`: in the pool mode the pool, the joint fit's table per
+  measured generation (9 cells Elo +- se, per-deck, overall, anchored, flags; the pairs' m and c; transitivity flags)
+  and a suggested promotion; in the ladder mode 177's tables, plus the fit's with `--fit`. `cells-fit RUN [--json]
+  [--boot B]`: the fit from the records only (no game is played, nothing written). `one RUN --kind cells_fit --iter
+  N` (the watcher's child). `cells-freeze` promotes by the fit in the pool mode.
+* **Retroactively**: `cells-fit` on any run's records (ladder rows included). Tested on a simulated ladder-mode run
+  (cells against gen0, gen over gen): every rating within 3.5 se of the truth, m within 3.5 se.
+* **Switching `legacy-meta3-r1` (live, ladder mode) to the pool without stopping training.** The run's companion
+  watcher runs its pinned checkout's code (no pool mode) and reads its config.json's setting. A watcher started by
+  hand from a checkout with this section (its own pinned worktree, `git worktree add --detach`) takes over:
+
+      python tools/run_yardsticks.py watch E:/mtg-zero/runs/legacy-meta3-r1 --take-over --yardsticks \
+        '{"bo1_games": 0, "blunders": false, "cells_games": 400, "cells_refs": ["iter0"], "cells_gen_games": 200,
+          "cells_every": 32, "cells_gen_every": 32, "cells_target_se": 30, "cells_batch": 40, "cells_mode": "pool"}'
+
+  `--take-over` (by hand only) checks that the lock's owner is the run's companion (the pid in the supervisor's state,
+  a run_yardsticks.py command), kills it with its measurement under way (measured again: the pool's plan for a pair
+  with no row yet), and takes the lock at once. The supervisor restarts its companion (one of its 3 restarts an hour),
+  which finds the lock held and waits (177's supervised watcher), so the hand watcher keeps the run (it never hands
+  back) until `<run>/yardsticks/STOP` or the run's end; then the companion takes over again with its own setting. A
+  lock held by anything else is refused. The checkpoints already measured keep their ladder rows; their fits are
+  wanted (one row each); the next ones are planned against the pool. **At the next restart** the same setting goes on
+  the run's command line (`--yardsticks '<the JSON>'`) from a checkout with this section (a repin), and the companion
+  runs the pool itself.
+
+### 186.8 Tests, smoke, gate
+
+* `tests/test_cells_pool.py` (14, ~16 s, no process started): the fit's recovery and coverage on simulated CRN games
+  (186.4); a mirror's single rating; the deals of sequential rows (batch k's seed, a mirror's half batches) and the
+  game tuples' orientation; the most informative member, the continuity one, the pool's membership and the games'
+  split; the promotion rules (cadence, threshold above 0.80 and below 0.20, only a fully rated checkpoint newer than
+  the newest reference); a pool watcher end to end on a fake run whose games come from a known world (in-process
+  measurements through the real measure / cache / row code: the anchor's baselines first, each promoted member's once
+  before its first use, legs of 90 + 30 games against the pool's main and next-older members, a fit row per checkpoint,
+  automatic promotions every 32 iterations, every rating within 3.5 se of the truth, the transitivity flags quiet);
+  manual promotion (suggested, `cells-freeze` writes it, the suggestion goes); the exploiter (186.5); the retroactive
+  fit of ladder records and the switch re-measuring nothing; a leg judged against its baseline's first games; the
+  setting's refusals; `cells-fit --json` playing nothing; the children's command lines and the fit item's wait; the
+  take-over's checks (only the run's companion is stopped). `tests/test_cells_yardstick.py`,
+  `tests/test_yardstick_cost.py`, `tests/test_yardsticks.py`, `tests/test_farm_play.py` unchanged and passing.
