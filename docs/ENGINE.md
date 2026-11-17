@@ -37918,3 +37918,37 @@ Earlier gates on this branch failed and were fixed or re-run:
 zero-core's own full pytest on the branch (desktop, GPU visible but shared): 714 passed. The 4 failures were 2 share-rule
 tests, now on 'none', and 2 CUDA token-graph tolerance checks (3.7e-5 against 2e-5 while another process used the GPU;
 this branch touches no network or graph code).
+
+## 183. Network arithmetic: bfloat16 self-play inference, TF32 training, flat tail uploads (zero-core `feat/precision`, docs/az.md 57; 2026-11-17)
+
+The user accepted the rounding of the 11-16 SP2 / T1-T5 measurements (maintainer's notes `sp2_measurements_2026-11-16`)
+on 2026-11-17: bfloat16 for self-play / evaluation inference, TF32 for training. These change the network's
+arithmetic, not the rules or the search. Re-pins zero-core from `feat/speed-wins` 1cd546f to `feat/precision`
+(1cd546f + one commit).
+
+### 183.1 What arrives (zero-core docs/az.md 57; all opt-in, defaults byte-identical)
+
+* **`infer_precision`** 'fp32' (default) | 'tf32' | 'bf16': the run's own CUDA evaluators - self-play, the league's
+  seats, the Elo / anchor matches - compute in bfloat16 autocast (the token CUDA graphs captured under it) or with TF32
+  matmuls. A remote worker (the Mac) stays float32, a CPU / MPS evaluator ignores it, the farm's ONNX workers are float32
+  (both keys are `trainer` in check-config: an older worker build ignores them).
+* **`train_tf32`** 0 (default) | 1: TF32 matmuls in the training step on CUDA.
+* **Flat tail uploads** (exact, no setting): a training batch's tail floats go to the GPU as stored (float16, no
+  padding) and are padded there. The same batches bit for bit; -10% a training step on pb3's window (T2).
+* The TF32 flag is process-wide, so every block that sets it holds one lock; with either setting on, the training step
+  holds it at its own value (the local linger self-plays on another thread while the run trains).
+
+### 183.2 The yardsticks
+
+The local best of one (`measure_bo1`, plain and sequential) plays **both** sides at the run's `infer_precision`
+(`bo1_precision(cfg)`), and the row names it when it is not 'fp32' (`"precision": "bf16"`). The cells stay float32:
+their reference-vs-reference baselines are cached across runs and references under keys without a precision, so a
+bfloat16 cell would be judged against a float32 baseline. A farm job is ONNX float32 anyway. The paired h2h of the
+11-16 measurements (pb3 iter 155 against itself, 1,600 games each) found no strength difference: TF32 +3.5 +- 6.2,
+bf16 0.0 +- 6.4 Elo against float32. Test: `tests/test_yardstick_cost.py::test_a_best_of_one_plays_both_sides_at_the_runs_infer_precision`.
+
+### 183.3 For the metagame launch
+
+`"infer_precision": "bf16"` and `"train_tf32": 1` in the run's config (or `--infer-precision bf16 --train-tf32 1`).
+Expected from the measurements: self-play +26-33% leaves/s at conc 1536, training -20 to -25% a step (T2 + TF32), a
+clean iteration ~-21%. `--conc 2048` is a separate decision (RAM).

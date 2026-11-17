@@ -125,6 +125,24 @@ def test_a_sequential_best_of_one_stops_by_its_rule_and_the_plain_one_is_as_befo
     assert calls[-1][2]['sparse'] is False
 
 
+def test_a_best_of_one_plays_both_sides_at_the_runs_infer_precision(tmp_path, monkeypatch):
+    """infer_precision (zero-core docs/az.md 57; ENGINE.md 183): both sides of a local best of one at the run's, named
+    in the row; unset or 'fp32': no keyword, the row of before."""
+    calls = []
+    _bo1_fakes(monkeypatch, calls)
+    base = {'bo1_games': 400, 'bo1_opponents': ['iter0'], 'bo1_device': 'cpu', 'blunders': False}
+    run, _ = _run(tmp_path, dict(base))
+    row = Y.measure_bo1(run, 16, 'gen0')
+    assert 'precision' not in calls[-1][2] and 'precision' not in row
+    for p in ('fp32', 'bf16'):
+        rd = tmp_path / p
+        r, cfg = _run(rd, dict(base))
+        cfg['infer_precision'] = p
+        (rd / 'run' / 'config.json').write_text(json.dumps(cfg))
+        row = Y.measure_bo1(r, 16, 'gen0')
+        assert calls[-1][2].get('precision') == (None if p == 'fp32' else p) and row.get('precision') == calls[-1][2].get('precision')
+
+
 def _cells_fake(monkeypatch, calls, c_p=0.62, r_p=0.5):
     """zero.h2h.match stand-in for the cells: A's result per game from (seed, game id, spec) - the same deal, the same
     random number for C and for R (common random numbers) - C winning below c_p, R (a == b) below r_p."""

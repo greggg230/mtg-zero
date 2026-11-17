@@ -679,6 +679,13 @@ def bo1_tilts(cfg):
     return {k: v for k, v in (belief_tilts(cfg, 'eval') or {}).items() if k != 'deck'}
 
 
+def bo1_precision(cfg):
+    """The network arithmetic of a local best-of-one (both sides): the run's `infer_precision` (zero-core docs/az.md
+    57; 'fp32' when unset). The cells stay float32 (their cached baselines are float32; docs/ENGINE.md 183), and so
+    does a farm job (ONNX float32)."""
+    return str(cfg.get('infer_precision') or 'fp32').lower()
+
+
 def measure_bo1(run, it, opp, cfg=None, ys=None):
     """One best-of-one head-to-head: the run's checkpoint `it` against the opponent named `opp` -> the result row
     (played where bo1_backend says: here, or a farm play job with the same numbers)."""
@@ -699,6 +706,9 @@ def measure_bo1(run, it, opp, cfg=None, ys=None):
     t0 = time.time()
     kw = dict(seed=ys['bo1_seed'], threads=ys['bo1_threads'], groups=ys['bo1_groups'], device=ys['bo1_device'],
               spec=spec, seat_a=dict(seat), seat_b=dict(seat), paired=True, sparse=bool(ys['sparse']))
+    prec = bo1_precision(cfg)
+    if prec != 'fp32':                          # (docs/ENGINE.md 183: both sides at the run's infer_precision)
+        kw['precision'] = prec
     seq = bo1_sequential(ys)
     if seq:                                     # (docs/ENGINE.md 182: batches until the stop rule, at most bo1_games)
         out = h2h.sequential(ck, o['path'], batch_games=ys['bo1_batch'], max_games=ys['bo1_games'],
@@ -722,6 +732,8 @@ def measure_bo1(run, it, opp, cfg=None, ys=None):
                    max_games=ys['bo1_games'], target_se=ys['bo1_target_se'])
         if out.get('sprt'):
             row['sprt'] = out['sprt']
+    if prec != 'fp32':
+        row['precision'] = prec
     return row
 
 
