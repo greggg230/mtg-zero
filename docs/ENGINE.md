@@ -37414,7 +37414,7 @@ The gates ran on 5eee4461 in warm worktrees beside the live pb3, with
   stale for its own layout (`RowsMismatch` raised in the baseline's process). A baseline worktree rebuilt at e2811d25
   passed.
 * **python**: **GATE PASSED WITH SKIPS python 5eee44613460 in 986s**. The skips are the live-run fence only (8 tests).
-  Results: pytest 542 passed across the 4 shards and the desktop part; the run-loop smoke played 16 games, 0
+  Results: pytest 588 passed across the 4 shards and the desktop part; the run-loop smoke played 16 games, 0
   unfinished.
 * **pb3's worker**: `tools/farm_gates.py` ran on pb3's config.json + iter_0146.pt WITH THE EXISTING WORKER 88c69488
   against this checkout, and **FARM GATES PASSED**:
