@@ -42,6 +42,28 @@ the smokes):
                    one (lane 'farm'): one this long without progress, its console unchanged (docs/ENGINE.md 175.6)
   poll             seconds between looks for new checkpoints (60)
 
+The cost settings (docs/ENGINE.md 182; all off by default: the measurements of before, number for number):
+
+  bo1_every, blunders_every, cells_every, cells_gen_every
+                   a kind's cadence: measured only on evaluated checkpoints whose iteration is a multiple of it
+                   (null / 0: every evaluated checkpoint; give a multiple of eval_every). cells_gen's previous
+                   checkpoint is then the previous one on its own cadence (gen over N iterations)
+  bo1_target_se, bo1_sprt, bo1_batch
+                   a sequential best of one (zero.h2h.sequential, local games only): batches of bo1_batch paired
+                   games (100; batch k seeded bo1_seed + 7919 k, batch 0 the plain match's first games) until the
+                   score's se <= bo1_target_se (e.g. 0.02) or the SPRT [elo0, elo1] (alpha = beta = 0.05) decides, at
+                   most bo1_games games; the row says why it stopped ('stop') and its batches
+  cells_target_se, cells_batch
+                   sequential cells (local games only): each deck pair played in batches of cells_batch games a cell
+                   (100; a multiple of 4 dividing cells_games and cells_gen_games; batch k of a spec seeded its seed +
+                   7919 k, h2h.sequential's schedule) until every cell of the pair has an Elo se <= cells_target_se
+                   (e.g. 35; at least two batches), at most the pair's games; the baseline is played on the same
+                   batches to the full games (cached under its own key: the batch is in it) and each cell is judged
+                   against the baseline's same first units (common random numbers kept)
+  sparse           the local head-to-heads' sparse batches (true: zero.h2h's driver ships sparse rows, as self-play
+                   does - the network's answers are bit for bit the dense rows', zero-core tests/test_tail_graphs.py;
+                   false: dense rows, as before 11-16)
+
 The metagame cells (docs/ENGINE.md 177; off unless cells_games or cells_gen_games > 0): every ordered (my deck,
 opponent's deck) cell of `cells_decks`, the checkpoint piloting my deck against a frozen reference piloting the
 other, against the reference piloting both on the same seeds (common random numbers) - see the section "the cells":
@@ -117,7 +139,11 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             # the metagame cells (docs/ENGINE.md 177)
             'cells_games': 0, 'cells_gen_games': 0, 'cells_decks': None, 'cells_refs': [], 'cells_sims': None,
             'cells_seed': 0, 'cells_device': None, 'cells_backend': None, 'cells_format': 'bo1', 'cells_max_turns': 60,
-            'cells_promote': 0.80, 'cells_base_elo': 1000.0, 'cells_cache': None, 'cells_boot': 1000}
+            'cells_promote': 0.80, 'cells_base_elo': 1000.0, 'cells_cache': None, 'cells_boot': 1000,
+            # the cost settings (docs/ENGINE.md 182): cadences, sequential stopping, sparse rows
+            'bo1_every': None, 'blunders_every': None, 'cells_every': None, 'cells_gen_every': None,
+            'bo1_target_se': None, 'bo1_sprt': None, 'bo1_batch': 100, 'cells_target_se': None, 'cells_batch': 100,
+            'sparse': True}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)
 DELVER_YARDSTICKS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter0'], 'blunders': True}
@@ -129,7 +155,12 @@ KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': 
         'from': int, 'settle': _NUM, 'retry_s': _NUM, 'retry_max_s': _NUM, 'timeout_s': _NUM, 'poll': _NUM,
         'cells_games': int, 'cells_gen_games': int, 'cells_decks': list, 'cells_refs': list, 'cells_sims': int,
         'cells_seed': int, 'cells_device': str, 'cells_backend': str, 'cells_format': str, 'cells_max_turns': int,
-        'cells_promote': _NUM, 'cells_base_elo': _NUM, 'cells_cache': str, 'cells_boot': int}
+        'cells_promote': _NUM, 'cells_base_elo': _NUM, 'cells_cache': str, 'cells_boot': int,
+        'bo1_every': int, 'blunders_every': int, 'cells_every': int, 'cells_gen_every': int, 'bo1_target_se': _NUM,
+        'bo1_sprt': list, 'bo1_batch': int, 'cells_target_se': _NUM, 'cells_batch': int, 'sparse': bool}
+# a kind's cadence setting (docs/ENGINE.md 182)
+EVERY = {'bo1': 'bo1_every', 'blunders': 'blunders_every', 'cells': 'cells_every', 'cells_gen': 'cells_gen_every'}
+SEQ_SEED = 7919                           # batch k's seed offset (zero.h2h.sequential's)
 # The metagame of the 3-deck run (docs/ENGINE.md 177): Izzet Delver, Legacy Doomsday, Sneak and Show (data/decks)
 CELL_DECKS = ['izzet_delver_8016541', 'doomsday_8027957', 'sneak_show_8014220']
 CELLS_FORMATS = ('bo1',)                  # ('bo3' cells: the extension point, _cell_spec)
@@ -187,12 +218,64 @@ def normalize(ys):
     if not out['bo1_games'] and not out['blunders'] and not out['cells_games'] and not out['cells_gen_games']:
         raise ValueError('yardsticks: neither bo1_games, blunders nor cells: nothing to measure ({} turns it off)')
     _normalize_cells(out)
+    _normalize_cost(out)
     for k in ('retry_s', 'retry_max_s', 'timeout_s', 'poll'):
         if out[k] <= 0:
             raise ValueError(f'yardsticks: {k} {out[k]} must be > 0')
     if out['settle'] < 0 or out['from'] < 0:
         raise ValueError('yardsticks: settle and from must be >= 0')
     return out
+
+
+def _normalize_cost(out):
+    """The cost settings checked in place (docs/ENGINE.md 182): cadences >= 0 (0 = null), sequential stopping only
+    with local games, batches that fit."""
+    for k in EVERY.values():
+        if out[k] is not None and out[k] < 0:
+            raise ValueError(f'yardsticks: {k} {out[k]}: an iteration count >= 1 (null / 0: every evaluated checkpoint)')
+        if not out[k]:
+            out[k] = None
+    if out['bo1_sprt'] is not None:
+        e = out['bo1_sprt']
+        if len(e) != 2 or not all(isinstance(x, _NUM) and not isinstance(x, bool) for x in e) or e[1] <= e[0]:
+            raise ValueError(f'yardsticks: bo1_sprt {e!r}: [elo0, elo1] with elo1 > elo0')
+    if out['bo1_target_se'] is not None and out['bo1_target_se'] <= 0:
+        raise ValueError('yardsticks: bo1_target_se must be > 0 (a score standard error, e.g. 0.02)')
+    if bo1_sequential(out):
+        if out['bo1_batch'] < 2 or out['bo1_batch'] % 2 or out['bo1_batch'] > max(2, out['bo1_games']):
+            raise ValueError(f"yardsticks: bo1_batch {out['bo1_batch']}: an even number of paired games, at most "
+                             f"bo1_games ({out['bo1_games']})")
+        if out['bo1_backend'] == 'farm':
+            raise ValueError('yardsticks: a sequential best of one (bo1_target_se / bo1_sprt) plays here: '
+                             "bo1_backend 'farm' is refused with it")
+    if out['cells_target_se'] is not None:
+        if out['cells_target_se'] <= 0:
+            raise ValueError('yardsticks: cells_target_se must be > 0 (a cell\'s Elo standard error, e.g. 35)')
+        b = out['cells_batch']
+        if b < 4 or b % 4:
+            raise ValueError(f'yardsticks: cells_batch {b}: a multiple of 4 (games a cell per batch)')
+        for k in ('cells_games', 'cells_gen_games'):
+            if out[k] % b:
+                raise ValueError(f'yardsticks: {k} {out[k]} is not a multiple of cells_batch {b}')
+        if out['cells_backend'] == 'farm':
+            raise ValueError("yardsticks: sequential cells (cells_target_se) play here: cells_backend 'farm' is refused "
+                             "with it")
+
+
+def bo1_sequential(ys):
+    """Whether the best of one stops sequentially (bo1_target_se or bo1_sprt)."""
+    return ys.get('bo1_target_se') is not None or ys.get('bo1_sprt') is not None
+
+
+def cells_sequential(ys):
+    return ys.get('cells_target_se') is not None
+
+
+def due(ys, kind, it):
+    """Whether kind `kind` measures evaluated checkpoint `it` (its cadence, docs/ENGINE.md 182; a cells_base goes
+    with the measurement that needs it)."""
+    n = ys.get(EVERY.get(kind, ''))
+    return not n or int(it) % int(n) == 0
 
 
 def _normalize_cells(out):
@@ -463,14 +546,14 @@ def wanted(run, cfg, ys, lib=None, now=None, settle=None):
     cw = CellsWant(run, cfg, ys, now) if (ys['cells_games'] or ys['cells_gen_games']) else None
     out = []
     for it in its:
-        for o in opps:
+        for o in (opps if due(ys, 'bo1', it) else []):
             if it == 0 and (o['name'] == 'gen0' or same_file(o['path'], model_path(run, 0))):
                 continue                        # (generation 0 against itself, or a copy of it, measures nothing)
             out.append({'lane': bo1_lane(run, cfg, ys, o), 'kind': 'bo1', 'iter': it,
                         'opp': o['name']})
         if cw is not None:                      # (the cells: each pair's baseline first, once)
             out += cw.items(it)
-        if ys['blunders']:                      # (no library: measured all the same - it fails loudly, retried)
+        if ys['blunders'] and due(ys, 'blunders', it):     # (no library: measured all the same - fails loudly, retried)
             out.append({'lane': 'cpu', 'kind': 'blunders', 'iter': it, 'library': lib})
     return out
 
@@ -559,6 +642,8 @@ def bo1_backend(run, cfg, ys, o):
     network is loaded)."""
     if ys.get('bo1_backend'):
         return ys['bo1_backend']
+    if bo1_sequential(ys):
+        return 'local'                          # (a sequential best of one plays here, docs/ENGINE.md 182)
     from . import farm_campaign as C
     if C.run_pool(cfg) is None:
         return 'local'
@@ -612,18 +697,32 @@ def measure_bo1(run, it, opp, cfg=None, ys=None):
     spec = bo1_spec(cfg, ys)
     seat = bo1_seat(ck)
     t0 = time.time()
-    out = h2h.match(ck, o['path'], ys['bo1_games'], ys['bo1_sims'], seed=ys['bo1_seed'], threads=ys['bo1_threads'],
-                    groups=ys['bo1_groups'], device=ys['bo1_device'], spec=spec, seat_a=dict(seat), seat_b=dict(seat),
-                    paired=True)
-    if out.get('games') != ys['bo1_games']:
+    kw = dict(seed=ys['bo1_seed'], threads=ys['bo1_threads'], groups=ys['bo1_groups'], device=ys['bo1_device'],
+              spec=spec, seat_a=dict(seat), seat_b=dict(seat), paired=True, sparse=bool(ys['sparse']))
+    seq = bo1_sequential(ys)
+    if seq:                                     # (docs/ENGINE.md 182: batches until the stop rule, at most bo1_games)
+        out = h2h.sequential(ck, o['path'], batch_games=ys['bo1_batch'], max_games=ys['bo1_games'],
+                             sprt=tuple(ys['bo1_sprt']) if ys['bo1_sprt'] is not None else None,
+                             target_se=ys['bo1_target_se'], sims=ys['bo1_sims'], **kw)
+        ok = 0 < out.get('games', 0) <= ys['bo1_games'] and out['games'] % 2 == 0
+    else:
+        out = h2h.match(ck, o['path'], ys['bo1_games'], ys['bo1_sims'], **kw)
+        ok = out.get('games') == ys['bo1_games']
+    if not ok:
         raise RuntimeError(f"best-of-one {it} vs {opp}: {out.get('games')} games of {ys['bo1_games']}")
     pairs = out.get('pairs') or {}
-    return {'kind': 'bo1', 'iter': int(it), 'opp': opp, 'opp_label': o['label'], 'opp_sha': sha12(o['path']),
-            'score': out['a_score'], 'se': out['se'], 'elo_diff': out.get('elo_diff'), 'elo_se': out.get('elo_se'),
-            'games': out['games'], 'unfinished': out.get('unfinished', 0), 'pairs': pairs,
-            'pentanomial': pairs.get('pentanomial'), 'sims': ys['bo1_sims'], 'select': out.get('select_a'),
-            'spec_sha': hashlib.sha256(spec.encode()).hexdigest()[:12], 'seed': ys['bo1_seed'],
-            'seconds': round(time.time() - t0, 1), 'time': round(time.time())}
+    row = {'kind': 'bo1', 'iter': int(it), 'opp': opp, 'opp_label': o['label'], 'opp_sha': sha12(o['path']),
+           'score': out['a_score'], 'se': out['se'], 'elo_diff': out.get('elo_diff'), 'elo_se': out.get('elo_se'),
+           'games': out['games'], 'unfinished': out.get('unfinished', 0), 'pairs': pairs,
+           'pentanomial': pairs.get('pentanomial'), 'sims': ys['bo1_sims'], 'select': out.get('select_a'),
+           'spec_sha': hashlib.sha256(spec.encode()).hexdigest()[:12], 'seed': ys['bo1_seed'],
+           'seconds': round(time.time() - t0, 1), 'time': round(time.time())}
+    if seq:
+        row.update(stop=out.get('stop'), batches=len(out.get('batches') or []), batch=ys['bo1_batch'],
+                   max_games=ys['bo1_games'], target_se=ys['bo1_target_se'])
+        if out.get('sprt'):
+            row['sprt'] = out['sprt']
+    return row
 
 
 def measure_bo1_farm(run, it, o, cfg, ys, client=None, opts=None, log=None):
@@ -868,6 +967,8 @@ def base_key(ref, pair, games, ys, seat):
     d = {'v': 1, 'ref': sha12(ref), 'ref_seat': _seat_keys(ref), 'pair': list(pair), 'seed': pair_seed(ys, pair),
          'specs': [hashlib.sha256(j['spec'].encode()).hexdigest()[:12] for j in pair_jobs(pair, games, ys)],
          'games': games, 'sims': ys['cells_sims'], 'seat': seat, 'chance_k': 2, 'c_puct': 1.0, 'engine': engine_sha()}
+    if cells_sequential(ys):
+        d['batch'] = ys['cells_batch']          # (batch k seeded seed + 7919 k: other games than the plain match's)
     return hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:16], d
 
 
@@ -908,6 +1009,8 @@ def cells_backend(run, cfg, ys, ref):
     farm pool and one eval job seats both sides exactly (match_settings), else 'local'."""
     if ys.get('cells_backend'):
         return ys['cells_backend']
+    if cells_sequential(ys):
+        return 'local'                          # (sequential cells play here, docs/ENGINE.md 182)
     from . import farm_campaign as C
     if C.run_pool(cfg) is None:
         return 'local'
@@ -949,7 +1052,9 @@ class CellsWant:
     def __init__(self, run, cfg, ys, now=None):
         self.run, self.cfg, self.ys = run, cfg, ys
         self.refs = cell_refs(run, cfg, ys) if ys['cells_games'] else []
-        self.all = evaluated(run, cfg, dict(ys, **{'from': 0}), now, settle=0) if ys['cells_gen_games'] else []
+        # (cells_gen's chain: the evaluated checkpoints on its cadence)
+        self.all = [x for x in evaluated(run, cfg, dict(ys, **{'from': 0}), now, settle=0) if due(ys, 'cells_gen', x)] \
+            if ys['cells_gen_games'] else []
         self.seen = set()
         self._seat = None
 
@@ -978,11 +1083,11 @@ class CellsWant:
     def items(self, it):
         out = []
         ck = model_path(self.run, it)
-        if self.ys['cells_games']:
+        if self.ys['cells_games'] and due(self.ys, 'cells', it):
             r = ref_for(self.refs, it)
             if r is not None and not same_file(ck, r['path']):      # (the reference itself measures nothing)
                 out += self._pairs('cells', it, r['label'], r['path'], self.ys['cells_games'])
-        if self.ys['cells_gen_games']:
+        if self.ys['cells_gen_games'] and due(self.ys, 'cells_gen', it):
             prev = max((x for x in self.all if x < it), default=None)
             if prev is not None and not same_file(ck, model_path(self.run, prev)):
                 out += self._pairs('cells_gen', it, f'iter_{prev:04d}', model_path(self.run, prev),
@@ -1134,17 +1239,27 @@ def summarize(cells, decks, base=None, promote=0.80):
 
 
 # ---------------------------------------------------------------- the games
-def play_pair_local(a, b, pair, games, ys, seat, log=print):
+def batch_games(pair, ys):
+    """Sequential cells: games of each chooser spec per batch (cells_batch games a cell: a mirror's spec plays half,
+    every game its one cell's)."""
+    return ys['cells_batch'] // 2 if pair[0] == pair[1] else ys['cells_batch']
+
+
+def play_pair_local(a, b, pair, games, ys, seat, log=print, stop=None):
     """The pair's two matches A (`a`) against B (`b`; the same file for a baseline) by zero.h2h.match (unpaired: A in
     seat gid % 2), both sides at `seat` -> {'results': {'0': [A's result per game id], '1': ...}, 'unfinished',
-    'select'}."""
+    'select'}. Sequential cells (cells_target_se, docs/ENGINE.md 182): the specs in batches (batch k of each seeded
+    its seed + 7919 k, game ids following on), `stop(results)` asked after each batch (None: every batch, a
+    baseline's) -> also 'batches', 'stop'."""
     from zero import h2h
     out = {'results': {}, 'unfinished': 0, 'select': None}
+    if cells_sequential(ys):
+        return _play_pair_batches(a, b, pair, games, ys, seat, log, stop)
     for j in pair_jobs(pair, games, ys):
         t0 = time.time()
         m = h2h.match(a, b, j['games'], ys['cells_sims'], seed=j['seed'], threads=ys['bo1_threads'],
                       groups=ys['bo1_groups'], device=ys['cells_device'], spec=j['spec'], seat_a=dict(seat),
-                      seat_b=dict(seat), paired=False, rows=True)
+                      seat_b=dict(seat), paired=False, rows=True, sparse=bool(ys['sparse']))
         rows = m['rows']
         if [r['gid'] for r in rows] != list(range(j['games'])):
             raise RuntimeError(f"cells {pair} chooser {j['chooser']}: {len(rows)} games of {j['games']}")
@@ -1153,6 +1268,35 @@ def play_pair_local(a, b, pair, games, ys, seat, log=print):
         out['select'] = m.get('select_a')
         log(f"cells {pair[0]} / {pair[1]} chooser seat {j['chooser']}: {j['games']} games, A {m['a_score']:.4f}, "
             f"{time.time() - t0:.0f} s")
+    return out
+
+
+def _play_pair_batches(a, b, pair, games, ys, seat, log, stop):
+    from zero import h2h
+    jobs = pair_jobs(pair, games, ys)
+    per = batch_games(pair, ys)
+    nb = jobs[0]['games'] // per
+    out = {'results': {str(j['chooser']): [] for j in jobs}, 'unfinished': 0, 'select': None, 'batches': 0,
+           'stop': 'max_games'}
+    t0 = time.time()
+    for k in range(nb):
+        for j in jobs:
+            m = h2h.match(a, b, per, ys['cells_sims'], seed=j['seed'] + SEQ_SEED * k, threads=ys['bo1_threads'],
+                          groups=ys['bo1_groups'], device=ys['cells_device'], spec=j['spec'], seat_a=dict(seat),
+                          seat_b=dict(seat), paired=False, rows=True, sparse=bool(ys['sparse']))
+            rows = m['rows']
+            if [r['gid'] for r in rows] != list(range(per)):
+                raise RuntimeError(f"cells {pair} chooser {j['chooser']} batch {k}: {len(rows)} games of {per}")
+            out['results'][str(j['chooser'])] += [float(r['result'][r['gid'] % 2]) for r in rows]
+            out['unfinished'] += int(m.get('unfinished', 0))
+            out['select'] = m.get('select_a')
+        out['batches'] = k + 1
+        if k + 1 < nb and stop is not None and k >= 1 and stop(out['results']):
+            out['stop'] = 'target_se'
+            break
+    n = len(out['results']['0'])
+    log(f"cells {pair[0]} / {pair[1]}: {out['batches']} of {nb} batches ({n} games a chooser spec), stop "
+        f"{out['stop']}, {time.time() - t0:.0f} s")
     return out
 
 
@@ -1195,11 +1339,17 @@ def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, cli
     return out
 
 
-def _play(backend, a, b, pair, games, ys, seat, farm, log):
+def _play(backend, a, b, pair, games, ys, seat, farm, log, stop=None):
     if backend == 'farm':
         return play_pair_farm(farm['run'], farm['cfg'], farm['rule_ck'], a, b, pair, games, ys, farm['name'],
                               log=farm.get('log'), client=farm.get('client'), opts=farm.get('opts'))
-    return play_pair_local(a, b, pair, games, ys, seat, log=log)
+    kw = {'stop': stop} if stop is not None else {}  # (sequential cells only)
+    return play_pair_local(a, b, pair, games, ys, seat, log=log, **kw)
+
+
+def _prefix(res, n):
+    """A pair's results {chooser: [per game id]} cut to the first `n` game ids of each spec."""
+    return {int(c): list(r)[:n] for c, r in res.items()}
 
 
 def _spec_sha(pair, games, ys):
@@ -1239,16 +1389,27 @@ def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, ba
     for p in (ck, ref):
         if not os.path.exists(p):
             raise FileNotFoundError(p)
-    key, bunits = None, None
+    key, bunits, bres = None, None, None
     if pair[0] != pair[1]:
         key, _ = base_key(ref, pair, games, ys, seat)
         data = load_base(cdir, key)
         if data is None:
             raise RuntimeError(f'cells {pair}: no baseline {key} in {cdir} (measured first: kind cells_base)')
-        bunits = cell_units(pair, {int(c): res_decode(r) for c, r in data['results'].items()})
+        bres = {int(c): res_decode(r) for c, r in data['results'].items()}
+    stop = None
+    if cells_sequential(ys):
+        target = float(ys['cells_target_se'])
+
+        def stop(res):
+            n = len(res['0'])
+            us = cell_units(pair, {int(c): r for c, r in res.items()})
+            bs = cell_units(pair, _prefix(bres, n)) if bres is not None else None
+            return all(cell_stats(u, bs[c] if bs is not None else None, boot=0)['se'] <= target for c, u in us.items())
     t0 = time.time()
-    p = _play(backend, ck, ref, pair, games, ys, seat, farm, log)
+    p = _play(backend, ck, ref, pair, games, ys, seat, farm, log, stop=stop)
     units = cell_units(pair, {int(c): r for c, r in p['results'].items()})
+    if bres is not None:                        # (the baseline's same first units: all of them unless stopped early)
+        bunits = cell_units(pair, _prefix(bres, len(p['results']['0'])))
     cells = {c: cell_stats(us, bunits[c] if bunits is not None else None, boot=ys['cells_boot'], seed=_cell_seed(c))
              for c, us in units.items()}
     row = {'kind': kind, 'iter': it, 'ref': label, 'ref_sha': sha12(ref), 'sha': sha12(ck), 'pair': list(pair),
@@ -1258,6 +1419,9 @@ def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, ba
            'backend': backend, 'seconds': round(time.time() - t0, 1), 'time': round(time.time())}
     if p.get('farm'):
         row['farm'] = p['farm']
+    if cells_sequential(ys):
+        row.update(stop=p.get('stop'), batches=p.get('batches'), batch=ys['cells_batch'], max_games=games,
+                   target_se=ys['cells_target_se'])
     return row
 
 

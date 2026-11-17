@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # A watchdog for a supervised run (run it in the background from a Claude session; it exits on
 # the first event and prints what it saw). Fires on: a new supervisor crash/restart/exit line, the
-# supervisor pid gone, no write to progress.json/log.txt/stdout.txt for 75 min without PAUSE
-# (progress.json alone is not written during Elo phases), NaN/Inf in an "iter N train" line, and
-# a collapse (heuristic win <= 2% while self-play rounds sit at 150+, runs/mtg4 2026-10-27).
+# supervisor pid gone, a stall - tools/stall_watch.py --once: no iteration finished for 3x the run's median
+# iteration time (1.5x its longest recent one lets evaluation iterations through; 75 min for a new run; never while
+# PAUSE is there), with a stack dump of the run's Python processes (py-spy when installed; zero-core docs/az.md
+# 56.4) -, NaN/Inf in an "iter N train" line, and a collapse (heuristic win <= 2% while self-play rounds sit at
+# 150+, runs/mtg4 2026-10-27).
 #   bash tools/watch_run.sh "C:/Users/<user>/mtg-zero/runs/mtg5" [hours, default 24]
 set -u
 RUN="$1"; HOURS="${2:-24}"
 SUP_PID="$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['pid'])" "$RUN/supervisor_state.json")"
-STALL_MIN=75
 START_LINES="$(wc -l < "$RUN/supervisor.log")"
 LOG_LINES="$(wc -l < "$RUN/log.txt")"
 END=$(( $(date +%s) + HOURS*3600 ))
@@ -33,13 +34,9 @@ while [ "$(date +%s)" -lt "$END" ]; do
   if ! tasklist //FI "PID eq $SUP_PID" //NH 2>/dev/null | grep -q "$SUP_PID"; then
     echo "SUPERVISOR GONE $(date '+%F %T') (pid $SUP_PID)"; tail -5 "$RUN/supervisor.log"; tail -5 "$RUN/log.txt" | cut -c1-300; exit 0
   fi
-  NEWEST=0
-  for f in progress.json log.txt stdout.txt; do
-    m="$(stat -c %Y "$RUN/$f" 2>/dev/null || echo 0)"; [ "$m" -gt "$NEWEST" ] && NEWEST="$m"
-  done
-  AGE_MIN=$(( ( $(date +%s) - NEWEST ) / 60 ))
-  if [ "$AGE_MIN" -ge "$STALL_MIN" ] && [ ! -e "$RUN/PAUSE" ]; then
-    echo "STALL $(date '+%F %T'): no write for $AGE_MIN min"; cat "$RUN/progress.json"; echo; tail -5 "$RUN/log.txt" | cut -c1-300; exit 0
+  STALL="$(python "$(dirname "$0")/stall_watch.py" "$RUN" --once 2>&1)"
+  if [ $? -eq 3 ]; then
+    echo "$STALL"; cat "$RUN/progress.json"; echo; tail -5 "$RUN/log.txt" | cut -c1-300; exit 0
   fi
 done
 echo "watch expired after $HOURS h without events $(date '+%F %T')"

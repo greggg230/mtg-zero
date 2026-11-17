@@ -17,8 +17,8 @@ from `start` (at iteration `from` and before) to `end` (at `from` + `iters` and 
 resolution forced at first, none after 100 iterations. zero-core's `selfplay_specs` hook (its docs/az.md 40;
 `decklists.selfplay_spec` chains it after the matchup model's) writes iteration `it`'s p into the self-play spec - a pure
 function of the run's settings and `it`, so the local driver and the farm's definition of the iteration play one spec.
-A changed spec is refused by zero-core's remote self-play (the Mac's workers play the run's spec): a scheduled run
-self-plays on this machine and the farm.
+zero-core's remote self-play sends the phase's spec to the Mac's workers (its docs/az.md 52): a scheduled run can
+self-play there too. A farm worker built before the setting existed refuses it (docs/ENGINE.md 181.5, 182.3).
 
 Kept light (no torch / numpy): `json` only.
 """

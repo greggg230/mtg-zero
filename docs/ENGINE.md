@@ -37802,3 +37802,98 @@ and the farm would sit idle. I checked both checkouts with pb3's config.json and
 93d359ed is the gated 5eee4461 plus docs, and it is in main's history. It keeps BUILD 88c69488 and CUDA alternate
 e182abd5 (181.4's farm gates). A later move of pb3 to main needs a release worker built from main, a CUDA re-sign and
 the farm gates.
+
+## 182. Iteration speed and run safety: the yardsticks' cost settings, the Mac's cap spiral, anchor-only Elo, the boundary pause, the stall alarm (branch `feat/speed-wins`, zero-core `feat/speed-wins` 104888c, docs/az.md 56; 2026-11-16)
+
+Branch `feat/speed-wins` implements the top three items of the 11-16 iteration-speed review of pb3 (the maintainer's
+notes): yardsticks off the critical path (E1-E3, E6), the Mac's in-flight cap spiral (SP1), and run safety (P1). It
+re-pins zero-core from main's 6146e21 (value-only decisions + 181's lock order d32bf98) to `feat/speed-wins` 104888c:
+b0ee98c (d32bf98 + docs/az.md 56) merged with 6146e21.
+
+### 182.1 The yardsticks' cost settings (mtgz/az/yardsticks.py; all off by default)
+
+pb3's Bo1 yardsticks shared the desktop GPU every 16 iterations and cost +26-35% wall time per block (self-play 50k ->
+19-30k leaves/s while a match ran). Nothing gated on them. New `yardsticks` keys:
+
+* **Cadence** per kind: `bo1_every`, `blunders_every`, `cells_every`, `cells_gen_every` (null / 0 = every evaluated
+  checkpoint, as before). A kind measures an evaluated checkpoint only when its iteration is a multiple of the
+  setting. `cells_gen`'s previous checkpoint is the previous one on its own cadence, so gen over gen chains every N
+  iterations.
+* **Sequential best of one** (`bo1_target_se`, `bo1_sprt` [elo0, elo1], `bo1_batch` 100): `zero.h2h.sequential`,
+  paired batches until the score's se reaches the target or the SPRT decides, at most `bo1_games`. Batch 0 is the plain
+  match's first games; batch k is seeded `bo1_seed + 7919 k`. The row adds `stop`, `batches`, `batch`, `max_games`,
+  `target_se` (and `sprt`). Local games only: `bo1_backend` 'farm' is refused with it, and auto picks 'local'.
+* **Sequential cells** (`cells_target_se` in Elo, `cells_batch` 100 games a cell, a multiple of 4 dividing
+  `cells_games` and `cells_gen_games`): each deck pair in batches, batch k of each chooser spec seeded `its seed +
+  7919 k` (h2h.sequential's schedule). After each batch from the second on, the pair stops once every cell's Elo se
+  (the delta method with the CRN covariance, 177) is at or below the target, at most the pair's games. The baseline
+  plays the same batches to the full games. It is cached under its own key (the batch is in it), and each cell is
+  judged against the baseline's same first units, so the common random numbers hold. The cells' stop rule needs the
+  baseline and both chooser specs, which a single h2h.sequential call cannot see, so the batches follow its seed
+  schedule in `_play_pair_batches`. Local games only, as the best of one.
+* **Sparse rows** (`sparse`, default true): the local head-to-heads (bo1 and cells) pass `sparse=True` to zero.h2h, so
+  the driver ships sparse rows as self-play does, not 56,384-float dense rows. The network's answers are the dense
+  rows' bit for bit (zero-core tests/test_tail_graphs.py), so the results are unchanged; `false` restores dense rows.
+  The time saved per match is not measured yet (it needs a quiet GPU: the review's E2).
+
+Tests: `tests/test_yardstick_cost.py` (defaults off and the refusals; the cadences of all four kinds and gen over gen's
+chain; the sequential best of one's call and row, the SPRT form, plain = before; sequential cells against a fake
+h2h.match with common random numbers: the baseline's 4 x 2 batch seeds, its own key, a loose target stopping after two
+batches with each cell equal to `cell_stats` of the same units against the baseline's first units, a tight one playing
+every batch, a mirror's half batches; sequential cells play here). The existing `test_yardsticks.py` and
+`test_cells_yardstick.py` pass unchanged.
+
+### 182.2 The Mac's Elo: anchor games only (`elo_games` 0)
+
+pb3's Mac phase was 2 opponents x 24 paired contests + 100 anchor games (1,283-1,961 s, Mac self-play stopped
+meanwhile). The unanchored Elo had se 220-560. zero-core 56.2: `elo_games` 0 now means no checkpoint-against-checkpoint
+matches, so with `elo_anchors` the Mac plays the anchor games only. A run setting, passed to the Mac's evaluation as
+any other.
+
+### 182.3 The Mac's in-flight cap spiral (zero-core 56.1)
+
+zero-core's `selfplay_remote_batch` 'auto' now makes every remote worker batch-bound, whatever its device. The Mac's
+CPU workers' rate grows with their in-flight, so the share rule had driven their caps from ~100 to ~10 a worker after
+the desktop doubled its speed: 5,869 -> 1,032 leaves/s, 283 -> 18 matches an iteration. The batch rule keeps a worker's
+games within `selfplay_remote_batch_inflight` (2) horizons, which bounds staleness at about two checkpoints (the farm
+pool's `pool_max_stale` is 4). This changes a default for runs with CPU remote workers, deliberately;
+`selfplay_remote_batch` 'local' restores the old behaviour on the desktop (CUDA driver, CPU workers). Measured on pb3's curves in zero-core's simulation test; the
+real check is the first iterations of the next run with the Mac attached (its `leaves_per_running_s` above 5,000, caps
+above 60, the staleness histogram within 2).
+
+**Remote self-play and `forced_find_schedule`.** zero-core already sends a changed phase spec to remote workers
+(docs/az.md 52, in this pin and in 2c67426). The line in 180 and in `mtgz/az/forced_find.py` that says zero-core's
+remote self-play refuses a changed spec is out of date. The refusal that does exist is the farm's: a release worker
+built before a7d7ca9c does not know the setting (181.5). The Mac needs no code change, only a checkout of the run's
+commit (tools/mac.sh) and a first-iteration check that its rows carry the scheduled p.
+
+### 182.4 Run safety: the boundary pause and the stall alarm (zero-core 56.3, 56.4)
+
+* `tools/pause_run.py --wait` now pauses at the iteration boundary (`PAUSE_NEXT`): the iteration finishes with every
+  Mac shard, no next-iteration work starts (no Mac head start, no lingering), then the run creates PAUSE and exits 75.
+  `--now` is the old immediate pause. Resume as before (`--resume`); no finished iteration's work is lost. This replaces
+  the 11-15 gotcha (`--wait` stopped inside self-play in 0.1-0.7 s and dropped Mac shards).
+* `tools/stall_watch.py` (zero-core's, run from this checkout's pinned core) alarms when no iteration has finished for
+  `max(3 x median, 1.5 x longest, 10 min)` of the run's last 32 iterations. It only reads the run, and it dumps the
+  run's Python stacks with py-spy. `tools/watch_run.sh` now calls it each minute instead of its fixed 75-minute
+  no-write rule. Replayed on pb3's 11-16 log, the alarm fires at 16:56, 19 minutes into the 93-minute hang. py-spy 0.4.2
+  is installed on the desktop (`pip install --user py-spy`; the watcher finds it in the user scripts directory).
+
+### 182.5 Recommended yardstick settings for the metagame run
+
+```json
+"yardsticks": {"bo1_games": 0, "blunders": false,
+               "cells_games": 400, "cells_refs": ["iter0"], "cells_gen_games": 200,
+               "cells_every": 32, "cells_gen_every": 32, "cells_target_se": 30, "cells_batch": 40},
+"elo_games": 0
+```
+
+The cells run every second evaluation (32 iterations, about 2.7 h at pb3's pace), not every evaluation. Each pair stops
+once all its cells reach se 30 Elo (about 10 Elo on the 9-cell overall mean), at most 400 games a cell (200 for gen over
+gen). A batch of 40 lets gen over gen stop early too: its cap is 5 batches, while a batch of 100 would give it only 2.
+Sparse rows stay on by default. Elo on the Mac uses the anchors alone. No `selfplay_remote_batch` setting is needed on
+this pin: the Mac's workers are batch-bound under 'auto'.
+
+### 182.6 Gates
+
+Gate results are recorded in the commit after this one.
