@@ -38313,3 +38313,5 @@ documented as they are:
   promotion rule refuses a checkpoint below 0.20 (a cell down and one up included) on the threshold and on the
   cadence; a simulated run whose generation 64 loses 3 logits: its record flags `below_ref` against g32 in its cells,
   it is not promoted though its cadence is due, and generation 80 is (ladder g32, g80).
+* **Gate** on c24afb33 (in a warm worktree beside the live run): **GATE PASSED WITH SKIPS python c24afb333924 in
+  294s** (the live-run fence only: 6 tests). The commit after it changes this section only.
