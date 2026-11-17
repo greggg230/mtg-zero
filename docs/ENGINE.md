@@ -37571,4 +37571,11 @@ commands under `tools/slotd.sh`, the gate's CPU steps on the Mac, scratch in `E:
   Delver (50 games, no forced find): 2 resolutions, in hand 1, missed 1. (A three-iteration smoke network: the numbers
   show the classes, not a measurement.)
 * `python tools/privacy_check.py`: 0 findings.
-* **`engine --tested-sha aab500d7`**: on the commit that adds this text (docs only): its last line is in the agent's report.
+* **`engine --tested-sha aab500d7`**: on ccbd0c5b (this section's numbers) it failed `tests/test_worker_farm.py`'s two
+  package-settings tests (the worker's `PACKAGE_SETTINGS` lacked `forced_find_schedule`; fixed in a7d7ca9c, no engine
+  change). On a7d7ca9c (`--expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`): **GATE PASSED WITH SKIPS
+  engine a7d7ca9cf9e9 in 695s** (skipped: one live-run-hazard test, fenced by the live run here) - digests full
+  8f71ccb0d89031a6 and encoding-free 41e27319acdae5b5 (= expected), digest formats constructed e1177d609d6c1aee, eoe
+  2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0 and dealt e802d9df793c9993 (each = the recorded
+  file); `az` 54, `limits` 13, `hidden` 28 passed; pytest 80 + 99 + 217 + 120 + 44 passed; the desktop smoke; farm
+  compat on the Delver dealt preset identical; the suite evidence of aab500d7.
