@@ -169,6 +169,7 @@ py/ ── binding crate ──▶ mtgz._engine ──▶ mtgz.az.* (= zero-core
 | the human draft data (yardsticks only) | `docs/data_m1.md`, `docs/research/` |
 | EoE sealed: the 17lands yardstick pools and the Play Booster generator (`mtgz/sealed/`) | `docs/sealed_data.md` |
 | EoE sealed: pools, the builder, the sealed spec; comparing decks in paired games (`python -m mtgz.sealed.compare`) | `docs/ENGINE.md` §101, §104 |
+| query every self-play game of a run (DuckDB over Parquet: `python tools/gamedb.py`) | [`docs/gamedb.md`](docs/gamedb.md), `docs/ENGINE.md` §187 |
 | the training loop and every run setting | zero-core's `docs/az.md` (in `third_party/zero-core/docs/`) |
 
 `docs/ENGINE.md` is about 16,000 lines, written as a lab notebook: one numbered, dated section

@@ -38403,4 +38403,139 @@ documented as they are:
   it is not promoted though its cadence is due, and generation 80 is (ladder g32, g80).
 * **Gate** on c24afb33 (in a warm worktree beside the live run): **GATE PASSED WITH SKIPS python c24afb333924 in
   294s** (the live-run fence only: 6 tests). The commit after it changes this section only.
-
+
+
+## 187. The game database: every self-play game recorded on every executor, replayed into Parquet, queried with DuckDB (`tools/gamedb.py`, docs/gamedb.md; branch `feat/gamedb`, zero-core `feat/game-records`, docs/az.md 59; 2026-11-17)
+
+Branch `feat/gamedb` from main 5477e859; zero-core pin 06647c5 -> 5c2d3f39 (`feat/game-records`). Why: the three-deck
+metagame run's questions are about what its games did - what Doomsday piles hold, what Show and Tell puts in, how each
+deck wins, against which opponent, since which iteration - and the run kept no game: the desktop's and the Mac's
+self-play wrote only shards (no game id, rolling off with the window), the farm's records became shards. Answering
+meant replaying a checkpoint (`combo_stats.py run`), not the run's own games. Now a run with `game_records` 1 keeps every
+accepted game as what replays it, and `tools/gamedb.py` turns them into tables where "how often does a Doomsday pile
+hold card X since iteration 120, by opponent" is one SQL query in ~0.02 s. No rule, encoding, search or training change:
+self-play, shards and checkpoints byte-identical with the setting on and off; digests untouched.
+
+### 187.1 Records (zero-core docs/az.md 59, docs/search.md 2.20)
+
+The run setting `game_records` (zero-core, default 0). The driver's game log (`SearchDriver.set_game_log`): a finished
+game's result row carries its seed, every action (from the failure log the driver keeps for every game anyway: no
+effect on the game, its search or its rows), its `record_setup` (the decks and the metagame's pairing), the spec it
+started from and its samples' networks. Where each executor's games go:
+
+| executor | how | file |
+|---|---|---|
+| the desktop's driver (shared queue, rolling, local linger) | its game log; each accepted row written as the quota accepts it | `<run>/records/iter_NNNN/local-<pid>.jsonl.gz` |
+| the Mac's remote workers | the worker's driver logs; its `accept` sends the accepted games' records in one `records` event; the run writes them | `.../w<K>-<pid>.jsonl.gz` (`<host>_w<K>` with a list of hosts) |
+| the farm pool | the farm's records already hold every move: the pool keeps each replayed game's moves and outcome and writes those the quota accepts. **No worker rebuild and no protocol change** | `.../pool-<farm run>-<pid>.jsonl.gz` (the machine as a short hash inside) |
+
+One JSON line a game (`zero/gamerec.py`): `it`, `src`, `gid`, `seed`, `spec` (a key; one spec line per file), `n`,
+`actions` (u16 LE, base64), `n_actions`, `setup`, `over`, `aborted`, `resigned` (the winner seat), `result`,
+`decisions`, `rounds`, `nets` [lo, hi], `machine` (farm), `t`. `records/iter_NNNN/DONE.json` closes the iteration (the
+files of the process that played the phase, per-source counts against the quota's `accepted`, `missing`). Records live
+outside `data/`: `keep_data` never touches them; the database deletes them after ingest (`prune --delete-raw`).
+`game_records` is trainer-only in the worker's settings table (the farm's existing builds serve the run).
+
+### 187.2 Ingest and tables
+
+`python tools/gamedb.py ingest RUN [--sample S] [--jobs J] [--follow 60]` replays each new complete iteration on the CPU
+at below-normal priority into `<db>/<table>/iter=NNNN/part.parquet` (zstd), the database in `$ZERO_BIG_DISK/mtg-zero-gamedb/<run>`
+(`MTGZ_GAMEDB`, `--db`). Incremental and idempotent (`state.json`; an iteration is written whole, a temp dir renamed); a
+game that does not replay (an illegal action, another end or result than its record's) fails the iteration loudly.
+* **light** (every game): the game to its end with the play-by-play on, the state exported before the last action and at
+  the end -> the `games` row (decks per seat, on the play, mulligans, result, the end's method as `combo_stats.method_of`,
+  turns, decisions, resignation, executor, networks, the wheel's p).
+* **full** (a deterministic share `--sample` by game id, default all): the state at every step read by
+  `combo_stats.Reader` - the code `combo_stats.py scan` runs - and every play-by-play line parsed -> `events` (cast, land,
+  activate, mana, move, find, trigger, counter, attack, look, choose, turn, forced_find, choice: each decision of two or
+  more options but priority and mana payment) and `doomsday`, `shows`, `spells`, `sneak`, `entered`.
+Views: `game_results`, `mulligans`, `doomsday_piles` (caster, opponent deck, the pile top first and card1..card5, the
+Oracle class and place, forced, the wheel's draw, won and how), `doomsday_pile_cards`, `casts`, `show_and_tell`,
+`sneak_attack`. `query RUN "SQL" [--csv|--json]`, `shell RUN`, `status`, `bench`, `prune --keep-iters N --old-sample F
+[--delete-raw]` (every game of the newest N iterations, a deterministic share F of the older). Schema, conventions and
+ten example queries: docs/gamedb.md. Needs `duckdb` and `pyarrow` (pip; installed in the desktop's system Python 3.13:
+duckdb 1.x / pyarrow; not in the run's venv - the tool is not on the run path).
+
+### 187.3 Validation
+
+Exact agreement with `combo_stats.py scan` (the truth), game by game and field by field, on four sets:
+* **the three-deck probe's games** (179.2: pb3@122, 1,200 games of 12 pairings and budgets, real network play):
+  `gamedb.py import-combo` turned each game's move log into a record (the single-option steps between its logged moves
+  replayed, as scan does), ingested, and compared with a fresh `scan` of the same files: method, winner, turn, play,
+  mulligans, life, result, decks, the winner's last attack, every resolved Doomsday (pile, library, choices, hand,
+  life, Oracle flags and class), every Show and Tell (both sides' cards), every tracked cast (outcome, counter), Sneak
+  Attack, entered fatties, and every cast count (`events` type cast): **no difference in 1,200 games**. The views'
+  totals equal the scan's: 324 resolved Doomsdays (voluntary 8, in_hand 83, not_findable 58, missed 175), 8 piles holding
+  the Oracle (179.2's number), 69 caster wins after a resolution, 411 Show and Tell resolutions, wins by method (combat
+  774, damage 129, pact 114, decking 96, oracle 20). Against the probe's own older stats lines (before 180's Oracle
+  classes) the same on every field they have.
+* **self-play records with the wheel** (uniform evaluator, the metagame spec with the forced find at p 0.75, the driver's
+  game log; 600 games): each record rebuilt as a move log and read by `scan_row`: 88 resolutions (forced 36, in_hand 19,
+  missed 18, voluntary 8, not_findable 7), **no difference**.
+* **real self-play records** (the run's iteration-156 network, its settings, 64 games, 48 resigned): 26 resolutions
+  (voluntary 24, in_hand 2), no difference (a resigned game: the database's method `resigned` and the resignation's
+  winner; scan reads it as unfinished, the rest equal).
+* **the end-to-end smoke**: `python -m mtgz.az.run --preset legacy-meta3-ddwheel-smoke --game-records 1` (3 iterations of
+  16 games, the wheel at p 0.75 / 0.5, CPU) and the same run with `--game-records 0`: the same shards (every array) and
+  every checkpoint's weights; `records/iter_0001..0003/` with DONE.json (16 accepted, 16 recorded each);
+  `gamedb.py ingest` (a second ingest: nothing new), `status`, `series`, the views queried; 48 games, 5 resolutions
+  (forced 2, missed 2, in_hand 1), no difference against `scan_row`.
+The light replay's `games` rows equal the full replay's on all 1,200 probe games (every column it fills).
+
+### 187.4 Measured
+
+The desktop's CPU, 2026-11-17, beside the live metagame run (its GPU busy).
+
+*Recording* (zero-core docs/az.md 59.2): the same 64 real self-play games and 2,968 rows byte for byte with the log on
+and off; no measurable cost in self-play (797.8 s on vs 812.2 s off: noise); **~148 bytes a game** (123 actions a game,
+gzip'd JSON) and **0.3 ms a game** to write: for the live run's 2,000 games an iteration **~0.3 MB and ~0.6 s an
+iteration** (its iterations take ~118 s). The farm's games cost the pool one more JSON parse of a record it already
+replays; the Mac's, one `records` line per accepted batch. The farm compat smoke (tools/farm_compat.py) passes with
+`game_records` 1 and 0 (both gates identical, the release worker built from this branch).
+
+*Replay* (`gamedb.py bench`, one core, below-normal priority):
+
+| games | actions a game | light | full | ingest (full + parse + Parquet) |
+|---|---|---|---|---|
+| real self-play (iteration-156 network, 48 of 64 resigned) | 123 | 2.7 ms | 20.8 ms (169 us an action) | 24.7 ms |
+| the probe's evaluation games (no resignation) | 445 | 3.5 ms | ~70 ms | 70-86 ms |
+| wheel games, uniform evaluator | 590 | - | - | 72 ms |
+
+Where the full replay's time goes (cProfile): the engine's `export_state` 30%, `json.loads` 22%, combo_stats' Reader
+22%, the line parser 6%. The live run plays ~161 actions a game (its metrics' steps per game) and ~61,000 games an hour
+(2,000 every ~118 s): full ingest of every game is **~32 ms a game, ~0.55 core**; at 40,000 games an hour ~0.35 core.
+Light rows cost ~0.06 core. **Recommendation: ingest every game in full (`--sample 1.0`, one process, `--follow`)** -
+it keeps up at ~0.5 core and the combo tables' counts then need no denominator care; at below-normal priority it only
+lags when the CPU is busy and catches up after (incremental). If its backlog grows, `--sample 0.5` (every game's
+`games` row, half the games' events and combo rows, ~0.3 core); `prune` keeps the disk in check: Parquet ~1.3 KB a
+light game, ~35 KB a full one (~200 events), ~2.5 MB an iteration at `--sample 1`, ~70 MB for 64 kept iterations of full
+games plus the older ones at `--old-sample 0.1`.
+
+*Queries* (DuckDB, 1,200 games / 472k events): the views' queries in docs/gamedb.md 0.005-0.035 s.
+
+### 187.5 Tests
+
+`tests/test_gamedb.py` (random-move games of the three open decklists, no network): the database against
+`combo_stats.scan_row` game by game (method, winner, turn, play, mulligans, decks; every Doomsday's pile, hand, choices,
+Oracle class; every tracked cast's outcome and counter) and the views' totals (piles, pile cards, casts); light rows ==
+full rows; sampling deterministic and nested; ingest incremental and idempotent; prune (the kept share, the events with
+their games, the raw records deleted); a tampered record fails the ingest. zero-core: `tests/test_gamerec.py` and the
+driver tests (docs/az.md 59.1, docs/search.md 2.20).
+
+### 187.6 Turning it on for a live run
+
+Recording rides a restart: the run's code (its pinned worktree, the Mac's eval checkout) must carry zero-core
+`feat/game-records` (here: a pin at or after 5c2d3f39), and the run gets `--game-records 1`.
+1. Pin the run's next commit (main with this branch merged) in a new pinned worktree; gate it `repin` on the run's spec
+   and preset (`legacy-meta3-ddwheel`); the Mac's eval checkout follows (`tools/mac.sh --eval-checkout`, part of the
+   repin gate).
+2. The farm: **no worker rebuild for recording** (the farm's records already hold every move). The run's existing
+   release build stays if `tools/farm_gates.py` passes with it on the new commit and the run's real config + a current
+   checkpoint with `--set game_records=1` - measured: the run's build (made from a6b21835) on this branch with the run's
+   config and its iteration-156 checkpoint, both gates identical (8 games, 332 rows, 200 batches; records replayed bit
+   for bit) - otherwise publish a build of the new commit.
+3. At the planned restart (the boundary pause, then the launch script's relaunch): add `--game-records 1` to the launch
+   flags. From the next iteration on, `records/iter_NNNN/` appears beside `data/`; the log says `iter N game records: ...`.
+4. Start the ingest beside the run: `python tools/gamedb.py ingest <run> --follow 120` (CPU, below-normal priority; its
+   database in `$ZERO_BIG_DISK/mtg-zero-gamedb/<run>`), and when wanted `gamedb.py prune <run> --keep-iters 64
+   --old-sample 0.1 --delete-raw`.
