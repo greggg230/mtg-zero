@@ -163,6 +163,12 @@ PATTERNS = [
     ('trigger', re.compile(r'^trigger of (.+) goes on the stack$')),
     ('counter', re.compile(r'^counters (.+)$')),
     ('attack', re.compile(r'^attacks with (.+)$')),
+    ('mulligan', re.compile(r'^P(\d) takes mulligan (\d+)$')),
+    ('wins', re.compile(r'^P(\d) wins the game')),
+    ('life_half', re.compile(r'^P(\d) loses half their life, rounded up: (\d+)$')),
+    ('damage', re.compile(r'^(\d+) damage to (.+?)(?:#\d+)?$')),
+    ('target', re.compile(r'^target (.+?)(?:#\d+)?$')),
+    ('fizzle', re.compile(r'^fizzles$')),
     ('move', re.compile(r'^(.+) (\w+) -> (\w+)$')),
 ]
 ZONE_KEY = {'Hand': 'hand', 'Battlefield': 'battlefield', 'Graveyard': 'graveyard', 'Exile': 'exile'}
@@ -211,6 +217,21 @@ def parse_line(ln, st):
             return turn, step, None, kind, g[0], None, None, {}
         if kind == 'attack':
             return turn, step, st.get('active'), kind, g[0], None, None, {}
+        if kind == 'mulligan':
+            return turn, step, int(g[0]), kind, None, None, None, {'n': int(g[1])}
+        if kind == 'wins':
+            return turn, step, int(g[0]), kind, None, None, None, {}
+        if kind == 'life_half':
+            return turn, step, int(g[0]), kind, None, None, None, {'amount': int(g[1])}
+        if kind == 'damage':
+            pm = re.fullmatch(r'P(\d)', g[1])
+            return (turn, step, int(pm.group(1)) if pm else None, kind, None if pm else g[1], None, None,
+                    {'amount': int(g[0]), **({'player': True} if pm else {})})
+        if kind == 'target':
+            pm = re.fullmatch(r'P(\d)', g[0])
+            return turn, step, int(pm.group(1)) if pm else None, kind, None if pm else g[0], None, None, {}
+        if kind == 'fizzle':
+            return turn, step, None, kind, None, None, None, {}
         if kind == 'move':
             return turn, step, _owner(st, g[0], g[2]), kind, g[0], g[1], g[2], {}
     return turn, step, None, 'other', None, None, None, {'text': rest}
