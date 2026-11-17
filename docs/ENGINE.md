@@ -37897,4 +37897,24 @@ this pin: the Mac's workers are batch-bound under 'auto'.
 
 ### 182.6 Gates
 
-Gate results are recorded in the commit after this one.
+Tier **search-core** (a zero-core default changes for runs with CPU remote workers), in a warm worktree against main
+9476f53c (built) as the baseline, `--offload mac` (the Mac ran the CPU steps), the GPU hidden from the gate
+(`CUDA_VISIBLE_DEVICES=""`: another job was measuring on it, so zero-core's CUDA tests skipped):
+**GATE PASSED search-core d918b35c241c in 2014s**. Results: zero-core cargo test 205 passed; core pytest 683 passed, 37
+skipped; this repo's pytest 79 + 165 + 140 + 138 on the Mac and 45 on the desktop; check_checkpoint_compat identical
+(visits 3,272 samples, cq 3,272); digests equal to the recorded ones (constructed e1177d609d6c1aee, EoE
+2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993); the 4-config smoke 0/4
+failed; the run-loop smoke 16 games, 0 unfinished; farm compat identical on the Delver best-of-three dealt preset.
+
+Earlier gates on this branch failed and were fixed or re-run:
+
+* 63e44f73: zero-core's `test_linger_plays_through_training` asserted the share rule's one-checkpoint bound; under the
+  batch-bound default its staleness mean was 1.03-1.10. That test now runs with 'none', and a new test holds a
+  batch-bound lingering worker within two checkpoints (zero-core 0494e84).
+* e187c18b, twice, without `--offload mac`: `tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]` timed out at
+  180 s with every step running on the loaded desktop. Run alone it takes 73 s on the branch and 78 s on main: the same
+  timing margin as 180.12.
+
+zero-core's own full pytest on the branch (desktop, GPU visible but shared): 714 passed. The 4 failures were 2 share-rule
+tests, now on 'none', and 2 CUDA token-graph tolerance checks (3.7e-5 against 2e-5 while another process used the GPU;
+this branch touches no network or graph code).
