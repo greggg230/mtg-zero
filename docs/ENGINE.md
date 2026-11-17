@@ -37344,13 +37344,13 @@ simulations alike (the same two spots), 2 of 16 spots at 4096 and 3 of 16 at 16,
 mirror spots at 64 and 1024. A larger budget does not find the pile: the value the search backs up does not know that
 an Oracle in a five-card library wins. No engine panic, no game that did not replay, no unfinished game (1,200 games).
 
-## 180. The farm pool's lock-order deadlock that hung pb3 (zero-core `fix/pool-lock-order` d32bf98, docs/az.md 55; branch `fix/pool-lock-order`, 2026-11-16)
+## 181. The farm pool's lock-order deadlock that hung pb3 (zero-core `fix/pool-lock-order` d32bf98, docs/az.md 55; branch `fix/pool-lock-order`, 2026-11-16)
 
 Branch `fix/pool-lock-order` from main e2811d25. It re-pins zero-core from 2c67426 to d32bf98, which is 2c67426 plus
 one commit. The change is Python only: `zero/farm_pool.py`, `zero/remoteplay.py`, a test and docs/az.md 55. The rolling
 branch carries the same fix: zero-core `feat/rolling-farm` 1338d49 merges d32bf98.
 
-### 180.1 The hang
+### 181.1 The hang
 
 pb3's run process stopped making progress for 91 minutes during self-play. A py-spy dump of the process showed an ABBA
 deadlock:
@@ -37366,7 +37366,7 @@ when pb3 resumed, so one drain held `Pool.mu` through 736 `accept_pool` calls wh
 first restart (still on the old pin) the pool held 1,376 games and pb3 hung again within a minute. The orchestrator then
 relaunched pb3 without the farm pool.
 
-### 180.2 The fix
+### 181.2 The fix
 
 There is now one lock order, outermost first: `Pool.dmu` -> `RemotePlay.mu` -> `Pool.mu`.
 
@@ -37388,13 +37388,13 @@ builds a real RemotePlay with a pool and 4,000 held games. One thread polls `pro
 the backlog, with a thread switch interval of 10 us and one 30 s deadline for both. On 2c67426 it deadlocks (66 polls,
 3,999 games still held). On d32bf98 both threads finish, and the quota is met by the pool's 4,000 games.
 
-### 180.3 The farm worker does not change
+### 181.3 The farm worker does not change
 
 The fix touches no Rust and none of the worker's inputs. `git diff 2c67426 d32bf98` lists only
 `python/zero/farm_pool.py`, `python/zero/remoteplay.py`, `tests/test_farm_pool.py` and `docs/az.md`. pb3 therefore keeps
 release BUILD 88c69488 and CUDA alternate e182abd5.
 
-### 180.4 Gates
+### 181.4 Gates
 
 The gates ran on 5eee4461 in warm worktrees beside the live pb3, with
 `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`:
