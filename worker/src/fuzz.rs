@@ -28,8 +28,8 @@ pub struct MtgFuzz;
 /// The engine's `FUZZ_POOL` values (engine::fuzz::games `pool_mode`), and those whose matches loop plays
 /// nothing (`matches_skipped`: constructed play's pools but the Delver mirror's - its matches are constructed
 /// best-of-three, ENGINE.md 120 -, EoE, sealed).
-const POOLS: &[&str] = &["interactions", "exponential", "drafted", "delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb", "cross", "delver_dealt", "delver_dealt2", "meta"];
-const GAMES_ONLY: &[&str] = &["eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb"];
+const POOLS: &[&str] = &["interactions", "exponential", "drafted", "delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb", "cross", "delver_dealt", "delver_dealt2", "meta", "meta_wheel"];
+const GAMES_ONLY: &[&str] = &["eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb", "meta_wheel"];
 /// The pools whose games the engine also plays with hidden decklists (`FUZZ_HIDDEN_DECKS=1`: the default
 /// decks and these, engine::fuzz::games docs).
 const HIDDEN_POOLS: &[&str] = &["eoe", "sealed", "names"];

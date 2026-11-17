@@ -89,7 +89,8 @@ class _CensusDriver(PyDriver):
 def census_spec(cfg):
     """The spec a census plays: the run's spec without dealt decks (docs/ENGINE.md 154: a self-play setting - a
     census measures the checkpoint's own sideboarding in every start)."""
-    return undealt(cfg['spec'])
+    from mtgz.az.forced_find import strip
+    return strip(undealt(cfg['spec']))          # (and without the forced find, docs/ENGINE.md 180: self-play's)
 
 
 def search_seat(cfg, sims):

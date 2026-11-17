@@ -59,6 +59,7 @@ def spec_with_log(spec):
     """The spec JSON with the engine's log on (`"log": true`, engine/src/az/mod.rs) and without dealt decks (a
     self-play setting, docs/ENGINE.md 154: a recorded match plays every seat's own sideboarding)."""
     s = json.loads(undealt(spec)) if spec else {}
+    s.pop('forced_find', None)      # (a self-play training aid, docs/ENGINE.md 180: recorded games play their own picks)
     s['log'] = True
     return json.dumps(s, separators=(',', ':'))
 

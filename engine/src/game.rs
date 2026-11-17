@@ -50,6 +50,9 @@ pub struct GameSpec {
     /// within their public 75; the sideboard's size stays public).
     /// `hidden_decklists` keeps them too.
     pub deck_clouds: bool,
+    /// The forced find (ENGINE.md 180, `forced_find.rs`): a self-play training aid that makes a share of a spell's
+    /// pile searches hold a card. None in every game but a self-play spec's with `"forced_find"`.
+    pub forced_find: Option<crate::forced_find::ForcedFind>,
 }
 
 impl Default for GameSpec {
@@ -66,6 +69,7 @@ impl Default for GameSpec {
             hidden_decks: false,
             hidden_decklists: false,
             deck_clouds: false,
+            forced_find: None,
         }
     }
 }
@@ -682,6 +686,9 @@ pub struct Game {
     /// The state was changed by hand (tests' perturbations, `Game::lose_sightings`): the sightings no longer
     /// describe it, and the deals weigh every seen card blind (ENGINE.md 140.9).
     pub(crate) sightings_lost: bool,
+    /// The forced find's state (ENGINE.md 180, `forced_find.rs`): its seed from the game's, the spell's resolutions so
+    /// far, the resolution in progress forced. Read only by the forced find; empty without it.
+    pub(crate) ff: crate::forced_find::FfState,
     /// Tokens created so far (a cheap "any token?" for the SBA check).
     pub(crate) tokens: u32,
     /// The lowest slot made as a token or a copy (`u32::MAX`: none yet).
@@ -1302,6 +1309,7 @@ impl Game {
             sight_at: 0,
             found: Vec::new(),
             sightings_lost: false,
+            ff: crate::forced_find::FfState::new(seed),
             tokens: 0,
             first_token: u32::MAX,
             observer: None,

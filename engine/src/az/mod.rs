@@ -186,6 +186,13 @@ impl Eq for Share {}
 /// mirror. `MatchState::pairing` names the game's pair (the game log, `record_setup`, the spectator view). Without the key
 /// every spec is what it was.
 ///
+/// The forced find (ENGINE.md 180, `forced_find.rs`): `"forced_find": {"spell": "Doomsday", "card": "Thassa's Oracle",
+/// "p": p, "unless_in_hand": true}` (constructed best-of-one only; some deck's main must hold both; the spell's resolution
+/// must search a library and graveyard for a pile): with probability p per resolution - a draw from the game's seed and
+/// the resolution's index, the same in every world - the pile's last pick is the card when none was chosen, unless one is
+/// in the caster's hand or none can be found. A self-play training aid, never encoded; the evaluation spec drops it
+/// (`eval_json`). With p 0 it changes nothing; without the key every spec is what it was.
+///
 /// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
 /// (`view.rs`, the replay recorder); it changes nothing else.
 ///
@@ -258,6 +265,46 @@ pub struct MtgSpec {
     pub build: Option<std::sync::Arc<build::Build>>,
     /// `export_state` carries each seat's description of the position (`build::describe`).
     pub describe: bool,
+    /// The forced find (ENGINE.md 180, `forced_find.rs`): a self-play training aid; every game's `GameSpec`.
+    pub forced_find: Option<crate::forced_find::ForcedFind>,
+}
+
+/// The spec's `"forced_find"` (ENGINE.md 180): `{"spell": name, "card": name, "p": share, "unless_in_hand": bool}` - with
+/// probability p (in [0, 1]) a resolving `spell`'s pile search must find a `card` (its last pick, when none was chosen),
+/// unless one is in the caster's hand (`unless_in_hand`, default true) or none can be found. Checked against the decks
+/// after every key is read (`check_forced_find`).
+fn parse_forced_find(x: &Value, db: &CardDb) -> Result<crate::forced_find::ForcedFind, String> {
+    const WHY: &str = "(ENGINE.md 180: {\"spell\": name, \"card\": name, \"p\": share, \"unless_in_hand\": bool})";
+    let o = x.as_object().ok_or_else(|| format!("mtg spec: forced_find must be an object {WHY}"))?;
+    if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "spell" | "card" | "p" | "unless_in_hand")) {
+        return Err(format!("mtg spec: unknown forced_find key {k:?} (spell, card, p, unless_in_hand)"));
+    }
+    let name = |k: &str| -> Result<DefId, String> {
+        let n = o.get(k).and_then(|v| v.as_str()).ok_or_else(|| format!("mtg spec: forced_find.{k} must be a card name {WHY}"))?;
+        db.expect_id(n).map_err(|e| format!("mtg spec: forced_find.{k}: {e}"))
+    };
+    let (spell, card) = (name("spell")?, name("card")?);
+    let p = o
+        .get("p")
+        .and_then(|v| v.as_f64())
+        .filter(|p| (0.0..=1.0).contains(p))
+        .ok_or_else(|| format!("mtg spec: forced_find.p must be a number in [0, 1] (the share of the spell's resolutions forced) {WHY}"))?;
+    let unless_in_hand = match o.get("unless_in_hand") {
+        None => true,
+        Some(v) => v.as_bool().ok_or("mtg spec: forced_find.unless_in_hand must be a boolean (ENGINE.md 180)")?,
+    };
+    // (The spell's resolution must search a library and graveyard for a pile - the only search the forced find
+    // knows: `DdA::PileFromGraveyard` then `DdA::PileFromLibrary`, ENGINE.md 124.1.)
+    if !crate::doomsday_a::searches_a_pile(db.def(spell)) {
+        return Err(format!(
+            "mtg spec: forced_find.spell {}: its resolution does not search a library and graveyard for a pile (the forced find's only search, Doomsday's; ENGINE.md 180)",
+            db.def(spell).name
+        ));
+    }
+    if spell == card {
+        return Err("mtg spec: forced_find.spell and forced_find.card are the same card (ENGINE.md 180)".into());
+    }
+    Ok(crate::forced_find::ForcedFind::new(spell, card, p, unless_in_hand))
 }
 
 /// The spec's `"dealt_decks"` (ENGINE.md 154): `p`, the share of matches with one dealt seat (in (0, 1]), and
@@ -331,8 +378,38 @@ impl Default for MtgSpec {
             keep_known: false,
             build: None,
             describe: false,
+            forced_find: None,
         }
     }
+}
+
+/// Where the forced find can apply (ENGINE.md 180), refused loudly elsewhere: constructed best-of-one self-play (open
+/// decklists or a metagame), not a lab start or a described position (analysis), and some deck's main holds both the
+/// spell and the card (else it could never apply).
+fn check_forced_find(s: &MtgSpec, ff: &crate::forced_find::ForcedFind, db: &CardDb) -> Result<(), String> {
+    if !s.constructed {
+        return Err("mtg spec: forced_find is for constructed decklists (\"constructed\": true; ENGINE.md 180)".into());
+    }
+    if s.format != Format::Bo1 {
+        return Err("mtg spec: forced_find is built for best-of-one (\"format\": \"bo1\"); best-of-three is not (ENGINE.md 180)".into());
+    }
+    if s.start.is_some() || s.build.is_some() {
+        return Err("mtg spec: forced_find is a self-play setting, not with a lab start or a described position (ENGINE.md 180)".into());
+    }
+    let mains: Vec<&[DefId]> = match &s.decks {
+        DeckMode::Lists(a, b) => vec![a, b],
+        DeckMode::ListsWithSideboards(p) => p.iter().map(|x| &x.0[..]).collect(),
+        DeckMode::Metagame(m) => m.decks.iter().map(|d| &d.main[..]).collect(),
+        _ => Vec::new(),
+    };
+    if !mains.iter().any(|d| d.contains(&ff.spell) && d.contains(&ff.card)) {
+        return Err(format!(
+            "mtg spec: forced_find: no deck's main holds both {} and {}: it could never apply (ENGINE.md 180)",
+            db.def(ff.spell).name,
+            db.def(ff.card).name
+        ));
+    }
+    Ok(())
 }
 
 /// The keys of a spec's `decks` object: the lists, then a drafted match's
@@ -482,6 +559,13 @@ impl MtgSpec {
                 "start" => s.start = Some(std::sync::Arc::new(lab::Start::parse(x, db)?)),
                 "build" => s.build = Some(std::sync::Arc::new(build::Build::parse(x)?)),
                 "describe" => s.describe = x.as_bool().ok_or("mtg spec: describe must be a boolean")?,
+                "forced_find" => {
+                    // (ENGINE.md 180: the names are constructed play's table's)
+                    if !s.constructed {
+                        return Err("mtg spec: forced_find is for constructed decklists (\"constructed\": true; ENGINE.md 180)".into());
+                    }
+                    s.forced_find = Some(parse_forced_find(x, db)?)
+                }
                 "chooser" => {
                     let c = int()?;
                     if c > 1 {
@@ -764,6 +848,9 @@ impl MtgSpec {
             // `mtg` game is layout v7, which does (ENGINE.md 125), and `mtg_eoe`, layout v6, refuses a
             // card table with any: `eoe::MtgEoeAz::parse_spec`.)
         }
+        if let Some(ff) = &s.forced_find {
+            check_forced_find(&s, ff, db)?;
+        }
         if s.build.is_some() {
             if s.start.is_some() || s.seed.is_some() || s.format != Format::Bo1 {
                 return Err("mtg spec: build is for best-of-one games without start or a match seed".into());
@@ -908,7 +995,8 @@ impl MtgSpec {
 
     /// The same spec with the fixed evaluation decks (zero-core uses one
     /// spec for self-play and evaluation; `mtgz.az.run` switches evaluation
-    /// matches to this) and without dealt decks (ENGINE.md 154: a self-play setting).
+    /// matches to this) and without dealt decks (ENGINE.md 154: a self-play setting), a choice table (168.3) or the
+    /// forced find (180).
     /// `mtgz.az.evaldecks.eval_spec` is the same rule.
     pub fn eval_json(json: &str) -> Result<String, String> {
         let mut v: Value = if json.trim().is_empty() { Value::Object(Default::default()) } else {
@@ -923,6 +1011,8 @@ impl MtgSpec {
         // sideboarding by a choice table, ENGINE.md 168.3)
         o.remove("dealt_decks");
         o.remove("sideboard_table");
+        // (the forced find is a self-play training aid, ENGINE.md 180: evaluation plays every pick of the network's own)
+        o.remove("forced_find");
         Ok(v.to_string())
     }
 }
@@ -984,6 +1074,8 @@ impl MtgAz {
             hidden_decks: (spec.format == Format::Bo3 && !spec.constructed) || spec.hidden_decklists,
             hidden_decklists: spec.hidden_decklists,
             log: spec.log,
+            // (ENGINE.md 180: the forced find, constructed best-of-one self-play only)
+            forced_find: spec.forced_find,
             ..GameSpec::default()
         };
         if spec.constructed && spec.format == Format::Bo3 {

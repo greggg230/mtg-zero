@@ -46,6 +46,8 @@ def half_specs(spec, known=True):
     arm): A's worlds know B keeps (`"keep_known": true`, docs/ENGINE.md 141). Refused unless a constructed best-of-three
     spec without its own `keep_deck` or `keep_known` and without `dealt_decks` (a self-play setting, docs/ENGINE.md 154)."""
     s = json.loads(spec)
+    from mtgz.az.forced_find import refuse
+    refuse(s, 'keep_h2h')
     if 'dealt_decks' in s:
         raise ValueError('keep_h2h: the spec deals decks (dealt_decks, docs/ENGINE.md 154: a self-play setting); '
                          "the yardstick plays every seat's own sideboarding - pass the run's evaluation spec")

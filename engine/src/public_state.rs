@@ -103,6 +103,7 @@ pub fn fields() -> Vec<Field> {
         outcome: Public "the game's result",
         clouds: Hidden "a player's partial knowledge of hidden cards (ENGINE.md 10): the viewer's own, leak-tested",
         sightings_lost: Derived "a test's flag: the state was changed by hand, the sightings dropped (ENGINE.md 140.9)",
+        ff: Derived "the forced find's state (ENGINE.md 180, a self-play training aid): its seed from the game's and a record of the spell's resolutions (public events), the same in every world; deliberately never encoded - neither player is told a resolution was forced (the user's decision)",
         sightings: Hidden "each player's sightings of the other's cards, in order, each blind or a search's find (ENGINE.md 140.9): the viewer's own knowledge, the same in all its worlds; read only by the hidden deck's deal",
         sight_at: Derived "the sightings' clock (ENGINE.md 140.9)",
         found: Public "which hidden cards are their owner's search's finds the other player still tells apart, in the order of the searches (ENGINE.md 140.9; a tutor's card put on top, a Doomsday pile): layout v7's found tokens (ENGINE.md 142.12)",

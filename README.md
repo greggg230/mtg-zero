@@ -104,6 +104,7 @@ it, and a run's saved `config.json` overrides the preset when you restart.
 | `mtg-smoke` | the end-to-end check: tiny network, few simulations, random cube decks | CPU, ~1 min |
 | `delver-smoke` | the same on the Delver mirror | CPU, ~1 min |
 | `legacy-meta3`, `legacy-meta3-smoke` | one network on every pairing of the Delver, Doomsday and Sneak and Show 60s (a metagame spec: each game's pairing drawn from its seed, docs/ENGINE.md 176), and its CPU smoke | GPU / CPU |
+| `legacy-meta3-ddwheel`, `legacy-meta3-ddwheel-smoke` | `legacy-meta3`'s Doomsday warm-up: in self-play a share p of Doomsday's piles must hold Thassa's Oracle (the "forced find", turned down by `forced_find_schedule`; docs/ENGINE.md 180), and its CPU smoke | GPU / CPU |
 | `team_draft-smoke` | co-training end to end: 2v2 drafts with tiny draft and play networks | CPU, ~5 min |
 | `mtg-1`, `mtg-2`, `mtg-2-mlp` | the early cube runs (MLP; the token network; its MLP control) | CPU / GPU |
 | `mtg-3` | the cube with a 128 x 4 token network (transformer over cards) | GPU |

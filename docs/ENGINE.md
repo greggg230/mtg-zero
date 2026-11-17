@@ -37343,3 +37343,189 @@ spots (31 against Delver, 4 searches each): the finished pile held the Oracle in
 simulations alike (the same two spots), 2 of 16 spots at 4096 and 3 of 16 at 16,384 (one search each); 0 of 120 for 30
 mirror spots at 64 and 1024. A larger budget does not find the pile: the value the search backs up does not know that
 an Oracle in a five-card library wins. No engine panic, no game that did not replay, no unfinished game (1,200 games).
+
+## 180. The forced find: a self-play training wheel for Doomsday - a share of Doomsday's piles must hold Thassa's Oracle (`"forced_find"`; branch `feat/doomsday-wheel`, 2026-11-16)
+
+Branch `feat/doomsday-wheel` from main e2811d25 (zero-core pin 2c67426c unchanged: no zero-core change). Section number:
+176, 177 and 179 are main's, 178 is `feat/rolling-farm`'s; no branch had 180 or above on 2026-11-16.
+
+**Why.** The three-deck metagame run (176, 177) forks the Delver line, whose network has never seen a Doomsday card
+played. The probe (179) found it puts Thassa's Oracle in its Doomsday pile in 8 of 270 resolutions and wins 0.5% against
+Delver with Doomsday, and more search (to 16,384 simulations) does not find the pile: the value net does not know that
+an Oracle in a five-card library wins. A bad pile mostly decks its caster, so self-play risks teaching the network to
+stop casting Doomsday before it ever sees the combo work. The user approved a training wheel for self-play only: make a
+share of the piles hold the Oracle, turned down over the run, so the value net sees Oracle piles win while the policy
+still makes every other pick.
+
+### 180.1 The spec option and where it applies
+
+```json
+"forced_find": {"spell": "Doomsday", "card": "Thassa's Oracle", "p": 0.75, "unless_in_hand": true}
+```
+
+* `spell`, `card`: card names (data, not code: the engine reads them from the spec; no card name appears in Rust
+  beyond the tests). `p` in [0, 1]: the share of the spell's resolutions forced. `unless_in_hand` (default true): a
+  card of that name in the caster's hand exempts the resolution. No other key.
+* `GameSpec::forced_find` (`engine/src/forced_find.rs`: `ForcedFind { spell, card, threshold, unless_in_hand }`, the
+  share as p x 2^53, exact for 0 and 1), carried by every game of the spec (`MtgAz::new`).
+* **Refused, loudly** (`MtgSpec::parse`, `check_forced_find`): without `"constructed": true` (checked before the names
+  are read: they are constructed play's table's), outside best-of-one (`"format": "bo3"`: not built - a match's later
+  games would need the draw per game; open), with a lab `start` or a described position (`build`: analysis), a spell
+  whose spell ability does not search a library and graveyard for a pile (`doomsday_a::searches_a_pile`: the forced
+  find's only search, `DdA::PileFromLibrary`, ENGINE.md 124.1 - e.g. Brainstorm), `spell` = `card`, an unknown name or
+  key, a `p` outside [0, 1], and a spec where no deck's main holds both the spell and the card (it could never apply:
+  e.g. the Delver mirror). Open decklists and the metagame (176) are accepted.
+* **The evaluation spec drops it** (`MtgSpec::eval_json`, `mtgz.az.evaldecks.eval_spec`, as `dealt_decks`).
+
+### 180.2 How the pile is forced (the user's mechanism, adapted to Doomsday's decisions)
+
+Doomsday's pile is chosen in two parts (124.1): the graveyard's cards (`ChooseGraveyardCard`, increasing position,
+`PASS` once the minimum is met), then the library's by definition (`SearchLibrary`, non-decreasing definition order,
+each multiset once; the finds wait as `Frame::picked_defs`, the found-card tokens of 140.9 / 142.12 come after the
+search). There is no single "last decision" in a fixed place: the t-th card (t = min(5, library + graveyard)) is the
+library part's last pick, or the graveyard part's when it fills the pile. So:
+
+* **The picks run unmasked.** Every pick before the pile's last offers exactly what it offers without the option (the
+  same options, the same floor and room rules): the network's own choices, including an Oracle it picks itself.
+* **Only the last pick is touched** (`Game::ff_must`): when the next pick is the pile's last (`k + 1 = t` in the
+  graveyard part, `need = 1` in the library part), the draw forces this resolution, no card of the name is among the
+  picks so far, none is in the caster's hand (with `unless_in_hand`) and one can be found, the decision's ONE option is
+  that card - in the library part its definition's `SearchLibrary` option (whatever the floor: the pile is legal, only
+  its path is new), else (the Oracle in the graveyard, the graveyard part passed) a `ChooseGraveyardCard` option of
+  that card asked from the library part (its answer joins the graveyard picks); in the graveyard part, the graveyard's
+  card, out of position order. When the graveyard part reaches the last pick and the card is in the library, the
+  graveyard part ends without asking (its other answer would be `PASS`, legal there: the library holds the card) and
+  the library part's one pick is the card.
+* **Result** (`forcing_reaches_exactly_the_piles_that_hold_the_oracle_in_every_order`): with six cards (the Oracle
+  among three in the library, three in the graveyard) every resolution reaches exactly the 600 (pile, order) outcomes
+  whose five-card pile holds the Oracle - each of them, and only them - the same with the Oracle in the graveyard; at p
+  0 the 720 outcomes on the 720 paths of the game without the option, path for path.
+* **What "voluntary" means** (`FfClass`): a pile holding the card whose last pick was not forced reads `Voluntary`. A
+  drawn resolution where the network's own last pick would have been the Oracle (the Oracle above every other pick in
+  definition order) reads `Forced`: the decision had one option, the class is the decision's, not an intent nobody can
+  see. The voluntary share is exact on undrawn resolutions (and in every evaluation and `combo_stats.py play` game).
+
+The draw (`Game::ff_draw`): resolution k of the game (0-based; `FfState::recs`, one record per resolution of the spell,
+public events) is forced when `split64(seed ^ split64(k + 1)) >> 11 < threshold`, `seed` = `split64(game seed ^ SALT)`
+set by `Game::empty`. A function of the game's seed and a public count: the same in every world `determinize` deals of
+either viewer (the game seed is not reseeded, the records are cloned), so the decider's worlds never disagree about a
+forced pick (no "determinize changed the viewer's decision"; the fuzz profile's run below) and every machine plays the
+same game for a seed (local self-play, the Mac, the farm's release worker, the replays, the trainer's replay path).
+Without the option nothing runs and `FfState` stays empty.
+
+Each resolution's record (`FfRec`: player, drawn, class, the pile's definitions; `Game::forced_finds`), in order of
+precedence: `Voluntary`, `Forced`, `InHand`, `NotFindable` (none in the library or the graveyard), `Missed` (one could
+be found, the draw did not force it, none chosen); asserted: a forced pick only when drawn and holding the card, and a
+drawn resolution never misses a findable card. The play-by-play (the log, off in self-play, never encoded) gets "P<p>'s
+pile takes <card> (forced_find)" at a forced pick and "P<p>'s forced find: <class> (drawn <bool>)" after the pile moved
+(the step's last lines, which `tools/combo_stats.py` reads).
+
+### 180.3 No policy target from a forced pick; value rows count
+
+A forced pick has one option, and the engine answers a single-option decision itself (`GameSpec::auto_single`, on in
+every `MtgAz` game: `flow.rs` `ask_options`): it never becomes the pending decision, so zero-core never sees it - no
+node, no search, no row, no policy target, nothing in a game record (records hold zero-core's moves; the replay
+re-derives the forced answer from the spec, `combo_stats.py scan` too). Zero-core would not record it either: its
+transitions step every single-option decision (`tree::transition_each`, docs/search.md "Transition"). The answer is keyed
+`KEY_AUTO` as every forced answer (the other player's worlds see the searched card's place masked, 161). Shown by
+`with_single_options_answered_by_the_engine_the_forced_pick_is_never_a_decision` (after the fourth pick the pending
+decision is the order, the Oracle in the pile, the answer keyed) and by the fuzz walk (no pile decision with one option
+reaches a player). The game's other rows keep their policy and value targets: the value targets of the positions
+after a forced pile are the point of the wheel.
+
+Known consequence (accepted by the design: the draw is the same in every world): a search at an earlier pick of a drawn
+resolution plays through the forced last pick, so it sees the Oracle arrive whether or not it picks it; its policy
+targets at those picks are the drawn resolution's. The share of drawn resolutions falls with the schedule.
+
+### 180.4 Not encoded; the opponent is not told
+
+`FfState` and `GameSpec::forced_find` are read by no encoding (`Game::ff` classified `Derived` in `public_state.rs`,
+with the reason; `build.rs`' description skips it). Neither player's row says whether a resolution was or will be
+forced (`nothing_of_it_reaches_an_encoding`: both viewers' rows before, during and after a forced resolution equal
+those of the same state with the option and its records dropped, `Game::strip_forced_find`; the fuzz does the same at
+every third step and every pick, for the real game and its worlds). The opponent's beliefs are not conditioned on the
+forcing (its worlds after a forced pile deal the caster's hand and library as after any pile) - the warm-up mismatch the
+user accepted. Its search worlds apply the rule as the real game does (the draw is the game's).
+
+### 180.5 The schedule (run setting `forced_find_schedule`)
+
+`mtgz/az/forced_find.py`. The package's run setting `forced_find_schedule` (a dict; `{}` = off: the spec's own p every
+iteration): p moves linearly from `start` (at iteration `from` and before) to `end` (at `from + iters` and after),
+rounded to 6 decimals; `iters` 0 or absent holds `start` (an `end` that differs is refused). Unknown keys, shares outside
+[0, 1] and negative or non-integer `from` / `iters` are refused. zero-core's `selfplay_specs` hook (its docs/az.md 40):
+`decklists.selfplay_spec` asks the matchup model's hook (168) first, then `forced_find.selfplay_spec(run, it, spec so
+far)`, which writes iteration `it`'s p into the spec's `forced_find` - a pure function of the run's settings and `it`,
+so every call for one iteration answers the same and the farm's per-iteration phase spec (zero-core docs/az.md 52)
+plays it. Refused at the first self-play phase (zero.run's `EncodingMismatch`: exit 78, not restarted): a schedule
+without `forced_find` in the self-play spec, a malformed schedule, and a run whose own `eval_spec` carries the option.
+The log says `iter N self-play: forced_find p = X ...` whenever p changes. zero-core's remote self-play (the Mac's
+workers) refuses a changed spec (docs/az.md 40): a scheduled run self-plays here and on the farm. A copied fork
+(`fork_run --copy`) keeps its iteration numbers: set `from` to its first iteration.
+
+### 180.6 Where it never applies (Python and tools)
+
+* Dropped: `evaldecks.eval_spec` (the package's evaluation spec), `replays.spec_with_log` (recorded matches),
+  `sideboard_census.census_spec`, the yardsticks' best of one derived from the run's eval_spec / spec
+  (`yardsticks.bo1_spec`).
+* Refused (`forced_find.refuse`, a ValueError naming the tool): `keep_h2h.half_specs`, an explicit `bo1_spec`, the cells
+  yardstick's specs (`_cell_spec`: `pair_spec` never has it - a guard), `tools/combo_stats.py play`.
+* `tools/combo_stats.py selfplay CKPT --p P ...`: `play` with the forced find (labelled SELF-PLAY, not a measurement), to
+  watch the network's own piles at a given p.
+
+### 180.7 `tools/combo_stats.py`: the Oracle at each resolution
+
+Each resolved Doomsday in a stats line gains `ff` (the class: `voluntary`, `forced`, `in_hand`, `not_findable`,
+`missed`), `ff_drawn` (the draw, None without the option) and `oracle_where` (the Oracle's zone as the resolution
+began). With the forced find the class is the engine's line; without it the state's in the same order (in the pile ->
+voluntary; else one in the hand -> in hand; else one in the library or graveyard as it began -> missed; else not
+findable). The report adds per Doomsday player "the Oracle at the resolutions: voluntary a, forced b, in_hand c,
+not_findable d, missed e; **in its own piles a/N** (exit gate >= 0.5: met / not met)" and, with the forced find, the
+drawn and undrawn resolutions (the voluntary share among the undrawn). The exit gate (the user's): the Oracle in the
+network's own piles in at least 50% of resolutions (`play`'s games: no draw) plus Oracle wins against Delver (the
+report's "Oracle wins").
+
+### 180.8 Presets
+
+* **`legacy-meta3-ddwheel`** = `legacy-meta3` with `forced_find` (Doomsday, Thassa's Oracle, p 1.0, `unless_in_hand`)
+  in the self-play spec only - the evaluation spec is legacy-meta3's - and `forced_find_schedule {"start": 1.0, "end":
+  0.0, "from": 0, "iters": 100}`; the metagame's weights uniform. The launch sets the weights, the length
+  (`--forced-find-schedule '{"start": 1.0, "end": 0.0, "from": 0, "iters": N}'`, or `{"start": p}` held) and the
+  rest, as for legacy-meta3.
+* **`legacy-meta3-ddwheel-smoke`** = `legacy-meta3-smoke` with the same spec and `{"start": 1.0, "end": 0.5, "from": 0,
+  "iters": 2}` (CPU).
+
+### 180.9 The fuzz: `FUZZ_POOL=meta_wheel`
+
+Games only (`matches_skipped`; the release worker knows it: `worker/src/fuzz.rs` `POOLS`, `GAMES_ONLY`): the best-of-one
+metagame of the three real mains with a Doomsday deck in every game (the cells with Doomsday weight 1, the others 0) and
+`forced_find` at p 1, 0.5 or 0.25 by seed (`unless_in_hand` false one seed in eight). Each game is played twice: by the
+default loop on its `Game` (the forced find in its `GameSpec`; every check of the default mode - invariants, clones,
+`determinize` for both viewers, the information-set walks, option completion, the rules check, replay), and first by
+`wheel_walk` on the spec's `MtgAz` game (as self-play makes it): both viewers' rows equal those of the same state
+without the option (every third step and every pick); at every pick of a resolving Doomsday, two worlds of each viewer
+keep the draw and the records (and their rows equal the stripped ones), the decider's worlds have the same options, take
+the real pick to the same chance keys (the forced answer's `KEY_AUTO` among them) and the same records; no pile decision
+with one option reaches the player; every new record's class agrees with its pile and draw (a forced or voluntary pile
+holds the Oracle, nothing else does; forced only when drawn, missed only when not; in hand only with the card in hand)
+and, where the library is the pile, with the library; the game replays from its seed and actions to the same state,
+records and result. With 200 games or more forced and missed resolutions must have been seen and worlds, decider steps,
+rows and libraries compared (summed over shards). Not in the suite tier's default pools: pass `--fuzz-pools ...,meta_wheel`.
+
+### 180.10 Tests
+
+`engine/tests/forced_find.rs` (`misc_suite`, 12): the forced last pick (library; its log line; the record); an Oracle
+chosen before the last pick stays voluntary, one that would be the network's last pick reads forced; the hand exempts
+(and with `unless_in_hand` false the library's copy is forced all the same); not findable and p 0 leave every pick
+free (missed); the graveyard's Oracle forced from either part; a library Oracle ends the graveyard part one pick early;
+the exhaustive outcomes (180.2); the forced pick never a decision under `auto_single`; every world of either viewer
+keeps the draw, records and options; nothing reaches an encoding; the spec option and every refusal, the evaluation
+spec without it; the draw is a share p of games (4,000 seeds at 0.3, within 4 se), deterministic, 0 and 1 exact, and a
+spec with the option plays the same first decision and rows as without. `tests/test_forced_find.py` (7): the helpers,
+the schedule, the hook (each iteration's p, chained after the matchup model's, its refusals as `EncodingMismatch`), the
+drops and refusals of 180.6, the engine's refusals through the bindings, the presets, and combo_stats' classes on 400
+random-move games with the forced find (every resolution drawn at p 1, forced and voluntary exactly the piles with the
+Oracle, never missed, the report's lines) and without it (the state's classes, no draw).
+
+### 180.11 Checks
+
+RESULTS-180

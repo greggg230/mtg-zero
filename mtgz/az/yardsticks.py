@@ -247,12 +247,18 @@ def of_run(run, cfg=None):
 def bo1_spec(cfg, ys):
     """The best-of-one spec JSON of the run: `bo1_spec`, else its eval_spec (or spec) - a best-of-three one without
     its best-of-three keys and sideboards (game 1: the mains, open decklists). ValueError when the run has none."""
+    from .forced_find import refuse
     if ys.get('bo1_spec'):
+        refuse(ys['bo1_spec'], 'yardsticks bo1_spec')
         return ys['bo1_spec']
     s = cfg.get('eval_spec') or cfg.get('spec')
     if not s:
         raise ValueError('yardsticks: the run has no eval_spec / spec to play best-of-one from (give bo1_spec)')
     d = json.loads(s) if isinstance(s, str) else dict(s)
+    if 'forced_find' in d:
+        # (the run's self-play spec's forced find, docs/ENGINE.md 180: a training aid - the yardstick plays without it)
+        d.pop('forced_find')
+        s = json.dumps(d, separators=(',', ':'))
     if d.get('format') != 'bo3':
         return s if isinstance(s, str) else json.dumps(d, separators=(',', ':'))
     d = {k: v for k, v in d.items() if k not in BO3_KEYS}
@@ -799,6 +805,8 @@ def _cell_spec(x, y, chooser, ys):
     from . import decklists as D
     spec = json.loads(D.pair_spec(x, y, fmt='bo1', max_turns=int(ys['cells_max_turns'])))
     spec['chooser'] = int(chooser)
+    from .forced_find import refuse
+    refuse(spec, 'the cells yardstick')         # (never: pair_spec has no forced find, docs/ENGINE.md 180)
     return json.dumps(spec, separators=(',', ':'))
 
 

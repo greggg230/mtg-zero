@@ -190,3 +190,14 @@ are what the new model keeps, with reasons. ENGINE.md 18 and 34 describe the mod
   end of the payment.
 * **New decision kind**: `PayPool` (41; 42 of 64 used), `NUMBER` ids, a minor decision (searched
   like `PayMana`); the bots take its first option (the pool keeping the most types).
+
+## Training aids (not rules)
+
+A setting that constrains a player's choices on purpose, for self-play training only, is no rules shortcut (the rules
+and every legal outcome are unchanged), but it is listed here so it is never mistaken for one:
+
+* **The forced find** (ENGINE.md 180, `engine/src/forced_find.rs`, the spec's `"forced_find"`; opt-in, constructed
+  best-of-one self-play only, refused or dropped by every evaluation): a share p of a spell's pile searches (Doomsday's)
+  must hold a card (Thassa's Oracle) - the pile's last pick, when the player chose no such card, has none in hand and
+  one can be found, offers only that card (a legal pick). The earlier picks and the order offer what they offer without
+  it. Neither player's encoding is told.

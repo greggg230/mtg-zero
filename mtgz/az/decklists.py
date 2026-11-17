@@ -119,7 +119,11 @@ def selfplay_spec(run, it):
                               f'train forced sideboarding decisions (docs/ENGINE.md 130.3, 147.4)')
     # the matchup model's choice table (docs/ENGINE.md 168.3; matchup_every 0: None, the run's spec)
     from .matchup import selfplay_spec as matchup_spec
-    return matchup_spec(run, it)
+    s = matchup_spec(run, it)
+    # then the forced find's p of the iteration (docs/ENGINE.md 180; forced_find_schedule {}: None, the spec so far)
+    from .forced_find import selfplay_spec as forced_find_spec
+    f = forced_find_spec(run, it, s)
+    return f if f is not None else s
 
 
 def _seat_lists(name, fmt):

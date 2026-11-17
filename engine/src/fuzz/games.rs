@@ -162,6 +162,17 @@
 //! matches' checks keep the pairing (`check_constructed_world`). With 200 games (90 matches, 20 post-sideboard
 //! matches) or more every cell (the post-sideboard matches: every mirror) must have been played.
 //!
+//! `FUZZ_POOL=meta_wheel` (ENGINE.md 180): the forced find. Games only: the best-of-one metagame of the three real mains
+//! with a Doomsday deck in every game and `"forced_find"` (Doomsday, Thassa's Oracle; p 1, 0.5 or 0.25 by seed,
+//! `unless_in_hand` false one seed in eight). Each game is played twice: by the default mode's loop on its `Game` (the
+//! forced find in its `GameSpec`; every check of the default mode, the information-set walks and the replay among them),
+//! and first by `wheel_walk` on the spec's `MtgAz` game: both viewers' rows equal those of the same state without the
+//! option (every third step and at every pick), every world of either viewer keeps the draw and the records at a pick,
+//! the decider's worlds take the real pick to the same keys and records, no pile decision with one option reaches the
+//! player, each record's class agrees with its pile, its draw and (where the library is the pile) the library, and the
+//! game replays to the same state and records. With 200 games or more forced and missed resolutions must have been
+//! seen and worlds, rows and libraries compared.
+//!
 //! The information-set walks (ENGINE.md 148): two worlds `determinize` deals for a viewer, played on
 //! the same random actions while their keys, next decider and legal actions agree (zero-core's child
 //! signature), must agree on what the viewer sees: in games with open decklists the view and the
@@ -536,6 +547,8 @@ pub enum PoolMode {
     DelverDealtPerSeat,
     /// `FUZZ_POOL=meta` (ENGINE.md 176): the metagame spec of the three real 75s.
     Meta,
+    /// `FUZZ_POOL=meta_wheel` (ENGINE.md 180): the best-of-one metagame's Doomsday games with the forced find.
+    MetaWheel,
 }
 
 thread_local! {
@@ -567,7 +580,8 @@ pub fn pool_mode() -> PoolMode {
         Ok("delver_dealt") => PoolMode::DelverDealt,
         Ok("delver_dealt2") => PoolMode::DelverDealtPerSeat,
         Ok("meta") => PoolMode::Meta,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"eoe\" or \"sealed\")"),
+        Ok("meta_wheel") => PoolMode::MetaWheel,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -698,7 +712,148 @@ fn dd_b_mode() -> bool {
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
 /// `doomsday`, `sneak_show`, `sns`, `names`, `delver_sb`, `cross` or `meta`).
 pub fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode() || cross_mode() || meta_mode()
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode() || cross_mode() || meta_mode() || wheel_mode()
+}
+
+/// `FUZZ_POOL=meta_wheel` (ENGINE.md 180).
+pub fn wheel_mode() -> bool {
+    pool_mode() == PoolMode::MetaWheel
+}
+
+/// `FUZZ_POOL=meta_wheel`'s spec of game `seed` (JSON): the best-of-one metagame of the three real mains with a
+/// Doomsday deck in every game (the cells with Doomsday weight 1, the others 0) and the forced find of Doomsday for
+/// Thassa's Oracle at p 1, 0.5 or 0.25 by seed (`unless_in_hand` false one seed in eight).
+fn wheel_json(seed: u64) -> String {
+    let p = [1.0, 0.5, 0.25][(seed % 3) as usize];
+    let ff = serde_json::json!({"spell": "Doomsday", "card": "Thassa's Oracle", "p": p, "unless_in_hand": seed % 8 != 7});
+    let mut v: serde_json::Value = serde_json::from_str(&meta_json(false, false, serde_json::json!({"forced_find": ff}))).unwrap();
+    v["metagame"]["weights"] = serde_json::json!([[0, 1, 0], [1, 1, 1], [0, 1, 0]]);
+    v.to_string()
+}
+
+/// `FUZZ_POOL=meta_wheel`'s counts of one game (`wheel_walk`).
+#[derive(Default)]
+struct WheelSeen {
+    /// Resolutions by class (`FfClass` order: voluntary, forced, in hand, not findable, missed).
+    classes: [u64; 5],
+    /// Worlds whose draw and records were compared at a pick.
+    worlds: u64,
+    /// The decider's worlds stepped with the real pick (keys and records compared).
+    stepped: u64,
+    /// Rows compared with the same state without the option.
+    rows: u64,
+    /// Records whose pile was compared with the caster's library.
+    libraries: u64,
+}
+
+/// `FUZZ_POOL=meta_wheel`'s walk of game `seed` (module docs, ENGINE.md 180): the metagame spec's game with the forced
+/// find (`MtgAz`, as self-play makes it), played by random actions from the seed; every third step and at every pick
+/// both viewers' rows equal those of the same state without the option; at every pick of a resolving Doomsday every
+/// world of either viewer keeps the draw and the records, and the decider's worlds take the real pick to the same keys
+/// and records; every new record's class agrees with its pile and draw (a forced or voluntary pile holds the Oracle,
+/// nothing else does; forced only when drawn, missed only when not) and, where the library is the pile, with the
+/// library; at the end the seed and actions replay to the same state and records.
+fn wheel_walk(seed: u64) -> WheelSeen {
+    use crate::az::tail_encode::Row;
+    use crate::az::{MtgAz, MtgSpec};
+    use crate::forced_find::FfClass;
+    use zero_search::game::SearchGame;
+    let spec = MtgSpec::parse(&wheel_json(seed)).unwrap_or_else(|e| panic!("seed {seed}: the wheel spec: {e}"));
+    let ff = spec.forced_find.expect("the forced find");
+    let mut a = MtgAz::new_game(&spec, 2, seed).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    let mut seen = WheelSeen::default();
+    let mut rng = Rng::new(seed ^ 0xF0_4CED_0180_1);
+    let (mut legal, mut keys, mut wkeys, mut actions) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut step = 0u64;
+    let strip_rows = |a: &MtgAz, seen: &mut WheelSeen, what: &dyn Fn() -> String| {
+        let mut s = a.clone();
+        s.g.strip_forced_find();
+        for v in 0..2 {
+            assert!(Row::of_az(a, v) == Row::of_az(&s, v), "{}: P{v}'s row shows the forced find", what());
+        }
+        seen.rows += 1;
+    };
+    while let Some(p) = a.to_move() {
+        let what = || format!("seed {seed} (FUZZ_POOL=meta_wheel) step {step}");
+        a.legal_actions(&mut legal);
+        let act = legal[rng.below(legal.len() as u32) as usize];
+        // a pick of a resolving Doomsday's pile (its controller deciding a library or graveyard choice)
+        let pick = a.g.pending_decision().is_some_and(|d| {
+            matches!(d.kind, crate::DecisionKind::SearchLibrary | crate::DecisionKind::ChooseGraveyardCard)
+                && a.g.stack().last().is_some_and(|s| s.controller == d.player && matches!(s.kind, crate::game::StackKind::Spell { card } if a.g.obj(card).def == ff.spell))
+        });
+        if step % 3 == 0 || pick {
+            strip_rows(&a, &mut seen, &what);
+        }
+        let before = a.g.forced_finds().len();
+        keys.clear();
+        let real_after = {
+            let mut r = a.clone();
+            r.step(act, &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
+            r
+        };
+        if pick {
+            assert!(legal.len() >= 2, "{}: a pile decision with one option reached the player (auto_single answers it)", what());
+            for viewer in 0..2usize {
+                for _ in 0..2 {
+                    let mut w = a.clone();
+                    w.determinize(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()));
+                    assert_eq!(w.g.ff_draw(), a.g.ff_draw(), "{}: P{viewer}'s world draws otherwise", what());
+                    assert_eq!(w.g.forced_finds(), a.g.forced_finds(), "{}: P{viewer}'s world's records", what());
+                    strip_rows(&w, &mut seen, &what);
+                    seen.worlds += 1;
+                    if viewer == p {
+                        let mut wl = Vec::new();
+                        w.legal_actions(&mut wl);
+                        assert_eq!(wl, legal, "{}: the decider's world's options", what());
+                        wkeys.clear();
+                        w.step(act, &mut wkeys).unwrap_or_else(|e| panic!("{}: the world's step: {e}", what()));
+                        assert_eq!(wkeys, keys, "{}: the decider's world's keys (the forced answer's among them)", what());
+                        let (wr, rr) = (w.g.forced_finds(), real_after.g.forced_finds());
+                        assert_eq!(wr.len(), rr.len(), "{}: the decider's world's records", what());
+                        for (x, y) in wr.iter().zip(rr) {
+                            assert_eq!((x.player, x.drawn, x.class, &x.pile), (y.player, y.drawn, y.class, &y.pile), "{}: the decider's world's record", what());
+                        }
+                        seen.stepped += 1;
+                    }
+                }
+            }
+        }
+        a = real_after;
+        actions.push(act);
+        for r in &a.g.forced_finds()[before..] {
+            let held = r.pile.contains(&ff.card);
+            assert_eq!(held, matches!(r.class, FfClass::Voluntary | FfClass::Forced), "{}: {r:?} against its pile", what());
+            assert!(r.class != FfClass::Forced || r.drawn, "{}: forced without the draw: {r:?}", what());
+            assert!(r.class != FfClass::Missed || !r.drawn, "{}: a drawn resolution missed the card: {r:?}", what());
+            assert!(r.class != FfClass::InHand || ff.unless_in_hand, "{}: {r:?} with unless_in_hand false", what());
+            if r.class == FfClass::InHand {
+                assert!(a.g.player(r.player).hand.iter().any(|&c| a.g.obj(c).def == ff.card), "{}: in hand without the card in hand", what());
+            }
+            let lib = &a.g.player(r.player).library;
+            if lib.len() == r.pile.len() && before + 1 == a.g.forced_finds().len() {
+                let mut l: Vec<u16> = lib.iter().map(|&c| a.g.obj(c).def).collect();
+                l.sort_unstable();
+                assert_eq!(&l, &r.pile, "{}: the library is the record's pile", what());
+                seen.libraries += 1;
+            }
+            let k = [FfClass::Voluntary, FfClass::Forced, FfClass::InHand, FfClass::NotFindable, FfClass::Missed].iter().position(|&c| c == r.class).unwrap();
+            seen.classes[k] += 1;
+        }
+        step += 1;
+        assert!(step < 300_000, "seed {seed}: the wheel game does not end");
+    }
+    strip_rows(&a, &mut seen, &|| format!("seed {seed} (FUZZ_POOL=meta_wheel) the end"));
+    // the seed and actions replay to the same state and records
+    let mut b = MtgAz::new_game(&spec, 2, seed).unwrap();
+    for &x in &actions {
+        keys.clear();
+        b.step(x, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: the replay: {e}"));
+    }
+    assert_eq!(b.g.forced_finds(), a.g.forced_finds(), "seed {seed}: the replay's records");
+    assert_eq!(b.export_state(), a.export_state(), "seed {seed}: the replay's state");
+    assert_eq!(b.result(), a.result(), "seed {seed}: the replay's result");
+    seen
 }
 
 /// `FUZZ_POOL=meta` (ENGINE.md 176).
@@ -2561,6 +2716,11 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
         let sp = crate::az::MtgSpec::parse(&meta_json(false, false, serde_json::json!({}))).unwrap();
         return sp.pools(seed);
     }
+    if wheel_mode() {
+        // (ENGINE.md 180) The wheel spec's game of this seed: its pairing's mains (a Doomsday deck in every game).
+        let sp = crate::az::MtgSpec::parse(&wheel_json(seed)).unwrap();
+        return sp.pools(seed);
+    }
     if cross_mode() {
         // (ENGINE.md 148) The Doomsday 60 against the Sneak and Show 60, seats by seed.
         let (dd, sns) = ((doomsday_deck(), Vec::new()), (sneak_show_deck(), Vec::new()));
@@ -2601,7 +2761,9 @@ pub fn new_game(seed: u64) -> Game {
     // `FUZZ_LOG=1` keeps the game log, so a panic message shows the game.
     let log = super::env::var("FUZZ_LOG").is_ok();
     let starting_life = if exponential_mode() { EXP_LIFE } else { GameSpec::default().starting_life };
-    Game::with_sideboards(game_db(), GameSpec { log, starting_life, ..GameSpec::default() }, [&d0, &d1], [&s0, &s1], seed).unwrap()
+    // (`FUZZ_POOL=meta_wheel`, ENGINE.md 180: the game plays with the seed's forced find, every check of the default mode)
+    let forced_find = wheel_mode().then(|| crate::az::MtgSpec::parse(&wheel_json(seed)).unwrap().forced_find).flatten();
+    Game::with_sideboards(game_db(), GameSpec { log, starting_life, forced_find, ..GameSpec::default() }, [&d0, &d1], [&s0, &s1], seed).unwrap()
 }
 
 /// Play one game with random actions; run the extra checks along the way.
@@ -3134,6 +3296,7 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     let mut skips = 0u64;
     let mut unplayable: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     let (mut meta_cells, mut meta_steps, mut meta_worlds) = ([0u64; 9], 0u64, 0u64);
+    let mut wheel = WheelSeen::default();
     for seed in first..first + n {
         if !hooks.before(seed) {
             return Run::Stopped { at: seed };
@@ -3153,13 +3316,24 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         // (`FUZZ_POOL=meta`, ENGINE.md 176: the game's pairing check first)
         let p = match std::panic::catch_unwind(|| {
             let m = meta_mode().then(|| meta_lockstep(&meta_json(false, false, serde_json::json!({})), seed));
-            (if hidden_decks_mode() { play_hidden(seed) } else { play(seed, true) }, m)
+            // (`FUZZ_POOL=meta_wheel`, ENGINE.md 180: the forced find's walk first)
+            let w = wheel_mode().then(|| wheel_walk(seed));
+            (if hidden_decks_mode() { play_hidden(seed) } else { play(seed, true) }, m, w)
         }) {
-            Ok((p, m)) => {
+            Ok((p, m, w)) => {
                 if let Some(([i, j], st, w)) = m {
                     meta_cells[(i * 3 + j) as usize] += 1;
                     meta_steps += st;
                     meta_worlds += w;
+                }
+                if let Some(w) = w {
+                    for k in 0..5 {
+                        wheel.classes[k] += w.classes[k];
+                    }
+                    wheel.worlds += w.worlds;
+                    wheel.stepped += w.stepped;
+                    wheel.rows += w.rows;
+                    wheel.libraries += w.libraries;
                 }
                 p
             }
@@ -3352,6 +3526,20 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     }
     let mut t = games_totals(companions_used as u64);
     meta_totals(&mut t, "g", &meta_cells, meta_steps, meta_worlds);
+    if wheel_mode() {
+        let c = wheel.classes;
+        println!(
+            "FUZZ_POOL=meta_wheel (ENGINE.md 180): Doomsday resolutions voluntary {} forced {} in hand {} not findable {} missed {}; worlds compared {}, the decider's worlds stepped {}, rows without the option compared {}, libraries checked {}",
+            c[0], c[1], c[2], c[3], c[4], wheel.worlds, wheel.stepped, wheel.rows, wheel.libraries
+        );
+        for (k, name) in ["voluntary", "forced", "in_hand", "not_findable", "missed"].iter().enumerate() {
+            t.set(&format!("wheel_{name}"), c[k]);
+        }
+        t.set("wheel_worlds", wheel.worlds);
+        t.set("wheel_stepped", wheel.stepped);
+        t.set("wheel_rows", wheel.rows);
+        t.set("wheel_libraries", wheel.libraries);
+    }
     end_of_run("games", first, n, &t, check_games);
     Run::Done
 }
@@ -3463,6 +3651,12 @@ fn totals_vec(t: &Totals, name: &str, len: usize) -> Vec<u64> {
 /// 165): what the mode must have exercised, each over its own least number of games (200 for most).
 pub fn check_games(n: u64, t: &Totals) {
     meta_check(t, "g", n, 200, false);
+    // (`FUZZ_POOL=meta_wheel`, ENGINE.md 180: forced and missed resolutions seen, worlds and rows compared)
+    if wheel_mode() && n >= 200 {
+        for k in ["wheel_forced", "wheel_missed", "wheel_worlds", "wheel_stepped", "wheel_rows", "wheel_libraries"] {
+            assert!(t.get(k) > 0, "FUZZ_POOL=meta_wheel: {k} is 0 in {n} games");
+        }
+    }
     let g = |k: &str| t.get(k);
     if n >= 200 && pool_mode() == PoolMode::Default {
         assert!(g("companions_used") > 0, "no companion special action in {n} games");
@@ -4576,7 +4770,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");

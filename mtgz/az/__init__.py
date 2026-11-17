@@ -10,7 +10,7 @@ presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-tra
 team_draft-smoke, team_draft-gpu-smoke, team_draft-4v4, team_draft-4v4-mac; the constructed Delver
 mirror delver-mirror and delver-smoke, docs/ENGINE.md 54, and its best-of-three delver-mirror-bo3 and
 delver-bo3-smoke, ENGINE.md 120; the three-deck Legacy metagame legacy-meta3 and legacy-meta3-smoke, ENGINE.md
-176; Edge of Eternities sealed eoe-smoke and eoe-1, the game
+176, and its Doomsday warm-up legacy-meta3-ddwheel and legacy-meta3-ddwheel-smoke, ENGINE.md 180; Edge of Eternities sealed eoe-smoke and eoe-1, the game
 `mtg_eoe`: `mtg` on the EoE card table in its own identity space, layout `layout_eoe.json`, docs/ENGINE.md 105), the default
 spec, the
 evaluation spec, the dashboard's title / port, the remote 'mac' (run setting eval_remote: the
@@ -47,6 +47,7 @@ from .yardsticks import DELVER_YARDSTICKS
 from ..sealed.games import REMOTE_EVAL_LOG
 from ..sealed.rolling import SETTINGS as ROLLING_SETTINGS
 from .matchup import SETTINGS as MATCHUP_SETTINGS
+from .forced_find import SETTINGS as FORCED_FIND_SETTINGS, with_forced_find
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -288,6 +289,20 @@ SPEC_META3 = decklists.metagame_spec(decklists.META3, fmt='bo1', max_turns=60)
 PRESETS['legacy-meta3'] = dict(PRESETS['delver-mirror'], spec=SPEC_META3, eval_spec=SPEC_META3, publish={}, yardsticks={})
 # the end-to-end check on CPU: the same spec with mtg-smoke's tiny network and sims (as delver-smoke)
 PRESETS['legacy-meta3-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_META3, eval_spec=SPEC_META3)
+# The Doomsday warm-up ("training wheel", docs/ENGINE.md 180, mtgz.az.forced_find): legacy-meta3 with the forced find in
+# the SELF-PLAY spec only - a share p of Doomsday's resolutions must put Thassa's Oracle in the pile (its last pick, when
+# the network chose none, has none in hand and one can be found; every other pick and the order the network's) - and p
+# turned down by the run setting `forced_find_schedule` through the selfplay_specs hook: here 1.0 at iteration 0 to 0.0
+# at iteration 100, linear (`from` the first iteration of the ramp: set it to a copied fork's first iteration; `iters` 0
+# holds `start`). The evaluation spec is legacy-meta3's (no forced find), the weights uniform: the launch sets the
+# weights, the length (`--forced-find-schedule '{"start": 1.0, "end": 0.0, "from": 0, "iters": N}'`) and the rest.
+SPEC_META3_DDWHEEL = with_forced_find(SPEC_META3, 1.0)
+DDWHEEL_SCHEDULE = {'start': 1.0, 'end': 0.0, 'from': 0, 'iters': 100}
+PRESETS['legacy-meta3-ddwheel'] = dict(PRESETS['legacy-meta3'], spec=SPEC_META3_DDWHEEL, eval_spec=SPEC_META3,
+                                       forced_find_schedule=dict(DDWHEEL_SCHEDULE))
+# its CPU smoke: legacy-meta3-smoke with the forced find, 1.0 -> 0.5 over its 3 iterations (forced and free resolutions)
+PRESETS['legacy-meta3-ddwheel-smoke'] = dict(PRESETS['legacy-meta3-smoke'], spec=SPEC_META3_DDWHEEL, eval_spec=SPEC_META3,
+                                             forced_find_schedule={'start': 1.0, 'end': 0.5, 'from': 0, 'iters': 2})
 
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,
@@ -412,6 +427,7 @@ def vast_remote(box, host=None):
 REAL_DECKS_SETTINGS = {'real_decks_every': 0, 'real_decks_pools': 64, 'real_decks_games': 2, 'real_decks_builder': 'best'}
 assert not set(REAL_DECKS_SETTINGS) & set(ROLLING_SETTINGS), 'two features of the package declare one setting'
 assert not set(MATCHUP_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS)), 'two features declare one setting'
+assert not set(FORCED_FIND_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS) | set(MATCHUP_SETTINGS)), 'two features declare one setting'
 
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
@@ -456,8 +472,9 @@ PACKAGE = register(GamePackage(
     # and the run's standing yardsticks (docs/ENGINE.md 164: the run setting `yardsticks`, {} = off; on in the
     # delver-mirror* presets), measured by a second companion process: mtgz.az.companions composes the two
     # the matchup model of a constructed best-of-three mirror and sideboarding by its choice table (docs/ENGINE.md 168,
-    # mtgz.az.matchup: matchup_every 0 = off), through `mtg`'s selfplay_specs hook
-    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, publish={}, yardsticks={}),
+    # mtgz.az.matchup: matchup_every 0 = off), through `mtg`'s selfplay_specs hook; and the forced find's schedule
+    # (docs/ENGINE.md 180, mtgz.az.forced_find: forced_find_schedule {} = off), through the same hook after it
+    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, **FORCED_FIND_SETTINGS, publish={}, yardsticks={}),
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},

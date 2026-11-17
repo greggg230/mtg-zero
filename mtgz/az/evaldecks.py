@@ -14,12 +14,15 @@ import json
 
 
 def eval_spec(spec):
-    """`spec` (the mtg game's JSON) with the evaluation deck set and without dealt decks (`undealt`); the same
+    """`spec` (the mtg game's JSON) with the evaluation deck set, without dealt decks (`undealt`) and without the forced
+    find (docs/ENGINE.md 180: a self-play training aid, `mtgz.az.forced_find`); the same
     rule as the engine's `MtgSpec::eval_json`. A spec with explicit decklists keeps them, and so does a metagame (its 75s,
     docs/ENGINE.md 176: evaluation plays every pairing as self-play does)."""
     s = json.loads(undealt(spec)) if spec and spec.strip() else {}
     if not isinstance(s, dict):
         raise ValueError(f'mtg spec is not a JSON object: {spec!r}')
+    # (the forced find is a self-play training aid, docs/ENGINE.md 180: evaluation plays every pick of the network's own)
+    s.pop('forced_find', None)
     if s.get('decks', 'random') == 'random' and 'metagame' not in s:
         s['decks'] = 'eval'
     return json.dumps(s, separators=(',', ':'))

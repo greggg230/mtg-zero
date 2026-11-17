@@ -87,6 +87,12 @@ impl DdA {
     }
 }
 
+/// Whether a card's spell ability searches a library and graveyard for a pile ([`DdA::PileFromLibrary`]): the search the
+/// forced find constrains (ENGINE.md 180).
+pub(crate) fn searches_a_pile(def: &crate::db::CardDef) -> bool {
+    def.spell.as_ref().is_some_and(|a| a.program.iter().any(|op| matches!(op, crate::program::Op::Ext(crate::program::Ext::DdA(DdA::PileFromLibrary { .. })))))
+}
+
 /// How many cards a search of `p`'s library and graveyard for `n` cards
 /// finds (CR 701.23d), and the bounds on how many come from the graveyard.
 fn pile_bounds(g: &Game, p: PlayerId, n: u8) -> (usize, usize, usize) {
@@ -114,10 +120,26 @@ impl Game {
                         }
                     }
                 }
-                let (_, min_gy, max_gy) = pile_bounds(self, p, n);
+                let (t, min_gy, max_gy) = pile_bounds(self, p, n);
                 let k = f.picked.len();
                 if k >= max_gy {
                     return Flow::Next;
+                }
+                // The forced find (ENGINE.md 180, a self-play setting): the pile's last pick, with no card of the
+                // spec's yet, is that card - here a graveyard one; one in the library is the library part's last pick,
+                // so the graveyard part ends now (its only other answer would be `PASS`).
+                if let Some(ff) = self.ff_of(f.source_def) {
+                    match self.ff_must(ff, p, k + 1 == t, &f.picked, &[], false) {
+                        Some(crate::forced_find::Must::Graveyard(c)) => {
+                            self.ff.forced_now = true;
+                            self.note(|g| format!("P{p}'s pile takes {} (forced_find)", g.name(c)));
+                            let opts = vec![Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }];
+                            self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
+                            return Flow::Suspend;
+                        }
+                        Some(crate::forced_find::Must::Library) => return Flow::Next,
+                        None => self.ff.forced_now = false,
+                    }
                 }
                 let gy = self.player(p).graveyard.clone();
                 let start = match f.picked.last() {
@@ -150,6 +172,11 @@ impl Game {
                         f.i += 1;
                     }
                     Some(Choice::Pass) => return self.dd_pile_found(f, p),
+                    // (The forced find's last pick from the graveyard, ENGINE.md 180.)
+                    Some(Choice::Card(c)) if self.ff.forced_now => {
+                        f.picked.push(c);
+                        f.i += 1;
+                    }
                     Some(other) => unreachable!("library pick answer {other:?}"),
                     None => {
                         if f.i == 0 {
@@ -164,6 +191,30 @@ impl Game {
                 }
                 let lib = self.library_sorted(p);
                 let def = |c: CardIdx| self.objs[c.i()].def;
+                // The forced find (ENGINE.md 180, a self-play setting): the pile's last pick, with no card of the
+                // spec's yet, is that card - its definition's library option (whatever the floor), else the
+                // graveyard's card.
+                if let Some(ff) = self.ff_of(f.source_def) {
+                    match self.ff_must(ff, p, need == 1, &f.picked, &f.picked_defs, true) {
+                        Some(crate::forced_find::Must::Library) => {
+                            self.ff.forced_now = true;
+                            let i = lib.iter().position(|&c| def(c) == ff.card).expect("a library card to force");
+                            assert!((i as u16) < act::LIBRARY_N, "library slot {i} out of range");
+                            self.note(|g| format!("P{p}'s pile takes {} (forced_find)", g.db.def(ff.card).name));
+                            let opts = vec![Opt { action: act::LIBRARY + i as u16, choice: Choice::Def(ff.card) }];
+                            self.ask(Task::Run(f.clone()), p, DecisionKind::SearchLibrary, opts);
+                            return Flow::Suspend;
+                        }
+                        Some(crate::forced_find::Must::Graveyard(c)) => {
+                            self.ff.forced_now = true;
+                            self.note(|g| format!("P{p}'s pile takes {} (forced_find)", g.name(c)));
+                            let opts = vec![Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }];
+                            self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
+                            return Flow::Suspend;
+                        }
+                        None => self.ff.forced_now = false,
+                    }
+                }
                 let mut opts: Vec<Opt> = Vec::new();
                 for (i, &c) in lib.iter().enumerate() {
                     let d = def(c);
@@ -226,6 +277,10 @@ impl Game {
     fn dd_pile_found(&mut self, f: &mut Frame, p: PlayerId) -> Flow {
         let lib_found: Vec<CardIdx> = self.cards_of_defs(p, &std::mem::take(&mut f.picked_defs));
         let gy_found: Vec<CardIdx> = std::mem::take(&mut f.picked);
+        // (The forced find's record of this resolution, ENGINE.md 180: before any card moves.)
+        if let Some(ff) = self.ff_of(f.source_def) {
+            self.ff_record(ff, p, &lib_found, &gy_found);
+        }
         // Which library cards were found is private: the other player loses
         // track of the library (ENGINE.md 10; as `finish_search`).
         self.scramble(p, &[], false, true);
@@ -277,6 +332,9 @@ impl Game {
         self.scramble(p, &pile, false, false);
         let found: Vec<DefId> = pile.iter().map(|&c| self.objs[c.i()].def).collect();
         self.note(|_| format!("P{p} finds {} card(s) and exiles the rest", found.len()));
+        if self.ff_of(f.source_def).is_some() {
+            self.ff_note();
+        }
         f.pile = pile;
         Flow::Next
     }

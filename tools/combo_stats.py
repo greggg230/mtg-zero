@@ -4,6 +4,7 @@ Measuring only: no rule, encoding or search change. Read-only for runs (writes o
 
   python tools/combo_stats.py play CKPT --decks doomsday_8027957,izzet_delver_8016541 --sims 1024,64 \\
       --games 100 --out DIR [--label L] [--seed 1] [--batch 25] [--threads 4] [--device cpu]
+  python tools/combo_stats.py selfplay CKPT --p 0.5 --decks ... (the same flags)   # with the forced find: NOT a measurement
   python tools/combo_stats.py scan DIR/L.b000.games.json.gz [...] [--jobs 4]   # rebuild + per-game stats
   python tools/combo_stats.py report DIR/*.stats.jsonl [--md OUT.md] [--json OUT.json]
 
@@ -31,6 +32,20 @@ each resolved Doomsday's pile (the library after it, top first, and the choices 
 was within reach (in the pile or in the hand), the life left; each Show and Tell's cards each player put onto the
 battlefield; Sneak Attack activations; fatties and Omniscience entering the battlefield and how (show / sneak /
 cast); the winner's attackers in its last attack.
+
+selfplay. `play` with the Doomsday warm-up's forced find in the spec (docs/ENGINE.md 180, mtgz.az.forced_find: a share
+--p of Doomsday's resolutions must put Thassa's Oracle in the pile) - what the self-play of a `legacy-meta3-ddwheel` run
+plays at that p, to watch the network's own piles while the wheel is on. Not a measurement: `play` (and every
+evaluation) refuses the forced find; the exit gate reads `play`'s games.
+
+The Oracle at each resolved Doomsday (`ff` in a stats line, `oracle` in the report): `voluntary` (the pile holds it and the
+player chose it), `forced` (its last pick was forced: the engine's play-by-play line "P<p>'s forced find: <class> (drawn
+<bool>)", only with the forced find), `in_hand` (none in the pile, one in the caster's hand), `not_findable` (none in the
+library or graveyard when it resolved), `missed` (one could be found, none chosen). With the forced find the class is the
+engine's; without it the state's (the same order). A drawn resolution whose Oracle would have been the network's own LAST
+pick reads `forced` (the decision had one option): the warm-up's voluntary share is exact on the undrawn resolutions
+(`undrawn`); `play`'s games have no draw. The exit gate (the user's): the Oracle in the network's own piles (`voluntary`)
+in at least 50% of resolutions, plus Oracle wins against Delver.
 
 report. Per label: games, player 0's score (+- binomial se), each deck's score on the play and on the draw, the win
 methods per winning deck, the turn of the win, mulligans, decisions and seconds per game, unfinished games and
@@ -66,6 +81,8 @@ FATTIES = ('Emrakul, the Aeons Torn', 'Griselbrand', 'Atraxa, Grand Unifier')
 TRACKED = (DOOMSDAY, ORACLE, SHOW, SNEAK, OMNI) + FATTIES
 COMBAT_STEPS = ('combat_damage', 'first_strike_damage')
 CHOICE_KINDS = ('ChooseGraveyardCard', 'SearchLibrary', 'PutOnTop')
+# the Oracle at a resolved Doomsday (module docs; engine/src/forced_find.rs FfClass, in its order)
+FF_CLASSES = ('voluntary', 'forced', 'in_hand', 'not_findable', 'missed')
 
 
 def say(*a):
@@ -115,14 +132,20 @@ def seats_for(ckpt, sims, chance_k=2, c_puct=1.0):
 
 
 def play(ckpt, decks, sims, games, out, label=None, seed=1, batch=25, threads=4, groups=2, conc=None, device='cpu',
-         max_steps=20000, sparse=True, max_turns=60, log=say):
+         max_steps=20000, sparse=True, max_turns=60, log=say, forced_find=None):
+    """`forced_find` None: a measurement (the spec refuses the forced find); a share p: `selfplay` (module docs)."""
     from zero import games as G
     from zero.infer import NetEvaluator, drive
     from zero.net import load
     from zero.local_config import portable_path
-    label = label or f'{decks[0]}-vs-{decks[1]}_s{sims[0]}-{sims[1]}'
+    from mtgz.az import forced_find as FF
+    label = label or f'{decks[0]}-vs-{decks[1]}_s{sims[0]}-{sims[1]}' + ('' if forced_find is None else f'_ff{forced_find:g}')
     os.makedirs(out, exist_ok=True)
     spec = deck_spec(decks[0], decks[1], max_turns=max_turns)
+    if forced_find is None:
+        FF.refuse(spec, 'combo_stats play')
+    else:
+        spec = FF.with_forced_find(spec, forced_find)
     seats = seats_for(ckpt, sims)
     model, _ = load(ckpt, device, game='mtg')
     ev = NetEvaluator(model, device)
@@ -130,6 +153,9 @@ def play(ckpt, decks, sims, games, out, label=None, seed=1, batch=25, threads=4,
             'ckpt_sha256': sha256(ckpt)[:16], 'decks': list(decks), 'sims': [int(s) for s in sims], 'spec': spec,
             'seats': seats, 'paired': False, 'commit': head_commit(), 'device': device, 'threads': threads,
             'groups': groups}
+    if forced_find is not None:
+        meta['selfplay'] = True                 # (the forced find on: not a measurement, docs/ENGINE.md 180)
+        meta['forced_find'] = json.loads(spec)['forced_find']
     nb = (games + batch - 1) // batch
     for b in range(nb):
         n = min(batch, games - b * batch)
@@ -191,6 +217,11 @@ class Reader:
 
     def __init__(self, decks):
         self.decks = decks
+        # the Oracle at each resolving Doomsday (module docs): its copies in each seat's main; where it was as the
+        # resolution began (stack id -> zone); the engine's forced-find line (stack id -> (class, drawn))
+        self.oracle_main = [_main_count(d, ORACLE) for d in decks]
+        self.where = {}
+        self.ff = {}
         self.spells = []                  # tracked casts: {card, p, turn, outcome, by}
         self.live = {}                    # stack id -> index into spells (tracked spells on the stack; still there
         #                                   at the end of a game: outcome None)
@@ -221,6 +252,14 @@ class Reader:
                 self.sneak.append({'p': int(m.group(1)), 'turn': turn})
         # a Doomsday resolving: its choices (the decisions while it is the top of the stack)
         top = (before.get('stack') or [None])[-1] if before.get('stack') else None
+        if top and top.get('name') == DOOMSDAY and not top.get('ability'):
+            # (where the Oracle is until the resolution's first choice: the state it resolves from; its forced-find line)
+            if not self.choices.get(top['stack']):
+                self.where[top['stack']] = self.oracle_where(before, top.get('controller'))
+            for ln in lines:
+                m = re.search(r"P(\d)'s forced find: (\w+) \(drawn (true|false)\)", ln)
+                if m:
+                    self.ff[top['stack']] = (m.group(2), m.group(3) == 'true')
         if top and top.get('name') == DOOMSDAY and not top.get('ability') and kind in CHOICE_KINDS:
             self.choices[top['stack']].append(text)
         # a Show and Tell about to resolve: the battlefields before (its first choice, or the state it leaves)
@@ -275,15 +314,40 @@ class Reader:
                             how = 'cast'
                     self.entered.append({'card': card, 'p': p, 'turn': after.get('turn'), 'how': how})
 
+    def oracle_where(self, st, p):
+        """Where player p's Oracle is in state `st`: 'hand', 'graveyard', 'library' (a copy of its main not seen in any
+        other zone), else 'gone' (exiled, on the battlefield or the stack, or none in the main)."""
+        if p is None:
+            return None
+        pl = st['players'][p]
+        if ORACLE in names_of(pl.get('hand')):
+            return 'hand'
+        if ORACLE in names_of(pl.get('graveyard')):
+            return 'graveyard'
+        seen = sum(names_of(pl.get(z)).count(ORACLE) for z in ('exile', 'battlefield'))
+        seen += sum(1 for e in st.get('stack') or [] if e.get('name') == ORACLE and not e.get('ability')
+                    and e.get('controller') == p)
+        return 'library' if self.oracle_main[p] > seen else 'gone'
+
     def doomsday_resolved(self, sp, after, sid):
         p = sp['p']
         pile = library_top(after, p)
         hand = names_of(after['players'][p].get('hand'))
+        where = self.where.pop(sid, None)
+        ff = self.ff.pop(sid, None)
+        if ff:
+            cls, drawn = ff
+        else:
+            # (no forced find: the state's class, in the engine's order - module docs)
+            cls = ('voluntary' if ORACLE in pile else 'in_hand' if ORACLE in hand or where == 'hand'
+                   else 'missed' if where in ('library', 'graveyard') else 'not_findable')
+            drawn = None
         self.doomsday.append({'p': p, 'turn': sp['turn'], 'pile': pile, 'library': after['players'][p].get('library'),
                               'choices': self.choices.pop(sid, []), 'hand': hand,
                               'life': after['players'][p].get('life'),
                               'oracle_in_pile': ORACLE in pile, 'oracle_in_hand': ORACLE in hand,
-                              'oracle_reachable': ORACLE in pile or ORACLE in hand})
+                              'oracle_reachable': ORACLE in pile or ORACLE in hand,
+                              'oracle_where': where, 'ff': cls, 'ff_drawn': drawn})
 
     def show_resolved(self, sp, after, sid):
         bef = self.show_before.pop(sid, None)
@@ -293,6 +357,20 @@ class Reader:
             nb = collections.Counter(bef[p]) if bef else collections.Counter()
             put.append(sorted((na - nb).elements()) if bef else None)
         self.show.append({'p': sp['p'], 'turn': sp['turn'], 'put': put})
+
+
+_MAINS = {}
+
+
+def _main_count(deck, card):
+    """Copies of `card` in decklist `deck`'s main (data/decks names; 0 for an unknown name)."""
+    if deck not in _MAINS:
+        try:
+            from mtgz.az import decklists as D
+            _MAINS[deck] = D.names(D.load(deck)['main'])
+        except (OSError, KeyError, ValueError):
+            _MAINS[deck] = []
+    return _MAINS[deck].count(card)
 
 
 def method_of(final, prev, recent=()):
@@ -379,6 +457,7 @@ def scan_row(E, meta, row):
     method = method_of(final, prev, R.recent)
     return {'label': meta['label'], 'batch': meta['batch'], 'gid': row['gid'], 'driver_seed': meta['driver_seed'],
             'decks': meta['decks'], 'sims': meta['sims'], 'over': bool(row['over']),
+            'forced_find': meta.get('forced_find'),
             'aborted': bool(row.get('aborted')), 'result': row['result'], 'winner': w,
             'reason': final.get('reason'), 'method': method, 'turn': final.get('turn'),
             'starting': final.get('starting'), 'mulligans': [p.get('mulligans') for p in final['players']],
@@ -468,7 +547,8 @@ def summarize(rs):
     """One label's numbers (a dict; `table` renders it)."""
     n = len(rs)
     d0, d1 = rs[0]['decks']
-    out = {'label': rs[0]['label'], 'decks': [d0, d1], 'sims': rs[0]['sims'], 'games': n}
+    out = {'label': rs[0]['label'], 'decks': [d0, d1], 'sims': rs[0]['sims'], 'games': n,
+           'forced_find': rs[0].get('forced_find')}
     s0 = sum(r['result'][0] for r in rs)
     out['p0_score'] = s0 / n
     out['p0_se'] = se(s0 / n, n)
@@ -555,6 +635,10 @@ def summarize(rs):
                                        and s['outcome'] == 'resolved'),
                 'top_piles': [[list(k), c] for k, c in piles.most_common(8)],
                 'pile_cards': dict(cards.most_common(25)),
+                # the Oracle at each resolution (module docs): all, and the undrawn ones (the forced find's draw said no)
+                'oracle': {k: sum(1 for _, x in res if x.get('ff') == k) for k in FF_CLASSES},
+                'undrawn': {k: sum(1 for _, x in res if x.get('ff') == k and x.get('ff_drawn') is False) for k in FF_CLASSES},
+                'drawn': sum(1 for _, x in res if x.get('ff_drawn')),
             }
         out['doomsday'] = info
     # Show and Tell / Sneak Attack
@@ -617,6 +701,8 @@ def table(s):
          f'* tracked casts: ' + ', '.join(f'{k} {v}' for k, v in s['spells'].items())]
     if s['countered_by']:
         L.append('* countered by: ' + ', '.join(f'{k} {v}' for k, v in s['countered_by'].items()))
+    if s.get('forced_find'):
+        L.append(f'* **SELF-PLAY with the forced find** {s["forced_find"]} (docs/ENGINE.md 180): not a measurement')
     for p, x in (s.get('doomsday') or {}).items():
         L += [f'* **Doomsday ({p})**: cast {x["casts"]} times in {x["games_cast"]} games ({x["games_cast"] / s["games"]:.2f} of games), '
               f'outcomes {x["outcomes"]}; resolved {x["resolved"]} in {x["games_resolved"]} games; '
@@ -628,6 +714,17 @@ def table(s):
               f'after a resolved Doomsday: Oracle cast in {x["oracle_cast_after"]}, Oracle win in {x["oracle_win_after"]}; '
               f'mean game turn of the cast {x["cast_turn"]:.1f}, game turns from the resolution to the end {x["turns_to_end"]:.1f}',
               f'  * pile cards (games with the card in the pile): {x["pile_cards"]}']
+        o, n_res = x.get('oracle') or {}, x['resolved']
+        if n_res:
+            vol = o.get('voluntary', 0)
+            L.append(f'  * **the Oracle at the resolutions**: ' + ', '.join(f'{k} {o.get(k, 0)}' for k in FF_CLASSES)
+                     + f'; **in its own piles {vol}/{n_res} = {vol / n_res:.3f}** (exit gate >= 0.5: '
+                     f'{"met" if vol / n_res >= 0.5 else "not met"})')
+            u = x.get('undrawn') or {}
+            nu = sum(u.values())
+            if x.get('drawn') or nu:
+                L.append(f'  * forced find: drawn {x["drawn"]}, undrawn {nu} (' + ', '.join(f'{k} {u.get(k, 0)}' for k in FF_CLASSES)
+                         + (f'; own piles among the undrawn {u.get("voluntary", 0) / nu:.3f}' if nu else '') + ')')
         for pile, c in x['top_piles'][:5]:
             L.append(f'  * pile x{c}: {" / ".join(pile)}')
     for p, x in (s.get('sneak_show') or {}).items():
@@ -810,10 +907,7 @@ def search_spots(ckpt, spots, sims_list, repeats=8, device='cpu', log=say):
 
 
 # ====================================================================================== main
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest='cmd', required=True)
-    p = sub.add_parser('play')
+def _play_args(p):
     p.add_argument('ckpt')
     p.add_argument('--decks', required=True, help='DECK0,DECK1 (data/decks names)')
     p.add_argument('--sims', default='64,64', help='S0,S1: each player\'s simulations')
@@ -829,6 +923,16 @@ def main(argv=None):
     p.add_argument('--max-steps', type=int, default=20000)
     p.add_argument('--max-turns', type=int, default=60)
     p.add_argument('--torch-threads', type=int, default=None)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    p = sub.add_parser('play')
+    sp = sub.add_parser('selfplay', help='play with the forced find (docs/ENGINE.md 180): not a measurement')
+    sp.add_argument('--p', type=float, required=True, help='the forced find\'s share of Doomsday\'s resolutions')
+    _play_args(sp)
+    _play_args(p)
     s = sub.add_parser('scan')
     s.add_argument('files', nargs='+')
     s.add_argument('--jobs', type=int, default=1)
@@ -863,7 +967,7 @@ def main(argv=None):
             json.dump({'spots': [{k: v for k, v in sp.items() if k not in ('spec', 'actions')} for sp in spots],
                        'repeats': a.repeats, 'results': res}, f, indent=1)
         return
-    if a.cmd == 'play':
+    if a.cmd in ('play', 'selfplay'):
         if a.torch_threads:
             import torch
             torch.set_num_threads(a.torch_threads)
@@ -872,7 +976,7 @@ def main(argv=None):
         if len(decks) != 2 or len(sims) != 2:
             ap.error('--decks and --sims take two values')
         play(a.ckpt, decks, sims, a.games, a.out, a.label, a.seed, a.batch, a.threads, a.groups, a.conc, a.device,
-             a.max_steps, max_turns=a.max_turns)
+             a.max_steps, max_turns=a.max_turns, forced_find=a.p if a.cmd == 'selfplay' else None)
     elif a.cmd == 'scan':
         files = [f for x in a.files for f in (sorted(glob.glob(x)) or [x])]
         res = scan(files, a.jobs)

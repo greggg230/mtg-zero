@@ -527,6 +527,8 @@ impl Describer<'_> {
             // where whole-deck clouds are -, the last known identities of gone objects - described with each stale
             // reference, `obj` -, a loop action's activation in progress)
             sightings, sight_at: _, found, sightings_lost: _, ref_lki: _, loop_open,
+            // (ENGINE.md 180: the forced find's records, a self-play setting's; a described position's game has none)
+            ff: _,
         } = g;
         let empty = |n: usize, what: &str| if n == 0 { Ok(()) } else { unsupported(what) };
         empty(face_down.len() + face_down_ids.len(), "face-down cards (exiled face down, face-down permanents)")?;

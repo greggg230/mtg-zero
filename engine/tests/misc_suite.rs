@@ -30,6 +30,8 @@ mod draft_matches;
 mod eoe_net;
 #[path = "farm_fuzz_seeds.rs"]
 mod farm_fuzz_seeds;
+#[path = "forced_find.rs"]
+mod forced_find;
 #[path = "hidden_refs.rs"]
 mod hidden_refs;
 #[path = "interactions_copies.rs"]
