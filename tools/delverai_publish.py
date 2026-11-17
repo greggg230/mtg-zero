@@ -115,6 +115,12 @@ paths), from <run>/yardsticks.jsonl (the run's companion writes it, `tools/run_y
 run's blunder-check record `blunders.<run>` (tools/delverai_blunders.py's, the Progress tab's "Blunder checks passed"
 chart) is posted again whenever the run's canary cache changed.
 
+A metagame run (the spec's `"metagame"`, docs/ENGINE.md 176, 185; tools/delverai_meta.py): the record says `run_kind`
+'metagame' and carries `metagame` (its 75s, the forced find's p by iteration, the cells yardstick, its own self-play by
+ordered pairing read from the training shards by a thread of its own every minute, combo statistics of every
+--combo-every'th generation); its recorded games are --games different pairings (--games 9: every cell once), each seat
+labelled with its deck. Its files (selfplay_cells.json, combo/) are in --state-dir like the others.
+
 Every record carries `started`: the run's start (its directory's creation time; None where the file system does not
 keep one) - the site's default run is the newest main (non-side) run by it (delverai worker defaultRun).
 """
@@ -134,6 +140,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mtgz.az import decklists, replays, sideboard_census, yardsticks as YS  # noqa: E402
+import delverai_meta as META  # noqa: E402
 from zero import elo as zelo, runctl  # noqa: E402
 
 SETTINGS = ('preset', 'iters', 'games', 'sims', 'sims_fast', 'p_full', 'sims_minor', 'temp_moves', 'arch', 'hidden',
@@ -332,6 +339,7 @@ def _eval_seconds(m, e):
 # This publisher's recording and sideboard census in progress (set by one_pass, read by the progress thread).
 RECORDING = {}
 CENSUS = {}
+COMBO = {}                     # a metagame run's combo statistics in progress (delverai_meta.combo_pass)
 
 
 def _last(rows, f):
@@ -375,12 +383,15 @@ def now_record(run, cfg, prog, rows, state):
         out['recording'] = dict(RECORDING)
     if CENSUS:
         out['census'] = dict(CENSUS)
+    if COMBO:
+        out['combo'] = dict(COMBO)
     out['est'] = {
         'selfplay_s': _last(rows, lambda r: (r.get('phases') or {}).get('selfplay_s')),
         'train_s': _last(rows, lambda r: (r.get('phases') or {}).get('train_s')),
         'eval_s': _last(rows, lambda r: r.get('eval_s')),
         'record_s': (state.get('record_s') or [None])[-1],
         'census_s': (state.get('census_s') or [None])[-1],
+        'combo_s': (state.get('combo_s') or [None])[-1],
     }
     return out
 
@@ -391,8 +402,8 @@ def deck_of(cfg):
         spec = json.loads(cfg.get('spec') or '{}')
     except ValueError:
         return None
-    if not spec.get('constructed'):
-        return None
+    if not spec.get('constructed') or 'metagame' in spec:
+        return None                # (a metagame's 75s: the record's metagame.decks, delverai_meta)
     d = decklists.load(decklists.IZZET_DELVER)
     main = sorted(set(spec['decks']['p0']), key=spec['decks']['p0'].index)
     counts = {n: spec['decks']['p0'].count(n) for n in main}
@@ -849,6 +860,9 @@ def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=Non
         **({'keep_yardstick': keep_yardstick(yardstick, os.path.basename(os.path.abspath(run)))} if yardstick else {}),
         **({'sideboard_census': census} if census else {}),
         **({'yardsticks': ys} if (ys := yardsticks_record(run)) else {}),
+        # a metagame run (docs/ENGINE.md 176, 185): its kind and its block (tools/delverai_meta.py)
+        **({'run_kind': 'metagame', 'metagame': META.record(run, cfg, rows, state_dir or run)}
+           if META.is_metagame(cfg) else {}),
     }, **(extra or {}))
 
 
@@ -912,6 +926,65 @@ def census_pass(run, a, state, state_path, log=print, kick=None):
     if kick:
         kick.set()
     return True
+
+
+def combo_pass(run, a, state, state_path, log=print, kick=None):
+    """A metagame run's combo statistics (tools/delverai_meta.py combo_pass) of the newest checkpoint divisible by
+    --combo-every that has none -> True when made. A failure is logged with its traceback and that generation is not
+    tried again (the state's `combo_failed`)."""
+    cfg = _json(os.path.join(run, 'config.json'), {}) or {}
+    if not getattr(a, 'combo_every', 0) or not META.is_metagame(cfg):
+        return False
+    sd = a.state_dir or run
+    due = META.combo_due(state, sd, run, a.combo_every, a.min_iter)
+    if due is None:
+        return False
+    it, ck = due
+    os.makedirs(os.path.join(sd, META.COMBO_DIR), exist_ok=True)
+    log(f'combo statistics of generation {it}: {a.combo_games} games a pairing at {a.combo_sims} simulations')
+    t0 = time.time()
+    COMBO.update(iter=it, since=t0, games=a.combo_games)
+    if kick:
+        kick.set()
+    try:
+        e = META.combo_pass(run, cfg, sd, it, ck, a.combo_games, a.combo_sims, a.threads, a.device, log=log,
+                            progress=COMBO)
+    except Exception:
+        log(f'combo statistics of generation {it} FAILED (not tried again):\n' + traceback.format_exc())
+        state['combo_failed'] = sorted(set(state.get('combo_failed') or []) | {it})
+        _save_state(state, state_path)
+        return False
+    finally:
+        COMBO.clear()
+    dd = e.get('doomsday') or {}
+    log(f'combo statistics of generation {it}: Doomsday resolved {dd.get("resolved")}, the Oracle {dd.get("oracle")}, '
+        f'gate {(dd.get("gate") or {}).get("met")}')
+    state['combo_s'] = (state.get('combo_s') or [])[-9:] + [round(time.time() - t0, 1)]
+    _save_state(state, state_path)
+    if kick:
+        kick.set()
+    return True
+
+
+def selfplay_pass(run, a, log=print):
+    """A metagame run's self-play by pairing (tools/delverai_meta.py selfplay_pass): every complete iteration's shards
+    not tallied yet -> the iterations tallied."""
+    cfg = _json(os.path.join(run, 'config.json'), {}) or {}
+    if not META.is_metagame(cfg) or getattr(a, 'no_selfplay_cells', False):
+        return []
+    return META.selfplay_pass(run, cfg, a.state_dir or run, log)
+
+
+def selfplay_loop(a, log, kick, every=60):
+    """The self-play tally every `every` seconds on its own thread: the run keeps only its last `keep_data`
+    iterations' shards (minutes), so a recording or a combo measurement must not hold it up."""
+    while True:
+        try:
+            if os.path.exists(os.path.join(a.run, 'config.json')) and selfplay_pass(a.run, a, log) and kick:
+                kick.set()
+        except Exception:                  # noqa: BLE001 - said; the next pass tries again
+            log('self-play tally failed:\n' + traceback.format_exc())
+        time.sleep(every)
 
 
 def _save_state(state, state_path):
@@ -1052,6 +1125,7 @@ def one_pass(run, a, key, log=print, kick=None, settle_s=30):
     (`kick`, its wake-up event) the progress is posted here, before and after. `settle_s`: how long the checkpoint's
     file must be unchanged (0 in the final pass: the run has exited)."""
     if kick is None:
+        selfplay_pass(run, a, log)
         post_progress(run, a, key, log)
     state_path = os.path.join(a.state_dir or run, 'delverai.json')
     state = _json(state_path, {}) or {}
@@ -1063,16 +1137,27 @@ def one_pass(run, a, key, log=print, kick=None, settle_s=30):
         # (the newest recorded generation's census when it has none: e.g. recorded before this publisher started)
         if census_pass(run, a, state, state_path, log, kick) and not kick:
             post_progress(run, a, key, log)
+        if combo_pass(run, a, state, state_path, log, kick) and not kick:
+            post_progress(run, a, key, log)
         return False
     it, path = ck
-    what = 'matches' if match_format(_json(os.path.join(run, 'config.json'), {}) or {})[0] == 'bo3' else 'games'
+    cfg = _json(os.path.join(run, 'config.json'), {}) or {}
+    what = 'matches' if match_format(cfg)[0] == 'bo3' else 'games'
     log(f'recording {a.games} {what} of iteration {it} ({path}){f" against {a.record_vs}" if a.record_vs else ""}')
+    meta_decks, seed = None, None
+    if META.is_metagame(cfg):
+        # a metagame run (tools/delverai_meta.py): a driver seed whose first games are all different pairings
+        meta_decks = META.decks(cfg)
+        n = len(meta_decks) ** 2
+        seed, ps = META.covering_seed(replays.spec_with_log(cfg['spec']), a.games, n)
+        log(f'  driver seed {seed}: pairings {ps}' + ('' if len(set(ps[:min(a.games, n)])) == min(a.games, n)
+                                                      else ' (NOT all different: the best seed found)'))
     t0 = time.time()
     RECORDING.update(iter=it, since=t0, games=a.games)
     if kick:
         kick.set()
     try:
-        reps = replays.record(path, games=a.games, sims=a.sims, device=a.device,
+        reps = replays.record(path, games=a.games, sims=a.sims, device=a.device, seed=seed,
                               title=f'Generation {it}', log=log, opp=a.record_vs)
     finally:
         RECORDING.clear()
@@ -1082,6 +1167,11 @@ def one_pass(run, a, key, log=print, kick=None, settle_s=30):
     saved = []
     for r in reps:
         meta = {'seat_labels': seat_labels(r, path, a, it)} if a.record_vs else None
+        if meta_decks is not None:
+            lab = META.seat_labels(r, meta_decks)
+            if lab is None:
+                raise RuntimeError(f'iteration {it}: a metagame game without its pairing in its first state')
+            meta = dict(meta or {}, seat_labels=lab)
         saved.append({'path': replays.core.save(r, out), 'meta': meta})
         if a.dry_run:
             log(f'  (dry run) {dict(replays.summary(r), **(meta or {}))}')
@@ -1096,6 +1186,7 @@ def one_pass(run, a, key, log=print, kick=None, settle_s=30):
     if kick:              # the progress record lists the recorded generations
         kick.set()
     census_pass(run, a, state, state_path, log, kick)       # (its matches are up first, then what it sideboards)
+    combo_pass(run, a, state, state_path, log, kick)        # (a metagame run: the combo statistics when due)
     if not kick:
         post_progress(run, a, key, log)
     return True
@@ -1205,6 +1296,12 @@ def main(argv=None):
     ap.add_argument('--census', type=int, default=sideboard_census.STARTS, metavar='N',
                     help=f"a best-of-three run: the sideboard census's starts for each recorded generation (default "
                          f"{sideboard_census.STARTS}; 0: none)")
+    ap.add_argument('--combo-every', type=int, default=16, metavar='N',
+                    help='a metagame run: combo statistics of every Nth generation (tools/delverai_meta.py; 0: none)')
+    ap.add_argument('--combo-games', type=int, default=24, help='a metagame run: combo statistics games a pairing')
+    ap.add_argument('--combo-sims', type=int, default=64, help='a metagame run: combo statistics simulations')
+    ap.add_argument('--no-selfplay-cells', action='store_true',
+                    help="a metagame run: don't read the self-play results by pairing from the shards")
     ap.add_argument('--supervised', action='store_true',
                     help="started by the run's supervisor (docs/ENGINE.md 163): end with the run (module docstring)")
     ap.add_argument('--end-poll', type=float, default=5.0, help='--supervised: seconds between looks at the run\'s end')
@@ -1229,6 +1326,7 @@ def main(argv=None):
     if a.loop is not None:
         kick = threading.Event()
         threading.Thread(target=progress_loop, args=(a, key, log, kick), daemon=True).start()
+        threading.Thread(target=selfplay_loop, args=(a, log, kick), daemon=True).start()
         kick.set()
     finish = None
     if a.supervised:

@@ -38039,6 +38039,94 @@ dealt preset (a worker built from this commit); glassroad / caverna / kingdombui
   tests/test_token_graphs.py -q` in zero-core at 06647c5; a few seconds of GPU). Expected: 'max' bit-identical over
   repeats and within 2e-5 of the CPU; legacy deterministic on its duplicate-free rows.
 
+## 185. The metagame run on delverai: a run kind of its own, the cells and self-play by pairing, the wheel, combo statistics, replays by pairing (branch `feat/publish-metagame`, 2026-11-17)
+
+Branch `feat/publish-metagame` from main a6b21835 (the commit `legacy-meta3-r1` runs from; zero-core pin unchanged; no
+Rust change: digests untouched). Section number: main's newest is 184 (`fix/dup-action-reduce`); no branch had 185.
+Publishing and tooling only: no rule, encoding, search or training change.
+
+**Why.** The user asked on 2026-11-17 to make delverai.greggg230.com the site of mtg-zero's experiments, starting with
+the three-deck metagame run (176, 177, 179, 180; `E:/...runs/legacy-meta3-r1`, launched with the Delver-only publisher
+off). `tools/delverai_publish.py` could not publish it at all (`deck_of` reads the spec's `decks.p0`, which a metagame
+spec has not), and none of what the run is about - per-cell strength, its own matchups, the Doomsday wheel, the combo -
+was on the site.
+
+### 185.1 The record (tools/delverai_meta.py)
+
+A run whose spec has `"metagame"` gets `run_kind: 'metagame'` (the site's page for it) and a `metagame` block (the
+module's docstring has the shapes): `decks` (the 75s with their provenance, the sideboards of data/decks/ for the
+pictures), `weights`, `wheel` (the forced find's p by iteration: `forced_find.p_at` of the run's schedule - the p its
+self-play spec carries), `cells` (177's `cells_report` without paths or error text, plus missing and failing items and
+the cells settings; `fit` when yardsticks.jsonl has rows of the cells' joint fit against a reference pool - kind
+`cells_fit`, another lane's additive kind, not on main on 2026-11-17: `fit_row` is a pluggable reader taking the fields
+it knows, each cell a rating +- se with its reference, per-deck, overall, anchored and the flags; the site prefers them
+to the gains), `selfplay` (185.2), `combo` (185.3). `deck` is None for such a run. A Delver run's record is
+unchanged (tested).
+
+### 185.2 Self-play by ordered pairing, from the training shards
+
+The game log has no line for a resigned best-of-one game (176.9) and 60% of the run's self-play games resign, so the
+matchup table is read from the iteration's shards (`data/iter_NNNN/*.npz`, local, the Mac's and the farm's rows) by a
+thread of the publisher every minute (the run keeps `keep_data` iterations: minutes): each row's player, its game's
+result (`z` from the row's player's side), its opponent's deck (the encoding's opponent-pool bag, `bag::OPP_POOL` at
+`belief.O_BAGS`: a best-of-one with open decklists shows the opponent's whole pool - checked against the engine on 120
+games) and its deck target's total (the frame opponent's unknown cards: the whole main at a game's first decision).
+A writer's shards are concatenated and split into games where the result changes, where a player's opponent deck
+changes, or where a player's deck target is the whole main again after it was less. The tally per iteration:
+`{iter, games (DONE.json: local + remote accepted), read, unread (one player's rows only), cells {'i|j': [games, seat
+0's points]}, resigned}` in the publisher's state dir (`selfplay_cells.json`).
+
+Not exact, and said so on the site: two games in a row with the same pairing and result in which no player learnt an
+opponent's card read as one, and a game whose known opponent card goes back into the hidden zones reads as two.
+Iterations 10-23 of legacy-meta3-r1: read within -0.5% / +0.7% of the games played (e.g. 2,000 of 2,000, 1,978 of
+1,984, 2,006 of 2,000), 5-19 games a 2,000 without a readable pairing. The exact count needs a line per resigned
+game from the run (zero-core's driver rows carry the pairing through `record_setup`, or the game log writing
+resignations): a run change for its next restart, not made here.
+
+### 185.3 Combo statistics every --combo-every generations
+
+`combo_pass`: `tools/combo_stats.py play` (179: no forced find, the yardsticks' seat, --combo-sims 64) of the checkpoint
+for Doomsday against every deck (the mirror reads both seats) and Sneak and Show against Delver and itself, --combo-games
+a pairing, then `scan` and `summarize`; the entry keeps, per opponent, Doomsday's casts, resolutions, Oracle wins and the
+five classes of 180.7 (`voluntary` / `forced` / `in_hand` / `not_findable` / `missed`), the share in its own piles with
+its binomial se, the exit gate (own piles >= 0.5 and an Oracle win against Delver), and Sneak and Show's Show and Tell,
+Sneak Attack, fatty, Omniscience and damage-win games. Files under the state dir's `combo/`. A failure is logged and that
+generation not tried again (`combo_failed`). Cost on the desktop's CPU beside the live run (below normal priority, 4
+torch threads): about 3 minutes a game per batch of two games at 64 simulations on 11-17; batches of 24 share their
+network calls, so a pairing of 24 games is much less than 24 times that (see the preview's numbers in the report).
+
+### 185.4 Recorded games: every pairing
+
+`covering_seed`: the recorder's driver seed is chosen so that its first `--games` games are all different pairings
+(`game_seed`: zero-core's driver gives game k's slot `Random(driver rng.randrange(2^30))`, whose third draw seeds the
+Game; tested against `zero.replay.RecordingDriver`): with `--games 9` each recorded generation plays each cell once,
+~0.5 s of search. The listing record carries `pairing` (`replays.summary`, from the first state's `match.pairing`) and
+each seat's deck as `seat_labels`.
+
+### 185.5 Running it beside the live run
+
+A standalone publisher, as before 163 (the run's `publish` is `{}`): from a checkout of this branch with the run
+worktree's `_engine.pyd` (and zero-core's) copied in, `--state-dir` outside the run directory (its files never in the
+run's), hidden and below normal priority, recording on the CPU:
+
+    python tools/launch_hidden.py <log> python -u tools/delverai_publish.py <run> --loop 300 --every 8 --games 9 \
+        --device cpu --threads 4 --state-dir <dir> --combo-every 32 --combo-games 24 --title "..."
+
+It reads the run's files only (config, metrics, models, data/, the yardsticks' rows, the Elo pool); it never touches
+the supervisor.
+
+### 185.6 Tests
+
+`tests/test_delverai_meta.py` (9): the 75s and provenance; the wheel's points and p now; the opponent-pool bag reading
+the opponent's deck on 120 engine games (all 9 cells); `segment` on synthetic rows (results, decks, the deck target's
+reset, a one-player game unread); an iteration's tally from stored and compressed shards and the pass's state; the
+covering seed against the real recorder; a recorded game's seat labels and listing pairing; the combo entry and its
+gate; the publisher's record of a metagame run (kind, block, no paths) and a Delver run's (unchanged); the cells_fit
+reader (known fields only, a bad row skipped). Gate: `python tools/warm_pool.py run --sha c8bbc4b4 -- python
+tools/gate.py python` beside the live run - **GATE PASSED WITH SKIPS python c8bbc4b4a686 in 529s** (the live-run fence
+only); the fit reader's commit and this line after it.
+`tests/test_delverai_publish.py` and `tests/test_run_publisher.py` pass unchanged.
+
 ## 186. The cells yardstick's reference pool and one joint rating fit: every cells game in one model per deck pair, the most informative reference, bootstrap standard errors over deals, transitivity flags (branch `feat/cells-pool`, 2026-11-17)
 
 Branch `feat/cells-pool` from main be9075dd (zero-core pin 06647c5 unchanged; no Rust change: digests untouched).
@@ -38315,3 +38403,4 @@ documented as they are:
   it is not promoted though its cadence is due, and generation 80 is (ladder g32, g80).
 * **Gate** on c24afb33 (in a warm worktree beside the live run): **GATE PASSED WITH SKIPS python c24afb333924 in
   294s** (the live-run fence only: 6 tests). The commit after it changes this section only.
+

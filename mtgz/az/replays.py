@@ -391,7 +391,8 @@ def save_json(rep, out_dir, name=None):
 
 
 def summary(rep):
-    """The site's listing record of a replay: who played, who won, how, and how long."""
+    """The site's listing record of a replay: who played, who won, how, and how long (a metagame game's `pairing`
+    too)."""
     final = rep['states'][rep['final']] if rep['states'] else {}
     first = rep['states'][0] if rep['states'] else {}
     res = rep.get('result')
@@ -399,7 +400,10 @@ def summary(rep):
     if res and max(res) > min(res):
         winner = res.index(max(res))
     src = rep.get('source') or {}
+    # a metagame game (docs/ENGINE.md 176): its pairing, each seat's deck (index in the spec's list and name)
+    pairing = (first.get('match') or {}).get('pairing') if isinstance(first, dict) else None
     return {'format': rep['format'], 'title': rep['title'], 'group': rep['group'], 'created': rep['created'],
+            **({'pairing': {'decks': list(pairing['decks']), 'names': list(pairing['names'])}} if pairing else {}),
             'run': src.get('run'), 'iter': src.get('iter'), 'game_index': rep['game_index'],
             'seats': [s['name'] for s in rep['seats']], 'sims': rep['seats'][0].get('sims'),
             'selfplay': rep['selfplay'], 'winner': winner, 'draw': bool(res) and winner is None,
