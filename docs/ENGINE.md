@@ -38257,5 +38257,38 @@ full per-cell dicts, `transitivity` with every check, `pairs`, `method`), not a 
   manual promotion (suggested, `cells-freeze` writes it, the suggestion goes); the exploiter (186.5); the retroactive
   fit of ladder records and the switch re-measuring nothing; a leg judged against its baseline's first games; the
   setting's refusals; `cells-fit --json` playing nothing; the children's command lines and the fit item's wait; the
-  take-over's checks (only the run's companion is stopped). `tests/test_cells_yardstick.py`,
-  `tests/test_yardstick_cost.py`, `tests/test_yardsticks.py`, `tests/test_farm_play.py` unchanged and passing.
+  take-over's checks (only the run's companion is stopped); the fit lane outliving the others when finishing.
+  `tests/test_cells_yardstick.py`, `tests/test_yardstick_cost.py`, `tests/test_yardsticks.py`,
+  `tests/test_farm_play.py` unchanged and passing.
+* **Smoke** on CPU, a scratch copy (`E:/mtg-zero-scratch/meta3-cells-pool/smoke`, never runs/) of 177.6's smoke run:
+  its 4 `delver-smoke` checkpoints and its 18 ladder-mode rows (iteration 3 against gen0 and against iteration 2, with
+  their cached baselines). (a) `cells-fit` on those records alone: 60 games, every cell of iteration 3 rated (overall
+  +68 +- 101: two deals a pair, a smoke). (b) The switch: `watch --once` with `{cells_games 8, cells_sims 4,
+  cells_device cpu, cells_mode pool, cells_auto_promote true, cells_promote_every 1, cells_pool_active 1, from 1,
+  cells_fit_boot 100}`: 23 child processes, 0 failures, 29 min - gen0's 3 baselines, iteration 1's 6 pairs against
+  gen0 (the only member), its fit (promoted g1, cadence), g1's 3 baselines, iteration 2's pairs (the two mirrors'
+  main legs of 6 games against g1 and their continuity legs of 2 against gen0; the other four pairs' predicted
+  scores were nearest 0.5 against gen0; its first pair had been fixed against gen0 before g1 existed), its fit
+  (promoted g2), and iteration 3's fit over its ladder rows, nothing of it played again (promoted g3). `cells`
+  printed the pool (g1 1038.7 +- 40.1, g2 983.7 +- 50.4, g3 1097.5 +- 40.3 from the fit), each generation's 3 x 3
+  table and the pairs' m and c; the reading rule flags nearly every cell at this size (4 to 8 deals a pair): a smoke,
+  not a measurement. A first attempt ran iteration 3's fit (ready first: its rows existed) before iterations 1 and 2
+  were measured and promoted it out of order; the fits are now chained (186.2), and the fit lane no longer ends at
+  once under `--once`.
+* **Retroactive on the live run** (read-only): `cells-fit E:/mtg-zero/runs/legacy-meta3-r1` on its first ladder row
+  (iteration 32's Delver mirror against gen0, 120 games, sequential): -85 +- 29 Elo, the row's own -82.6 +- 26.7.
+* **Gate**: `python tools/gate.py python` in a warm worktree beside the live run (the Mac's share and the desktop's
+  throttled) on a8129db9: privacy, build, worker build, pytest, the run-loop smoke (16 games) - **GATE PASSED WITH
+  SKIPS python a8129db99458 in 695s** (the live-run fence only: 2 tests). The commit after it changes this section
+  only.
+
+### 186.9 Open questions
+
+* The reference is chosen per deck pair, not per cell: one match plays both of a pair's cells (A in seat gid % 2).
+  Choosing per cell needs a match per cell (twice the matches, half the games each).
+* Generation 0 is in every pool but played only when it is the most informative member or the end of the
+  continuity chain; a fixed small share against it every time ("played lightly") would be one more setting.
+* The reading rule's reading (186.5), and whether a threshold promotion below 0.20 (a checkpoint much worse than the
+  newest reference) should promote at all.
+* A transitivity flag also trips on the neighbour of an exploiter (186.5); pred_se is the full fit's.
+* Sequential stopping (182) is optional stopping: the fit ignores it (a small bias, as the ladder's cells did).
