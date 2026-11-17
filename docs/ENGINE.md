@@ -37294,3 +37294,52 @@ missing waits (missing, never measured without it).
 `python tools/gate.py python` on 3b6acdbc (main 35c48ef3 merged, pair_spec): privacy, build, the worker build, pytest
 (205 + 98 + 110 + 132 passed, 44 on the desktop; `tests/test_cells_yardstick.py` 18 among them), the run-loop smoke
 (16 games) - **GATE PASSED WITH SKIPS python 3b6acdbc320a in 579s** (the live-run fence only: 8 tests beside pb3).
+
+## 179. Combo statistics of constructed best-of-one games: `tools/combo_stats.py`, and the three-deck probe of pb3@122 (branch `feat/combo-stats`, 2026-11-16)
+
+Branch `feat/combo-stats` from main a4fd5701 (zero-core pin unchanged). Why: the planned three-deck Legacy metagame run
+(176, 177: Izzet Delver, Legacy Doomsday, Sneak and Show; its network forked from the Delver best-of-three line) starts
+from a network that has never seen a Doomsday or Sneak and Show card played. The question was whether Doomsday can win
+by its combo at all (the pile is five picks out of the library; the Thassa's Oracle win comes several decisions later),
+and whether a bigger search budget at the pile would fix it. Measuring and tooling only: no rule, encoding, search or
+training change; digests untouched.
+
+### 179.1 The tool
+
+`python tools/combo_stats.py play CKPT --decks D0,D1 --sims S0,S1 --games N --out DIR` plays the checkpoint against
+itself with a deck per seat (the constructed best-of-one spec of the open decklists, 120) and a simulation budget per
+player (the yardsticks' best-of-one seat, 164: the run's move rule, root belief minus the deck tilt, eval_cache; c_puct
+1, chance_k 2; every decision searched, mana payments too), in batches with the driver's move log; the same `--seed`
+gives the same deals, so two budgets of one pairing are paired by deal. Panicked games go to `DIR/game_failures.jsonl`
+(zero.game_failure records). `scan` rebuilds every game from its seed and moves with the play-by-play on and writes a
+stats line per game: the end's method (`oracle`, `pact` - the loser's own Pact of Negation trigger -, `combat`,
+`damage`, `decking`, `turn_cap`, ...), the turn, play / draw, mulligans, every cast of the tracked cards (Doomsday,
+Thassa's Oracle, Show and Tell, Sneak Attack, Omniscience, the fatties) with its outcome and the counterspell that
+answered it, each resolved Doomsday's pile (the library after it, top first) and the choices that built it, Show and
+Tell's cards on both sides, Sneak Attack activations, how each fatty entered and the winner's last attackers. The
+roles are card names: any deck that plays the cards reads the same way. `report` gives the tables (`--pair A:B`: the
+paired difference of two budgets over common deals; `--merge`). `spots CKPT GAMES...` takes every resolving Doomsday's
+first choice that offers Thassa's Oracle from played games and searches the whole resolution again at given budgets
+(tools/delver_blunders.search_many, the same seat), reading whether the finished pile holds the Oracle.
+Tests: `tests/test_combo_stats.py` (random-move games of the open decklists: a resolved Doomsday read with its pile;
+the end's methods; the paired difference).
+
+### 179.2 The probe (pb3's iteration 122, both seats, 64 simulations unless said; the Mac's CPU)
+
+| pairing (p0 vs p1) | games | p0 score | p0's combo wins |
+|---|---|---|---|
+| Doomsday vs Delver | 200 | 0.005 +- 0.005 | 1 Oracle win; Doomsday resolved in 32 games |
+| Doomsday vs Sneak and Show | 200 | 0.145 +- 0.025 | 1 Oracle win; Doomsday resolved in 60 games |
+| Sneak and Show vs Delver | 350 | 0.194 +- 0.021 | Show and Tell resolved in 152 games; 68 wins, all combat (Emrakul in 53) |
+| Doomsday mirror | 100 | 0.570 +- 0.050 | 15 Oracle wins (of 100 games), 26 losses to the caster's own Pact |
+| Sneak and Show mirror | 100 | 0.450 +- 0.050 | 20 turn-cap draws |
+| Delver mirror | 50 | 0.520 +- 0.071 | - |
+| Doomsday at 256 / 1024 vs Delver | 50 / 50 | 0.000 / 0.000 | none; paired with the 64-sim deals: +0.000 |
+| Doomsday at 256 / 1024 vs Sneak and Show | 50 / 50 | 0.140 / 0.110 | 2 / 1 Oracle wins; paired: -0.030 +- 0.066 / -0.060 +- 0.060 |
+
+The piles: of 270 Doomsday resolutions at 64 simulations, 8 piles held the Oracle (6 of them in the mirror); the
+network fills the pile with Edge of Autumn, Lotus Petal, fetchlands, Personal Tutor and Doomsday itself. The searched
+spots (31 against Delver, 4 searches each): the finished pile held the Oracle in 8 of 124 at 64, 256 and 1024
+simulations alike (the same two spots), 2 of 16 spots at 4096 and 3 of 16 at 16,384 (one search each); 0 of 120 for 30
+mirror spots at 64 and 1024. A larger budget does not find the pile: the value the search backs up does not know that
+an Oracle in a five-card library wins. No engine panic, no game that did not replay, no unfinished game (1,200 games).
