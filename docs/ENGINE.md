@@ -37343,3 +37343,53 @@ spots (31 against Delver, 4 searches each): the finished pile held the Oracle in
 simulations alike (the same two spots), 2 of 16 spots at 4096 and 3 of 16 at 16,384 (one search each); 0 of 120 for 30
 mirror spots at 64 and 1024. A larger budget does not find the pile: the value the search backs up does not know that
 an Oracle in a five-card library wins. No engine panic, no game that did not replay, no unfinished game (1,200 games).
+
+## 180. The farm pool's lock-order deadlock that hung pb3 (zero-core `fix/pool-lock-order` d32bf98, docs/az.md 55; branch `fix/pool-lock-order`, 2026-11-16)
+
+Branch `fix/pool-lock-order` from main e2811d25. It re-pins zero-core from 2c67426 to d32bf98, which is 2c67426 plus
+one commit. The change is Python only: `zero/farm_pool.py`, `zero/remoteplay.py`, a test and docs/az.md 55. The rolling
+branch carries the same fix: zero-core `feat/rolling-farm` 1338d49 merges d32bf98.
+
+### 180.1 The hang
+
+pb3's run process stopped making progress for 91 minutes during self-play. A py-spy dump of the process showed an ABBA
+deadlock:
+
+* **the main thread** was in `RemotePlay.progress`. It held `RemotePlay.mu` and called `Pool.progress`, which waited
+  for `Pool.mu`;
+* **the pool's thread** `zero-pool-delver-bo3-pb3` was in `Pool._loop` -> `_ingest` -> `_drain`. It held `Pool.mu`
+  across its whole loop and called `RemotePlay.accept_pool` once per held game, which waited for `RemotePlay.mu`;
+* **the worker reader threads** (`zero-rsp-w*-out`, `_event`) all queued on `RemotePlay.mu` behind them.
+
+The window had existed since the farm pool arrived (docs/az.md 45). A 2 h pause made it wide: 736 farm games were held
+when pb3 resumed, so one drain held `Pool.mu` through 736 `accept_pool` calls while the pump polled progress. After the
+first restart (still on the old pin) the pool held 1,376 games and pb3 hung again within a minute. The orchestrator then
+relaunched pb3 without the farm pool.
+
+### 180.2 The fix
+
+There is now one lock order, outermost first: `Pool.dmu` -> `RemotePlay.mu` -> `Pool.mu`.
+
+* `Pool.mu` is innermost. A pool never calls RemotePlay while it holds `Pool.mu`.
+* The drain takes one game per step: it chooses the game under `Pool.mu`, offers it to the quota with no pool lock held,
+  then writes it under `Pool.mu` again. Each step holds `RemotePlay.mu` only for one quota check, and `Pool.mu` only for
+  that one game, so a backlog of any size releases both locks after every game.
+* A drain lock `Pool.dmu` is held across the whole drain. `end_phase` takes it first, so every game the quota accepted is
+  in its shard before the iteration's writers close. RemotePlay never calls `end_phase` while it holds its own mu.
+* `close` takes only `Pool.mu`, because `_membership` calls it under `RemotePlay.mu`. A drain that is mid-offer when the
+  pool closes sees `closed` under `Pool.mu`, closes the writers it opened and stops.
+* `RemotePlay.progress` reads the pools' progress after releasing its own mu.
+
+The games accepted, their order, the stale drops, the shard bytes and the metrics are unchanged. Only the locking
+changed. Self-play and training are byte-identical, so the digests do not change and there is no RULES_EPOCH bump.
+
+The regression test is zero-core `tests/test_farm_pool.py::test_progress_polling_never_deadlocks_a_draining_backlog`. It
+builds a real RemotePlay with a pool and 4,000 held games. One thread polls `progress()` in a loop while another drains
+the backlog, with a thread switch interval of 10 us and one 30 s deadline for both. On 2c67426 it deadlocks (66 polls,
+3,999 games still held). On d32bf98 both threads finish, and the quota is met by the pool's 4,000 games.
+
+### 180.3 The farm worker does not change
+
+The fix touches no Rust and none of the worker's inputs. `git diff 2c67426 d32bf98` lists only
+`python/zero/farm_pool.py`, `python/zero/remoteplay.py`, `tests/test_farm_pool.py` and `docs/az.md`. pb3 therefore keeps
+release BUILD 88c69488 and CUDA alternate e182abd5.
