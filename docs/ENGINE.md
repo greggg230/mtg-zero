@@ -37301,6 +37301,77 @@ missing waits (missing, never measured without it).
 (205 + 98 + 110 + 132 passed, 44 on the desktop; `tests/test_cells_yardstick.py` 18 among them), the run-loop smoke
 (16 games) - **GATE PASSED WITH SKIPS python 3b6acdbc320a in 579s** (the live-run fence only: 8 tests beside pb3).
 
+## 178. Rolling self-play leases: the farm worker's rolling jobs and the pool's per-row staleness (branch `feat/rolling-farm`, zero-core `feat/rolling-farm`, 2026-11-16)
+
+(Section number: 175-177 are main's.)
+
+**Why.** On the farm a classic self-play lease starts all its games at once and replaces none: its batch drains as
+games end, and it lasts as long as its slowest game, so GPU leases kept about a third of their full-batch rate and
+38-43% of what the GPU PCs played was thrown away as stale (pb3, iterations 83-131, 2026-11-16; zero-core docs/az.md
+54.1; the per-PC data is in the maintainer's notes). zero-farm PROTOCOL rev 15 (section 10) adds rolling leases: N games
+in flight, a new game started whenever one ends, ids released as the worker asks, each new generation switched to in
+place, finished games uploaded in small chunks, and rows judged stale one by one by the network that searched them.
+
+**What.** The zero-core pin moves from 2c67426 (`feat/fast-farm-export`, pb3's pin) to 347eb6c (`feat/rolling-farm`,
+branched from it: 46f7625 the worker, c2a2980 the pool, 878f728 docs/az.md 54, 347eb6c a quit guard); nothing else in this repo changes - the worker binary (`worker/`) is zero_worker's. zero-core docs/az.md 54
+has the design; in short:
+
+* **The worker** announces `"features": ["rolling"]` in `hello` and `info`. A job line with `"rolling": true` (and
+  `flush_s`, default 120 s) keeps `conc` games in flight while ids are left, then idles (status and ping as always) until
+  `{"op": "extend", "games": total}` raises its games or `finish` / `quit` ends it; it sends `low` once per games value
+  when fewer than `conc` ids are left to start; a records file is also written `flush_s` after the first game in it
+  finished; a `checkpoint` builds the new network's session and self-test on a thread of its own while the games go on
+  with the old one, then switches in place (each row keeps `net`). A failed self-test stays fatal. `end` is `finish` or
+  `quit` with the released ids not finished as `unfinished`.
+* **The pool** (the trainer's side): run setting `pool_rolling` ('' = off) is the farm run's `selfplay.rolling` (a JSON
+  object of `inflight`, `gpu_inflight`, `block`, `max_s`, `flush_s`, or `auto`). Set, the first publish checks the worker
+  build announces `rolling` (refused loudly otherwise), every self-play PUT carries it, and a held game loses only its
+  rows of a network older than i - 1 - `pool_max_stale` (the game is dropped only when none is left).
+
+**Defaults byte-identical.** A job line without `rolling` runs exactly the loop of before (the same games, rows, files
+and events; `extend` answered with the non-fatal "unknown op" error of before; the classic checkpoint path unchanged);
+`pool_rolling` '' sends every PUT body of before and judges staleness per game as before. The only change a classic job
+sees is `hello` / `info` gaining the `features` key. pb3's config sets no `pool_rolling`: on this pin it plays and trains
+as on 2c67426, and its farm leases stay classic until the coordinator (migration 0011), agents 0.2.13 and `pool_rolling`
+are all in place.
+
+**Tests.** zero-core: zero_worker's suites (`tests/rolling.rs`, 7: extend / low / idle / finish, a rolling job's games
+== the classic job's games of the same ids byte for byte, quit, flush_s while idle, a classic job unchanged, two
+checkpoint switches while the games go on; `proto.rs` unit tests: the job line, `extend` reaching a rolling job only,
+`features`) and the pool's pytest (`test_farm_pool.py`: the setting, the worker check, the PUT bodies, per-row staleness,
+`keep_rows` on tails / overrides / sparse rows), the full core pytest, `tools/smoke_all.sh --with-this-core
+--build-only`. Here: the `optin-core` gate (its farm-compat step: the release worker vs zero-core's Python worker,
+byte-identical, on classic jobs).
+
+### 178.1 The gate, the builds and the checks of e6c84c9e (docs only)
+
+* `optin-core` on e6c84c9eb9de: **GATE PASSED WITH SKIPS** (the live-run fence only: 17 live-run-hazard tests of the
+  core pytest; 662 passed). checkpoint_compat identical (visits and cq, 3,272 samples each); digests = the recorded
+  files (constructed e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993); farm compat
+  identical (gate 2: 6 games, 2,484 rows, 150 batches; gate 3: 6 games); core tests 204, az 54, hidden 28; the other
+  games built against the core.
+* Farm builds of e6c84c9e: release worker **769143b41098727bd70744ec** (CPU pack d531424b) and its CUDA re-sign
+  **4741ab3a1218ad3a446bbfbe** (pack 855d2162, min_agent 0.2.11): the same executable (sha256 236d65af...), which
+  announces `features: ["rolling"]`.
+* `tools/farm_gates.py` on the live best-of-three run's config with its iter 143 checkpoint and published gen-143 graph:
+  FARM GATES PASSED (gate 2: 8 games, 1,714 rows, 200 batches identical; gate 3: 12 games, nets 143 / 144, identical),
+  and again with gen 143's phase spec (gate 2: 1,957 rows; gate 3: 12 games, identical).
+* The CUDA build's self-test on gen 143 (`probe-providers --providers cuda,cpu`): cuda max abs 2.3e-6, cpu 1.8e-6, both
+  deterministic.
+* A rolling job end to end through `serve` with the release worker on the CPU (gens 142 and 143, conc 2, flush_s 30):
+  `low` at 3 ids, a lower `extend` ignored, `extend` to 40, a checkpoint to gen 143 built in the background (`selftest`
+  gen 143, 2.6e-6) while the games went on, four records files cut by `flush_s` (rows of nets 142 and 143), `finish` ->
+  `end` `finish`, `unfinished` [7007, 7040) (7 of 40 released ids played), 191 s.
+
+### 178.2 Re-pin to zero-core feat/rolling-farm 1338d49: the farm pool's lock-order fix (ENGINE.md 180 on main)
+
+zero-core `feat/rolling-farm` 1338d49 merges `fix/pool-lock-order` d32bf98, the deadlock fix that hung pb3 (main's
+ENGINE.md 180, zero-core docs/az.md 55). In the merge, rolling's per-row staleness moved into `Pool._head`, which runs
+under `Pool.mu`. `accept_pool` is called without `Pool.mu`. zero-core `tests/test_farm_pool.py` passes on 1338d49 (13
+tests, including the deadlock regression and the rolling tests). The change is Python only and touches none of the
+worker's Rust inputs, so farm builds 769143b4 and 4741ab3a stay. The rolling re-pin should be gated again when it
+merges.
+
 ## 179. Combo statistics of constructed best-of-one games: `tools/combo_stats.py`, and the three-deck probe of pb3@122 (branch `feat/combo-stats`, 2026-11-16)
 
 Branch `feat/combo-stats` from main a4fd5701 (zero-core pin unchanged). Why: the planned three-deck Legacy metagame run
@@ -39282,3 +39353,70 @@ fetchland too late").
 commit failed one load-sensitive timeout (tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]: no match rows
 within 600 s on a busy machine; code this branch does not touch; the test passes alone). Engine untouched, digests
 unchanged. This paragraph is docs only.
+
+## 195. Rolling leases on main and by default: every farm-attached run gets rolling self-play leases (zero-core `feat/rolling-default` 459599f, docs/az.md 54.7; branch `feat/rolling-main`, 2026-11-17)
+
+**Why.** Rolling self-play leases (178; zero-farm PROTOCOL rev 15, section 10) lived on side branches (`feat/rolling-farm`,
+and `feat/rolling-meta3` for legacy-meta3-r1's pin, 188). The coordinator serves them (rev 15/16) and the stable farm
+agent (0.2.14) plays them with memory-safe in-flight sizing. Measured on 2026-11-17 on one farm PC, same network: classic
+128-match leases 471 matches/h, rolling leases at 160 in flight 1,550 matches/h over 65 minutes (3.3x). The user
+approved (2026-11-17) making them the default for every future farm-attached run.
+
+**What.**
+
+* `feat/rolling-farm` 97c13ba3 merged into main (178, placed between main's 177 and 179). The zero-core pin moves from
+  68b6a40 (`feat/game-records-all`) to 459599f (`feat/rolling-default`): 425459a merges zero-core `feat/rolling-farm`
+  1338d49 (the worker's rolling jobs, `pool_rolling` with per-row staleness, the pool's lock order: docs/az.md 54, 55)
+  into 68b6a40 without conflicts, and 459599f flips the default.
+* **A deliberate behaviour change** (zero-core docs/az.md 54.7): `zero.run.DEFAULTS['pool_rolling']` '' -> `'auto'`
+  (`{"inflight": "auto", "gpu_inflight": "auto"}`). It is read only by the farm pool (`selfplay_remote` naming a
+  `pool:` entry), so a run without a farm pool plays and trains byte for byte as before (the gate's checkpoint
+  compatibility and digests below). A farm run on this pin: every self-play PUT carries `selfplay.rolling`; staleness is
+  judged per row, so **which farm rows are kept changes** (a game straddling the window keeps its newer rows); and the
+  pool refuses loudly a `pool_worker` that does not announce `rolling` (no silent fallback to classic leases). A run
+  whose `config.json` already saved `pool_rolling` '' (started on a core that knew the key) stays classic when resumed;
+  one whose config predates the key takes 'auto'. Off: `pool_rolling=''` - which a worker build before rolling jobs
+  needs explicitly. legacy-meta3-r1 and delver-bo3-pb3 pin older cores and are unaffected.
+* **The farm-compat step checks the feature.** `tools/farm_compat.py` gains check 3: the release worker's `info`
+  (`--ort-dll none`) must announce `rolling` with a build id; its JSON summary carries `features` and its final line
+  says "features rolling announced (build ...)". gate.py's `check_farm_compat` (the engine, encoding, search-core,
+  optin-core and repin tiers' `farm-compat` step) refuses a summary without `features` `passed` and `rolling` listed,
+  even under a "PASSED" line, so a build that loses the feature fails the gate. `tests/test_gate.py::
+  test_the_farm_compat_checker_wants_positive_evidence` covers a missing feature, a missing build id and a missing
+  `features` key.
+
+**Tests.** zero-core 459599f: `tests/test_farm_pool.py::test_default_pool_rolling_is_auto` (a pool with the default PUTs
+`selfplay.rolling` {"inflight": "auto", "gpu_inflight": "auto"}; '' PUTs no `rolling`), the classic farm-pool tests
+with `pool_rolling` '' unchanged; cargo test --workspace (the worker's rolling suite included) and the core pytest.
+
+### 195.1 The gate of 55c0761e
+
+Tier **search-core** (a zero-core behaviour change: the default of a farm setting), in warm-1 against main d3ec4957
+as the baseline (warm-2): **GATE PASSED WITH FLAKY RETRIES search-core 55c0761ebeec in 3035s** - the flaky test was
+`tests/test_remoteplay.py::test_a_worker_slower_than_a_phase_is_capped_at_its_floor` (core pytest, passed alone on
+retry; 734 passed). Checkpoint compatibility **identical** across both checkouts (visits 3,303 samples, cq 3,303
+samples): a run without a farm pool plays byte for byte as on main. Digest formats equal to the recorded files:
+constructed dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt
+f78ada3d3d114826 (80 matches). **Farm compat** identical: gate 2 6 games, 2,890 rows, 150 batches; gate 3 6 games,
+2,556 rows, 6 decks; **features rolling announced** (the new check 3). The 4-config search smoke 0 of 4 failed, the
+run-loop smoke 16 games 0 unfinished, this repo's pytest 641 passed (4 skipped), zero-core cargo test 215 passed.
+(While the checkpoint-compat step ran, another session's lease checked warm-2 out at 00c6aec2, main plus Bauble
+measure tools and docs: no engine, worker or core change, so the old side's engine and core were main's either way.)
+
+zero-core 459599f on its own: cargo test --workspace (the worker's rolling suite included) all ok; pytest 775 passed,
+11 skipped, 3 failed - `test_remoteplay.py::test_cotrain_the_local_driver_is_never_starved` (the known timing flake,
+passed alone), `test_token_graphs.py::test_absent_slots_are_never_read[max]` (passed alone) and
+`test_dup_reduce.py::test_max_is_deterministic_on_cuda_and_matches_the_cpu` (fails alone too, and fails the same
+on 68b6a40's own tree, the pin before this one: not this change - the merge and the flip touch only the farm pool,
+the worker crate and run defaults; the gate's Python has no CUDA and skips it; with another session's training run
+on the GPU at the time; open on zero-core's `dup_action_reduce` line, docs/az.md 58).
+
+### 195.2 The merge with main 5fb7e51b, and the other games
+
+d39486bb merges main 5fb7e51b (the Bauble measure's fetchland timing, 194.8, and the review page's verdicts tool: Python
+tools and docs, the same zero-core pin as before) into this branch. Tier **python** on it: **GATE PASSED WITH SKIPS
+python d39486bb43a8 in 393s** (the live-run fence only: another session's run was live on the desktop, so the pytest
+shards and the run-loop smoke ran on the Mac); a first run failed only `test_mac_remote::test_the_macs_selfplay_settings`
+on a shard that fell back to the desktop (174.1's Git Bash path conversion of `MTGZ_MAC_HOME`), passed when rerun with
+`MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`. zero-core 459599f against the other games: `tools/smoke_all.sh --with-this-core
+--build-only` GREEN, games 3 of 3 checked (glassroad-zero, caverna-zero, kingdombuilder-zero build).

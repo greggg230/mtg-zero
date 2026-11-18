@@ -18,14 +18,17 @@ the uniform evaluator has no auxiliary head, the auxiliary targets are still rec
 2. **Gate 3, records** (zero-core tools/worker_records_gate.py --uniform): the worker's game records replayed by the
    trainer's path (`mtgz._engine.replay_rows`) == the worker's own shards of the same games, bit for bit, with every
    game's decks (`record_setup`) compared by the replay.
+3. **Features** (ENGINE.md 195): the worker's `info` announces the protocol feature `rolling` (zero-farm PROTOCOL rev
+   15, 10.5) with this build's id: farm runs get rolling self-play leases by default (zero-core `pool_rolling` 'auto',
+   docs/az.md 54.7) and their pool refuses a worker without it, so a build that loses the feature fails here first.
 
 What this smoke does NOT cover (tools/farm_gates.py, run on a farm run's real config and checkpoint before it
 attaches the farm, ENGINE.md 114.8): the run's own network on both sides through ONNX Runtime (zero-onnx/1 or /2:
 the export, the runtime pack, the root belief through the auxiliary head), the run's own simulation counts, a
 network switch inside a lease, and more games.
 
-Prints one JSON summary, then a last line "farm compat: PASSED ..." or "farm compat: FAILED ..."; exit 0 iff both
-gates passed.
+Prints one JSON summary, then a last line "farm compat: PASSED ..." or "farm compat: FAILED ..."; exit 0 iff all
+three passed.
 """
 import argparse
 import json
@@ -92,6 +95,23 @@ def last_json(text):
     return None
 
 
+REQUIRED_FEATURES = ('rolling',)
+
+
+def worker_features(worker):
+    """Check 3 (module docs): `<worker> info --ort-dll none` -> {'features', 'build_id', 'missing', 'passed'} (passed:
+    exit 0, a build id, and every REQUIRED_FEATURES announced)."""
+    from zero.farm_h2h import worker_json
+    rc, info, text = worker_json(worker, 'info', '--ort-dll', 'none')
+    if rc != 0 or not isinstance(info, dict):
+        return {'features': None, 'build_id': None, 'missing': list(REQUIRED_FEATURES), 'passed': False,
+                'error': f'info exit {rc}: {text.strip()[-300:]}'}
+    feats = list(info.get('features') or [])
+    missing = [f for f in REQUIRED_FEATURES if f not in feats]
+    return {'features': feats, 'build_id': info.get('build_id'), 'missing': missing,
+            'passed': not missing and bool(info.get('build_id'))}
+
+
 def run(cmd, log):
     t0 = time.time()
     p = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', cwd=ROOT)
@@ -144,7 +164,10 @@ def main(argv=None):
     ok3 = rc3 == 0 and bool(r3 and r3.get('identical')) and (r3 or {}).get('rows', 0) > 0 and \
         (r3 or {}).get('setups') == a.games
     summary['gate3'] = {'passed': ok3, 'seconds': s3, 'result': r3, **({} if ok3 else {'tail': tail3})}
-    ok = ok2 and ok3
+    feats = worker_features(a.worker)
+    okf = feats['passed']
+    summary['features'] = feats
+    ok = ok2 and ok3 and okf
     summary['passed'] = ok
     with open(os.path.join(out, 'summary.json'), 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=1)
@@ -154,7 +177,10 @@ def main(argv=None):
           f'{(r2 or {}).get("batches_compared", 0)} batches')
     g3 = (f'gate 3 (records -> trainer rows) {"identical" if ok3 else "DIFFERENT or failed"}: '
           f'{(r3 or {}).get("games", 0)} games, {(r3 or {}).get("rows", 0)} rows, {(r3 or {}).get("setups", 0)} decks compared')
-    print(f'farm compat: {"PASSED" if ok else "FAILED"} - {a.preset}: {g2}; {g3} ({out})')
+    gf = (f'features {",".join(REQUIRED_FEATURES)} announced (build {feats["build_id"]})' if okf else
+          f'features: the worker does NOT announce {feats["missing"]} (announces {feats["features"]}'
+          f'{"; " + feats["error"] if feats.get("error") else ""})')
+    print(f'farm compat: {"PASSED" if ok else "FAILED"} - {a.preset}: {g2}; {g3}; {gf} ({out})')
     return 0 if ok else 1
 
 

@@ -677,9 +677,10 @@ def make_fuzz_shards_checker(games, pool, hidden):
 
 
 def check_farm_compat(output, rc):
-    """tools/farm_compat.py's positive evidence (ENGINE.md 155): exactly one "farm compat: PASSED - ..." line (both
-    gates identical with rows > 0, every game's decks compared: the tool's own checks), its JSON summary with
-    "passed": true + exit 0."""
+    """tools/farm_compat.py's positive evidence (ENGINE.md 155, 195): exactly one "farm compat: PASSED - ..." line (both
+    gates identical with rows > 0, every game's decks compared, the worker announcing `rolling`: the tool's own
+    checks), its JSON summary with "passed": true and "features" "passed": true (the rolling feature, ENGINE.md 195)
+    + exit 0."""
     ms = FARM_COMPAT_RE.findall(output)
     if len(ms) != 1:
         return False, f'{len(ms)} "farm compat:" lines (expected exactly 1)', {}
@@ -691,10 +692,14 @@ def check_farm_compat(output, rc):
             r = (summary.get(g) or {}).get('result') or {}
             extra['farm_compat'][g] = {k: r.get(k) for k in ('games', 'rows', 'batches_compared', 'setups', 'identical')
                                        if k in r}
+        extra['farm_compat']['features'] = (summary.get('features') or {}).get('features')
     if verdict != 'PASSED' or not (summary and summary.get('passed')):
         return False, f'farm compat {verdict}: {text[:250]}', extra
     if rc != 0:
         return False, f'"farm compat: PASSED" but exit {rc}', extra
+    if not (summary.get('features') or {}).get('passed') or 'rolling' not in ((summary.get('features') or {}).get('features')
+                                                                              or []):
+        return False, 'farm compat: no evidence that the worker announces the feature rolling (ENGINE.md 195)', extra
     return True, text[:250], extra
 
 
@@ -1752,7 +1757,8 @@ def farm_compat_step(ctx):
                 [python_exe(), 'tools/farm_compat.py', '--worker', worker_path(ctx), '--out', out], id='farm-compat',
                 checker=check_farm_compat, cleanup=lambda: shutil.rmtree(out, ignore_errors=True), heavy=True,
                 evidence='exactly one "farm compat: PASSED - ..." line (gate 2 and gate 3 identical, rows > 0, every '
-                         "game's decks compared), its JSON summary \"passed\": true + exit 0")
+                         "game's decks compared, the worker announcing rolling), its JSON summary \"passed\": true "
+                         'with features passed + exit 0')
 
 
 def digest_steps(ctx, args):
