@@ -11,6 +11,8 @@ with its own setting overrides, trained one after the other on this machine, the
   python tools/ab.py stop    SPEC          # PAUSE_NEXT each live arm at its boundary (pause_run.py --wait), then STOP
   python tools/ab.py judge   SPEC [--no-publish]   # the cells matches + the metrics table -> <out>/judge/, published
   python tools/ab.py publish SPEC [--dry-run] [--replace]  # (again) the judge's results to the Head-to-heads tab
+  python tools/ab.py farm-gates SPEC [ARM]  # tools/farm_gates.py on each farm arm's config + checkpoint K (its worker)
+  python tools/ab.py farm-pause SPEC ARM    # the arm's coordinator farm run -> "paused" (go does it after each arm)
 
 THE SPEC (JSON):
   {
@@ -25,7 +27,9 @@ THE SPEC (JSON):
     "runs_dir": "E:/mtg-zero/runs",           # default: the source run's parent
     "run_prefix": "meta3-ab-",                # default "<id>-"
     "out": ".",                               # judge/ and ab_state.json here (relative: to the spec's directory)
-    "code": {"worktree": "...", "sha": "887d83c0", "python": "..."},       # default: this checkout, this python
+    "code": {"worktree": "...", "sha": "887d83c0", "python": "...",       # default: this checkout, this python
+             "arms": {"ctrl": {"worktree": "...", "sha": "..."}}},         # an arm's own code (the rest: the above)
+    "farm": {"gates": true, "pause_when_done": true},                       # opt-in: the farm arms (below)
     "env": {"ZERO_TOKEN_GRAPHS": "1"},        # extra environment of the arms' supervisors
     "require_source_idle": true,              # go refuses while the source's supervisor is live (the one GPU)
     "judge": {"games": 200, "device": "cuda", "sims": null, "seed": null, "decks": null, "yardsticks": null,
@@ -62,6 +66,21 @@ FAILED with the retry command (`ab.py publish SPEC`), exit 3; the judge's files 
 THE FARM BUILD: an override `"pool_build": "published"` (in `common` or an arm) is the published farm build of the
 code's commit (`code.sha`, else its worktree's HEAD; "published:<rev>" another commit) with its pool_runtime,
 pool_worker and pool_alternates unless the overrides give them (tools/farm_release.py lookup; docs/ENGINE.md 196).
+
+PER-ARM CODE (code.arms): an arm whose engine differs (an A/B of an engine change) trains from its own pinned
+worktree: its supervisor, fork_run, pause_run and farm gates run there (`check` checks each worktree's sha and engine
+build). The judge runs in the common code's worktree (`code.worktree`): the checkout every arm is measured on.
+
+THE FARM (opt-in, "farm": {...}): an arm self-plays on the farm when its settings name a pool (`selfplay_remote`
+'pool:<farm run>' with pool_build / pool_worker / pool_runtime / pool_alternates ...: setting overrides like any other,
+in `common` or per arm - the same lease settings for every arm unless the A/B is about them; the worker build must play
+the arm's engine: one build per engine, published with tools/farm_build.py beforehand). With "gates" (default true),
+`farm-gates` runs tools/farm_gates.py on each farm arm's forked config.json and checkpoint K with its pool_worker
+(<out>/farm_gates/<arm>/summary.json), and `launch` refuses a farm arm without a passed summary for that worker
+(AGENTS.md: farm compatibility is required; `go` runs the missing gates first). The coordinator's farm run is created
+by the pool's first PUT; with "pause_when_done" (default true) `go` pauses it ("state": "paused": the whole body as GET
+returns it minus alternates[].problems) when the arm ends, so the farm stops serving its last generation.
+`go --no-judge` trains the arms and stops before the cells judge (an A/B judged otherwise).
 
 STOP: `ab.py stop SPEC`; `go` exits when an arm stops before its last iteration (resume: `ab.py launch SPEC ARM`, or
 `go` again: complete arms are skipped). ROLLBACK: stop; delete the arms' run directories; the source was never touched.
@@ -131,7 +150,15 @@ def normalize(spec, base='.'):
     code.setdefault('worktree', None)
     code.setdefault('sha', None)
     code.setdefault('python', None)
+    code['arms'] = dict(code.get('arms') or {})
+    for a, c in code['arms'].items():
+        if a not in s['arms'] or not isinstance(c, dict) or set(c) - {'worktree', 'sha', 'python'}:
+            raise SystemExit(f'spec: code.arms.{a}: an arm\'s {{"worktree", "sha", "python"}}')
     s['code'] = code
+    farm = s.get('farm')
+    if farm is not None and not isinstance(farm, dict):
+        raise SystemExit('spec: farm - {"gates": true, "pause_when_done": true}')
+    s['farm'] = dict({'gates': True, 'pause_when_done': True}, **farm) if farm is not None else None
     s['env'] = {str(k): str(v) for k, v in (s.get('env') or {}).items()}
     s['require_source_idle'] = s.get('require_source_idle', True)
     s['judge'] = dict(JUDGE_DEFAULTS, **(s.get('judge') or {}))
@@ -143,12 +170,25 @@ def normalize(spec, base='.'):
     return s
 
 
-def worktree(s):
-    return s['code']['worktree'] or ROOT
+def worktree(s, arm=None):
+    return (s['code']['arms'].get(arm) or {}).get('worktree') or s['code']['worktree'] or ROOT
 
 
-def python(s):
-    return s['code']['python'] or sys.executable
+def python(s, arm=None):
+    return (s['code']['arms'].get(arm) or {}).get('python') or s['code']['python'] or sys.executable
+
+
+def code_sha(s, arm=None):
+    c = s['code']['arms'].get(arm) or {}
+    return c.get('sha') if c.get('worktree') or c.get('sha') else s['code']['sha']
+
+
+def farm_run(cfg):
+    """The farm run an arm's settings self-play on ('pool:<name>' in selfplay_remote), or None."""
+    for r in str((cfg or {}).get('selfplay_remote') or '').split(','):
+        if r.strip().startswith('pool:'):
+            return r.strip()[5:]
+    return None
 
 
 def run_dir(s, arm):
@@ -263,13 +303,20 @@ def source_k(s):
 
 
 # ------------------------------------------------------------------ commands
-def check(s):
-    wt = worktree(s)
+def check_code(wt, sha):
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=wt, text=True).strip()
-    if s['code']['sha'] and not head.startswith(s['code']['sha']):
-        raise SystemExit(f"{wt} is at {head[:12]}, not {s['code']['sha']}")
+    if sha and not head.startswith(sha):
+        raise SystemExit(f"{wt} is at {head[:12]}, not {sha}")
     if not any(f.startswith('_engine') and f.endswith(('.pyd', '.so')) for f in os.listdir(os.path.join(wt, 'mtgz'))):
         raise SystemExit(f'{wt}: no mtgz/_engine build (bash tools/build_py.sh there)')
+    return head
+
+
+def check(s):
+    wt = worktree(s)
+    head = check_code(wt, s['code']['sha'])
+    for a in s['code']['arms']:
+        print(f'  {a}: code {worktree(s, a)} at {check_code(worktree(s, a), code_sha(s, a))[:12]}; python {python(s, a)}')
     k = source_k(s)
     src = s['source']['run']
     if k is None or not os.path.isfile(os.path.join(src, 'models', f'iter_{k:04d}.pt')):
@@ -279,8 +326,11 @@ def check(s):
           f"({'LIVE' if live else 'not running'})")
     for arm in s['arms']:
         role = 'control' if arm == s['control'] else 'treatment'
+        ov = overrides(s, arm, k)
         print(f"  {arm} ({role}, {s['labels'][arm]!r}): {run_dir(s, arm)} iters {k + 1}..{k + s['iterations']}: "
-              f"{json.dumps(overrides(s, arm, k))}")
+              f"{json.dumps(ov)}")
+        if farm_run(ov) and s['farm'] is None:
+            raise SystemExit(f'{arm} self-plays on the farm ({farm_run(ov)}): the spec needs "farm": {{...}} (the gates)')
     print(f"code: {wt} at {head[:12]}; python {python(s)}; out {s['out']}")
     pub = s['publish']
     if pub['h2h'] or pub['live']:
@@ -300,12 +350,12 @@ def fork(s, k=None):
         if os.path.exists(os.path.join(d, 'config.json')):
             print(f'{d}: forked already')
             continue
-        cmd = [python(s), 'tools/fork_run.py', '--source', s['source']['run'], '--dest', d, '--iter', str(k), '--copy']
+        cmd = [python(s, arm), 'tools/fork_run.py', '--source', s['source']['run'], '--dest', d, '--iter', str(k), '--copy']
         ov = overrides(s, arm, k)
         for key, v in ov.items():
             cmd += ['--set', f'{key}={json.dumps(v)}']
         print(subprocess.list2cmdline(cmd), flush=True)
-        subprocess.run(cmd, cwd=worktree(s), check=True)
+        subprocess.run(cmd, cwd=worktree(s, arm), check=True)
         cfg = jload(os.path.join(d, 'config.json'), {})
         for key, v in ov.items():
             if cfg.get(key) != v:
@@ -323,12 +373,15 @@ def launch(s, arm):
     for a in s['arms']:
         if a != arm and supervisor(run_dir(s, a))[1]:
             raise SystemExit(f'{a} is live: one arm at a time')
+    why = farm_gate_missing(s, arm)
+    if why:
+        raise SystemExit(f'{arm}: {why}')
     env = dict(os.environ, **s['env'])
     env.pop('CUDA_VISIBLE_DEVICES', None)
-    py = python(s)
+    py = python(s, arm)
     with open(os.path.join(d, 'launch_out.txt'), 'a', encoding='utf-8') as lf:
         r = subprocess.run([py, 'tools/launch_hidden.py', os.path.join(d, 'supervisor_console.txt'), py,
-                            'tools/supervise.py', d], cwd=worktree(s), env=env, stdin=subprocess.DEVNULL, stdout=lf,
+                            'tools/supervise.py', d], cwd=worktree(s, arm), env=env, stdin=subprocess.DEVNULL, stdout=lf,
                            stderr=subprocess.STDOUT)
     print(f'{arm}: launch exit {r.returncode}', flush=True)
     return r.returncode
@@ -378,7 +431,7 @@ def stop(s):
     for arm in s['arms']:
         d = run_dir(s, arm)
         if supervisor(d)[1]:
-            subprocess.run([python(s), 'tools/pause_run.py', d, '--wait'], cwd=worktree(s))
+            subprocess.run([python(s, arm), 'tools/pause_run.py', d, '--wait'], cwd=worktree(s, arm))
             open(os.path.join(d, 'STOP'), 'w').close()
             print(f'{arm}: paused at its boundary, STOP written')
 
@@ -556,7 +609,87 @@ def publish_judge(s, dry_run=False, replace=False):
     return 0
 
 
-def go(s, publish=True):
+def farm_gates_dir(s, arm):
+    return os.path.join(s['out'], 'farm_gates', arm)
+
+
+def farm_gate_missing(s, arm):
+    """Why the arm may not start on the farm yet (its config names a pool and the gates have not passed with its
+    worker), or None."""
+    cfg = jload(os.path.join(run_dir(s, arm), 'config.json'), {}) or {}
+    if not farm_run(cfg):
+        return None
+    if s['farm'] is None:
+        return f'it self-plays on the farm ({farm_run(cfg)}): the spec needs "farm": {{...}}'
+    if not s['farm']['gates']:
+        return None
+    sm = jload(os.path.join(farm_gates_dir(s, arm), 'summary.json'), {}) or {}
+    w = str(cfg.get('pool_worker') or '')
+    same = lambda x: os.path.normcase(os.path.normpath(str(x or '').replace('\\', '/')))  # noqa: E731
+    if not sm.get('passed'):
+        return f'no passed farm gates in {farm_gates_dir(s, arm)} (ab.py farm-gates SPEC {arm})'
+    if same(sm.get('worker')) != same(w):
+        return f"the farm gates passed with {sm.get('worker')}, not the arm's pool_worker {w}: run them again"
+    cc = jload(os.path.join(farm_gates_dir(s, arm), 'check_config.json'), {}) or {}
+    if cc.get('failures') != [] or same(cc.get('worker')) != same(w):
+        return (f"the worker's check-config of the arm's settings has not passed with {w} ({cc.get('failures')}; "
+                f"ab.py farm-gates SPEC {arm})")
+    return None
+
+
+def farm_gates(s, arm):
+    """tools/farm_gates.py on the arm's forked config.json and checkpoint K with its pool_worker, in the arm's own
+    code -> exit status (0: both gates passed, or no farm)."""
+    d = run_dir(s, arm)
+    cfg = jload(os.path.join(d, 'config.json'), {}) or {}
+    if not farm_run(cfg):
+        print(f'{arm}: no farm (selfplay_remote names no pool)')
+        return 0
+    k = fork_k(s)
+    out = farm_gates_dir(s, arm)
+    os.makedirs(out, exist_ok=True)
+    # the worker's own check-config of the arm's settings: the farm pool refuses a template whose settings the build
+    # does not know (a build older than the arm's zero-core), which the gates' games do not show
+    w = str(cfg.get('pool_worker') or '')
+    p = subprocess.run([w, 'check-config', os.path.join(d, 'config.json'), '--json'], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+    try:
+        failures = json.loads(p.stdout).get('failures')
+    except ValueError:
+        failures = [f'check-config exit {p.returncode}: {(p.stdout + p.stderr)[-300:]}']
+    jsave(os.path.join(out, 'check_config.json'), {'worker': w, 'failures': failures})
+    if failures:
+        print(f"{arm}: the worker refuses the arm's settings {failures}: publish a worker of the arm's code", flush=True)
+        return 3
+    cmd = [python(s, arm), 'tools/farm_gates.py', '--config', os.path.join(d, 'config.json'),
+           '--checkpoint', os.path.join(d, 'models', f'iter_{k:04d}.pt'), '--worker', str(cfg.get('pool_worker') or ''),
+           '--out', out]
+    print(subprocess.list2cmdline(cmd), flush=True)
+    with open(os.path.join(out, 'farm_gates.log'), 'w', encoding='utf-8') as f:
+        r = subprocess.run(cmd, cwd=worktree(s, arm), stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT)
+    print(f'{arm}: farm gates exit {r.returncode} (log {os.path.join(out, "farm_gates.log")})', flush=True)
+    return r.returncode
+
+
+def farm_pause(s, arm, client=None):
+    """The arm's coordinator farm run -> state 'paused': the whole body as GET returns it, minus the GET-only
+    alternates[].problems (the coordinator refuses a PUT that echoes them). -> the farm run's name, or None."""
+    fr = farm_run(jload(os.path.join(run_dir(s, arm), 'config.json'), {}) or {})
+    if not fr:
+        return None
+    if client is None:
+        from zero import farm_def as FD
+        client = FD.Client()
+    body = dict(client.call('GET', f'/v1/admin/run/{fr}'))
+    body['state'] = 'paused'
+    if body.get('alternates'):
+        body['alternates'] = [{k: v for k, v in x.items() if k != 'problems'} for x in body['alternates']]
+    client.call('PUT', f'/v1/admin/run/{fr}', body=body)
+    print(f'{arm}: farm run {fr} paused', flush=True)
+    return fr
+
+
+def go(s, publish=True, judge_too=True):
     k, live = check(s)
     if publish and s['publish']['h2h'] and not (os.path.isfile(S.uploader_path()) and S.has_key()):
         raise SystemExit(f'the judge publishes (publish.h2h) but the uploader ({S.uploader_path()}) or the upload key '
@@ -567,21 +700,32 @@ def go(s, publish=True):
     k = fork(s, k)
     last = k + s['iterations']
     for arm in [s['control']] + s['treatments']:
+        if s['farm'] and s['farm']['gates'] and farm_gate_missing(s, arm) and farm_gates(s, arm) != 0:
+            raise SystemExit(f'{arm}: the farm gates FAILED ({farm_gates_dir(s, arm)}): go ends here')
+    for arm in [s['control']] + s['treatments']:
         if (newest(run_dir(s, arm)) or 0) >= last:
             print(f'{arm}: complete already')
             continue
         launch(s, arm)
-        if not wait(s, arm, last):
+        ok = wait(s, arm, last)
+        if s['farm'] and s['farm']['pause_when_done']:
+            try:
+                farm_pause(s, arm)
+            except Exception as e:  # noqa: BLE001  (the arm's result stands; retried by hand)
+                print(f'{arm}: FARM PAUSE FAILED ({e}): ab.py farm-pause SPEC {arm}', flush=True)
+        if not ok:
             raise SystemExit(f'{arm} stopped before checkpoint {last}: go ends here (resume: ab.py launch SPEC {arm}, '
                              f'then go)')
-    return judge(s, publish)
+    return judge(s, publish) if judge_too else 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('cmd', choices=['check', 'fork', 'go', 'launch', 'status', 'stop', 'judge', 'publish'])
+    ap.add_argument('cmd', choices=['check', 'fork', 'go', 'launch', 'status', 'stop', 'judge', 'publish', 'farm-gates',
+                                    'farm-pause'])
     ap.add_argument('spec', help='the experiment spec (JSON)')
-    ap.add_argument('arm', nargs='?', help='launch: the arm')
+    ap.add_argument('arm', nargs='?', help='launch / farm-pause: the arm; farm-gates: one arm (default: every arm)')
+    ap.add_argument('--no-judge', action='store_true', help='go: train the arms, then stop (no cells judge)')
     ap.add_argument('--no-publish', action='store_true', help='go / judge: do not post to the Head-to-heads tab')
     ap.add_argument('--dry-run', action='store_true', help='publish: print the record, post nothing')
     ap.add_argument('--replace', action='store_true', help='publish: replace matches already on the site')
@@ -600,7 +744,15 @@ def main(argv=None):
             ap.error(f'launch: an arm ({", ".join(s["arms"])})')
         return launch(s, a.arm)
     elif a.cmd == 'go':
-        return go(s, not a.no_publish)
+        return go(s, not a.no_publish, not a.no_judge)
+    elif a.cmd == 'farm-gates':
+        if a.arm and a.arm not in s['arms']:
+            ap.error(f'farm-gates: an arm ({", ".join(s["arms"])})')
+        return max(farm_gates(s, x) for x in ([a.arm] if a.arm else list(s['arms'])))
+    elif a.cmd == 'farm-pause':
+        if a.arm not in s['arms']:
+            ap.error(f'farm-pause: an arm ({", ".join(s["arms"])})')
+        farm_pause(s, a.arm)
     elif a.cmd == 'status':
         status(s)
     elif a.cmd == 'stop':
