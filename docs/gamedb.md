@@ -85,6 +85,25 @@ end), `countered_by`.
 **sneak** - Sneak Attack activations (player, turn). **entered** - fatties and Omniscience entering the battlefield:
 player, card, turn, `how` (`show`, `sneak`, `cast`, `other`).
 
+**bauble** - one row per activation of Mishra's Bauble or Urza's Bauble (detailed games; `tools/gamedb_bauble.py`,
+ENGINE.md 194). Every condition is the replayed engine state's before the action that activated it (the spectator export
+and its `known` block: the engine's exact hidden-information state, `Obj.known`); the target is the engine's "target
+P<n>" line after it.
+
+| column | meaning |
+|---|---|
+| game_id, iter, idx | the game; the activation's order in it |
+| action, turn, step | the index of the activating action (its target decision is the next one), the turn and step |
+| activator, own_turn | the seat that activated it; on its own turn |
+| bauble, target | `urza` / `mishra`; `self` / `opponent` |
+| opp_targetable | the target decision offered the opponent (false: the engine answered a one-target decision alone) |
+| opp_hand, opp_hand_known, opp_hand_all_known | the opponent's hand size, how many of its cards the activator knows (exactly), all of them |
+| opp_library, opp_top_known, own_top_known | the opponent's library size; the activator knows the opponent's top card (a remembered look: ENGINE.md 192; on an engine before it only when the owner knew it too) / its own top card |
+| fetch_in_hand, fetch_on_battlefield, fetch_available | the activator's fetchlands (the sacrifice-and-search lands, `FETCHLANDS`) in hand / on its battlefield (uncracked, tapped or not); either |
+| manipulation_in_hand, brainstorm_in_hand, ponder_in_hand | the cards in its hand that see or rearrange its own top card (Brainstorm, Ponder, Preordain, ..., `LIBRARY_MANIPULATION`); Brainstorm / Ponder among them |
+| excluded | why the opponent could not be targeted, or meaninglessly (`opponent_not_targetable`, `opponent_library_empty` for Mishra's); NULL for a counted activation |
+| blunder, blunder_reason | the user's rules (below); NULL when excluded |
+
 ## Views
 
 | view | one row per | columns |
@@ -96,6 +115,7 @@ player, card, turn, `how` (`show`, `sneak`, `cast`, `other`).
 | casts | cast | game_id, iter, seq, turn, step, player, card, cast_from, deck, opp_deck, won |
 | show_and_tell | resolved Show and Tell | game_id, iter, idx, caster, caster_deck, opp_deck, turn, put_caster, put_opponent, caster_pick / opponent_pick (the first of each list), won, method |
 | sneak_attack | Sneak Attack activation | game_id, iter, idx, player, deck, turn, sneaked_in (what entered by Sneak Attack that turn), won, method |
+| bauble_activations | Bauble activation | game_id, iter, kind (`selfplay`; the game's kind where `games` has one), checkpoint (the activator's: its seat's checkpoint where `games` names it, else `iter_NNNN` of `net_hi`), deck, opp_deck, pairing (`deck v opp_deck`), every `bauble` column, won |
 
 Rates over the combo tables and `events` use detailed games only: with `--sample` below 1, count the denominators
 from `games WHERE detailed` (every query below does that implicitly by joining the detailed tables).
@@ -120,6 +140,37 @@ tools/gamedb.py series RUN [--since N] [--by-opponent]`) returns plain dicts, on
 import sys; sys.path.insert(0, 'tools')
 import gamedb
 rows = gamedb.doomsday_series('<runs>/legacy-meta3-r1', since_iter=120, by_opponent=True)   # or the run's name
+```
+
+## Bauble targeting (`tools/gamedb_bauble.py`, ENGINE.md 194)
+
+The user's blunder rules (2026-11-17), `blunder_reason` in brackets:
+
+* **Urza's Bauble** ("look at a card at random in target player's hand"): at itself is a blunder
+  (`self_with_unknown_opponent_hand`) unless the opponent's hand is empty (`ok_opponent_hand_empty`) or the activator
+  knows every card in it (`ok_opponent_hand_known`).
+* **Mishra's Bauble** ("look at the top card of target player's library"): at itself is a blunder with no fetchland in
+  hand or on its battlefield (`self_without_fetch`), unless the activator knows the opponent's top card
+  (`ok_opponent_top_known`). At itself with a fetchland is not a blunder (`ok_self_with_fetch`: reported on its own,
+  with `manipulation_in_hand`).
+* At the opponent: `ok_target_opponent`. Excluded (`excluded`, not counted): the opponent was not a legal target, or
+  (Mishra's) its library was empty.
+
+`gamedb.bauble_blunder_series(run, since_iter=0, by_kind=False, kind=None, db=None)` (CLI: `python tools/gamedb.py
+bauble RUN [--since N] [--by-kind] [--kind selfplay]`) returns one dict per iteration and Bauble (`urza`, `mishra`,
+`all`; and kind with `by_kind`): `games`, `activations`, `excluded`, `counted` (the shares' denominator), `self_targets`,
+`blunders`, `self_with_fetch`, `self_with_fetch_and_manipulation`, `self_with_manipulation`, and `self_share` /
+`self_se`, `blunder_share` / `blunder_se`, `self_with_fetch_share` / `self_with_fetch_se` (standard errors clustered by
+game; None without a counted activation, the SE also with a single game). The delverai publisher puts the self-play
+rows in the progress record (`bauble_targeting`) of a run with a database; the site's run pages draw the "Bauble
+targeting" card from it.
+
+A database ingested before the table existed has no `bauble` rows for those iterations: `ingest --redo` replays them.
+
+```sql
+-- the blunders of one checkpoint by reason, with the activator's library manipulation
+SELECT bauble, blunder_reason, count(*) AS n, count(*) FILTER (WHERE len(manipulation_in_hand) > 0) AS with_manipulation
+FROM bauble_activations WHERE excluded IS NULL GROUP BY ALL ORDER BY ALL;
 ```
 
 ## Ten example queries

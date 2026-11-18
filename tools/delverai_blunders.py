@@ -62,7 +62,8 @@ LABELS = {
 def scored_spots(L):
     """The spots the site counts: only those the user kept on the review page (the user, 11-02: not unsure, not
     yet reviewed)."""
-    return [sp for sp in L['spots'] if (sp.get('review') or {}).get('verdict') == 'keep' and (sp.get('review') or {}).get('by') == 'user']
+    return [sp for sp in L['spots'] if (sp.get('review') or {}).get('verdict') == 'keep' and (sp.get('review') or {}).get('by') == 'user'
+            and sp.get('answer') != 'control']     # (a control spot has no right answer to pass: docs/ENGINE.md 194)
 
 
 def library_id(L):

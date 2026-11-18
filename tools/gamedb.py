@@ -9,6 +9,7 @@ card X since iteration 120, by opponent" is one SQL query.
   python tools/gamedb.py prune RUN [--keep-iters 64] [--old-sample 0.1] [--delete-raw]
   python tools/gamedb.py status RUN
   python tools/gamedb.py series RUN [--since 120] [--by-opponent]   # the Doomsday series (doomsday_series)
+  python tools/gamedb.py bauble RUN [--since N] [--by-kind]   # the Bauble targeting series (bauble_blunder_series)
   python tools/gamedb.py bench RUN [--iter N] [--games 200]   # replay cost per game (light and full)
   python tools/gamedb.py import-combo OUT_RUN FILES...    # combo_stats games files -> game records (validation)
 
@@ -25,7 +26,8 @@ incremental) is replayed game by game from its seed and actions - CPU only, in -
 * a deterministic share --sample of the games (by game id: the same games every time) FULL: the state exported at every
   step and read by tools/combo_stats.py's Reader (the same code as `combo_stats.py scan`) -> its `events` (every
   play-by-play line and every choice of two or more options) and the combo tables (`doomsday`, `shows`, `spells`,
-  `sneak`, `entered`); its `games` row is the full replay's (`detailed` true).
+  `sneak`, `entered`) and its Bauble activations (`bauble`: tools/gamedb_bauble.py, ENGINE.md 194); its `games` row is
+  the full replay's (`detailed` true).
 Tables are written per iteration (`<db>/<table>/iter=NNNN/part.parquet`, replaced whole); `<db>/state.json` lists the
 iterations ingested. A game that does not replay is never dropped silently: the iteration fails loudly.
 
@@ -34,7 +36,7 @@ games, events and combo rows of the other games deleted); --delete-raw deletes t
 iteration (<run>/records/iter_NNNN; never the run's training data).
 
 query / shell. DuckDB over the tables and the views (docs/gamedb.md): doomsday_piles, doomsday_pile_cards, casts,
-show_and_tell, sneak_attack, mulligans, game_results. Needs `duckdb` and `pyarrow` (pip install duckdb pyarrow).
+show_and_tell, sneak_attack, mulligans, game_results, bauble_activations. Needs `duckdb` and `pyarrow` (pip install duckdb pyarrow).
 
 series / doomsday_series(run, since_iter, by_opponent). The Doomsday deck per iteration (a publisher's: plain dict rows):
 resolutions and the Oracle's class at each (own pile / forced by the wheel / in hand / not findable / missed), the
@@ -59,7 +61,7 @@ for _p in (ROOT, os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'third_party', 
         sys.path.insert(0, _p)
 
 FORMAT = 'mtgz-gamedb/1'
-TABLES = ('games', 'events', 'doomsday', 'shows', 'spells', 'sneak', 'entered')
+TABLES = ('games', 'events', 'doomsday', 'shows', 'spells', 'sneak', 'entered', 'bauble')   # bauble: gamedb_bauble.py
 NO_CHOICE_EVENT = ('Priority', 'PayMana')     # decisions that are not `choice` events (their effects are lines)
 
 
@@ -297,6 +299,8 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
     sp['log'] = True
     g = E.Game('mtg', json.dumps(sp), int(rec['n']), int(rec['seed']))
     R = C.Reader(decks)
+    import gamedb_bauble
+    B = gamedb_bauble.Reader()
     if mains and all(m is not None for m in mains):
         R.oracle_main = [list(m).count(C.ORACLE) for m in mains]
     st = json.loads(g.export_state())
@@ -334,6 +338,7 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
             events.append((len(events), i, nxt.get('turn'), nxt.get('step'), None, 'lines_lost', None, None, None,
                            {'n': k - len(nxt['log'])}))
         R.step(st, d.get('kind'), text, lines, nxt)
+        B.step(i, st, d, [ln for ln in lines if ln != '(log lines lost)'])
         lines_ev([ln for ln in lines if ln != '(log lines lost)'], nxt, i)
         prev, st = st, nxt
     check_end(g, rec)
@@ -346,7 +351,7 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
         if ts:
             last_attack = {'turn': max(ts), 'attackers': R.attacks[max(ts)][1]}
     combo = {'spells': R.spells, 'doomsday': R.doomsday, 'show': R.show, 'sneak': R.sneak, 'entered': R.entered,
-             'last_attack': last_attack, 'lines_lost': lost}
+             'last_attack': last_attack, 'lines_lost': lost, 'bauble': B.finish(g.to_move is None)}
     return _final_fields(final, n_dec, method, rec, decks), events, combo
 
 
@@ -413,6 +418,8 @@ def ingest_chunk(args):
         for k, x in enumerate(combo['entered']):
             out['entered'].append({'game_id': gid, 'iter': it, 'idx': k, 'player': x['p'], 'card': x['card'],
                                    'turn': x['turn'], 'how': x['how']})
+        for x in combo['bauble']:
+            out['bauble'].append({'game_id': gid, 'iter': it, **x})
     out['_cpu_s'] = time.process_time() - t0
     return out
 
@@ -441,6 +448,7 @@ def schemas():
         'sneak': pa.schema([('game_id', pa.int64()), ('iter', i), ('idx', i), ('player', i), ('turn', i)]),
         'entered': pa.schema([('game_id', pa.int64()), ('iter', i), ('idx', i), ('player', i), ('card', s), ('turn', i),
                               ('how', s)]),
+        'bauble': __import__('gamedb_bauble').schema(),
     }
 
 
@@ -583,6 +591,8 @@ def connect(db):
             con.register(f'_{t}_empty', schemas()[t].empty_table())
             con.execute(f'CREATE VIEW {t} AS SELECT * FROM _{t}_empty')
     con.execute(VIEWS)
+    import gamedb_bauble
+    con.execute(gamedb_bauble.view_sql([d[0] for d in con.execute('SELECT * FROM games LIMIT 0').description]))
     return con
 
 
@@ -659,10 +669,22 @@ def doomsday_series(run, since_iter=0, by_opponent=False, deck='doomsday_8027957
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def bauble_blunder_series(run, since_iter=0, by_kind=False, kind=None, db=None):
+    """The Bauble targeting series (docs/gamedb.md "Bauble targeting", tools/gamedb_bauble.py; the delverai
+    publisher's) -> plain dict rows, one per iteration and Bauble ('urza', 'mishra', 'all'; and kind of game with
+    `by_kind`, `kind` None otherwise; `kind` filters to one): `activations`, `excluded` (targeting the opponent impossible
+    or meaningless), `counted` (the denominator), `self_targets`, `blunders` (the user's rules), `self_with_fetch` (a
+    Mishra's Bauble at oneself with a fetchland available: not a blunder) and the shares of each in `counted` with their
+    binomial standard errors (`self_share` / `self_se`, `blunder_share` / `blunder_se`, `self_with_fetch_share` /
+    `self_with_fetch_se`; None without a counted activation)."""
+    import gamedb_bauble
+    return gamedb_bauble.series(connect(db_dir(run, db)), since_iter, by_kind, kind)
+
+
 def shell(run, db=None):
     con = connect(db_dir(run, db))
     say(f'gamedb {db_dir(run, db)}: tables {", ".join(TABLES)}; views game_results, mulligans, doomsday_piles, '
-        f'doomsday_pile_cards, casts, show_and_tell, sneak_attack. End statements with ";", .quit to leave.')
+        f'doomsday_pile_cards, casts, show_and_tell, sneak_attack, bauble_activations. End statements with ";", .quit to leave.')
     buf = []
     while True:
         try:
@@ -859,6 +881,12 @@ def main(argv=None):
     d.add_argument('--since', type=int, default=0)
     d.add_argument('--by-opponent', action='store_true')
     d.add_argument('--deck', default='doomsday_8027957')
+    u = sub.add_parser('bauble', help='the Bauble targeting series per iteration (bauble_blunder_series)')
+    u.add_argument('run')
+    u.add_argument('--db', default=None)
+    u.add_argument('--since', type=int, default=0)
+    u.add_argument('--by-kind', action='store_true')
+    u.add_argument('--kind', default=None)
     c = sub.add_parser('import-combo')
     c.add_argument('out_run')
     c.add_argument('files', nargs='+')
@@ -883,6 +911,9 @@ def main(argv=None):
         status(a.run, a.db)
     elif a.cmd == 'series':
         for r in doomsday_series(a.run, a.since, a.by_opponent, a.deck, a.db):
+            say(json.dumps(r, default=str))
+    elif a.cmd == 'bauble':
+        for r in bauble_blunder_series(a.run, a.since, a.by_kind, a.kind, a.db):
             say(json.dumps(r, default=str))
     elif a.cmd == 'bench':
         bench(a.run, a.iter, a.games)

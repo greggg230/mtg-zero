@@ -1579,7 +1579,7 @@ def library_add(spots_path, path=LIBRARY_PATH, kinds=None, why=(), engine_path=R
             answer = 'bad'
         elif sp['kind'] in KIND_ANSWER:
             answer, reason = KIND_ANSWER[sp['kind']]
-        elif sp.get('answer') in ('good', 'bad') and sp.get('why'):
+        elif sp.get('answer') in ('good', 'bad', 'control') and sp.get('why'):
             answer, reason = sp['answer'], sp['why']                 # a kind mined elsewhere, its answer on the spot
         else:
             continue
@@ -1611,7 +1611,9 @@ def library_score(L, ckpts, sims_list=(32,), repeats=8, device='cpu', engine_pat
     """Every library spot searched by each checkpoint (`canary`) -> {'stale': [ids that no longer replay
     to their position on this engine], 'held': [ids under review (HELD), not searched], 'scores': {label:
     {sims: {'spots': {id: score}, 'kinds': {kind: mean}, 'all': mean over kinds}}}}. A spot's score = the
-    share of its searches choosing the right answer ('good': its option; 'bad': any other)."""
+    share of its searches choosing the right answer ('good': its option; 'bad': any other); a 'control' spot's (no right
+    answer: gamedb_bauble's Mishra's Bauble with a fetchland) is the share choosing its option, and its kind stays out of
+    'all'."""
     E = load_engine(engine_path)
     ok, stale, held = [], [], []
     for sp in L['spots']:
@@ -1640,12 +1642,15 @@ def library_score(L, ckpts, sims_list=(32,), repeats=8, device='cpu', engine_pat
             sc = {}
             for sp, counts in zip(ok, per):
                 hit = counts.get(sp['watch'], 0) / repeats
-                sc[sp['id']] = hit if sp['answer'] == 'good' else 1.0 - hit
+                sc[sp['id']] = hit if sp['answer'] in ('good', 'control') else 1.0 - hit
             kinds = collections.defaultdict(list)
             for sp in ok:
                 kinds[sp['kind']].append(sc[sp['id']])
             km = {k: sum(v) / len(v) for k, v in kinds.items()}
-            out[lab][sims] = {'spots': sc, 'kinds': km, 'all': sum(km.values()) / len(km), 'n': len(ok)}
+            control = {sp['kind'] for sp in ok if sp['answer'] == 'control'}
+            right = [v for k, v in km.items() if k not in control]
+            out[lab][sims] = {'spots': sc, 'kinds': km, 'all': sum(right) / len(right) if right else None,
+                              'n': len(ok), **({'control': sorted(control)} if control else {})}
     return {'stale': stale, 'held': held, 'scores': out, 'repeats': repeats}
 
 

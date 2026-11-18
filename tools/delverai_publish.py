@@ -786,6 +786,30 @@ def yardsticks_record(run):
             'failed': [{k: f[k] for k in ('kind', 'iter', 'opp', 'attempts') if k in f} for f in st['failed']]}
 
 
+# the Bauble targeting series' fields in the record (gamedb.bauble_blunder_series; no paths, no game ids)
+BAUBLE_KEYS = ('iter', 'bauble', 'games', 'activations', 'excluded', 'counted', 'self_targets', 'blunders',
+               'self_with_fetch', 'self_with_fetch_and_manipulation', 'self_share', 'self_se', 'blunder_share',
+               'blunder_se', 'self_with_fetch_share', 'self_with_fetch_se')
+
+
+def bauble_record(run, db=None):
+    """The run's Bauble targeting series from its game database (docs/gamedb.md "Bauble targeting", docs/ENGINE.md 194)
+    -> {kind, rows [{iter, bauble ('urza' / 'mishra' / 'all'), counts, shares and their standard errors}]} or None: a
+    run without records in a database, or none of its games had a Bauble activation. Self-play only (the database's
+    other kinds of game, where it has them, are other players' games). Never a reason to drop the progress post."""
+    try:
+        import gamedb
+        d = gamedb.db_dir(run, db)
+        if not os.path.exists(os.path.join(d, 'state.json')):
+            return None
+        rows = gamedb.bauble_blunder_series(run, kind='selfplay', db=d)
+    except Exception as e:                 # noqa: BLE001 - said; never a reason to drop the progress post
+        print(f'bauble targeting: not in the record this time ({e!r})', flush=True)
+        return None
+    rows = [{k: (_r(r[k], 4) if isinstance(r[k], float) else r[k]) for k in BAUBLE_KEYS} for r in rows if r['activations']]
+    return {'kind': 'selfplay', 'rows': rows} if rows else None
+
+
 def post_blunders(run, a, key, state, log=print):
     """With the run's yardsticks measuring the canary library: its record `blunders.<run>` (delverai_blunders.record,
     the site's blunder chart) posted when the run's cache changed since the last post (`state`: this process's) ->
@@ -860,6 +884,8 @@ def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=Non
         **({'keep_yardstick': keep_yardstick(yardstick, os.path.basename(os.path.abspath(run)))} if yardstick else {}),
         **({'sideboard_census': census} if census else {}),
         **({'yardsticks': ys} if (ys := yardsticks_record(run)) else {}),
+        # the Bauble targeting blunder measure, for a run whose games are in the game database (docs/ENGINE.md 194)
+        **({'bauble_targeting': bt} if (bt := bauble_record(run)) else {}),
         # a metagame run (docs/ENGINE.md 176, 185): its kind and its block (tools/delverai_meta.py)
         **({'run_kind': 'metagame', 'metagame': META.record(run, cfg, rows, state_dir or run)}
            if META.is_metagame(cfg) else {}),
