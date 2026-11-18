@@ -38616,3 +38616,14 @@ stay as a check (comments and `docs/gamedb.md` updated: 0 since this section). R
 
 Behaviour digests unchanged (the view is read by nothing in play; the gates below). The release worker plays and
 records exactly as before (self-play runs with the log off, and nothing it plays reads the view); farm compat runs in the engine tier.
+
+### 189.6 The gates (on 1c036e03)
+
+* `suite`: GATE PASSED in 1,110 s - the full engine suite 2,703 passed (24 binaries); the sharded 2,000-game fuzz of
+  the default pool (2,000 games, 100 matches), the default pool with hidden decklists (2,000 games) and
+  `FUZZ_POOL=delver_dealt` (2,000 games, 100 matches + 100 post-sideboard), all clean.
+* `engine --tested-sha 1c036e03`: GATE PASSED WITH SKIPS (5 live-run-hazard tests fenced beside the paused live run) in
+  781 s - digests **unchanged**: full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, constructed e1177d609d6c1aee,
+  eoe 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993 (each = the
+  recorded files); `--test az` 54, `limits` 13, `hidden` 28; pytest 4 shards + the desktop part; the smoke; the
+  release worker built and farm compat identical (gate 2: 6 games, 2,484 rows; gate 3: 6 games, 2,556 rows).
