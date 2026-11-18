@@ -309,6 +309,75 @@ def test_a_farm_h2h_definition_holds_the_play_settings_only(tmp_path):
         FH.play_settings(WORKER, bid, cfg, str(tmp_path / 'st2'))
 
 
+def _check(worker, cfg, path, *args):
+    path.write_text(json.dumps(cfg), encoding='utf-8')
+    p = subprocess.run([worker, 'check-config', str(path), '--json', *args], capture_output=True, text=True, encoding='utf-8')
+    out = json.loads(p.stdout)
+    return p.returncode, out['failures'], {r['key']: r['status'] for r in out['settings']}
+
+
+def test_declared_setting_classes_with_the_real_worker(tmp_path):
+    """docs/ENGINE.md 196.1 (zero-core docs/az.md 61): this worker announces `setting_classes`; with the trainer's
+    declaration (zero.farm_h2h.run_setting_classes: zero-core's table + mtgz's GamePackage.setting_classes) a run's
+    settings pass check-config as before, and a NEW key this build doesn't know passes when declared trainer-only,
+    is refused when declared play or not declared at all; a known key declared otherwise is refused; for an eval job
+    the same. MTGZ_OLD_WORKER (a worker build before the feature, e.g. a published one): it refuses the new key whatever
+    the declaration says - an old worker against a new definition stays safe."""
+    import mtgz.az  # noqa: F401
+    from zero import farm_h2h as FH
+    info = json.loads(subprocess.run([WORKER, 'info', '--ort-dll', 'none'], capture_output=True, text=True, check=True).stdout)
+    assert FH.FEATURE_SETTING_CLASSES in info['features']
+    cfg, _ = _smoke_cfg(tmp_path, forced_find_schedule={'start': 1.0, 'end': 0.0, 'from': 1, 'iters': 4})
+    decl = FH.run_setting_classes(cfg)
+    assert set(decl) == set(cfg) and decl['forced_find_schedule'] == 'trainer' and decl['sims'] == 'play'
+    base = _check(WORKER, dict(cfg, **{FH.CLASSES_KEY: decl}), tmp_path / 'a.json')
+    assert base[:2] == (0, []) and FH.CLASSES_KEY not in base[2] and base[2] == _check(WORKER, cfg, tmp_path / 'b.json')[2]
+    new = dict(cfg, zz_new_setting={'every': 4})
+    for d, rc, status in ((dict(decl, zz_new_setting='trainer'), 0, 'trainer'), (dict(decl, zz_new_setting='play'), 1, 'unknown'),
+                          (decl, 1, 'unknown')):
+        for args in ([], ['--eval']):
+            got = _check(WORKER, dict(new, **{FH.CLASSES_KEY: d}), tmp_path / 'c.json', *args)
+            assert (got[0], got[2]['zz_new_setting']) == (rc, status), (d.get('zz_new_setting'), args, got[:2])
+            assert got[1] == ([] if rc == 0 else ['zz_new_setting'])
+    got = _check(WORKER, dict(cfg, **{FH.CLASSES_KEY: dict(decl, forced_find_schedule='play')}), tmp_path / 'd.json')
+    assert got[:2] == (1, ['forced_find_schedule']) and got[2]['forced_find_schedule'] == 'unsupported'
+    old = os.environ.get('MTGZ_OLD_WORKER')
+    if old:
+        oi = json.loads(subprocess.run([old, 'info', '--ort-dll', 'none'], capture_output=True, text=True, check=True).stdout)
+        assert FH.FEATURE_SETTING_CLASSES not in (oi.get('features') or [])
+        got = _check(old, dict(new, **{FH.CLASSES_KEY: dict(decl, zz_new_setting='trainer')}), tmp_path / 'e.json')
+        assert got[0] == 1 and 'zz_new_setting' in got[1], got[:2]
+
+
+def test_the_pool_template_declares_the_classes(tmp_path, monkeypatch):
+    """zero.farm_pool.play_settings (the farm pool's self-play template) with the real worker in a build directory of
+    its own: the template is the play settings plus the declaration; a package setting this build doesn't know but the
+    package classes trainer-only (here a stand-in added to mtgz's GamePackage) is left out of the template and logged,
+    not refused; the template's driver is the run's (play_settings checks driver-cfg)."""
+    import hashlib
+    import shutil
+    import mtgz.az  # noqa: F401
+    from zero import farm_def as FD, farm_h2h as FH, farm_pool as FP, package as P
+    cfg, _ = _smoke_cfg(tmp_path)
+    d = tmp_path / 'build'
+    d.mkdir()
+    shutil.copy2(WORKER, d / 'mtgz-worker.exe')
+    raw = json.dumps({'manifest': 1, 'kind': 'worker', 'game': 'mtg', 'entry': 'mtgz-worker.exe', 'files': []}).encode()
+    (d / 'manifest.json').write_bytes(raw)
+    bid = hashlib.sha256(raw).hexdigest()[:24]
+    pkg = P.active()
+    monkeypatch.setattr(pkg, 'setting_classes', dict(pkg.setting_classes, zz_new_trainer='trainer'))
+    lines = []
+    play = FP.play_settings(str(d / 'mtgz-worker.exe'), bid, dict(cfg, zz_new_trainer={'a': 1}), str(tmp_path / 'st'), lines.append)
+    decl = play.pop(FH.CLASSES_KEY)
+    assert decl['zz_new_trainer'] == 'trainer' and 'zz_new_trainer' not in play and 'forced_find_schedule' not in play
+    assert lines == [f"worker build {bid} doesn't know setting zz_new_trainer: trainer by the declared classes"]
+    plain = FP.play_settings(str(d / 'mtgz-worker.exe'), bid, cfg, str(tmp_path / 'st2'))
+    assert plain.pop(FH.CLASSES_KEY) == {k: v for k, v in decl.items() if k != 'zz_new_trainer'} and play == plain
+    FD.check_no_paths(dict(play, **{FH.CLASSES_KEY: decl}), 'settings')
+    FD.definition('run', 'x', 1, 'mtg', [bid], None, {}, {'selfplay': {'settings': dict(play, **{FH.CLASSES_KEY: decl})}}, created=1)
+
+
 def test_eval_check_config_and_the_package_settings(tmp_path):
     """check-config --eval: a run's settings pass (the evaluation's read, the rest unused - the game package's own
     settings too, which the worker lists: every one of mtgz's GamePackage.settings is known); an external bot, an

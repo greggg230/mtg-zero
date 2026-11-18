@@ -429,6 +429,18 @@ assert not set(REAL_DECKS_SETTINGS) & set(ROLLING_SETTINGS), 'two features of th
 assert not set(MATCHUP_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS)), 'two features declare one setting'
 assert not set(FORCED_FIND_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS) | set(MATCHUP_SETTINGS)), 'two features declare one setting'
 
+# How the native farm worker treats each of the package's own settings (zero-core GamePackage.setting_classes, its
+# docs/az.md 61; docs/ENGINE.md 196): the trainer declares these classes with a run's settings to a worker build that
+# announces the feature `setting_classes`, which then takes a trainer-only setting it doesn't know as unused - a new
+# trainer-only setting here needs no new worker build. worker/src/main.rs PACKAGE_SETTINGS (what a build itself knows)
+# holds the same classes (tests/test_farm_release.py keeps them equal). A new setting: 'trainer' unless the worker's
+# self-play reads it ('play': then the worker must implement it, and needs a rebuild anyway).
+SETTING_CLASSES = dict(
+    {k: 'param:evaluator_every' for k in ROLLING_SETTINGS if k.startswith('evaluator_') and k != 'evaluator_every'},
+    evaluator_every='python_only', deckchoice_eval_games='trainer',
+    **{k: 'trainer' for k in REAL_DECKS_SETTINGS}, **{k: 'trainer' for k in MATCHUP_SETTINGS},
+    **{k: 'trainer' for k in FORCED_FIND_SETTINGS}, publish='trainer', yardsticks='trainer')
+
 # Every Rust input of the engine (tools/zcache.py's RUST_PATHS; tests/test_gamedb.py keeps them equal): with zero-core's
 # crates they name the engine that played a game record (zero-core docs/az.md 59.4, docs/gamedb.md "The engine"): a
 # record replays only on that engine
@@ -481,6 +493,7 @@ PACKAGE = register(GamePackage(
     # mtgz.az.matchup: matchup_every 0 = off), through `mtg`'s selfplay_specs hook; and the forced find's schedule
     # (docs/ENGINE.md 180, mtgz.az.forced_find: forced_find_schedule {} = off), through the same hook after it
     settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, **FORCED_FIND_SETTINGS, publish={}, yardsticks={}),
+    setting_classes=SETTING_CLASSES,
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
     engine_paths=ENGINE_PATHS,
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},

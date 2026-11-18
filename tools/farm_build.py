@@ -1,8 +1,16 @@
 """Build, sign and publish zero-farm builds of this checkout (docs/ENGINE.md 114.3; zero-farm PROTOCOL.md 2).
 
-    python tools/farm_build.py --profile release|fuzz [--runtime-id BUILD_ID] [--publish] [--url URL]
+    python tools/farm_build.py --profile release|fuzz [--runtime-id BUILD_ID] [--root CHECKOUT] [--publish] [--url URL]
     python tools/farm_build.py --runtime [--ort-dll PATH] [--msvc-dir DIR] [--publish] [--url URL]
     python tools/farm_build.py --runtime --pack winml [--winml-version V | --winml-nupkg F] [--publish] [--url URL]
+    python tools/farm_build.py --runtime --pack cuda --msvc-dir DIR [--check-net EXPORT_DIR] [--publish] [--url URL]
+    python tools/farm_build.py --resign BUILD_DIR --runtime-id ID [--min-agent V] [--publish] [--url URL]
+    python tools/farm_build.py --publish-dir BUILD_DIR [--url URL]
+
+`--root CHECKOUT` builds another clean checkout (a worktree at the commit to release) with this file's code: the build
+names that checkout's commits (tools/farm_release.py, docs/ENGINE.md 196). `--resign` signs a signed worker build's
+executable again for another runtime pack (zero-farm PROTOCOL.md 9.1: the CUDA alternate), `--publish-dir` publishes
+a build directory signed earlier (verified first), so a release can sign, check, then publish.
 
 Worker builds (`--profile`): the tree must be clean (tracked files, and the zero-core submodule at its
 pin with no changes) - a build names its exact commits. `mtgz-worker` is built at HEAD with that cargo
@@ -123,8 +131,8 @@ def die(msg):
     sys.exit(1)
 
 
-def git(*a, cwd=ROOT):
-    return subprocess.run(['git', *a], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+def git(*a, cwd=None):
+    return subprocess.run(['git', *a], cwd=cwd or ROOT, capture_output=True, text=True, check=True).stdout.strip()
 
 
 def clean_tree():
@@ -764,6 +772,8 @@ def main():
     g.add_argument('--profile', choices=('release', 'fuzz'))
     g.add_argument('--runtime', action='store_true', help='the runtime pack (ONNX Runtime + its MSVC runtime)')
     g.add_argument('--resign', metavar='BUILD_DIR', help='sign a signed worker build\'s executable again for --runtime-id (PROTOCOL 9.1)')
+    g.add_argument('--publish-dir', metavar='BUILD_DIR', help='publish a signed build directory (verified first)')
+    ap.add_argument('--root', help='the checkout to build (default: this one): a clean worktree at the commit to release')
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')
     ap.add_argument('--pack', choices=('cpu', 'winml', 'cuda'), default='cpu',
                     help='--runtime: the CPU pack (default), the Windows ML GPU pack or the CUDA pack (NVIDIA, PROTOCOL 9)')
@@ -788,7 +798,18 @@ def main():
                     help='a diagnostic release worker: ZERO_PROBE_VARIANTS names the probe variants zero-core embeds '
                          '(they may hold real networks); its version gets a -diag suffix; for canary test runs only')
     a = ap.parse_args()
+    if a.root:
+        global ROOT
+        ROOT = os.path.abspath(a.root)
     check_variants_env(a)
+    if a.publish_dir:
+        print(farm_release(a, 'verify', a.publish_dir))
+        print(farm_release(a, 'publish', a.publish_dir, '--url', a.url, token=True))
+        print(f'published to {a.url}')
+        print(f'build directory {a.publish_dir}')
+        with open(os.path.join(a.publish_dir, 'manifest.json'), 'rb') as f:
+            print(f'build_id {hashlib.sha256(f.read()).hexdigest()[:24]}')
+        return
     if a.resign:
         bid, d = resign_worker(a)
     elif a.runtime:

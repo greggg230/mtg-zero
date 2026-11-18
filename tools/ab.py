@@ -59,6 +59,10 @@ lists the treatments' overall matches first, then the arms against the start, th
 one date: when the judge finished). Labels only - "<label>, gen N" - never a path. A post that fails says PUBLISH
 FAILED with the retry command (`ab.py publish SPEC`), exit 3; the judge's files stand.
 
+THE FARM BUILD: an override `"pool_build": "published"` (in `common` or an arm) is the published farm build of the
+code's commit (`code.sha`, else its worktree's HEAD; "published:<rev>" another commit) with its pool_runtime,
+pool_worker and pool_alternates unless the overrides give them (tools/farm_release.py lookup; docs/ENGINE.md 196).
+
 STOP: `ab.py stop SPEC`; `go` exits when an arm stops before its last iteration (resume: `ab.py launch SPEC ARM`, or
 `go` again: complete arms are skipped). ROLLBACK: stop; delete the arms' run directories; the source was never touched.
 """
@@ -177,7 +181,27 @@ def overrides(s, arm, k):
     o = dict(s['common'], **s['arms'][arm])
     o['iters'] = k + s['iterations']
     o['publish'] = live_publish(s, arm)
-    return o
+    return published_build(s, o)
+
+
+def published_build(s, o):
+    """`"pool_build": "published"` (or "published:<rev>") -> the published farm build of the arms' code commit (or
+    <rev>'s) and, unless the overrides give them, its pool_runtime, pool_worker and pool_alternates (tools/farm_release.py
+    lookup, docs/ENGINE.md 196). SystemExit when there is none."""
+    v = o.get('pool_build')
+    if not (isinstance(v, str) and (v == 'published' or v.startswith('published:'))):
+        return o
+    from mtgz.az import farm_builds as FB
+    wt = worktree(s)
+    rev = v.split(':', 1)[1] if ':' in v else (s['code']['sha'] or 'HEAD')
+    e = FB.lookup(rev, wt)
+    if e is None:
+        raise SystemExit(f'pool_build {v!r}: no published farm build for {rev} of {wt} (python tools/farm_release.py release {rev})')
+    out = dict(o)
+    for key, val in FB.pool_settings(e).items():
+        if key == 'pool_build' or key not in o:
+            out[key] = val
+    return out
 
 
 # ------------------------------------------------------------------ state
