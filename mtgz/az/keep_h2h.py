@@ -7,7 +7,8 @@ decision) and side A searches its sideboarding as it searches everything else.
 
 B defaults to A: one network, sideboarding against keeping. The spec defaults to the delver-mirror-bo3 preset's
 (post-sideboard games only, one episode per game, the pinned 75s: `mtgz.az.SPEC_DELVER_BO3`); any constructed
-best-of-three spec of `mtg` works. B's seat is the spec's `"keep_deck"` (an engine setting: its seat's only
+best-of-three spec of `mtg` works. `--publish EXPERIMENT [--title T]` posts the result to delverai's
+Head-to-heads tab when it ends (mtgz.az.site_h2h, docs/ENGINE.md 193). B's seat is the spec's `"keep_deck"` (an engine setting: its seat's only
 sideboarding option is `PASS`). zero.h2h alternates the seats in one driver with one spec, so the seat that keeps
 would alternate between the sides; here the games are two drivers, A in seat 0 (`"keep_deck": [1]`) and A in seat 1
 (`"keep_deck": [0]`), half the games each, with the same driver seed: game k of each half has the same seed (the
@@ -130,7 +131,10 @@ def main(argv=None):
     ap.add_argument('--conc', type=int, default=None)
     ap.add_argument('--max-steps', type=int, default=60_000, help='a match\'s step cap (the preset\'s: up to three games)')
     ap.add_argument('--torch-threads', type=int, default=1)
+    from mtgz.az import site_h2h as S
+    S.add_args(ap)
     a = ap.parse_args(argv)
+    S.check(a)
     import torch
     torch.set_num_threads(max(1, a.torch_threads))
     try:
@@ -139,6 +143,23 @@ def main(argv=None):
     except ValueError as e:
         ap.error(str(e))
     print(json.dumps(out), flush=True)
+    if a.publish and publish(out, a) != 0:
+        raise SystemExit(S.EXIT_PUBLISH_FAILED)
+
+
+def publish(out, o):
+    """The result to delverai's Head-to-heads tab (`--publish`, mtgz.az.site_h2h, docs/ENGINE.md 193): A sideboards, B
+    keeps; one checkpoint on both sides by default, so the sides' default names say which does what."""
+    from mtgz.az import site_h2h as S
+    o.a_label = o.a_label or f"{S.checkpoint_label(out['a'])} (sideboards)"
+    o.b_label = o.b_label or f"{S.checkpoint_label(out['b'])} (keeps its 60)"
+    pg = out.get('per_game') or {}
+    gap = f", {100 * out['per_game_gap']:+.1f} points over the uninformed arm" if out.get('per_game_gap') is not None else ''
+    note = (f"Keep-your-60 yardstick ({out.get('arm')} arm): B keeps its main 60 at every sideboarding, A searches its "
+            f"sideboarding. A's score is its match score (best of three, post-sideboard games)"
+            + (f"; A's games won in games 2 and 3: {100 * pg['win']:.1f}%{gap}" if pg.get('win') is not None else '') + '.')
+    o.publish_note = note + (' ' + o.publish_note if o.publish_note else '')
+    return S.publish_result(out, o, name=S.default_key(out['a'], out['b'], prefix=f"keep-{out.get('arm')}-"))
 
 
 if __name__ == '__main__':
