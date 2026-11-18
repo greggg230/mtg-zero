@@ -26,8 +26,7 @@ incremental) is replayed game by game from its seed and actions - CPU only, in -
 * a deterministic share --sample of the games (by game id: the same games every time) FULL: the state exported at every
   step and read by tools/combo_stats.py's Reader (the same code as `combo_stats.py scan`) -> its `events` (every
   play-by-play line and every choice of two or more options) and the combo tables (`doomsday`, `shows`, `spells`,
-  `sneak`, `entered`) and its Bauble activations (`bauble`: tools/gamedb_bauble.py, ENGINE.md 194); its `games` row is
-  the full replay's (`detailed` true).
+  `sneak`, `entered`); its `games` row is the full replay's (`detailed` true).
 Tables are written per iteration (`<db>/<table>/iter=NNNN/part.parquet`, replaced whole); `<db>/state.json` lists the
 iterations ingested. A game that does not replay is never dropped silently: the iteration fails loudly.
 
@@ -36,11 +35,16 @@ games, events and combo rows of the other games deleted); --delete-raw deletes t
 iteration (<run>/records/iter_NNNN; never the run's training data).
 
 query / shell. DuckDB over the tables and the views (docs/gamedb.md): doomsday_piles, doomsday_pile_cards, casts,
-show_and_tell, sneak_attack, mulligans, game_results, bauble_activations. Needs `duckdb` and `pyarrow` (pip install duckdb pyarrow).
+show_and_tell, sneak_attack, mulligans, game_results. Needs `duckdb` and `pyarrow` (pip install duckdb pyarrow).
 
 series / doomsday_series(run, since_iter, by_opponent). The Doomsday deck per iteration (a publisher's: plain dict rows):
 resolutions and the Oracle's class at each (own pile / forced by the wheel / in hand / not findable / missed), the
 undrawn share, games, wins and Oracle wins (docs/gamedb.md "The Doomsday series").
+
+bauble / bauble_blunder_series(run, since_iter, by_kind, kind). The Bauble targeting measure (tools/gamedb_bauble.py,
+docs/gamedb.md "Bauble targeting", docs/ENGINE.md 194): a full replay also reads every Mishra's / Urza's Bauble
+activation into the `bauble` table (the view bauble_activations), its conditions from the engine state at the
+activation and the user's blunder rules; the series is per iteration and Bauble.
 """
 import argparse
 import base64
@@ -61,8 +65,9 @@ for _p in (ROOT, os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'third_party', 
         sys.path.insert(0, _p)
 
 FORMAT = 'mtgz-gamedb/1'
-TABLES = ('games', 'events', 'doomsday', 'shows', 'spells', 'sneak', 'entered', 'bauble')   # bauble: gamedb_bauble.py
+TABLES = ('games', 'events', 'doomsday', 'shows', 'spells', 'sneak', 'entered')
 NO_CHOICE_EVENT = ('Priority', 'PayMana')     # decisions that are not `choice` events (their effects are lines)
+TABLES += ('bauble',)                         # the Bauble activations (tools/gamedb_bauble.py, docs/ENGINE.md 194)
 
 
 def say(*a):
@@ -871,6 +876,12 @@ def main(argv=None):
     t = sub.add_parser('status')
     t.add_argument('run')
     t.add_argument('--db', default=None)
+    u = sub.add_parser('bauble', help='the Bauble targeting series per iteration (bauble_blunder_series)')
+    u.add_argument('run')
+    u.add_argument('--db', default=None)
+    u.add_argument('--since', type=int, default=0)
+    u.add_argument('--by-kind', action='store_true')
+    u.add_argument('--kind', default=None)
     b = sub.add_parser('bench')
     b.add_argument('run')
     b.add_argument('--iter', type=int, default=None)
@@ -881,12 +892,6 @@ def main(argv=None):
     d.add_argument('--since', type=int, default=0)
     d.add_argument('--by-opponent', action='store_true')
     d.add_argument('--deck', default='doomsday_8027957')
-    u = sub.add_parser('bauble', help='the Bauble targeting series per iteration (bauble_blunder_series)')
-    u.add_argument('run')
-    u.add_argument('--db', default=None)
-    u.add_argument('--since', type=int, default=0)
-    u.add_argument('--by-kind', action='store_true')
-    u.add_argument('--kind', default=None)
     c = sub.add_parser('import-combo')
     c.add_argument('out_run')
     c.add_argument('files', nargs='+')

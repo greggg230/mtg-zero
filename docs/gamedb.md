@@ -115,7 +115,6 @@ P<n>" line after it.
 | casts | cast | game_id, iter, seq, turn, step, player, card, cast_from, deck, opp_deck, won |
 | show_and_tell | resolved Show and Tell | game_id, iter, idx, caster, caster_deck, opp_deck, turn, put_caster, put_opponent, caster_pick / opponent_pick (the first of each list), won, method |
 | sneak_attack | Sneak Attack activation | game_id, iter, idx, player, deck, turn, sneaked_in (what entered by Sneak Attack that turn), won, method |
-| bauble_activations | Bauble activation | game_id, iter, kind (`selfplay`; the game's kind where `games` has one), checkpoint (the activator's: its seat's checkpoint where `games` names it, else `iter_NNNN` of `net_hi`), deck, opp_deck, pairing (`deck v opp_deck`), every `bauble` column, won |
 
 Rates over the combo tables and `events` use detailed games only: with `--sample` below 1, count the denominators
 from `games WHERE detailed` (every query below does that implicitly by joining the detailed tables).
@@ -155,6 +154,10 @@ The user's blunder rules (2026-11-17), `blunder_reason` in brackets:
   with `manipulation_in_hand`).
 * At the opponent: `ok_target_opponent`. Excluded (`excluded`, not counted): the opponent was not a legal target, or
   (Mishra's) its library was empty.
+
+The view **bauble_activations** (one row per activation): game_id, iter, kind (`selfplay`; the game's kind where
+`games` has one), checkpoint (the activator's: its seat's checkpoint where `games` names it, else `iter_NNNN` of
+`net_hi`), deck, opp_deck, pairing (`deck v opp_deck`), every `bauble` column, won (the activator won the game).
 
 `gamedb.bauble_blunder_series(run, since_iter=0, by_kind=False, kind=None, db=None)` (CLI: `python tools/gamedb.py
 bauble RUN [--since N] [--by-kind] [--kind selfplay]`) returns one dict per iteration and Bauble (`urza`, `mishra`,
