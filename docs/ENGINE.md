@@ -38623,3 +38623,13 @@ run's settings otherwise (2,000 games, lr 1e-4, seed 1); judged by paired cells 
 (adapt vs ctrl, each vs the start; 200 games a cell), the mean simulations per decision (`selfplay.budget`), the policy
 loss and entropy, games per minute. Estimate ~2.5 h of GPU. The launch script lives in the maintainer's scratch; an
 'adapt + 1/f weight' arm waits for the weight (189.1).
+
+### 189.5 The gate (on 887d83c0, zero-core pin 3161bd9)
+
+* `optin-core` tier (`--baseline-root` = main b3245a81): GATE PASSED (no skips) in 1,751 s - privacy, builds (mtgz,
+  release worker, zero._engine), core `cargo test --release` (215 passed), checkpoint_compat byte-identical (visits and
+  cq, 3,272 samples each), digest formats = the recorded files (constructed e1177d609d6c1aee, eoe 2efe956d589840ce,
+  driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0) and dealt e802d9df793c9993 (the digests of 187.7: unchanged),
+  `--test az` (54) / `--test hidden` (28), the three other games built against the core, core pytest (721 passed, 51
+  skipped), farm compat identical. By hand (189.3): farm compat with the rule on, with game_records on, both;
+  driver_settings_dump old vs new and against the worker.
