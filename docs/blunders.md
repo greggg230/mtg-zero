@@ -366,6 +366,9 @@ each with that answer and the reason:
   option is the right line (no kind uses it today). A spot's **score** is the share of
   its searches choosing a right answer; a kind's score the mean over its spots (the Play-tab reports
   together are the kind `play`); **all kinds** the mean over the kinds. Each spot's own score is kept too.
+  A third answer, `control` (docs/ENGINE.md 194: the Bauble kinds' Mishra's Bauble with a fetchland), marks a
+  spot with no right answer: its score is the share of searches choosing the watched option, its kind is
+  reported but stays out of **all kinds**, and the site's pass counts leave it out.
 * **which kinds**: only those with a clear right answer (`KIND_ANSWER`): tamiyo_flip_precombat (attack
   first), murktide_delve_short (a delve short by the user's rule),
   burn_no_kill (the burn killed nothing), land_drop_tapout (play the land first), daze_payable_pool (the
