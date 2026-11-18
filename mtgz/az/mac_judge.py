@@ -63,6 +63,11 @@ def remote():
     commit. RuntimeError when this checkout is not exactly its commit (the Mac plays a commit, never local changes)."""
     from . import MAC_HOME, MAC_HOST, MAC_PYTHON
     from . import mac as M
+    if not MAC_HOME.startswith('/') or not MAC_PYTHON.startswith('/'):
+        # (Git Bash turns an exported MTGZ_MAC_HOME=/Users/... into C:/Program Files/Git/Users/... for a Windows
+        # process: start the watcher where tools/local_env.sh was not sourced, or with MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME)
+        raise RuntimeError(f'cells_backend mac: the Mac\'s home {MAC_HOME!r} is not a POSIX path (MTGZ_MAC_HOME '
+                           f'converted by Git Bash?)')
     head, dirty = M.checkout_state(ROOT)
     if dirty:
         raise RuntimeError(f'cells_backend mac: {ROOT} has uncommitted changes or untracked files, so the Mac cannot '

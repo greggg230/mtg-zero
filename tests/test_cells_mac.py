@@ -494,14 +494,20 @@ def test_the_macs_play_ends_with_its_result_while_stdin_stays_open(games, code):
 
 def test_a_dirty_checkout_is_refused_and_the_remote_names_the_commits_checkout(monkeypatch):
     from mtgz.az import mac as M
+    monkeypatch.setattr(mtgz.az, 'MAC_HOME', '/Users/user')
+    monkeypatch.setattr(mtgz.az, 'MAC_PYTHON', '/Users/user/.venvs/v/bin/python')
     monkeypatch.setattr(M, 'checkout_state', lambda root: ('b' * 40, [' M mtgz/az/yardsticks.py']))
     with pytest.raises(RuntimeError, match='uncommitted'):
         MJ.remote()
     monkeypatch.setattr(M, 'checkout_state', lambda root: ('b' * 40, []))
     monkeypatch.setattr(M, 'moved_problem', lambda root, head: None)
     rt = MJ.remote()
-    assert rt['repo'].endswith('/mtg-zero-wt/run-' + 'b' * 12) and rt['commit'] == 'b' * 40
-    assert rt['work'].endswith('/' + MJ.WORK) and rt['python'] == mtgz.az.MAC_PYTHON
+    assert rt['repo'] == '/Users/user/mtg-zero-wt/run-' + 'b' * 12 and rt['commit'] == 'b' * 40
+    assert rt['work'] == '/Users/user/' + MJ.WORK and rt['python'] == '/Users/user/.venvs/v/bin/python'
+    # Git Bash's conversion of an exported MTGZ_MAC_HOME for a Windows process: refused loudly, never used
+    monkeypatch.setattr(mtgz.az, 'MAC_HOME', 'C:/Program Files/Git/Users/user')
+    with pytest.raises(RuntimeError, match='not a POSIX path'):
+        MJ.remote()
 
 
 def test_the_mirror_paths_keep_each_runs_name_apart():

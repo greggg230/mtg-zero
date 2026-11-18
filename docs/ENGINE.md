@@ -39651,7 +39651,9 @@ evaluations; the user accepts judging taking about a third of it.
   (`cells_mac_threads` 4, `cells_mac_groups` 2: not part of the measurement's definition, as `bo1_threads` is not).
   Net against net on another CPU's float arithmetic a game can take another line; the engine itself is bit-identical
   (44).
-* **The code is the watcher's commit**: `mac_judge.remote()` refuses a checkout with uncommitted changes, and the Mac
+* **The code is the watcher's commit**: `mac_judge.remote()` refuses a checkout with uncommitted changes (and a Mac
+  home that is not a POSIX path: Git Bash turns an exported `MTGZ_MAC_HOME=/Users/...` into `C:/Program
+  Files/Git/Users/...` for a Windows process - a watcher started where `tools/local_env.sh` was sourced), and the Mac
   plays in its checkout of that commit, `~/mtg-zero-wt/run-<sha12>` (`bash tools/mac.sh --eval-checkout` in the
   watcher's checkout: the engine built and stamped there, mtgz/az/mac.py); each process there checks it first
   (`mac.verify_checkout`) and refuses another commit.
