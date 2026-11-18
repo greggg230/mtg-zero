@@ -5,11 +5,23 @@ at that moment read from the replayed engine state, and whether its target was a
 The rules (the user's, 2026-11-17):
 * Urza's Bauble ("{T}, Sacrifice: Look at a card at random in target player's hand. ..."): targeting YOURSELF is a
   blunder, unless the opponent has no card in hand or the activator already knows every card in the opponent's hand.
-* Mishra's Bauble ("{T}, Sacrifice: Look at the top card of target player's library. ..."): targeting YOURSELF is a
-  blunder when the activator has no fetchland available (none in hand and none uncracked on its battlefield), unless it
-  already knows the opponent's top card (a remembered look, ENGINE.md 192). A self-target with a fetchland available is
-  not a blunder; it is counted on its own (`blunder_reason` 'ok_self_with_fetch'), with the library manipulation the
-  activator held (Brainstorm, Ponder, ...) as a column.
+* Mishra's Bauble ("{T}, Sacrifice: Look at the top card of target player's library. Draw a card at the beginning of
+  the next turn's upkeep."): targeting YOURSELF is a blunder when the activator has no fetchland AVAILABLE, unless it
+  already knows the opponent's top card (a remembered look, ENGINE.md 192). Looking at its own top card is worth
+  something only if it can shuffle that card away before the Bauble's delayed draw (the user, 2026-11-18, correcting
+  the first rule, which counted any fetchland in hand). A fetchland is available when it is
+  - on the activator's battlefield and crackable before that draw (`fetch_crackable`: untapped, or tapped on the
+    opponent's turn - it untaps in the activator's untap step, before the upkeep trigger resolves), or
+  - in the activator's hand and playable before that draw (`fetch_in_hand_playable`): it is the activator's own turn, a
+    main phase is still to come or under way (upkeep through main 2), and its land drop is unused
+    (`land_drop_available`: lands played this turn below its land drops - one, plus the extra drops its permanents
+    grant). A fetchland in hand on the opponent's turn, in the activator's end step, or after its land drop is spent is
+    NOT available: the delayed draw comes first.
+  A self-target with a fetchland available is not a blunder; it is counted on its own (`blunder_reason`
+  'ok_self_with_fetch'), with the library manipulation the activator held (Brainstorm, Ponder, ...) as a column. A
+  self-target with a fetchland that is not available is a blunder with its own reason ('self_with_unusable_fetch');
+  with no fetchland at all, 'self_without_fetch'. The raw counts (`fetch_in_hand`, `fetch_on_battlefield`) stay
+  columns.
 * An activation where targeting the opponent is impossible or meaningless is excluded (`excluded`, `blunder` NULL): the
   opponent was not a legal target (no target decision offered it), or for Mishra's Bauble the opponent's library was
   empty. So is one whose game stopped before its target was chosen (a resignation at the target decision: `target`
@@ -20,7 +32,11 @@ hands, the battlefield, the library sizes - and its `known` block (`view_known`,
 state `Obj.known`): the opponent's hand cards the activator knows, and whether the activator knows the card on top of
 the opponent's library (remembered since ENGINE.md 192; an engine before it never remembers that look, so the column is
 false there unless the opponent's owner knew the card too). The target is the engine's own play-by-play line ("target
-P<seat>") after the activation. Partial knowledge (the engine's clouds) is not counted as knowing a card.
+P<seat>") after the activation. Partial knowledge (the engine's clouds) is not counted as knowing a card. The land drop
+is the engine's rule (cast.rs `priority_options_all`: the active player plays a land in a main phase with an empty
+stack while its lands played this turn < 1 + the extra drops its permanents grant); where the state's own decision
+shows it (the activator's priority in its main phase, the stack empty, a fetchland in hand) the engine's offer to play
+that fetchland must agree with `land_drop_available`, or the read stops (loud).
 """
 import json
 import re
@@ -43,6 +59,33 @@ LIBRARY_MANIPULATION = frozenset({
     'Jace, the Mind Sculptor', 'Prismari Charm', 'Thundering Falls', 'Flow State',
 })
 
+# The steps of the activator's own turn from which it can still play a land this turn (a main phase under way or to
+# come): a fetchland played then can be cracked before the next turn's upkeep. (The export's step names, az/view.rs.)
+LAND_DROP_STEPS = frozenset({'untap', 'upkeep', 'draw', 'main1', 'begin_combat', 'declare_attackers', 'declare_blockers',
+                             'first_strike_damage', 'combat_damage', 'end_combat', 'main2'})
+ALL_STEPS = LAND_DROP_STEPS | {'setup', 'end', 'cleanup'}
+
+
+def _extra_land_drops():
+    """{card name: extra land drops a turn} of every card the engine grants them to: its card data's
+    `grants_additional_land_per_turn` (data/cards/*.ir.json, lowered into `CardDef::extra_lands`; Fastbond's "any
+    number" is the IR's sentinel 1,000,000: more drops than a game has lands, as the engine's ANY_LANDS). The hand-written legacy cards grant none (no other
+    `extra_lands` in engine/src)."""
+    import glob
+    import os
+    out = {}
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'cards')
+    for f in sorted(glob.glob(os.path.join(root, '*.ir.json'))):
+        with open(f, encoding='utf-8') as fh:
+            for c in json.load(fh).get('cards') or []:
+                n = int((c.get('printing') or {}).get('grants_additional_land_per_turn') or 0)
+                if n:
+                    out[c['name']] = n
+    return out
+
+
+EXTRA_LAND_DROPS = _extra_land_drops()
+
 LINE = re.compile(r'^T(\d+) (\w+) (.*)$')
 ACTIVATE = re.compile(r"^P(\d) activates (Mishra's Bauble|Urza's Bauble) \(")
 TARGET = re.compile(r'^target P(\d)$')
@@ -56,6 +99,7 @@ def schema():
         ('own_turn', b), ('bauble', s), ('target', s), ('opp_targetable', b), ('opp_hand', i), ('opp_hand_known', i),
         ('opp_hand_all_known', b), ('opp_library', i), ('opp_top_known', b), ('own_top_known', b),
         ('fetch_in_hand', i), ('fetch_on_battlefield', i), ('fetch_available', b), ('manipulation_in_hand', ls),
+        ('lands_played', i), ('land_drop_available', b), ('fetch_in_hand_playable', b), ('fetch_crackable', i),
         ('brainstorm_in_hand', b), ('ponder_in_hand', b), ('excluded', s), ('blunder', b), ('blunder_reason', s)])
 
 
@@ -75,12 +119,33 @@ def conditions(st, p):
     opp_hand = len(op.get('hand') or [])
     opp_known = len(known[opp].get('hand') or [])
     manip = sorted({n for n in hand if n in LIBRARY_MANIPULATION})
+    own = st.get('active') == p
+    step = st.get('step')
+    if step not in ALL_STEPS:
+        raise ValueError(f'the exported state has no known step ({step!r})')
     fib = sum(1 for n in hand if n in FETCHLANDS)
-    fob = sum(1 for c in me.get('battlefield') or [] if c.get('name') in FETCHLANDS and c.get('controller', p) == p)
-    return {'own_turn': st.get('active') == p, 'opp_hand': opp_hand, 'opp_hand_known': opp_known,
+    mine = [c for c in me.get('battlefield') or [] if c.get('controller', p) == p]
+    fob = sum(1 for c in mine if c.get('name') in FETCHLANDS)
+    # crackable before the delayed draw: untapped; or tapped on the opponent's turn (it untaps in the activator's untap
+    # step, before the upkeep's draw trigger resolves); tapped on its own turn it stays tapped through the next upkeep
+    crack = sum(1 for c in mine if c.get('name') in FETCHLANDS and (not c.get('tapped') or not own))
+    played = int(me.get('lands_played') or 0)
+    drops = 1 + sum(EXTRA_LAND_DROPS.get(c.get('name'), 0) for c in mine)
+    drop = own and step in LAND_DROP_STEPS and played < drops
+    d = st.get('decision') or {}
+    if (fib and d.get('kind') == 'Priority' and d.get('player') == p and own and step in ('main1', 'main2')
+            and not st.get('stack')):
+        offered = any(o.get('t') == f'Play {n}' for o in d.get('options') or [] for n in hand if n in FETCHLANDS)
+        if offered != drop:
+            raise ValueError(f'turn {st.get("turn")} {step}: the engine {"offers" if offered else "does not offer"} '
+                             f'P{p} a land play of its fetchland, land_drop_available = {drop} (lands played {played}, '
+                             f'drops {drops})')
+    return {'own_turn': own, 'opp_hand': opp_hand, 'opp_hand_known': opp_known,
             'opp_hand_all_known': opp_known >= opp_hand, 'opp_library': int(op.get('library') or 0),
             'opp_top_known': _knows_top(known, opp, p), 'own_top_known': _knows_top(known, p, p),
-            'fetch_in_hand': fib, 'fetch_on_battlefield': fob, 'fetch_available': fib + fob > 0,
+            'fetch_in_hand': fib, 'fetch_on_battlefield': fob, 'lands_played': played, 'land_drop_available': drop,
+            'fetch_in_hand_playable': bool(fib) and drop, 'fetch_crackable': crack,
+            'fetch_available': crack > 0 or (bool(fib) and drop),
             'manipulation_in_hand': manip, 'brainstorm_in_hand': 'Brainstorm' in hand,
             'ponder_in_hand': 'Ponder' in hand}
 
@@ -103,6 +168,8 @@ def classify(r):
         return None, False, 'ok_opponent_top_known'
     if r['fetch_available']:
         return None, False, 'ok_self_with_fetch'
+    if r['fetch_in_hand'] or r['fetch_on_battlefield']:
+        return None, True, 'self_with_unusable_fetch'
     return None, True, 'self_without_fetch'
 
 
@@ -174,7 +241,8 @@ SELECT b.game_id, b.iter, {kind} AS kind, {ckpt} AS checkpoint,
        CASE b.activator WHEN 0 THEN g.deck0 || ' v ' || g.deck1 ELSE g.deck1 || ' v ' || g.deck0 END AS pairing,
        b.idx, b.action, b.turn, b.step, b.activator, b.own_turn, b.bauble, b.target, b.opp_targetable, b.opp_hand,
        b.opp_hand_known, b.opp_hand_all_known, b.opp_library, b.opp_top_known, b.own_top_known, b.fetch_in_hand,
-       b.fetch_on_battlefield, b.fetch_available, b.manipulation_in_hand, b.brainstorm_in_hand, b.ponder_in_hand,
+       b.fetch_on_battlefield, b.fetch_available, b.lands_played, b.land_drop_available, b.fetch_in_hand_playable,
+       b.fetch_crackable, b.manipulation_in_hand, b.brainstorm_in_hand, b.ponder_in_hand,
        b.excluded, b.blunder, b.blunder_reason, (g.winner = b.activator) AS won
 FROM bauble b JOIN games g USING (game_id);
 """
@@ -267,9 +335,18 @@ SPOT_KINDS = {
                                            "and the opponent's top card unknown: it can't act on its own top card "
                                            "(the Bauble draws it anyway), while the opponent's top card is remembered "
                                            "(ENGINE.md 192) (the user's rule, docs/ENGINE.md 194)"),
-    'bauble_mishra_fetch_control': ('control', "a control, not a blunder: Mishra's Bauble with a fetchland available "
-                                               "(look at its own top card, then shuffle a bad one away) - the share of "
-                                               "searches targeting itself is reported, not scored right or wrong"),
+    'bauble_mishra_self_fetch_unusable': ('bad', "Mishra's Bauble at itself with a fetchland it can't use in time and "
+                                                 "the opponent's top card unknown: the Bauble draws its top card at the "
+                                                 "beginning of the next upkeep, and the fetchland can't shuffle it away "
+                                                 "first - one in hand can't be played (the opponent's turn, its end "
+                                                 "step, or its land drop already spent this turn) and none on its "
+                                                 "battlefield can be cracked - so looking at its own top card tells it "
+                                                 "only what it is about to draw (the user's rule of 2026-11-18, "
+                                                 "docs/ENGINE.md 194.8)"),
+    'bauble_mishra_fetch_control': ('control', "a control, not a blunder: Mishra's Bauble with a fetchland it can use "
+                                               "before the delayed draw (look at its own top card, then shuffle a bad "
+                                               "one away) - the share of searches targeting itself is reported, not "
+                                               "scored right or wrong"),
 }
 
 
@@ -281,7 +358,11 @@ def spot_kind(r):
         return 'bauble_urza_self' if r['opp_hand'] > 0 and not r['opp_hand_all_known'] else None
     if r['opp_top_known']:
         return None
-    return 'bauble_mishra_fetch_control' if r['fetch_available'] else 'bauble_mishra_self_no_fetch'
+    if r['fetch_available']:
+        return 'bauble_mishra_fetch_control'
+    if r['fetch_in_hand'] or r['fetch_on_battlefield']:
+        return 'bauble_mishra_self_fetch_unusable'
+    return 'bauble_mishra_self_no_fetch'
 
 
 def spots(run, db, source, per_kind=6, log=print):
@@ -335,7 +416,9 @@ def spots(run, db, source, per_kind=6, log=print):
                     'decider': r['activator'], 'turn': st['turn'],
                     'step': st['step'], 'answer': answer, 'why': why, 'chose_self': r['target'] == 'self',
                     'conditions': {c: r[c] for c in ('opp_hand', 'opp_hand_known', 'opp_library', 'fetch_in_hand',
-                                                     'fetch_on_battlefield', 'manipulation_in_hand', 'own_turn')}})
+                                                     'fetch_on_battlefield', 'manipulation_in_hand', 'own_turn',
+                                                     'lands_played', 'land_drop_available', 'fetch_in_hand_playable',
+                                                     'fetch_crackable')}})
         taken[kind] += 1
         seen.add((r['game_id'], kind))
     log(f'{len(out)} Bauble spots: {taken}')

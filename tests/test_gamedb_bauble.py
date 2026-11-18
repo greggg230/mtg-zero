@@ -28,7 +28,8 @@ from test_gamedb import combo_file, table  # noqa: E402
 
 def row(**k):
     base = {'bauble': 'urza', 'target': 'self', 'opp_targetable': True, 'opp_hand': 5, 'opp_hand_all_known': False,
-            'opp_library': 40, 'opp_top_known': False, 'fetch_available': False}
+            'opp_library': 40, 'opp_top_known': False, 'fetch_available': False, 'fetch_in_hand': 0,
+            'fetch_on_battlefield': 0}
     base.update(k)
     return base
 
@@ -44,6 +45,10 @@ def row(**k):
     # Mishra's Bauble
     ({'bauble': 'mishra'}, (None, True, 'self_without_fetch')),
     ({'bauble': 'mishra', 'fetch_available': True}, (None, False, 'ok_self_with_fetch')),
+    # a fetchland it can't use before the delayed draw (in hand off its land drop, tapped on its own turn): a blunder
+    ({'bauble': 'mishra', 'fetch_in_hand': 1}, (None, True, 'self_with_unusable_fetch')),
+    ({'bauble': 'mishra', 'fetch_on_battlefield': 1}, (None, True, 'self_with_unusable_fetch')),
+    ({'bauble': 'mishra', 'fetch_in_hand': 2, 'opp_top_known': True}, (None, False, 'ok_opponent_top_known')),
     ({'bauble': 'mishra', 'opp_top_known': True}, (None, False, 'ok_opponent_top_known')),
     ({'bauble': 'mishra', 'opp_top_known': True, 'fetch_available': True}, (None, False, 'ok_opponent_top_known')),
     ({'bauble': 'mishra', 'opp_hand_all_known': True}, (None, True, 'self_without_fetch')),   # hand knowledge: Urza's only
@@ -57,16 +62,77 @@ def test_the_blunder_rules(k, want):
 
 
 def state(p=0, opp_hand=('Daze', 'Brainstorm'), known_opp_hand=(), my_hand=('Ponder',), my_bf=(), opp_lib=40,
-          opp_top_mask=0):
+          opp_top_mask=0, active=None, step='main1', lands_played=0, tapped=(), bf_extra=(), decision=None):
     pl = [None, None]
-    pl[p] = {'hand': [{'name': n} for n in my_hand], 'battlefield': [{'name': n, 'controller': p} for n in my_bf],
-             'library': 30}
-    pl[1 - p] = {'hand': [{'name': n} for n in opp_hand], 'battlefield': [], 'library': opp_lib}
+    pl[p] = {'hand': [{'name': n} for n in my_hand], 'library': 30, 'lands_played': lands_played,
+             'battlefield': [{'name': n, 'controller': p, 'tapped': n in tapped} for n in (*my_bf, *bf_extra)]}
+    pl[1 - p] = {'hand': [{'name': n} for n in opp_hand], 'battlefield': [], 'library': opp_lib, 'lands_played': 0}
     known = [None, None]
     known[p] = {'hand': [], 'library': []}
     known[1 - p] = {'hand': [[i, n] for i, n in enumerate(known_opp_hand)],
                     'library': [[0, opp_top_mask, 'Island']] if opp_top_mask else []}
-    return {'active': p, 'players': pl, 'known': known}
+    st = {'active': p if active is None else active, 'step': step, 'turn': 3, 'players': pl, 'known': known, 'stack': []}
+    if decision is not None:
+        st['decision'] = decision
+    return st
+
+
+def mishra_self(st, p=0):
+    """The row of a Mishra's Bauble at itself by `p` from state `st` (the Reader's)."""
+    R = GB.Reader()
+    R.step(1, st, {'kind': 'Priority', 'player': p}, [f"T3 Main1 P{p} activates Mishra's Bauble (Activated(0))"])
+    R.step(2, {}, {'kind': 'Target', 'player': p, 'options': [{}, {}]}, [f'T3 Main1 target P{p}'])
+    (r,) = R.finish()
+    return r
+
+
+@pytest.mark.parametrize('k, playable, crackable, want', [
+    # in hand, its own turn, main 1, its land drop unused: it can play the fetch and crack it before the draw
+    ({'my_hand': ('Polluted Delta',)}, True, 0, 'ok_self_with_fetch'),
+    ({'my_hand': ('Polluted Delta',), 'step': 'upkeep'}, True, 0, 'ok_self_with_fetch'),      # main 1 to come
+    ({'my_hand': ('Polluted Delta',), 'step': 'declare_blockers'}, True, 0, 'ok_self_with_fetch'),   # main 2 to come
+    ({'my_hand': ('Polluted Delta',), 'step': 'main2'}, True, 0, 'ok_self_with_fetch'),
+    # in hand, its land drop already played this turn: the delayed draw comes first - a blunder
+    ({'my_hand': ('Polluted Delta',), 'lands_played': 1}, False, 0, 'self_with_unusable_fetch'),
+    # in hand on the opponent's turn (two of them): no land play before its upkeep's draw - a blunder
+    ({'my_hand': ('Misty Rainforest', 'Polluted Delta'), 'active': 1, 'step': 'end'}, False, 0,
+     'self_with_unusable_fetch'),
+    ({'my_hand': ('Misty Rainforest',), 'active': 1, 'step': 'main1'}, False, 0, 'self_with_unusable_fetch'),
+    # in hand in its own end step: no main phase left this turn
+    ({'my_hand': ('Polluted Delta',), 'step': 'end'}, False, 0, 'self_with_unusable_fetch'),
+    # an extra land drop (Fastbond, the engine's card data): a second land this turn is still a play
+    ({'my_hand': ('Polluted Delta',), 'lands_played': 1, 'bf_extra': ('Fastbond',)}, True, 0, 'ok_self_with_fetch'),
+    # an uncracked fetch on the battlefield: crackable at instant speed before the draw - the control
+    ({'my_bf': ('Flooded Strand',)}, False, 1, 'ok_self_with_fetch'),
+    ({'my_bf': ('Flooded Strand',), 'lands_played': 1, 'step': 'end'}, False, 1, 'ok_self_with_fetch'),
+    ({'my_bf': ('Flooded Strand',), 'active': 1}, False, 1, 'ok_self_with_fetch'),
+    # ... tapped: on its own turn it stays tapped past the opponent's upkeep (a blunder); on the opponent's turn it
+    # untaps in the activator's untap step, before its upkeep's draw trigger resolves (crackable)
+    ({'my_bf': ('Flooded Strand',), 'tapped': ('Flooded Strand',)}, False, 0, 'self_with_unusable_fetch'),
+    ({'my_bf': ('Flooded Strand',), 'tapped': ('Flooded Strand',), 'active': 1}, False, 1, 'ok_self_with_fetch'),
+    # no fetchland at all
+    ({'my_hand': ('Island',)}, False, 0, 'self_without_fetch'),
+])
+def test_the_fetchland_timing(k, playable, crackable, want):
+    r = mishra_self(state(**k))
+    assert (r['fetch_in_hand_playable'], r['fetch_crackable'], r['blunder_reason']) == (playable, crackable, want)
+    assert r['fetch_available'] == (want == 'ok_self_with_fetch')
+    assert r['blunder'] == (want != 'ok_self_with_fetch')
+
+
+def test_the_land_drop_agrees_with_the_engines_offer():
+    play = {'kind': 'Priority', 'player': 0, 'options': [{'t': 'Pass priority'}, {'t': 'Play Polluted Delta'}]}
+    no_play = {'kind': 'Priority', 'player': 0, 'options': [{'t': 'Pass priority'}]}
+    c = GB.conditions(state(my_hand=('Polluted Delta',), decision=play), 0)
+    assert c['land_drop_available'] and c['fetch_in_hand_playable']
+    c = GB.conditions(state(my_hand=('Polluted Delta',), lands_played=1, decision=no_play), 0)
+    assert not c['land_drop_available'] and not c['fetch_available']
+    with pytest.raises(ValueError):       # the engine offers a land play the rule says is spent
+        GB.conditions(state(my_hand=('Polluted Delta',), lands_played=1, decision=play), 0)
+    with pytest.raises(ValueError):       # ... or withholds one the rule says is open
+        GB.conditions(state(my_hand=('Polluted Delta',), decision=no_play), 0)
+    with pytest.raises(ValueError):
+        GB.conditions(state(step='Main1'), 0)
 
 
 def test_the_reader_on_play_by_play():
@@ -82,6 +148,7 @@ def test_the_reader_on_play_by_play():
     assert [(r['action'], r['activator'], r['bauble'], r['target']) for r in rows] == [(5, 0, 'mishra', 'self'), (9, 1, 'urza', 'self')]
     a, b = rows
     assert a['opp_targetable'] and a['fetch_in_hand'] == 1 and a['fetch_available'] and a['brainstorm_in_hand']
+    assert a['land_drop_available'] and a['fetch_in_hand_playable'] and a['lands_played'] == 0
     assert a['manipulation_in_hand'] == ['Brainstorm'] and not a['opp_top_known']    # (the owner's knowledge, not P0's)
     assert (a['excluded'], a['blunder'], a['blunder_reason']) == (None, False, 'ok_self_with_fetch')
     assert not b['opp_targetable'] and b['excluded'] == 'opponent_not_targetable' and b['blunder'] is None

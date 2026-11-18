@@ -12,6 +12,10 @@ Only spots not reviewed yet (`review` null) are touched - an earlier verdict on 
 * `keep` / `unsure`: `review` = {verdict, by 'user', date[, note]} (unsure holds the spot: kept, not scored - HELD);
 * no verdict (or a cleared one): left as it is, listed as still to review.
 
+A spot whose id changed after the page was made (reclassified into another kind: the id carries the kind) is found
+through the library's `moved` map ({old id: new id}): a verdict saved under the old id applies to the spot's new id,
+unless the new id has a verdict of its own (that one wins).
+
 A summary goes under `audit_user[<label>]` (default `review_<date>`). A spot to drop or hold that the stored reference
 scores include stops the run (re-measure the reference with `library-score --reference` instead of patching means).
 Fails loudly when a kind filter matches nothing to apply or a verdict names no library spot."""
@@ -47,8 +51,21 @@ def read_verdicts(path):
     return {k: v.get('data', v) for k, v in d.items()}
 
 
+def resolve_moved(L, ver):
+    """`ver` with the verdicts saved under a moved spot's old id re-keyed to its new id (the library's `moved` map,
+    entries whose value is a library spot id); a verdict under the new id itself wins."""
+    ids = {sp['id'] for sp in L['spots']}
+    moved = {o: n for o, n in (L.get('moved') or {}).items() if n in ids}
+    out = {k: v for k, v in ver.items() if k not in moved}
+    for k, v in ver.items():
+        if k in moved:
+            out.setdefault(moved[k], v)
+    return out
+
+
 def apply(L, ver, date, kinds=None, label=None):
     """Apply `ver` to the library `L` in place -> the summary (also stored under audit_user[label])."""
+    ver = resolve_moved(L, ver)
     ids = {sp['id'] for sp in L['spots']}
     unknown = sorted(v for v in ver if v not in ids and v not in (L.get('dropped') or {}))
     if unknown:

@@ -383,7 +383,9 @@ each with that answer and the reason:
   (`HELD`), listed as `held` in the scores and the sidecar's record. To apply them: save the `verdicts` collection as
   JSON files (one a document), then `python tools/delver_review_apply.py VERDICTS_DIR --date YYYY-MM-DD [--kinds
   K,K] [--dry-run]` - only spots not reviewed yet are touched (an earlier verdict is never rewritten), spots with no
-  verdict are listed as still to review, the summary goes under `audit_user` (tests/test_delver_review_apply.py).
+  verdict are listed as still to review, the summary goes under `audit_user` (tests/test_delver_review_apply.py). A
+  spot reclassified after its page was made gets a new id (the id carries the kind); the library's `moved` map
+  ({old id: new id}) carries a verdict saved under the old id to it.
 * **the fingerprint**: each spot stores `sig` (`spot_sig`: turn, step, decider, the options' words, the
   decider's hand, the life totals) on the engine it was added on. A later engine whose rules change the
   game before the spot replays it to another position: the spot is then **stale** - not scored, listed by

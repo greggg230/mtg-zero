@@ -33,6 +33,19 @@ def test_keep_drop_unsure_and_pending():
     assert L['audit_user']['bauble'] == s and L['audit_user']['date'] == '2026-11-02'
 
 
+def test_a_moved_spot_takes_the_verdict_of_its_old_id():
+    L = lib()
+    L['moved'] = {'old:1': 'b:1', 'old:2': 'b:2', 'gone:1': 'a text, not a spot id'}
+    ver = {'old:1': {'verdict': 'keep', 'note': 'n'}, 'old:2': {'verdict': 'unsure'}, 'b:2': {'verdict': 'keep'}}
+    s, pending = R.apply(L, ver, '2026-11-18', kinds={'new'})
+    by = {sp['id']: sp for sp in L['spots']}
+    assert by['b:1']['review'] == {'verdict': 'keep', 'by': 'user', 'date': '2026-11-18', 'note': 'n'}
+    assert by['b:2']['review']['verdict'] == 'keep'                     # the new id's own verdict wins
+    assert pending == ['b:3', 'b:4'] and s['kept'] == 2
+    with pytest.raises(SystemExit, match='name no library spot'):    # a moved entry that names no spot resolves nothing
+        R.apply(L, {'gone:1': {'verdict': 'keep'}}, '2026-11-18')
+
+
 def test_loud_failures():
     with pytest.raises(SystemExit, match='name no library spot'):
         R.apply(lib(), {'zz:9': {'verdict': 'keep'}}, '2026-11-18')
