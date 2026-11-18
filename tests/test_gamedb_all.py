@@ -1,4 +1,4 @@
-"""Every game the system plays in the game database (docs/gamedb.md, docs/ENGINE.md 189): records of every kind under a
+"""Every game the system plays in the game database (docs/gamedb.md, docs/ENGINE.md 191): records of every kind under a
 run (self-play, evaluation, the yardsticks' cells / baselines / best-of-one - their farm jobs' traced games too -, the
 publisher's replays) ingested with their kind and both players in their seats, the views carrying them, the Doomsday
 series still self-play's alone; the engine identity (a unit of another engine or of none refused loudly, handed to

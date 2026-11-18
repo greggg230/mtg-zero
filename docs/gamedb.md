@@ -2,7 +2,7 @@
 
 Every game of a run - its self-play, its evaluations, its yardsticks, its publisher's - and of the standalone tools that
 play games, replayed through the engine's play-by-play, in Parquet tables that DuckDB queries in well under a second.
-Design and measurements: `docs/ENGINE.md` 187 (self-play) and 189 (every other game, the engine identity). This page is
+Design and measurements: `docs/ENGINE.md` 187 (self-play) and 191 (every other game, the engine identity). This page is
 the schema and the queries: enough to write SQL against it cold.
 
 ## Pipeline
@@ -29,7 +29,7 @@ the schema and the queries: enough to write SQL against it cold.
    iterations; the other kinds are kept whole). **The raw records are kept by default** (the user's choice: no
    `--delete-raw` unless asked; they are what replays a game on its own engine). Their cost on disk: ~150 bytes a
    self-play game (148 measured, ENGINE.md 187.4) - the metagame run's ~61,000 games an hour are ~9 MB an hour, ~0.2 GB a
-   day -; an evaluation or yardstick game (played out, no resignation) ~400-600 bytes (ENGINE.md 189.5): its ~1,000 a day
+   day -; an evaluation or yardstick game (played out, no resignation) ~230 bytes (ENGINE.md 191.5): its ~1,000 a day
    (the anchors' 100 every 16 iterations, the cells' 400-1,200 a measured generation) are well under 1 MB a day.
    `gamedb.py status RUN` prints the raw records' size.
 
@@ -90,7 +90,7 @@ python tools/gamedb.py ingest RUN --engine-checkout ../mtgz-engine-<sha12>
 `--engine-checkout PATH` asks PATH's gamedb for its engine id and hands it the refused units of that engine (`python
 PATH/tools/gamedb.py ingest RUN --db <the same db> --only-engine <id>`): they are replayed by the engine that played them
 and written into the same database (its tables read by name: a later checkout's columns are NULL in an earlier one's
-files). The checkout must be at or after this page's ENGINE.md 189 (the build lines exist from there). So records made
+files). The checkout must be at or after this page's ENGINE.md 191 (the build lines exist from there). So records made
 before an engine change - the play-by-play export in view.rs, Mishra's Bauble remembering what it saw - stay ingestible
 after it: run the ingest of the new commit, then `--engine-checkout` a checkout of the old one (`refused` names its
 commit). A unit without an engine id (records of zero-core 5c2d3f39, before the build lines) is refused unless
@@ -293,7 +293,7 @@ whole play-by-play (`SELECT seq, turn, step, player, type, card, from_zone, to_z
 ## Turning it all on (a run)
 
 One setting: the run's `game_records` 1 (`--game-records 1` at the launch; zero-core docs/az.md 59). With it, on a
-commit at or after ENGINE.md 189 (the run's pinned worktree and the Mac's eval checkout of it):
+commit at or after ENGINE.md 191 (the run's pinned worktree and the Mac's eval checkout of it):
 * self-play on every executor (as ENGINE.md 187), each file with its build line;
 * the evaluation (`eval`, `elo`, `anchor`, `ref`): here, or on the Mac with `eval_remote` 'mac' (the mirror gets the run's
   config, records there, and the files come back with the result);
