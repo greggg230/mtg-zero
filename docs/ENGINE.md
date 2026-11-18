@@ -39410,3 +39410,13 @@ passed alone), `test_token_graphs.py::test_absent_slots_are_never_read[max]` (pa
 on 68b6a40's own tree, the pin before this one: not this change - the merge and the flip touch only the farm pool,
 the worker crate and run defaults; the gate's Python has no CUDA and skips it; with another session's training run
 on the GPU at the time; open on zero-core's `dup_action_reduce` line, docs/az.md 58).
+
+### 195.2 The merge with main 5fb7e51b, and the other games
+
+d39486bb merges main 5fb7e51b (the Bauble measure's fetchland timing, 194.8, and the review page's verdicts tool: Python
+tools and docs, the same zero-core pin as before) into this branch. Tier **python** on it: **GATE PASSED WITH SKIPS
+python d39486bb43a8 in 393s** (the live-run fence only: another session's run was live on the desktop, so the pytest
+shards and the run-loop smoke ran on the Mac); a first run failed only `test_mac_remote::test_the_macs_selfplay_settings`
+on a shard that fell back to the desktop (174.1's Git Bash path conversion of `MTGZ_MAC_HOME`), passed when rerun with
+`MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`. zero-core 459599f against the other games: `tools/smoke_all.sh --with-this-core
+--build-only` GREEN, games 3 of 3 checked (glassroad-zero, caverna-zero, kingdombuilder-zero build).
