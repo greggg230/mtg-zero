@@ -39304,3 +39304,25 @@ approved (2026-11-17) making them the default for every future farm-attached run
 **Tests.** zero-core 459599f: `tests/test_farm_pool.py::test_default_pool_rolling_is_auto` (a pool with the default PUTs
 `selfplay.rolling` {"inflight": "auto", "gpu_inflight": "auto"}; '' PUTs no `rolling`), the classic farm-pool tests
 with `pool_rolling` '' unchanged; cargo test --workspace (the worker's rolling suite included) and the core pytest.
+
+### 195.1 The gate of 55c0761e
+
+Tier **search-core** (a zero-core behaviour change: the default of a farm setting), in warm-1 against main d3ec4957
+as the baseline (warm-2): **GATE PASSED WITH FLAKY RETRIES search-core 55c0761ebeec in 3035s** - the flaky test was
+`tests/test_remoteplay.py::test_a_worker_slower_than_a_phase_is_capped_at_its_floor` (core pytest, passed alone on
+retry; 734 passed). Checkpoint compatibility **identical** across both checkouts (visits 3,303 samples, cq 3,303
+samples): a run without a farm pool plays byte for byte as on main. Digest formats equal to the recorded files:
+constructed dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt
+f78ada3d3d114826 (80 matches). **Farm compat** identical: gate 2 6 games, 2,890 rows, 150 batches; gate 3 6 games,
+2,556 rows, 6 decks; **features rolling announced** (the new check 3). The 4-config search smoke 0 of 4 failed, the
+run-loop smoke 16 games 0 unfinished, this repo's pytest 641 passed (4 skipped), zero-core cargo test 215 passed.
+(While the checkpoint-compat step ran, another session's lease checked warm-2 out at 00c6aec2, main plus Bauble
+measure tools and docs: no engine, worker or core change, so the old side's engine and core were main's either way.)
+
+zero-core 459599f on its own: cargo test --workspace (the worker's rolling suite included) all ok; pytest 775 passed,
+11 skipped, 3 failed - `test_remoteplay.py::test_cotrain_the_local_driver_is_never_starved` (the known timing flake,
+passed alone), `test_token_graphs.py::test_absent_slots_are_never_read[max]` (passed alone) and
+`test_dup_reduce.py::test_max_is_deterministic_on_cuda_and_matches_the_cpu` (fails alone too, and fails the same
+on 68b6a40's own tree, the pin before this one: not this change - the merge and the flip touch only the farm pool,
+the worker crate and run defaults; the gate's Python has no CUDA and skips it; with another session's training run
+on the GPU at the time; open on zero-core's `dup_action_reduce` line, docs/az.md 58).
