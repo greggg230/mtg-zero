@@ -39095,8 +39095,11 @@ farm by default. Both are opt-in spec options; a spec without them behaves as be
 * `farm`: `{"gates": true, "pause_when_done": true}`. A farm arm is one whose settings name a pool (`selfplay_remote`
   'pool:<farm run>', with pool_build / pool_worker / pool_alternates / lease settings as ordinary overrides, in
   `common` or per arm). `ab.py farm-gates SPEC [ARM]` runs tools/farm_gates.py on the arm's forked config.json and
-  checkpoint K with its pool_worker in the arm's checkout (`<out>/farm_gates/<arm>/summary.json`); `launch` refuses a
-  farm arm without a passed summary for that exact worker, and `go` runs missing gates before the first arm. The
+  checkpoint K with its pool_worker in the arm's checkout (`<out>/farm_gates/<arm>/summary.json`), after the worker's
+  own `check-config` of the arm's config.json (`check_config.json`: no failures). The check-config step is there because
+  the gates' games passed with a build older than the arm's zero-core whose check-config refuses `game_records` (the
+  Bauble A/B's first control launch: the pool refused the template, the arm self-played on the desktop alone until it
+  was stopped). `launch` refuses a farm arm without both for that exact worker, and `go` runs missing gates before the first arm. The
   coordinator's farm run is created by the pool's first PUT; `go` pauses it after the arm ends (`ab.py farm-pause SPEC
   ARM` by hand: the whole body as GET returns it with "state" "paused", minus the GET-only alternates[].problems). The
   worker builds stay a step before the spec (tools/farm_build.py --publish per engine, the CUDA re-sign): publishing
@@ -39105,7 +39108,7 @@ farm by default. Both are opt-in spec options; a spec without them behaves as be
   head-to-heads against an anchor).
 
 Tests: tests/test_ab.py +2 (per-arm code and its refusals; farm_run, the launch refusal reasons - no summary, another
-worker, gates off, no `farm` block - and farm_pause against a fake coordinator: GET, then PUT paused without
+worker, a check-config with failures, gates off, no `farm` block - and farm_pause against a fake coordinator: GET, then PUT paused without
 `problems`). Gate: the python tier.
 
 ## 194. The Bauble targeting blunder measure: the game database's `bauble` table, the per-iteration series, the run page's card and Bauble canary spots (branch `feat/bauble-blunders`, delverai branch `bauble-blunders`, 2026-11-17)

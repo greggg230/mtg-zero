@@ -181,6 +181,10 @@ def test_farm_arms(tmp_path):
     (g / 'summary.json').write_text(json.dumps({'passed': True, 'worker': 'E:/b/other.exe'}))
     assert 'not the arm\'s pool_worker' in ab.farm_gate_missing(s, 'adapt')
     (g / 'summary.json').write_text(json.dumps({'passed': True, 'worker': 'E:\\b\\w.exe'}))
+    assert 'check-config' in ab.farm_gate_missing(s, 'adapt')
+    (g / 'check_config.json').write_text(json.dumps({'worker': 'E:/b/w.exe', 'failures': ['game_records']}))
+    assert "['game_records']" in ab.farm_gate_missing(s, 'adapt')
+    (g / 'check_config.json').write_text(json.dumps({'worker': 'E:/b/w.exe', 'failures': []}))
     assert ab.farm_gate_missing(s, 'adapt') is None and ab.farm_gate_missing(s, 'ctrl') is None
     assert ab.farm_gate_missing(ab.normalize(spec(out=str(tmp_path / 'out'), runs_dir=str(tmp_path), farm={'gates': False})),
                                 'adapt') is None

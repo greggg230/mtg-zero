@@ -601,11 +601,15 @@ def farm_gate_missing(s, arm):
         return None
     sm = jload(os.path.join(farm_gates_dir(s, arm), 'summary.json'), {}) or {}
     w = str(cfg.get('pool_worker') or '')
+    same = lambda x: os.path.normcase(os.path.normpath(str(x or '').replace('\\', '/')))  # noqa: E731
     if not sm.get('passed'):
         return f'no passed farm gates in {farm_gates_dir(s, arm)} (ab.py farm-gates SPEC {arm})'
-    same = lambda x: os.path.normcase(os.path.normpath(str(x or '').replace('\\', '/')))  # noqa: E731
     if same(sm.get('worker')) != same(w):
         return f"the farm gates passed with {sm.get('worker')}, not the arm's pool_worker {w}: run them again"
+    cc = jload(os.path.join(farm_gates_dir(s, arm), 'check_config.json'), {}) or {}
+    if cc.get('failures') != [] or same(cc.get('worker')) != same(w):
+        return (f"the worker's check-config of the arm's settings has not passed with {w} ({cc.get('failures')}; "
+                f"ab.py farm-gates SPEC {arm})")
     return None
 
 
@@ -620,6 +624,19 @@ def farm_gates(s, arm):
     k = fork_k(s)
     out = farm_gates_dir(s, arm)
     os.makedirs(out, exist_ok=True)
+    # the worker's own check-config of the arm's settings: the farm pool refuses a template whose settings the build
+    # does not know (a build older than the arm's zero-core), which the gates' games do not show
+    w = str(cfg.get('pool_worker') or '')
+    p = subprocess.run([w, 'check-config', os.path.join(d, 'config.json'), '--json'], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+    try:
+        failures = json.loads(p.stdout).get('failures')
+    except ValueError:
+        failures = [f'check-config exit {p.returncode}: {(p.stdout + p.stderr)[-300:]}']
+    jsave(os.path.join(out, 'check_config.json'), {'worker': w, 'failures': failures})
+    if failures:
+        print(f"{arm}: the worker refuses the arm's settings {failures}: publish a worker of the arm's code", flush=True)
+        return 3
     cmd = [python(s, arm), 'tools/farm_gates.py', '--config', os.path.join(d, 'config.json'),
            '--checkpoint', os.path.join(d, 'models', f'iter_{k:04d}.pt'), '--worker', str(cfg.get('pool_worker') or ''),
            '--out', out]
