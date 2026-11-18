@@ -39743,14 +39743,17 @@ is the measure. Earlier unpaired windows: KleidiAI off 3,603 leaves/s at 148 ms/
 
 * **Per process, the native worker is at ~0.75-0.8x of the Python remote worker** with 4 evaluator threads (windows
   3/4, 6/7: 5,707 / 7,164, 5,820 / 7,731), from 0.29x with one (1/2). Both make the same batches (~227 rows, conc 768 in
-  4 groups); the native evaluator threads are ~2.7 of 4 busy. **The gap is ONNX Runtime's speed per session on the M4**:
-  88-92 ms for a 227-row batch on 3 threads where torch (Apple Accelerate) takes 20-26 ms. Profiled
-  (`ZERO_ORT_PROFILE`): no hot node - LayerNormalization 11.5%, Gemm 10.9%, MatMul 10.3%, FusedMatMul 8.7%, Transpose
-  8.0%, Add 6.9%, Gather 6.6%, Where 4.4% of the kernel time, over ~1,000 nodes a run. ONNX Runtime 1.32.0 (NuGet) is
-  no faster (2,518 vs 2,527 rows/s at 3 threads). Turning KleidiAI off is 2x slower. CoreML is no way out: ONNX Runtime
-  puts 531 of the graph's 2,111 nodes on it in 60 pieces, it fails our empty `where` outputs, and its fp16 would fail the
-  self-test. Not tried: sessions with and without KleidiAI side by side (an M4's SME units are one per cluster; its
-  NEON is per core), a whole-Mac native process (needs the clean window).
+  4 groups); the native evaluator threads are ~2.7 of 4 busy. (The Python side's "ms/batch" is its driver's wait in
+  `launch` + `result`: with 4 inference workers the batch is computed on the evaluator's own threads in between, so it is
+  not the compute time; 197.8 measures that.) **The gap is the zero-onnx/2 graph's arithmetic, not ONNX Runtime**
+  (197.8): the graph costs ~2.5x the remote worker's own forward per batch under any runtime - its attention is two
+  batched matmuls with masks where torch's forward calls a fused flash-attention kernel, and it has ~34,000 tiny
+  `select`s per batch. Profiled in ONNX Runtime (`ZERO_ORT_PROFILE`): no hot node - LayerNormalization 11.5%, Gemm
+  10.9%, MatMul 10.3%, FusedMatMul 8.7%, Transpose 8.0%, Add 6.9%, Gather 6.6%, Where 4.4% of the kernel time, over
+  ~1,000 nodes a run. ONNX Runtime 1.32.0 (NuGet) is no faster (2,518 vs 2,527 rows/s at 3 threads). Turning KleidiAI
+  off is 2x slower. CoreML is no way out: ONNX Runtime puts 531 of the graph's 2,111 nodes on it in 60 pieces, it fails
+  our empty `where` outputs, and its fp16 would fail the self-test. Not measured: a whole-Mac native process (the clean
+  window).
 * **The farm's own default is the bigger problem**: an agent sends a CPU job `threads` = its threads (16 on the Mac) and
   a rolling run's `inflight` "auto" = 32 games in 4 groups (zero-farm PROTOCOL 10.6): 8-10-row batches, 651 leaves/s,
   **0.09x** of one Python process. From 45c284b a macOS build splits a job's intra-op threads into sessions of 3 when the
@@ -39762,7 +39765,7 @@ machine's memory (the measured cost here: 7.9 GB at 768 in flight with 4 session
 `infer_workers` / `infer_threads` as job line tuning fields (the worker takes `infer_workers` from this branch on;
 PROTOCOL 5 lists the agent's tuning fields); (2) for the whole Mac, one native process against the three SSH processes'
 ~1,000-2,300 games in flight - to be measured in a clean window (`worker_bench.py --python-procs 3` for the SSH side);
-(3) closing the per-session gap (above), or accepting ~0.8x per core.
+(3) a cheaper graph (197.8: fused attention, fewer tiny nodes), or accepting ~0.8x per core.
 
 ### 197.6 Release plumbing (`farm_release.py release --mac`; opt-in, nothing applied)
 
@@ -39782,3 +39785,49 @@ zero-core: `cargo test` (212 + 3), `cargo test -p zero_worker` (Windows; on the 
 test_farm_def / test_farm_pool / test_farm_h2h / test_privacy (56 passed), `smoke_all.sh --with-this-core --build-only`
 GREEN (3 of 3 games). MTG Zero: tests/test_worker_farm.py (the new test and the setting-class tests), the Mac's farm
 gates (197.4), `infer_workers` 3 vs 1 byte-identical shards (Windows, gen-206 network); tier below.
+
+### 197.8 Why not PyTorch on the Mac? A libtorch / MPS spike (scratch code, nothing integrated)
+
+The question (the user, 2026-11-18): run the network through PyTorch (libtorch from C++, or the Mac's GPU) instead of
+ONNX Runtime. Measured on the Mac (the gen-398 network, 400 real batches the native worker recorded - 229 rows on
+average -, the worker's 64-row pieces; CONTENDED as above, every comparison in neighbouring runs):
+
+* **TorchScript does not hold the contract.** `torch.jit.script` of the zero-onnx/2 module (zero-core's `ZeroOnnx2`,
+  the module the ONNX exporter exports) fails; `torch.jit.trace` fails on `torch._check` of export-time SymInts, and with
+  those neutralised it bakes the data-dependent token count (`n.max().item()`) as a constant: "index out of range" on
+  the next batch. The module is written for `torch.export`, which handles those shapes - so **AOTInductor** is libtorch's
+  route: `torch.export` (5.7 s) then `aoti_compile_and_package` (35 s, needs clang; a 21.6 MB `.pt2` with the weights and
+  compiled kernels, per checkpoint), loaded from a 68 KB C++ program (`AOTIModelPackageLoader`, libtorch of the venv's
+  torch 2.14.1: `libtorch_cpu.dylib` 386 MB + `libc10` 1.1 MB + `libomp` 0.9 MB + `libtorch` 35 KB, ~388 MB against the
+  ONNX Runtime pack's 45 MB). Its answers: the reference set within 3.4e-6 (eager torch 4.2e-6, ONNX Runtime 7.5e-6;
+  the self-test's bound 2e-5), 2.6e-5 from ONNX Runtime's raw outputs.
+* **Per batch (ms, one caller, threads 1 / 3 / 4 / 6):** the zero-onnx/2 graph in ONNX Runtime 1.31.1 (Python API)
+  68 / 59 / 54 / 56; the same module in eager torch 61 / 98 / 91 / 110; AOTInductor from C++ 56 / 57 / 57 / 57 (its
+  kernels ignore the intra-op threads); from Python 103 / 98 / 83 / 89. **The remote worker's own evaluator**
+  (`infer.NetEvaluator`: TokenNet's eager forward, its own packing and `scaled_dot_product_attention`) **24 / 27 / 25 /
+  30**. Side by side (batches/s, every caller its own session): ONNX Runtime 4 x 3 54, 6 x 2 71; AOTInductor (C++) 4 x 3
+  58, 6 x 2 70; the remote worker's evaluator (workers 4 x 3 threads, 4 in flight) 70-71. So libtorch running the same
+  graph is no faster than ONNX Runtime; the forward the remote worker runs is ~2.5x cheaper per batch.
+* **Where the graph's time goes** (torch.profiler, 1 thread, per batch): the zero-onnx/2 module 78 ms - `bmm` 24.7
+  (attention as Q K^T and A V with masks), `addmm` 7.1, `select` 6.0 (34,000 calls), `copy_` 4.5, `where` 4.2,
+  `gelu` 3.7, `softmax` 3.0 -; TokenNet's forward 24.7 ms - `scaled_dot_product_flash_attention_for_cpu` 5.7, `addmm`
+  5.6, `gelu` 3.9, `copy_` 2.2 -, the rest small. The export has no fused attention (opset 17), so every runtime pays the
+  unfused form.
+* **The Mac GPU (MPS)**, the remote worker's evaluator in Python (the zero-onnx/2 module does not run on MPS: it computes
+  in float64, which MPS lacks): 227 rows 24.2 ms (9.4k rows/s; the CPU on 3 threads 20.8 ms), 512 38.4 ms (13.3k; CPU
+  34.0), 1024 72.3 ms (14.2k; CPU 72.2), 2048 132 ms (15.5k; CPU 196); answers within 2.1e-6 of the CPU's. One thread
+  feeding it: 90 s stable, 39.9 batches/s of 227 rows. **Four threads feeding one MPS evaluator crashed it** (SIGSEGV
+  after seconds: `at::native::mps::MetalShaderLibrary::exec_unary_kernel` in a hash map of torch's shader library,
+  reached from a `.to(dtype)` copy - the shader cache is not thread-safe in torch 2.14.1, in libtorch as much as in
+  Python). Stopped there (as asked): the GPU-plus-full-CPU-search combination was not measured.
+
+**What it would take** (not started): the cheaper arithmetic is in the export, not the runtime - (a) the zero-onnx graph
+with fused attention (ONNX Runtime's `com.microsoft` `MultiHeadAttention` / opset 23's `Attention`, both with CPU kernels)
+and without the per-element `select`s, which would serve every platform and keep the runtime packs and the protocol; or
+(b) a libtorch backend: an AOTInductor package of TokenNet's own forward per checkpoint (compiled on the Mac: AOTInductor
+does not cross-compile from Windows), a ~390 MB runtime pack, a second signed model file per checkpoint in the
+definitions and leases (zero-farm PROTOCOL 7 / 10), a `zero_worker` evaluator over `AOTIModelPackageLoader`, and the
+self-test as today. If inference took TokenNet's time (~2.5x less per batch), the native worker's 4 evaluator threads
+would no longer limit it (they are ~2.7 of 4 busy now at 88-92 ms a batch): an estimate of 1.2-1.5x the Python worker per
+process, bounded by the search threads - to be measured. MPS adds GPU throughput only with one feeding thread (a queue in
+front of it) and only above ~1,000-row batches.
