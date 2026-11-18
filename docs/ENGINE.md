@@ -39079,3 +39079,9 @@ searches a spot, 32 and 1,024 sims alike): Urza's 25% right, Mishra's without a 
   no deploy.
 * The SE treats each game's activations as one cluster; iterations of a few dozen games give wide bands (Urza's ±4.5
   points at 240 games).
+
+### 194.7 The gate
+
+`python tools/gate.py python` (warm worktree): GATE PASSED on a5f164fb (319 s; the earlier 2f59365e passed with skips -
+three live-run-hazard tests fenced while a supervisor was live). Engine untouched, digests unchanged. This subsection
+is docs only.
