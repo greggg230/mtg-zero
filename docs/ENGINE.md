@@ -38786,3 +38786,16 @@ by `describe` (a private cloud entry, 192.2).
 
 The release worker plays this engine: it must be rebuilt (the engine tier builds it and runs farm compat). A run picks
 this up only at a re-pin, and its networks see a new input there (the user's call: which run, when).
+
+### 192.7 The gates (on the merge with main c106f7e8, zero-core pin 3161bd9)
+
+* `suite` on 86c4de85: GATE PASSED in 1,094 s - the full engine suite 2,705 passed (24 binaries); the sharded
+  2,000-game fuzz of seven pools, all clean: default (100 matches), default with hidden decklists, `delver_dealt`,
+  `delver`, `meta`, `cross` and `delver_dealt2` (each 2,000 games, 100 matches + 100 post-sideboard).
+* `engine` on d604db12 (`--tested-sha 86c4de85`: the commit after it touched no engine file - the canary library,
+  `delver_rerecord.py`, `position_lab.py`): GATE PASSED WITH SKIPS (3 live-run-hazard tests fenced) in 1,442 s -
+  every digest = 192.4's (full 53eda75d63b2743b, encoding-free e65b965d025c800f, constructed dab59f1ff2a6d02e, eoe
+  2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt f78ada3d3d114826); `--test az` 57,
+  `limits` 13, `hidden` 28; pytest 4 shards + the desktop part; the smoke; the release worker rebuilt and farm compat
+  identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 6 games, 2,556 rows). (The first engine gate, on
+  86c4de85, failed two pytest tests - the canary library's five spots, 192.3 - fixed by d604db12.)
