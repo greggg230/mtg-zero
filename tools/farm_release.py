@@ -459,7 +459,7 @@ class Release:
                 if client is not None and run_id:
                     try:
                         cur = client.call('GET', f'/v1/admin/run/{run_id}')
-                        put_alts = list(cur.get('alternates') or [])
+                        put_alts = [{k: a[k] for k in ('build_id', 'runtime', 'when') if k in a} for a in cur.get('alternates') or []]
                         entry['current'] = {'build_id': cur.get('build_id'), 'runtime': cur.get('runtime'), 'alternates': put_alts}
                     except Exception as e:      # noqa: BLE001 - a plan without the current state
                         entry['current'] = f'GET failed: {e}'
@@ -489,6 +489,9 @@ class Release:
                     body = {k: cur.get(k) for k in keys if k in cur}
                     body['alternates'] = [{'build_id': fuzz['build_id'], 'when': {'platform': 'macos-arm64'}}]
                     entry['put'] = {'path': f'/v1/admin/campaign/{cid}', 'body': body}
+                    # (PROTOCOL 11.4: the campaign's current definition must list the alternate's build too; the
+                    # alternate should be the campaign's own commit, as a release's builds are)
+                    entry['definition_builds'] = [cur.get('build_id'), fuzz['build_id']]
             plan['campaigns'].append(entry)
         with open(os.path.join(self.log_dir, 'mac-plan.json'), 'w', encoding='utf-8', newline='\n') as f:
             json.dump(plan, f, indent=1)
