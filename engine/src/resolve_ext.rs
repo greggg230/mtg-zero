@@ -1274,7 +1274,7 @@ impl Game {
                     self.force_library_card(top, crate::hidden::KEY_LOOK, p);
                     // The looker knows that card where it is (until it moves,
                     // or the library is shuffled or searched), also when its
-                    // owner doesn't (ENGINE.md 190: the owner's worlds deal
+                    // owner doesn't (ENGINE.md 192: the owner's worlds deal
                     // it again, the looker's knowledge moving with it, as
                     // with the looker's own hand).
                     self.learn(p, top);

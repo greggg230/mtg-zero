@@ -533,7 +533,7 @@ impl Describer<'_> {
         let empty = |n: usize, what: &str| if n == 0 { Ok(()) } else { unsupported(what) };
         empty(face_down.len() + face_down_ids.len(), "face-down cards (exiled face down, face-down permanents)")?;
         empty(waiting.len(), "triggered abilities waiting to be put on the stack")?;
-        empty(peeks.len(), "a cloud entry naming a card its owner never saw (a look at the opponent's library, then a shuffle; ENGINE.md 190)")?;
+        empty(peeks.len(), "a cloud entry naming a card its owner never saw (a look at the opponent's library, then a shuffle; ENGINE.md 192)")?;
         empty(extra_turns.len(), "extra turns")?;
         empty(combat_dmg.len(), "combat damage being assigned")?;
         empty(links.len(), "cards exiled with a permanent (links)")?;

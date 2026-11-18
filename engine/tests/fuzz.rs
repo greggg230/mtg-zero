@@ -108,7 +108,7 @@ fn a_listed_card_s_find_with_the_deck_known_cross_post_sideboard_match_98() {
 /// 3) carries the card's identity". The engine keyed nothing private: the card was the viewer's own, and the look was
 /// the game that ended's. The check now reads the hand the look saw. The seeds were found under the `fuzz` profile
 /// (determinize checks 1 in 4); the denominator is drawn from the match's random stream, so they are replayed at 4 in
-/// every profile (`CHECKPOINT_EVERY_OVERRIDE`). Each must reach such a look (positive evidence). (ENGINE.md 190: the
+/// every profile (`CHECKPOINT_EVERY_OVERRIDE`). Each must reach such a look (positive evidence). (ENGINE.md 192: the
 /// remembered looks at another library moved the worlds' random draws; 52, 163 and 3,900,000,197 no longer reach one,
 /// 30, 55 and 3,900,000,012 do - a scan of seeds 0..300 and 3,900,000,000..300 found 41.)
 #[test]

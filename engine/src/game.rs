@@ -985,7 +985,7 @@ pub struct Game {
     /// sorted; set by the match. `None`: open decklists.
     pub(crate) known_pools: [Option<std::sync::Arc<[DefId]>>; 2],
     pub(crate) log: Option<Vec<String>>,
-    /// The private entries of the clouds (ENGINE.md 190): (viewer, owner, identity) - an entry of the viewer's
+    /// The private entries of the clouds (ENGINE.md 192): (viewer, owner, identity) - an entry of the viewer's
     /// cloud over the owner's library naming a card the viewer saw and the owner did not (a look at the opponent's
     /// library, then a shuffle or search). The owner's worlds draw them again (`deal_keeping_others`); everywhere
     /// else they are ordinary entries. Kept by `tidy_clouds`.

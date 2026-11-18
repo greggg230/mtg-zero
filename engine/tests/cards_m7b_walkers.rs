@@ -469,7 +469,7 @@ fn jace_the_mind_sculptor_plus_two_looks_at_the_top_card_and_may_bottom_it() {
     resolve_with(&mut g, none);
     assert_eq!(g.player(1).library[0], bolt, "on the bottom");
     // P0 knows the card it put on the bottom, its owner doesn't (ENGINE.md
-    // 190; before it the look was not remembered, 23.7).
+    // 192; before it the look was not remembered, 23.7).
     assert!(g.knows(0, bolt), "P0 saw it go to the bottom");
     assert!(!g.knows(1, bolt), "P1 didn't look");
     assert_eq!(loyalty(&g, jace), 5);

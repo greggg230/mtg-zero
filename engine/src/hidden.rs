@@ -905,7 +905,7 @@ impl Game {
     /// of which card is which among the domain (`slots`, plus the hand,
     /// plus the library). What they knew exactly there, and the clouds the
     /// domain touches, become one cloud. A card another player knew that its
-    /// owner does not (a look at the opponent's library, ENGINE.md 190) is
+    /// owner does not (a look at the opponent's library, ENGINE.md 192) is
     /// listed too, as that player's private entry (`Game::peeks`): the
     /// owner's worlds draw it again (`deal_keeping_others`).
     pub(crate) fn scramble(&mut self, owner: PlayerId, slots: &[CardIdx], hand: bool, library: bool) {
@@ -951,7 +951,7 @@ impl Game {
     /// library" (a cloud over the library: the owner's own determinize
     /// keeps them there, so it stays true in every world); a card its owner
     /// did not know is that player's private entry (as `scramble`, ENGINE.md
-    /// 190).
+    /// 192).
     pub(crate) fn forget_order(&mut self, owner: PlayerId, cards: &[CardIdx]) {
         for &c in cards {
             self.untrack_found(c);
@@ -1045,7 +1045,7 @@ impl Game {
         self.tidy_peeks();
     }
 
-    /// The private entries (`Game::peeks`, ENGINE.md 190) follow their clouds: each lives in its (viewer, owner)'s
+    /// The private entries (`Game::peeks`, ENGINE.md 192) follow their clouds: each lives in its (viewer, owner)'s
     /// cloud over the library (a library scramble made it, and a cloud never loses its library); an entry that cloud
     /// no longer lists - a card of that identity left or was seen (the entry may have been it: the remaining one of a
     /// public entry and a private one is the private one), or the cloud was dropped - goes.
@@ -1374,7 +1374,7 @@ impl Game {
     }
 
     /// The owner's deal of its own hidden cards `slots` (`viewer == owner`: its library) when the other player knows
-    /// some of them exactly and has clouds over the owner's cards (ENGINE.md 190: a look at a library card its owner
+    /// some of them exactly and has clouds over the owner's cards (ENGINE.md 192: a look at a library card its owner
     /// doesn't know - Mishra's Bauble, Jace's +2 - and a cloud of that player's from an earlier card both knew). A
     /// plain shuffle keeps every card that player knows a card it knows, but could move a cloud's listed identity onto
     /// one of them, and the cloud ("these identities are among the domain's cards I don't know") would be false in the
@@ -1387,7 +1387,7 @@ impl Game {
     /// replacement) - the world never shows the owner what the other player saw. -> false (nothing dealt) when the
     /// other player has no cloud over the owner, or no dealt card is known to it and no entry is private: then a plain
     /// shuffle keeps its knowledge (every dealt card is unknown to it, so every domain's unknown part keeps its
-    /// multiset - the invariant before section 190).
+    /// multiset - the invariant before section 192).
     fn deal_keeping_others(&mut self, owner: PlayerId, slots: &[CardIdx], rng: &mut Rng) -> bool {
         let q = crate::ids::opp(owner);
         let private: Vec<DefId> = self.peeks.iter().filter(|x| x.0 == q && x.1 == owner).map(|x| x.2).collect();

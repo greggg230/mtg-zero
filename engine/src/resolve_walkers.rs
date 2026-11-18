@@ -233,7 +233,7 @@ impl Game {
                 let Some(&top) = self.players[q as usize].library.last() else { return Flow::Next };
                 if f.i == 0 {
                     // The look (keyed once), remembered also when its owner
-                    // doesn't know the card (ENGINE.md 190; as `LookAtTopOf`):
+                    // doesn't know the card (ENGINE.md 192; as `LookAtTopOf`):
                     // on top, or at the bottom if put there.
                     self.force_library_card(top, crate::hidden::KEY_LOOK, p);
                     self.learn(p, top);

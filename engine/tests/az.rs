@@ -3421,7 +3421,7 @@ fn bauble_at_unknown_top(lib: &[&str], hand: &[&str], baubles: usize, seed: u64)
     g
 }
 
-/// ENGINE.md 190 (the value-of-information experiment's finding, hub notes 2026-11-17): a look at the top card of the
+/// ENGINE.md 192 (the value-of-information experiment's finding, hub notes 2026-11-17): a look at the top card of the
 /// opponent's library that its owner doesn't know (Mishra's Bauble: "Look at the top card of target player's
 /// library") is remembered - the looker knows that card is there (the library's order is hidden, CR 401.2, and only
 /// a shuffle, 701.20, or a move changes it). Before, the looker's encoding after the look was the same as without it
@@ -3487,7 +3487,7 @@ fn cr_401_2_a_look_at_the_opponents_top_card_its_owner_doesnt_know_is_remembered
     assert!(g.knows(1, top) && g.knows(0, top), "drawn: P1 still knows that card, now in P0's hand");
 }
 
-/// ENGINE.md 190: a shuffle (CR 701.20: a fetch land's search) turns the looker's knowledge of a card its owner
+/// ENGINE.md 192: a shuffle (CR 701.20: a fetch land's search) turns the looker's knowledge of a card its owner
 /// doesn't know into "that card is somewhere in the library" - a cloud whose entry is private (`Game::peeks`): the
 /// looker's worlds keep it, the owner's draw it again from the library's cards (never the card the looker saw: the
 /// owner's encoding the same in every world, the entry varying across them). The owner's look (Ponder) makes the
@@ -3544,7 +3544,7 @@ fn cr_701_20_a_shuffle_leaves_the_looker_a_private_cloud_entry_and_the_owners_lo
     g.check_knowledge().unwrap();
 }
 
-/// ENGINE.md 190: the owner's worlds keep the looker's clouds true. P0 Brainstorms (it knows the Bolt and the
+/// ENGINE.md 192: the owner's worlds keep the looker's clouds true. P0 Brainstorms (it knows the Bolt and the
 /// Mountain it put back); P1's first Bauble sees the top one (remembered: P0 knows it); P0's fetch land shuffles (P1:
 /// "that card is somewhere in P0's library", a cloud); P1's second Bauble sees P0's new top card, which P0 doesn't
 /// know. A plain shuffle of P0's unknown cards in P0's worlds could deal the cloud's card to the top card P1 knows,

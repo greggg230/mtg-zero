@@ -2951,7 +2951,7 @@ delayed return about the exiled card (a new object, 400.7).
 * **Looking at another player's library card that its owner doesn't know** (Mishra's
   Bauble): the look is keyed for the looker but not remembered; the owner's determinize may
   change that card, and the looker's clouds could not stay consistent with it. **Fixed in
-  section 190** (2026-11-17): the look is remembered (Mishra's Bauble and Jace, the Mind
+  section 192** (2026-11-17): the look is remembered (Mishra's Bauble and Jace, the Mind
   Sculptor's +2); the owner's worlds deal the card again with the looker's knowledge on it and
   keep the looker's clouds true; after a shuffle or search it is the looker's private cloud
   entry, drawn again in the owner's worlds. A random hand
@@ -15306,7 +15306,7 @@ with an untrained input (55.6's size of effect).
 
 * A Mishra's Bauble at a card its owner does not know is still not remembered (23.7), and a
   shuffle followed by a draw still drops the cloud it made (10): the bot's own knowledge.
-  (The first part is **fixed in section 190**: such a look is remembered, and `TOP_OTHER` /
+  (The first part is **fixed in section 192**: such a look is remembered, and `TOP_OTHER` /
   the `OPP_LIBRARY_KNOWN` bag carry it.)
 * The belief head (66) predicts the opponent's hand only and the weighted deal (69) tilts the hand;
   the opponent's known top cards are dealt uniformly. A belief over them is a later step, and now
@@ -38567,7 +38567,7 @@ Recording rides a restart: the run's code (its pinned worktree, the Mac's eval c
 * By hand: farm compat with `--set game_records=1` (both gates identical), `tools/farm_gates.py` with the live run's
   build, config and iteration-156 checkpoint and `--set game_records=1` (passed), the smoke on / off (187.3).
 
-## 190. A look at the opponent's library card that its owner doesn't know is remembered (Mishra's Bauble, Jace's +2; branch `fix/opp-look-memory`, 2026-11-17)
+## 192. A look at the opponent's library card that its owner doesn't know is remembered (Mishra's Bauble, Jace's +2; branch `fix/opp-look-memory`, 2026-11-17)
 
 The user's call after the value-of-information experiment (branch `exp/voi-bauble`, `tools/voi_bauble.py`; the
 maintainer's notes of 2026-11-17): a Mishra's Bauble at the opponent was worth exactly 0 to every network, because the
@@ -38575,7 +38575,7 @@ engine forgot the look (23.7, 72.7: "the look is keyed for the looker but not re
 encoding was bit for bit the encoding without it (1,049 of 1,050 positions), and the next decision's search dealt that
 card again.
 
-### 190.1 The rules
+### 192.1 The rules
 
 Mishra's Bauble: "{T}, Sacrifice Mishra's Bauble: Look at the top card of target player's library. Draw a card at the
 beginning of the next turn's upkeep." Jace, the Mind Sculptor's +2: "Look at the top card of target player's library.
@@ -38590,7 +38590,7 @@ knows: Gitaxian Probe, Urza's Bauble, Thoughtseize, ...). Both had the same gap 
 `resolve_walkers.rs` `Ext::LookAtTopMayBottom`). A look at one's own library (a Bauble at oneself, Ponder, Delver's
 upkeep look) was always remembered.
 
-### 190.2 The fix
+### 192.2 The fix
 
 * Both looks `learn` the card for the looker whoever knows it (before: only when the looker was its owner or its owner
   knew it). The card stays known to the looker on top, at the bottom after Jace's "put it on the bottom" (a hidden ->
@@ -38629,7 +38629,7 @@ upkeep look) was always remembered.
 * `view.rs`'s `known.order` (kept for a seat's view to follow a look the engine did not remember) is no longer needed
   for that: the card is in `known.library` with its mask.
 
-### 190.3 Tests
+### 192.3 Tests
 
 `engine/tests/az.rs`:
 * `cr_401_2_a_look_at_the_opponents_top_card_its_owner_doesnt_know_is_remembered`: P1's Bauble at P0's top Counterspell
@@ -38661,7 +38661,7 @@ library - and stay for a decision: layout v6 is EoE's until its run 2.)
 no longer reach the look it needs (the worlds' random draws moved); replaced by three that do (a scan of 600 seeds
 found 41), the check unchanged.
 
-### 190.4 Digests (re-recorded on purpose, `DIGEST_WRITE=1`)
+### 192.4 Digests (re-recorded on purpose, `DIGEST_WRITE=1`)
 
 Behaviour changes where a look at another library happens: the looker's encoding, and so a searched game's choices.
 
@@ -38676,7 +38676,7 @@ Behaviour changes where a look at another library happens: the looker's encoding
 | dealt per seat | 26c9751332e70c73 | **776bf9c1b6db07bc** | 49 of 60 |
 | EoE | 2efe956d589840ce | 2efe956d589840ce, unchanged | none (no look at another library) |
 
-### 190.5 The value of information, re-measured
+### 192.5 The value of information, re-measured
 
 `tools/voi_bauble.py measure` (branch `exp/voi-bauble`, run with this branch's engine; its rebuild accepts a position
 whose history held an earlier look at the opponent, whose exported knowledge now differs) on the Delver line's
@@ -38699,9 +38699,9 @@ positions, and the real look's value equals the value of the true card built in 
 card: +0.57 +- 0.20 pp). Its expectation under today's network, +0.17 +- 0.09 pp, is the experiment's "counterfactual"
 number again - the same input, which no network has trained on yet: noise, not a learned value. It has to be trained
 in (a fork from the current line; nothing has to be retrained from scratch). One position more than before is refused
-by `describe` (a private cloud entry, 190.2).
+by `describe` (a private cloud entry, 192.2).
 
-### 190.6 Farm, runs
+### 192.6 Farm, runs
 
 The release worker plays this engine: it must be rebuilt (the engine tier builds it and runs farm compat). A run picks
 this up only at a re-pin, and its networks see a new input there (the user's call: which run, when).
