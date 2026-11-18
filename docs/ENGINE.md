@@ -39626,3 +39626,155 @@ zero-farm venv; its first poll took origin/main 7bd1722d, already released: noth
 * **Agents and alternates.** The CUDA alternate is signed with min agent 0.2.11 (pb3's and meta3's); the CPU build
   keeps farm_build's 0.1.3. Runs still choose their own `pool_min_agent`.
 
+## 198. The cells' games on the MacBook: `cells_backend` 'mac' and a parallel watcher lane (branch `feat/cells-mac`, 2026-11-18)
+
+### 198.1 Why
+
+`legacy-meta3-r1`'s 3x3 cells (186: the pool mode against gen0) played on the farm (`cells_backend` 'farm', 165) one
+measurement at a time, chooser 0 and then chooser 1: at most ~200 games in flight, a campaign's straggler tail at the
+end of each, ~100-200 games/h delivered against the ~1,800 games/h the 64-iteration cadence needed. In a day it
+produced one of the nine cells (the Delver mirror at iteration 32). The run moved to a 256-iteration cadence at its
+13:55 restart (`cells_every` 256, `from` 512, gen over gen off). Measuring every 256 iterations with gen over gen back
+on is, per checkpoint, 1,800 games against gen0 (6 pairs, 200 games a cell), 1,800 against the checkpoint 256 back
+and that checkpoint's 3 baselines (1,200: a new reference every time), 4,800 games per ~5.5 h window, ~870 games/h,
+on top of the farm's self-play. The Mac (16 cores) runs 3 of the run's self-play workers (~3 cores each) and its anchor
+evaluations; the user accepts judging taking about a third of it.
+
+### 198.2 What
+
+* **`cells_backend` 'mac'** (`mtgz/az/mac_judge.py`; explicit only: auto never picks it). A cells measurement's two
+  chooser matches are played at once on the Mac, each the `zero.h2h.match` call `play_pair_local` makes - the same
+  checkpoints (their bytes), spec, seed, games, sims, seat and unpaired seating (A in seat gid % 2) - so the rows,
+  results, statistics and baselines are the local backend's, and **the baseline cache keys are unchanged** (`base_key`
+  reads no backend): a baseline played on the farm or here is the Mac's too (the run's gen0 Delver/Doomsday baseline,
+  played on the farm, is reused as is). The search threads and driver groups are the Mac's own
+  (`cells_mac_threads` 4, `cells_mac_groups` 2: not part of the measurement's definition, as `bo1_threads` is not).
+  Net against net on another CPU's float arithmetic a game can take another line; the engine itself is bit-identical
+  (44).
+* **The code is the watcher's commit**: `mac_judge.remote()` refuses a checkout with uncommitted changes (and a Mac
+  home that is not a POSIX path: Git Bash turns an exported `MTGZ_MAC_HOME=/Users/...` into `C:/Program
+  Files/Git/Users/...` for a Windows process - a watcher started where `tools/local_env.sh` was sourced), and the Mac
+  plays in its checkout of that commit, `~/mtg-zero-wt/run-<sha12>` (`bash tools/mac.sh --eval-checkout` in the
+  watcher's checkout: the engine built and stamped there, mtgz/az/mac.py); each process there checks it first
+  (`mac.verify_checkout`) and refuses another commit.
+* **The files**: each checkpoint and its run's config.json (zero.h2h reads a side's seat keys - margin_w, redet,
+  eval_cache - from the config.json beside models/) go to `~/mtgz-judge/<h8>/<run>/models/<file>` (h8: the sha256 of
+  the desktop's run directory), keeping the run's name, so the records name the checkpoint as `gamerec.ckpt_id` does
+  here (`legacy-meta3-r1/iter_0512`). A file already there with the same sha256 is not sent; a copy travels through
+  ssh's stdin to a temporary name and is renamed once its sha256 is checked (`mac_judge have` / `put`).
+* **The processes**: `ssh $MTGZ_MAC 'cd <checkout> && OMP_NUM_THREADS=t MTGZ_REMOTE_COMMIT=<sha> exec nice -n N python
+  -m mtgz.az.mac_judge play'`, the job one JSON line on stdin, the result one JSON line on stdout, the match's stderr
+  in the measurement's console. Stdin stays open while the match runs; the Mac's process exits when it closes (the
+  watcher killed its child, the connection dropped), so a stopped measurement leaves no games running on the Mac.
+  `cells_mac_nice` 10 (the run's self-play workers are at 5), `cells_mac_torch_threads` 2 (torch and OMP).
+* **The game records** (189/190, docs/gamedb.md): with `game_records` on the Mac's process writes the match as one
+  records file (`MatchSink`: the measurement's kind, iteration, labels and meta - pair, chooser, `backend: mac` -,
+  `src` 'mac', its own build line) and sends it back; the child checks it (a build line, every game id once, each
+  record's result the row's) and writes it whole into `<run>/records/<kind>/iter_NNNN/` (`misc/` for a baseline) as
+  `mac-<pid>-<ms>-<n>-c<chooser>.jsonl.gz`. `gamedb.executor` maps `src` 'mac' to 'remote'; the build line's engine id
+  is the commit's (platform-independent), so `gamedb ingest` takes them as it takes the Mac's anchor records.
+* **The parallel lane**: the watcher's lane 'mac' runs `cells_mac_jobs // 2` measurements at once
+  (`yardsticks.lane_parallel`; `cells_mac_jobs` 4: 2 measurements, 4 processes on the Mac), each in its own thread
+  and child process, the oldest due first; `pending(busy=...)` skips the measurements under way, and a cell whose
+  baseline is under way waits (`item_ready`). Every other lane keeps one at a time, in the lane's thread, as before
+  (`lane_parallel` 1). The fit lane still waits for the measurements of its checkpoint (`after`).
+* **Settings** (`yardsticks`; all new, defaults keep everything as before): `cells_backend` 'mac' (with
+  `cells_device` 'cpu': the Mac has no CUDA - refused otherwise - and not with sequential cells, `cells_target_se`,
+  as for 'farm'), `cells_mac_jobs` (4, >= 2), `cells_mac_threads` (4), `cells_mac_groups` (2),
+  `cells_mac_torch_threads` (2), `cells_mac_nice` (10, 0-20). `mtgz.az.MAC_PYTHON` names the Mac's venv interpreter
+  (the remote spec uses it too).
+* **`--take-over` and a venv launcher** (from an uncommitted fix in the `fix/take-over-launcher` worktree, carried
+  here): on Windows a venv's python.exe is a launcher - the supervisor records the launcher's pid as the companion,
+  the lock holds its child's (the interpreter). The take-over now accepts the lock's owner when it is the companion's
+  pid or a descendant of it (`_is_or_child_of`) and kills the companion's whole tree from the launcher.
+
+### 198.3 Tests
+
+`tests/test_cells_mac.py` (12): the live run's switch setting accepted exactly, cells and gen-over-gen cells both in
+the lane 'mac', its parallelism, `pending(busy=...)`; the refusals (cuda, sequential, jobs < 2, nice, threads, an
+unknown backend); both chooser matches under way at once (a barrier) with every argument of the local backend's
+`h2h.match` call and the same results; the files on the Mac (the run's name and models/ kept, `ckpt_id` the same, the
+config beside them, nothing sent again, a rewritten file sent again, a baseline sending one file); `put` refusing a
+wrong sha256, `have` listing missing files and removing a stale config; the records written into the measurement's
+directory (kind, iteration, src, meta, A in seat gid % 2, the checkpoint's id and sha) and records that disagree with
+the results refused, nothing written; **a mirror cell on identical deals with different networks** (both chooser
+matches on the same seed, A the checkpoint and B the reference) scoring what its games say - 0.7 by construction, in
+both halves - on the Mac as here, never 0.5 by structure; the watcher's lane with `cells_mac_jobs` 4 running exactly
+two at once, every measurement once, each cell after its baseline, the oldest checkpoint first; the take-over of a
+launcher's child; the ssh command line (nice, OMP threads, the commit) and the job protocol (a fake Mac process: the
+result line, the stderr in the console, a failure raised with its trace); the Mac process ending when its stdin closes
+(exit 75); a dirty checkout refused. The Mac's side runs here (`play_job`, `have`, `put`) on a fake `zero.h2h.match`.
+
+The 104-iteration Mac A/B's mirrors (m1_cells.py, 2026-11-18) read exactly 0.5 in the Delver and Sneak mirrors in every
+half. Not reproduced through the yardstick's path: gen0 against iteration 496 of `legacy-meta3-r1` on the desktop
+(4 games each, 16 sims, the cells' seat and specs) were decisive (Delver mirror 11, 9, 10, 21 rounds; Sneak mirror 10,
+16, 9, 12), and the mac path's results equal the local path's in the test above. Two networks that never end a game do
+read 0.5 exactly: tiny random networks hit the 60-turn cap in every game of both mirrors (a draw, [0.5, 0.5]); that
+script's games are worth checking for `rounds` = 60.
+
+Gate: `python tools/gate.py python` on eb5189d6 (the code of this section): **GATE PASSED WITH SKIPS python eb5189d62dd9 in 503s** (skipped: one live-run-hazard test fenced off; pytest 222 + 121 + 123 + 121 on the Mac, 46 on the desktop, the mtg-smoke loop); `tests/test_cells_mac.py` also passed on the Mac by hand.
+
+### 198.4 Measured (2026-11-18, on a scratch copy of `legacy-meta3-r1`; the run itself untouched)
+
+The copy held the run's config.json, generation 0, iterations 256 and 512 and its gen0 Delver/Doomsday baseline (the
+farm's); a hand watcher `--once` with the switch's setting (198.5) at 40 and then 8 games a cell played everything
+due for iteration 512 on the Mac, beside the run's 3 self-play workers on the Mac.
+
+* **The cache key is the run's**: from a checkout of this branch with the run's engine module (the pinned worktree's
+  `_engine.pyd`, engine sha 99b96a587887), the switch's wanted items on the live run name the farm's gen0
+  Delver/Doomsday baseline 73cf0ded6e8c95e5 as done and the farm's in-flight Delver/Sneak one (743f52e3e373ecb1) by its
+  key: neither is played again.
+* **Games**: every baseline and cell measurement landed (rows `backend: mac`, `mac.commit`); the Delver mirror of
+  iteration 512 against gen0 read +89 +- 37 at 40 games (0.70 and 0.55 in its two halves: decisive games, 0 draws);
+  gen0's Delver/Doomsday baseline 1.000 / 0.000 at 40 games (the farm's: 0.99 / 0.0 at 200).
+* **Records**: 4 Mac files of 40 games each in `records/cells_base/misc/`; `tools/gamedb.py ingest` took them (kind
+  cells_base, executor remote, src mac, players gen0 / gen0, 160 games, mean 13.4 turns, 0 draws).
+* **A stopped measurement leaves nothing on the Mac**: the watcher's process tree killed twice mid-match (its 6 and 4
+  ssh processes); the Mac's judge processes were gone within 8 s each time.
+* **The first smoke's failure**: every match ended `exit 255` after printing its result - "Fatal Python error:
+  _enter_buffered_busy: could not acquire lock for <_io.BufferedReader name='<stdin>'> at interpreter shutdown,
+  possibly due to daemon threads": the stdin watcher's daemon thread sat in sys.stdin's buffered read when the
+  interpreter shut down. Fixed: raw reads of the descriptor and `os._exit` once the result is out (a test runs the Mac
+  side with stdin held open).
+* **Throughput** (CPU, 64 sims, the run's cells seat; small matches, so a match's last games run with idle threads):
+  each process ~1.1-1.3 cores at nice 10 (load 14-21 on 16 cores with the self-play); 40-game matches 994-1,172 s and
+  20-game mirror matches 610-650 s: **~115-145 games/h per process**, ~750-850 games/h with 6 processes (part of it
+  beside a gate's pytest on the Mac), ~500-600 with 4. The prior one-off Mac judge (adaptive-budget A/B, 8 processes at
+  ~1.6 cores, 200-game matches) did 3,000 games in 71 min (~320 per process-hour).
+* **Cost to the run's Mac self-play** ("running" leaves/s in the run log, the hours before: 7,100-8,800 mean per hour):
+  6 judges 3,200-4,400; 6 judges and a gate's pytest 1,800-2,900; 4 judges 2,550-2,700. The anchor evaluation of
+  iteration 560 took ~8 min instead of ~5. The Mac's self-play is ~7% of the run's self-play leaves, so judging costs
+  the run ~3-4% of its self-play while it runs.
+
+### 198.5 Switching `legacy-meta3-r1` (live) to the Mac
+
+From a pinned worktree of the merged commit (its `mtgz/_engine.pyd` copied from the run's pinned worktree, so the
+engine sha - and so every cached baseline's key - is the run's), its Mac checkout prepared (`bash tools/mac.sh
+--eval-checkout` there), with a shell where `MTGZ_MAC_HOME` is not exported:
+
+    python tools/launch_hidden.py E:/mtg-zero/runs/legacy-meta3-r1/yardsticks_console.txt \
+      python tools/run_yardsticks.py watch E:/mtg-zero/runs/legacy-meta3-r1 --take-over --yardsticks \
+      '{"bo1_games": 0, "blunders": false, "cells_mode": "pool", "cells_games": 200, "cells_refs": ["iter0"],
+        "cells_gen_games": 200, "cells_gen_every": 256, "cells_every": 256, "cells_device": "cpu",
+        "bo1_threads": 16, "bo1_groups": 4, "timeout_s": 14400, "cells_batch": 40, "from": 512,
+        "bo1_farm_share": 1.0, "cells_backend": "mac"}'
+
+(config.json's setting with the Mac backend and the gen-over-gen cells back on at the cells' cadence: iteration N
+against N - 256.) Per 256 iterations (~5.5 h): 1,800 games against gen0, 1,800 against the checkpoint 256 back and
+1,200 for that checkpoint's 3 baselines - 4,800 games, ~870 games/h; the first window also plays gen0's
+Doomsday/Sneak baseline and, unless the farm finishes it first, its Delver/Sneak one (800).
+
+### 198.6 Open points
+
+* **The Mac cannot carry 4,800 games per 256 iterations beside the run's self-play at a third of its cores.** At the
+  measured ~120-145 games per process-hour (small matches; the 200-game matches should do better), 4 processes give
+  ~500-600 games/h and halve the Mac's self-play; 870 games/h needs ~7 processes. Choices: fewer gen-over-gen games
+  (`cells_gen_games` 100: 3,300 games a window), gen over gen every 512, or more Mac (`cells_mac_jobs` 6-8) with the
+  self-play's cost above. Measured on the run's first window, it decides.
+* **The farm lane is still one measurement at a time.** `lane_parallel` is the hook: a farm setting (campaigns at once)
+  would let the farm backend's straggler tails overlap the same way; not turned on here (the bo1 farm measurements share
+  that lane).
+* **The gate beside a live run**: when 5 Mac steps push a new sha to the Mac's bare repo at once, some pushes fail
+  ("failed to update ref") and those steps fall back to the desktop, where `test_mac_remote::
+  test_the_macs_selfplay_settings` fails because Git Bash converts the exported `MTGZ_MAC_HOME` (main fails the same
+  way through tools/slotd.sh). Rerunning the gate (the sha already pushed) puts them on the Mac.
