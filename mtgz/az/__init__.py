@@ -409,6 +409,7 @@ VAST_SELFPLAY = {'infer_device': 'cuda', 'train_device': 'cuda', 'conc': 1536, '
 # Unset: the ssh alias `mac` and /Users/<the target's user> (a machine without a Mac never uses the remote).
 MAC_HOST = local_config.get('MTGZ_MAC', 'mac')
 MAC_HOME = local_config.get('MTGZ_MAC_HOME') or f"/Users/{MAC_HOST.split('@')[0] if '@' in MAC_HOST else 'user'}"
+MAC_PYTHON = f'{MAC_HOME}/.venvs/dominion-zero/bin/python'      # (the venv: torch CPU/MPS, numpy, psutil; tools/mac.sh)
 
 
 def vast_remote(box, host=None):
@@ -516,7 +517,7 @@ PACKAGE = register(GamePackage(
     # locks on the Mac (their evaluations share the cores). Dense network batches on the Mac (sparse 0 whatever the
     # run's setting: its CPU evaluators would densify a sparse batch; not measured there, zero-core run setting sparse)
     remotes={'mac': RunCommitRemote(ROOT, host=MAC_HOST, home=MAC_HOME,
-                                    python=f'{MAC_HOME}/.venvs/dominion-zero/bin/python',
+                                    python=MAC_PYTHON,
                                     workdir=f'{MAC_HOME}/mtgz-remote', env={'OMP_NUM_THREADS': '4'},
                                     overrides={'infer_device': 'cpu', 'train_device': 'cpu', 'threads': 12,
                                                'groups': 2, 'infer_workers': 3, 'sparse': 0},

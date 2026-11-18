@@ -40,6 +40,10 @@ watcher per run (<run>/yardsticks/lock.json: pid and process creation time).
     <run>/yardsticks/STOP or the run's end. With --yardsticks '{..., "cells_mode": "pool"}' it switches a live run's
     cells to the pool without stopping training. A lock held by anything but the run's companion: refused.
 
+A lane runs one measurement at a time, except the Mac's ('mac': cells_backend 'mac', docs/ENGINE.md 198): there
+cells_mac_jobs // 2 at once (mtgz.az.yardsticks.lane_parallel; the oldest due first, a cell still waiting for its
+baseline under way skipped), each a child process of its own.
+
 `status`: what is measured, missing (an evaluated checkpoint without a result) and failing.
 """
 import argparse
@@ -243,6 +247,19 @@ def result_line(row):
         f", {row['seconds']:.0f} s"
 
 
+def _is_or_child_of(pid, parent):
+    """pid is `parent` or one of its descendants (a venv launcher's interpreter) - False when either is unknown."""
+    if not pid or not parent:
+        return False
+    if pid == parent:
+        return True
+    try:
+        import psutil
+        return any(p.pid == parent for p in psutil.Process(pid).parents())
+    except Exception:                          # noqa: BLE001 (gone, no psutil, no access)
+        return False
+
+
 class Watcher:
     def __init__(self, run, supervised=False, once=False, override=None, log=say, python=None, poll=None,
                  child_cmd=None, take_over=False):
@@ -314,7 +331,7 @@ class Watcher:
         with open(out, 'w', encoding='utf-8') as f:
             p = subprocess.Popen(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
                                  **kw)
-            self.procs[item['lane']] = p
+            self.procs[key] = p                # (by measurement: a lane may run several at once)
             err = None
             seen = [0, t0]                     # the console's size and when it last grew
             try:
@@ -337,7 +354,7 @@ class Watcher:
                         code, err = None, late
                         break
             finally:
-                self.procs.pop(item['lane'], None)
+                self.procs.pop(key, None)
         row = last_json(out) if code == 0 else None
         if row is not None and row.get('error') is None and same_measurement(row, item):
             with self.write:
@@ -367,20 +384,60 @@ class Watcher:
             self.alive.discard(name)
 
     def _lane(self, name):
-        while not self.stop.is_set() and not self.draining:
+        running = {}                           # (a parallel lane's measurements under way: key -> thread)
+        done = threading.Event()               # (one of them ended: look again at once)
+        try:
+            self._lane_loop(name, running, done)
+        finally:
+            for t in list(running.values()):   # (stopped: each kills its child; drained: each finishes)
+                t.join()
+
+    def _lane_loop(self, name, running, done):
+        while not self.stop.is_set():
+            for k, t in list(running.items()):
+                if not t.is_alive():
+                    running.pop(k)
+            if self.draining:
+                if not running:
+                    return
+                done.wait(min(self.tick, 5.0))
+                done.clear()
+                continue
+            item, par = None, 1
             try:
                 cfg, ys = self.settings()
                 if ys is None:
                     self.log('the run\'s yardsticks setting is off: nothing to measure')
-                    return
-                lib = self.lib(ys) if name == 'cpu' else None
-                settle = 0 if self.finishing else None
-                item = Y.pending(self.run, cfg, ys, name, lib=lib, settle=settle)
+                    return                     # (_lane waits for the measurements under way)
+                par = Y.lane_parallel(ys, name)
+                if len(running) < par:
+                    lib = self.lib(ys) if name == 'cpu' else None
+                    settle = 0 if self.finishing else None
+                    item = Y.pending(self.run, cfg, ys, name, lib=lib, settle=settle, busy=set(running))
             except Exception:                  # noqa: BLE001 - said, and looked at again
                 self.log('YARDSTICK FAILED: the lane\'s look at the run failed:\n' + traceback.format_exc())
                 item, ys = None, None
+            if item is not None and par <= 1 and not running:
+                self.measure(item, ys)         # (one at a time: in this thread, as always)
+                continue
             if item is not None:
-                self.measure(item, ys)
+                key = Y.key_of(item, item.get('library'))
+
+                def run(item=item, ys=ys):
+                    try:
+                        self.measure(item, ys)
+                    except Exception:          # noqa: BLE001 - said; the item stays due
+                        self.log('YARDSTICK FAILED: a measurement thread failed:\n' + traceback.format_exc())
+                    finally:
+                        done.set()
+                t = threading.Thread(target=run, daemon=True)
+                running[key] = t
+                t.start()
+                continue
+            if running:                        # (full, or nothing more due yet: until one ends or the next look)
+                done.wait(min(self.tick if len(running) >= par else (self.poll_override or (ys or Y.DEFAULTS)['poll']),
+                              60.0))
+                done.clear()
                 continue
             if self.finishing:
                 if name == 'fit' and self.alive - {'fit'}:
@@ -450,13 +507,15 @@ class Watcher:
             if pid is None:
                 continue
             c = (runctl.read_state(self.run, 'supervisor') or {}).get('companion') or {}
-            if c.get('pid') != pid or not any('run_yardsticks.py' in x for x in c.get('cmd') or []):
+            # A venv's python.exe is a launcher on Windows: the supervisor records the launcher's pid, the lock holds
+            # its child's (the interpreter). Either is the companion.
+            if not any('run_yardsticks.py' in x for x in c.get('cmd') or []) or not _is_or_child_of(pid, c.get('pid')):
                 self.log(f'--take-over: the lock is held by pid {pid}, not the run\'s companion watcher: refused '
                          f'(stop it first: {Y.DIR}/STOP)')
                 return False
             self.log(f"--take-over: stopping the run's companion watcher pid {pid} (its measurement under way is "
                      f"measured again) and taking its lock")
-            kill_pid_tree(pid)
+            kill_pid_tree(c.get('pid') or pid)
             t0 = time.time()
             while time.time() - t0 < wait_s:
                 if take_lock(self.run):
