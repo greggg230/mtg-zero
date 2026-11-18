@@ -38560,3 +38560,66 @@ Recording rides a restart: the run's code (its pinned worktree, the Mac's eval c
   game before the quota filled; it passed alone, and the gate on 02e2faf0 passed it.)
 * By hand: farm compat with `--set game_records=1` (both gates identical), `tools/farm_gates.py` with the live run's
   build, config and iteration-156 checkpoint and `--set game_records=1` (passed), the smoke on / off (187.3).
+
+## 189. The playout cap's full searches by the prior's uncertainty (`p_full_rule`; branch `feat/adaptive-budget`, zero-core `feat/adaptive-budget`, its docs/az.md 60 and docs/search.md 3.21; 2026-11-17)
+
+Branch `feat/adaptive-budget` from main b3245a81; zero-core pin 5c2d3f39 -> 3161bd9 (`feat/adaptive-budget`, on top of
+`feat/game-records`: both opt-ins, independent). Why: the uncertainty-head study (the maintainer's notes, phase 1) found
+that on the metagame network the search moves the recorded target's argmax off the prior's in 4.7% of the decisions,
+and that the prior's own uncertainty u = 1 - max P0 predicts which at AUC 0.90 (the top quarter by u holds 87% of the
+changes). Playout cap randomisation spends its full searches by a coin. The new run setting spends the same budget by
+u: a capped self-play decision is searched in full with probability min(1, floor + (p_full - floor) u / u_mean) (shape
+'linear'; 'sqrt' / 'square' too), floor 0.05, u_mean the measured mean of u - the same mean simulations per decision.
+No rule, card, encoding or default change: with `p_full_rule` 'random' (the default) every seat dict, driver, game,
+record, digest and checkpoint is that of before. With the rule on the native farm worker plays it exactly as the Python
+run (farm compat below).
+
+### 189.1 What changed (zero-core)
+
+* The driver (`zero_search`): the coin is drawn where the coin rule draws it; a fresh root's budget is chosen after its
+  own evaluation (one simulation; then the budget, the root noise of a full search, the root belief, the root floor);
+  a reused expanded root chooses at once. Playout-cap counters for either rule (`cap_*`): capped decisions, full ones,
+  budgets, mean u, mean chance, recorded targets off the prior's argmax.
+* zero.run: the settings `p_full_rule`, `p_full_floor`, `p_full_shape`, `p_full_u_mean` (zero/budget.py), the
+  per-phase metrics `selfplay.budget` and the log line `iter N budget: ...`, a loud `BUDGET DRIFT` when the mean chance
+  leaves p_full by more than a tenth (u_mean stale); remote workers' hello refuses a checkout without the rule.
+* The native worker's settings port and table (`zero_worker`: the four keys 'play'; an older worker build calls them
+  unknown and the pool refuses it): this repo's `mtgz-worker` needs a rebuild to play a run with the rule.
+* Policy targets: the full searches - the policy targets and, here, every decision record - concentrate on unsure
+  positions (confident ones near the floor's 5%). The importance weight 1/f on the policy loss is NOT built (a new
+  per-row column through records, shards, the window, the farm records and their replay: not cheap); zero-core
+  docs/az.md 60.4.
+
+### 189.2 Measured on legacy-meta3-r1's checkpoint 207 (CPU)
+
+The run's exact self-play seat and iteration-208 spec, 64 games per rule from one seed, CPU fp32, beside other jobs
+(zero-core docs/az.md 60.3 has the table): the coin u mean 0.116, targets off the prior's argmax 4.3% of the full
+searches; floor = p_full (shape 'sqrt') the same games as the coin (7 of 222,867 leaf rows differ: batch-dependent CPU
+arithmetic of the network, the belief rows in other batches); linear (u_mean 0.116) 13.1% of its full searches move
+the target (3.1x; ~80% of the target changes get a full search vs the coin's 24%; 'sqrt' 10.9%), mean chance 0.258
+(+3%: its own games' u mean 0.1215 - the fixed point is u_mean ~0.12), 28.5 vs 27.7 simulations a decision, 7.66 vs
+8.49 games a minute on the CPU.
+
+### 189.3 Checks
+
+* zero-core: `cargo test --release -p zero_search -p zero_worker` (212 + 30 passed: driver/tests/budget.rs - the coin
+  bit for bit at floor = p_full with and without the root belief, the share with u_mean measured, the same games at any
+  thread layout, minor / light decisions, the checks, the parser; the worker port), `tests/test_budget.py` (13: the seat
+  dict, refusals, bindings, run settings, a rolling run's metrics, remote workers and an older checkout refused).
+* `tools/driver_settings_dump.py` (zero-core) over every preset and every run config on the desktop, main b3245a81 vs
+  this branch: all 343 drivers equal but for the new seat field's `p_full_rule: Random` in the text; `--compare-worker
+  --eval` with this branch's release worker: 47 cases agree (3 Python-only refused, 1 without self-play) including a
+  metagame config with the rule on, eval jobs 50 agree.
+* `tools/farm_compat.py` with this branch's release worker: off; `--set game_records=1`; `--set
+  p_full_rule="prior_uncertainty" --set p_full_u_mean=0.3` (rows 3,557 vs 2,484 off: the uniform evaluator's u is
+  high); the rule with `game_records=1` - gates 2 and 3 identical in all four.
+
+### 189.4 The A/B (prepared, not run)
+
+Two continuations of legacy-meta3-r1 at its newest checkpoint (`tools/fork_run.py --source ... --copy`: checkpoint,
+optimizer, window shards copied; the live run only read), one after the other on the desktop's GPU, desktop-only
+self-play: `meta3-ab-ctrl` (the coin) and `meta3-ab-adapt` (linear, floor 0.05, u_mean 0.12), 28 iterations each, the
+run's settings otherwise (2,000 games, lr 1e-4, seed 1); judged by paired cells head-to-heads of the final checkpoints
+(adapt vs ctrl, each vs the start; 200 games a cell), the mean simulations per decision (`selfplay.budget`), the policy
+loss and entropy, games per minute. Estimate ~2.5 h of GPU. The launch script lives in the maintainer's scratch; an
+'adapt + 1/f weight' arm waits for the weight (189.1).
