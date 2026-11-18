@@ -1272,12 +1272,12 @@ impl Game {
                 let p = f.controller;
                 if let Some(&top) = self.players[q as usize].library.last() {
                     self.force_library_card(top, crate::hidden::KEY_LOOK, p);
-                    // Knowledge of a library card its owner doesn't know
-                    // can't be kept: the owner's determinize may change it
-                    // (ENGINE.md 10). The look is keyed; it isn't remembered.
-                    if p == q || self.knows(q, top) {
-                        self.learn(p, top);
-                    }
+                    // The looker knows that card where it is (until it moves,
+                    // or the library is shuffled or searched), also when its
+                    // owner doesn't (ENGINE.md 190: the owner's worlds deal
+                    // it again, the looker's knowledge moving with it, as
+                    // with the looker's own hand).
+                    self.learn(p, top);
                     let d = self.objs[top.i()].def;
                     self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
                     self.note(|_| format!("P{p} looks at the top card of P{q}'s library"));

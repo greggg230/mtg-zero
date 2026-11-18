@@ -500,8 +500,9 @@ impl Game {
     /// not the partial "clouds"): `library`, its known cards top first as `[position from the top, mask,
     /// name]` (mask bit q: player q knows the card there); `hand`, the cards of its hand the other player
     /// knows, `[id, name]` (an Urza's Bauble look, a card returned from play); `order`, the library's card
-    /// ids top first (for a seat's view to follow a look the engine does not remember: a Mishra's Bauble at
-    /// a card its owner does not know, 23.7). A spectator sees everything; a seat's view (the Delver Lab
+    /// ids top first (written for a seat's view to follow a look the engine did not remember - a Mishra's
+    /// Bauble at a card its owner does not know, 23.7 -, which it does since ENGINE.md 190: that card is in
+    /// `library` with its mask). A spectator sees everything; a seat's view (the Delver Lab
     /// Play tab) keeps only what that seat may know. Read only: no behaviour or encoding depends on it.
     fn view_known(&self, p: u8) -> Value {
         let pl = self.player(p);

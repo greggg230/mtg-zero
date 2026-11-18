@@ -232,12 +232,11 @@ impl Game {
                 }
                 let Some(&top) = self.players[q as usize].library.last() else { return Flow::Next };
                 if f.i == 0 {
-                    // The look (keyed once; remembered only where its owner
-                    // knows it too, ENGINE.md 23.7).
+                    // The look (keyed once), remembered also when its owner
+                    // doesn't know the card (ENGINE.md 190; as `LookAtTopOf`):
+                    // on top, or at the bottom if put there.
                     self.force_library_card(top, crate::hidden::KEY_LOOK, p);
-                    if p == q || self.knows(q, top) {
-                        self.learn(p, top);
-                    }
+                    self.learn(p, top);
                     let d = self.objs[top.i()].def;
                     self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
                     f.i = 1;

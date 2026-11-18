@@ -3389,6 +3389,227 @@ fn who_knows_a_librarys_top_cards_is_encoded() {
     check(&g, "the fetch land's shuffle", [no; 3]);
 }
 
+/// `owner`'s library as `v` encodes who knows its top three: (its owner knows, the other player knows) per position,
+/// top first (`g5::TOP_OWNER` / `TOP_OTHER`, ENGINE.md 72).
+fn library_tops(g: &engine::Game, v: u8, owner: u8) -> [(f32, f32); 3] {
+    use encode::{g5, O_GLOBALS_V5};
+    let x = features(g, v);
+    let at = O_GLOBALS_V5 + g5::PLAYER * (owner != v) as usize;
+    std::array::from_fn(|k| (x[at + g5::TOP_OWNER + k], x[at + g5::TOP_OTHER + k]))
+}
+
+/// P1's Mishra's Bauble at P0's library (`lib`, top first), whose top card P0 does not know: P0 at its main phase
+/// with an Island and a Polluted Delta (and `hand`), P1 with `baubles` Baubles; the first one activated and resolved.
+fn bauble_at_unknown_top(lib: &[&str], hand: &[&str], baubles: usize, seed: u64) -> engine::Game {
+    use engine::db::AbilitySlot;
+    use engine::testkit::Scenario;
+    use engine::{Choice, Step, Target, Zone};
+    let mut g = Scenario::new(CardDb::constructed())
+        .spec(|s| s.auto_single = false)
+        .seed(seed)
+        .battlefield(0, &["Island", "Polluted Delta"])
+        .hand(0, hand)
+        .library(0, lib)
+        .battlefield(1, &vec!["Mishra's Bauble"; baubles])
+        .library(1, &["Island"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    g.pass();
+    assert_eq!(g.turn().priority, 1);
+    g.choose(Choice::Ability(g.card(1, "Mishra's Bauble", Zone::Battlefield), AbilitySlot::Activated(0)));
+    settle(&mut g, |_| Some(Choice::Target(Target::Player(0))));
+    g
+}
+
+/// ENGINE.md 190 (the value-of-information experiment's finding, hub notes 2026-11-17): a look at the top card of the
+/// opponent's library that its owner doesn't know (Mishra's Bauble: "Look at the top card of target player's
+/// library") is remembered - the looker knows that card is there (the library's order is hidden, CR 401.2, and only
+/// a shuffle, 701.20, or a move changes it). Before, the looker's encoding after the look was the same as without it
+/// (ENGINE.md 23.7's limit). Now: the looker's encoding reads the card (two positions differing only in that card
+/// encode differently for the looker, identically for the owner); who knows is public (both encode "the other player
+/// knows P0's top", g5 TOP_OTHER); the looker's worlds keep the card on top; the owner's deal it again, the looker's
+/// knowledge moving with it (the owner's encoding the same in every world); the owner's draw takes it into the hand,
+/// still known to the looker.
+#[test]
+fn cr_401_2_a_look_at_the_opponents_top_card_its_owner_doesnt_know_is_remembered() {
+    use engine::{DecisionKind, Step, Zone};
+    let lib = ["Counterspell", "Forest", "Plains", "Swamp", "Lightning Bolt", "Brainstorm", "Ponder", "Island", "Mountain", "Daze"];
+    let g = bauble_at_unknown_top(&lib, &[], 1, 1);
+    let top = *g.player(0).library.last().unwrap();
+    assert_eq!(g.name(top), "Counterspell");
+    assert!(g.knows(1, top), "the looker knows the card on top");
+    assert!(!g.knows(0, top), "its owner did not look");
+    let no = (0.0, 0.0);
+    for v in 0..2u8 {
+        assert_eq!(library_tops(&g, v, 0), [(0.0, 1.0), no, no], "who knows P0's top cards, as P{v} encodes it");
+        assert_eq!(library_tops(&g, v, 1), [no; 3]);
+    }
+    // the same position but for the card on top (its second card swapped in): the looker's encoding differs, the
+    // owner's does not
+    let mut lib2 = lib;
+    lib2.swap(0, 1);
+    let h = bauble_at_unknown_top(&lib2, &[], 1, 1);
+    assert_eq!(h.name(*h.player(0).library.last().unwrap()), "Forest");
+    assert_ne!(features(&g, 1), features(&h, 1), "the looker's encoding reads the card it saw");
+    assert_eq!(features(&g, 0), features(&h, 0), "the owner's encoding does not");
+    // worlds
+    let (x0, x1) = (features(&g, 0), features(&g, 1));
+    let mut dealt = std::collections::BTreeSet::new();
+    for s in 0..60 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        assert_eq!(d.ident(top), g.ident(top), "the looker's world {s} keeps the card it saw on top");
+        assert_eq!(features(&d, 1), x1, "the looker's world {s}");
+        d.check_knowledge().unwrap();
+        let mut d = g.clone();
+        d.determinize(0, &mut Rng::new(s));
+        assert!(d.knows(1, top) && !d.knows(0, top), "the owner's world {s}: the looker knows its top card, it does not");
+        assert_eq!(features(&d, 0), x0, "the owner's world {s}");
+        d.check_knowledge().unwrap();
+        dealt.insert(d.ident(top));
+    }
+    assert!(dealt.len() >= 4, "the owner's worlds deal its unknown top card again: {dealt:?}");
+    // P0's next draw takes it: still known to P1, in P0's hand now (and known to P0)
+    let mut g = g;
+    for _ in 0..500 {
+        if g.turn().number == 5 && g.turn().step == Step::Main1 {
+            break;
+        }
+        let d = g.pending_decision().expect("the game goes on");
+        let c = match d.kind {
+            DecisionKind::Priority | DecisionKind::DeclareAttackers | DecisionKind::DeclareBlockers => engine::Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.turn().number, 5);
+    assert_eq!(g.obj(top).zone, Zone::Hand, "P0 drew it");
+    assert!(g.knows(1, top) && g.knows(0, top), "drawn: P1 still knows that card, now in P0's hand");
+}
+
+/// ENGINE.md 190: a shuffle (CR 701.20: a fetch land's search) turns the looker's knowledge of a card its owner
+/// doesn't know into "that card is somewhere in the library" - a cloud whose entry is private (`Game::peeks`): the
+/// looker's worlds keep it, the owner's draw it again from the library's cards (never the card the looker saw: the
+/// owner's encoding the same in every world, the entry varying across them). The owner's look (Ponder) makes the
+/// card known to both: the looker's exact knowledge becomes "among the cards Ponder put back", as for a card both knew.
+#[test]
+fn cr_701_20_a_shuffle_leaves_the_looker_a_private_cloud_entry_and_the_owners_look_a_shared_one() {
+    use engine::db::AbilitySlot;
+    use engine::{Choice, DecisionKind, Zone};
+    let lib = ["Counterspell", "Forest", "Plains", "Swamp", "Lightning Bolt", "Brainstorm", "Ponder", "Island", "Mountain", "Daze"];
+    let mut g = bauble_at_unknown_top(&lib, &[], 1, 1);
+    let top = *g.player(0).library.last().unwrap();
+    assert!(g.knows(1, top));
+    g.choose(Choice::Ability(g.card(0, "Polluted Delta", Zone::Battlefield), AbilitySlot::Activated(0)));
+    settle(&mut g, |_| None);
+    g.card(0, "Polluted Delta", Zone::Graveyard);
+    assert_eq!(g.obj(top).zone, Zone::Library);
+    assert!(!g.knows(1, top), "shuffled: P1 no longer knows where it is");
+    let cs = g.ident(top);
+    let cloud = |g: &engine::Game| g.clouds().iter().find(|k| k.viewer == 1 && k.owner == 0 && k.library).map(|k| k.defs.clone());
+    assert_eq!(cloud(&g), Some(vec![cs]), "P1 knows Counterspell is somewhere in P0's library: {:?}", g.clouds());
+    g.check_knowledge().unwrap();
+    let (x0, x1) = (features(&g, 0), features(&g, 1));
+    let mut drawn = std::collections::BTreeSet::new();
+    for s in 0..60 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        assert_eq!(cloud(&d), Some(vec![cs]), "the looker's world {s} keeps its entry");
+        assert_eq!(features(&d, 1), x1);
+        d.check_knowledge().unwrap();
+        let mut d = g.clone();
+        d.determinize(0, &mut Rng::new(s));
+        let e = cloud(&d).expect("the owner's world keeps the looker's cloud");
+        assert_eq!(e.len(), 1);
+        assert_eq!(features(&d, 0), x0, "the owner's world {s}");
+        d.check_knowledge().unwrap_or_else(|e| panic!("the owner's world {s}: {e}"));
+        drawn.insert(e[0]);
+    }
+    assert!(drawn.len() >= 4, "the owner's worlds draw the private entry again: {drawn:?}");
+    // Ponder after the look: P0 sees the card, P1's knowledge becomes a cloud over Ponder's cards
+    let mut g = bauble_at_unknown_top(&lib, &["Ponder"], 1, 1);
+    let top = *g.player(0).library.last().unwrap();
+    let cs = g.ident(top);
+    assert_eq!(g.name(top), "Counterspell");
+    assert!(g.knows(1, top) && !g.knows(0, top));
+    g.choose(Choice::Cast(g.card(0, "Ponder", Zone::Hand)));
+    settle(&mut g, |g| (g.kind() == Some(DecisionKind::YesNo)).then_some(Choice::Pass));
+    assert!(!g.knows(1, top), "P1 lost track of which card it is");
+    assert!(g.knows(0, top), "P0 looked at it");
+    assert!(
+        g.clouds().iter().any(|k| k.viewer == 1 && k.owner == 0 && k.defs.contains(&cs)),
+        "P1 knows Counterspell is among the cards Ponder put back (or drawn): {:?}",
+        g.clouds()
+    );
+    g.check_knowledge().unwrap();
+}
+
+/// ENGINE.md 190: the owner's worlds keep the looker's clouds true. P0 Brainstorms (it knows the Bolt and the
+/// Mountain it put back); P1's first Bauble sees the top one (remembered: P0 knows it); P0's fetch land shuffles (P1:
+/// "that card is somewhere in P0's library", a cloud); P1's second Bauble sees P0's new top card, which P0 doesn't
+/// know. A plain shuffle of P0's unknown cards in P0's worlds could deal the cloud's card to the top card P1 knows,
+/// and P1's cloud would be false there; `deal_keeping_others` places it among the cards P1 doesn't know.
+#[test]
+fn the_owners_worlds_keep_the_lookers_clouds_true() {
+    use engine::db::AbilitySlot;
+    use engine::testkit::Scenario;
+    use engine::{Choice, Step, Target, Zone};
+    let lib = ["Forest", "Plains", "Swamp", "Island", "Counterspell", "Daze", "Ponder", "Underground Sea", "Dark Ritual", "Consider"];
+    for seed in 0..40u64 {
+        let mut g = Scenario::new(CardDb::constructed())
+            .spec(|s| s.auto_single = false)
+            .seed(seed)
+            .battlefield(0, &["Island", "Polluted Delta"])
+            .hand(0, &["Brainstorm", "Mountain", "Lightning Bolt"])
+            .library(0, &lib)
+            .battlefield(1, &["Mishra's Bauble", "Mishra's Bauble"])
+            .library(1, &["Island"; 10])
+            .at(Step::Main1, 0)
+            .start();
+        let (mountain, bolt) = (g.card(0, "Mountain", Zone::Hand), g.card(0, "Lightning Bolt", Zone::Hand));
+        g.choose(Choice::Cast(g.card(0, "Brainstorm", Zone::Hand)));
+        settle(&mut g, |g| [Choice::Card(mountain), Choice::Card(bolt)].into_iter().find(|&c| g.has_option(c)));
+        let bauble = |g: &mut engine::Game| {
+            g.pass();
+            assert_eq!(g.turn().priority, 1);
+            g.choose(Choice::Ability(g.card(1, "Mishra's Bauble", Zone::Battlefield), AbilitySlot::Activated(0)));
+            settle(g, |_| Some(Choice::Target(Target::Player(0))));
+        };
+        bauble(&mut g);
+        let seen = *g.player(0).library.last().unwrap();
+        assert!(g.knows(0, seen) && g.knows(1, seen), "a card both know");
+        g.choose(Choice::Ability(g.card(0, "Polluted Delta", Zone::Battlefield), AbilitySlot::Activated(0)));
+        settle(&mut g, |_| None);
+        let cloud = |g: &engine::Game| g.clouds().iter().find(|k| k.viewer == 1 && k.owner == 0).map(|k| k.defs.clone());
+        assert_eq!(cloud(&g), Some(vec![g.ident(seen)]), "shuffled: the card P1 saw is somewhere in P0's library");
+        bauble(&mut g);
+        let top = *g.player(0).library.last().unwrap();
+        if cloud(&g).is_none() {
+            continue; // (the second look saw a card of that identity: the cloud's entry may have been it)
+        }
+        assert!(g.knows(1, top) && !g.knows(0, top), "P1 knows P0's top card, P0 does not");
+        let listed = cloud(&g).unwrap();
+        let x0 = features(&g, 0);
+        let mut moved = 0;
+        for s in 0..200 {
+            let mut d = g.clone();
+            d.determinize(0, &mut Rng::new(s));
+            d.check_knowledge().unwrap_or_else(|e| panic!("P0's world {s}: {e}"));
+            assert_eq!(cloud(&d), Some(listed.clone()));
+            assert!(d.knows(1, top));
+            assert_eq!(features(&d, 0), x0, "P0's world {s}");
+            moved += (d.ident(top) != g.ident(top)) as u32;
+            let mut d = g.clone();
+            d.determinize(1, &mut Rng::new(s));
+            d.check_knowledge().unwrap_or_else(|e| panic!("P1's world {s}: {e}"));
+            assert_eq!(d.ident(top), g.ident(top));
+        }
+        assert!(moved > 100, "P0's worlds deal its top card again: {moved} of 200");
+        return;
+    }
+    panic!("no seed left P1 both a cloud and a top card P0 doesn't know");
+}
+
 /// A belief of both targets (ENGINE.md 106): random hand and deck predictions, the hand's tilt `hand`
 /// (`belief_tilt`) and the deck's `deck` (`belief_tilts.deck`).
 fn zbelief_deck(rng: &mut Rng, hand: f64, deck: f64, clip: f64) -> zero_search::game::Belief {
