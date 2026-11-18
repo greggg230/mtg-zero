@@ -510,9 +510,9 @@ def test_a_dirty_checkout_is_refused_and_the_remote_names_the_commits_checkout(m
         MJ.remote()
 
 
-def test_the_mirror_paths_keep_each_runs_name_apart():
-    a = MJ.remote_path('/w', os.path.join('E:', os.sep, 'runs', 'r1', 'models', 'iter_0016.pt'))
-    b = MJ.remote_path('/w', os.path.join('C:', os.sep, 'runs', 'r1', 'models', 'iter_0016.pt'))
+def test_the_mirror_paths_keep_each_runs_name_apart(tmp_path):
+    a = MJ.remote_path('/w', os.path.join(str(tmp_path), 'disk1', 'runs', 'r1', 'models', 'iter_0016.pt'))
+    b = MJ.remote_path('/w', os.path.join(str(tmp_path), 'disk2', 'runs', 'r1', 'models', 'iter_0016.pt'))
     assert a[0] != b[0] and a[0].endswith('/r1/models/iter_0016.pt') and b[0].endswith('/r1/models/iter_0016.pt')
-    ref = MJ.remote_path('/w', os.path.join('E:', os.sep, 'runs', 'r1', 'yardsticks', 'cells_refs', 'g32.pt'))
+    ref = MJ.remote_path('/w', os.path.join(str(tmp_path), 'runs', 'r1', 'yardsticks', 'cells_refs', 'g32.pt'))
     assert ref[0].endswith('/yardsticks/cells_refs/g32.pt') and ref[1].endswith('/yardsticks')
