@@ -38739,6 +38739,20 @@ Mac's eval checkout: the repin of 187.6, gated `repin`):
    records made before it: `--engine-checkout` a checkout of their commit (docs/gamedb.md "The engine").
 4. Raw records are kept (no `--delete-raw`): ~0.2 GB a day of self-play at the run's rate, the rest under 1 MB a day.
 
+### 190.7 The gates (on 1d79585c: main 8b4bac07 merged, zero-core pin 68b6a40)
+
+* `python` tier: GATE PASSED WITH SKIPS (the live-run fence: 1 + 1 live-run-hazard tests) in 749 s.
+* `optin-core` tier (`--baseline-root` = a checkout of main 8b4bac07, its engine from the artifact cache): GATE PASSED in
+  1,480 s - core tests 215, checkpoint_compat identical (visits 3,303 / cq 3,303 samples), digest formats = main's
+  re-recorded files (constructed dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame
+  284d8312cc21c587), dealt f78ada3d3d114826, farm compat identical (6 games, 2,890 / 2,556 rows), `--test az` 57,
+  `--test hidden` 28, the three other games built against the core, core pytest 728 passed. (The run before on the same
+  sha failed one core test, `test_farm_pool::test_the_pool_follows_the_phase_spec_of_the_game_package`: a Windows
+  PermissionError reading the pool's state.json while its thread replaced it, under the machine's load; it passed 3 of
+  3 alone and in the rerun. Earlier: 19076f5b failed every co-training test - fixed by `Run.rec_kw`, zero-core 68b6a40.)
+* No Rust input differs from main 8b4bac07 (engine, card_ir, py, worker, data, the Cargo files; zero-core's crates
+  equal 3161bd9's): the cube digest is main's 53eda75d63b2743b by construction.
+
 ## 191. The spectator view exports every play-by-play line of a step (branch `fix/full-log-export`, 2026-11-17)
 
 The user's call after 187.3's limit: make the exported play-by-play lossless.
