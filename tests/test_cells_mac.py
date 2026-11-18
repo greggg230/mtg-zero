@@ -460,6 +460,38 @@ def test_the_macs_process_ends_when_its_stdin_closes():
     assert p.wait(timeout=60) == 75
 
 
+PLAY = (
+    'import json, sys\n'
+    'sys.path.insert(0, {root!r})\n'
+    'from mtgz.az import mac as MAC, mac_judge as M\n'
+    'MAC.verify_checkout = lambda root, expect=None: None\n'
+    'def play(job):\n'
+    '    if job["games"] < 0:\n'
+    '        raise RuntimeError("no such match")\n'
+    '    return {{"rows": [], "games": job["games"]}}\n'
+    'M.play_job = play\n'
+    'M.cmd_play()\n')
+
+
+@pytest.mark.parametrize('games, code', [(5, 0), (-1, 1)])
+def test_the_macs_play_ends_with_its_result_while_stdin_stays_open(games, code):
+    """The Mac's play exits 0 after its result line (1 with the traceback on a failure) while the desktop still holds
+    its stdin open - never an abort at the interpreter's shutdown with the stdin watcher's thread blocked in a read
+    (the first smoke's exit 255, 'could not acquire lock for <_io.BufferedReader name=<stdin>>')."""
+    p = subprocess.Popen([sys.executable, '-c', PLAY.format(root=ROOT)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, cwd=ROOT)
+    p.stdin.write(json.dumps({'games': games}).encode() + b'\n')
+    p.stdin.flush()
+    out = p.stdout.read()
+    err = p.stderr.read()
+    assert p.wait(timeout=60) == code, err
+    p.stdin.close()
+    if code == 0:
+        assert json.loads(out.decode().strip().splitlines()[-1]) == {'rows': [], 'games': 5}
+    else:
+        assert b'no such match' in err and b'Fatal Python error' not in err
+
+
 def test_a_dirty_checkout_is_refused_and_the_remote_names_the_commits_checkout(monkeypatch):
     from mtgz.az import mac as M
     monkeypatch.setattr(M, 'checkout_state', lambda root: ('b' * 40, [' M mtgz/az/yardsticks.py']))

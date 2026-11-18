@@ -236,6 +236,9 @@ def play_pair_mac(a, b, pair, games, ys, seat, log=print):
     here from the Mac's files."""
     from zero import gamerec as GR
     from . import yardsticks as Y
+    if log is print:                           # (the watcher's child: its console is a file - every line at once)
+        def log(m):
+            print(m, flush=True)
     rt = remote()
     where, files = mirror(rt, [a] if os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
                           else [a, b])
@@ -334,25 +337,61 @@ def play_job(job):
             'seconds': m.get('seconds'), 'records': data, 'load': [load0, _load()]}
 
 
-def _die_with_stdin():
+def _read_line(fd=0):
+    """The job line from stdin's file descriptor itself (no buffered reader: _die_with_stdin reads the rest)."""
+    buf = b''
+    while not buf.endswith(b'\n'):
+        b = os.read(fd, 65536)
+        if not b:
+            break
+        buf += b
+    return buf
+
+
+def _die_with_stdin(fd=0):
     """The desktop keeps this process's stdin open while it waits: EOF (the watcher's child killed, the connection
-    gone) ends the process, games and all."""
+    gone) ends the process, games and all. Raw reads of the descriptor: a daemon thread blocked in sys.stdin's
+    buffered reader makes the interpreter's shutdown abort ('could not acquire lock ... at interpreter shutdown')."""
     try:
-        sys.stdin.buffer.read()
-    finally:
-        os._exit(75)
+        while os.read(fd, 65536):
+            pass
+    except OSError:
+        pass
+    os._exit(75)
+
+
+def _finish(code):
+    """Ends the process at once with `code`, its output flushed: no interpreter shutdown while _die_with_stdin's
+    thread waits on stdin."""
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f.flush()
+        except Exception:                      # noqa: BLE001
+            pass
+    os._exit(code)
 
 
 def cmd_play():
-    from mtgz.az.mac import verify_checkout
-    line = sys.stdin.buffer.readline()
+    """One job (the JSON line on stdin) -> its result line on stdout, exit 0; a failure: its reason or traceback on
+    stderr, exit 1 (the niceness comes from the command line: `nice -n N`)."""
+    import traceback
+    line = _read_line()
     if not line.strip():
         raise SystemExit('mac judge: no job on stdin')
     job = json.loads(line)
     threading.Thread(target=_die_with_stdin, daemon=True).start()
-    verify_checkout(ROOT, job.get('commit'))     # (the niceness comes from the command line: `nice -n N`)
-    print(json.dumps(play_job(job), separators=(',', ':')), flush=True)
-    return 0
+    code = 1
+    try:
+        from mtgz.az.mac import verify_checkout
+        verify_checkout(ROOT, job.get('commit'))
+        print(json.dumps(play_job(job), separators=(',', ':')), flush=True)
+        code = 0
+    except SystemExit as e:
+        print(e.code if isinstance(e.code, str) else f'mac judge: exit {e.code}', file=sys.stderr, flush=True)
+    except BaseException:                      # noqa: BLE001 - said on stderr: the desktop raises it
+        traceback.print_exc()
+    finally:
+        _finish(code)
 
 
 def cmd_have():

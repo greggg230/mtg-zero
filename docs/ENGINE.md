@@ -39626,3 +39626,90 @@ zero-farm venv; its first poll took origin/main 7bd1722d, already released: noth
 * **Agents and alternates.** The CUDA alternate is signed with min agent 0.2.11 (pb3's and meta3's); the CPU build
   keeps farm_build's 0.1.3. Runs still choose their own `pool_min_agent`.
 
+## 198. The cells' games on the MacBook: `cells_backend` 'mac' and a parallel watcher lane (branch `feat/cells-mac`, 2026-11-18)
+
+### 198.1 Why
+
+`legacy-meta3-r1`'s 3x3 cells (186: the pool mode against gen0) played on the farm (`cells_backend` 'farm', 165) one
+measurement at a time, chooser 0 and then chooser 1: at most ~200 games in flight, a campaign's straggler tail at the
+end of each, ~100-200 games/h delivered against the ~1,800 games/h the 64-iteration cadence needed. In a day it
+produced one of the nine cells (the Delver mirror at iteration 32). The run moved to a 256-iteration cadence at its
+13:55 restart (`cells_every` 256, `from` 512, gen over gen off). Measuring every 256 iterations with gen over gen back
+on is, per checkpoint, 1,800 games against gen0 (6 pairs, 200 games a cell), 1,800 against the checkpoint 256 back
+and that checkpoint's 3 baselines (1,200: a new reference every time), 4,800 games per ~5.5 h window, ~870 games/h,
+on top of the farm's self-play. The Mac (16 cores) runs 3 of the run's self-play workers (~3 cores each) and its anchor
+evaluations; the user accepts judging taking about a third of it.
+
+### 198.2 What
+
+* **`cells_backend` 'mac'** (`mtgz/az/mac_judge.py`; explicit only: auto never picks it). A cells measurement's two
+  chooser matches are played at once on the Mac, each the `zero.h2h.match` call `play_pair_local` makes - the same
+  checkpoints (their bytes), spec, seed, games, sims, seat and unpaired seating (A in seat gid % 2) - so the rows,
+  results, statistics and baselines are the local backend's, and **the baseline cache keys are unchanged** (`base_key`
+  reads no backend): a baseline played on the farm or here is the Mac's too (the run's gen0 Delver/Doomsday baseline,
+  played on the farm, is reused as is). The search threads and driver groups are the Mac's own
+  (`cells_mac_threads` 4, `cells_mac_groups` 2: not part of the measurement's definition, as `bo1_threads` is not).
+  Net against net on another CPU's float arithmetic a game can take another line; the engine itself is bit-identical
+  (44).
+* **The code is the watcher's commit**: `mac_judge.remote()` refuses a checkout with uncommitted changes, and the Mac
+  plays in its checkout of that commit, `~/mtg-zero-wt/run-<sha12>` (`bash tools/mac.sh --eval-checkout` in the
+  watcher's checkout: the engine built and stamped there, mtgz/az/mac.py); each process there checks it first
+  (`mac.verify_checkout`) and refuses another commit.
+* **The files**: each checkpoint and its run's config.json (zero.h2h reads a side's seat keys - margin_w, redet,
+  eval_cache - from the config.json beside models/) go to `~/mtgz-judge/<h8>/<run>/models/<file>` (h8: the sha256 of
+  the desktop's run directory), keeping the run's name, so the records name the checkpoint as `gamerec.ckpt_id` does
+  here (`legacy-meta3-r1/iter_0512`). A file already there with the same sha256 is not sent; a copy travels through
+  ssh's stdin to a temporary name and is renamed once its sha256 is checked (`mac_judge have` / `put`).
+* **The processes**: `ssh $MTGZ_MAC 'cd <checkout> && OMP_NUM_THREADS=t MTGZ_REMOTE_COMMIT=<sha> exec nice -n N python
+  -m mtgz.az.mac_judge play'`, the job one JSON line on stdin, the result one JSON line on stdout, the match's stderr
+  in the measurement's console. Stdin stays open while the match runs; the Mac's process exits when it closes (the
+  watcher killed its child, the connection dropped), so a stopped measurement leaves no games running on the Mac.
+  `cells_mac_nice` 10 (the run's self-play workers are at 5), `cells_mac_torch_threads` 2 (torch and OMP).
+* **The game records** (189/190, docs/gamedb.md): with `game_records` on the Mac's process writes the match as one
+  records file (`MatchSink`: the measurement's kind, iteration, labels and meta - pair, chooser, `backend: mac` -,
+  `src` 'mac', its own build line) and sends it back; the child checks it (a build line, every game id once, each
+  record's result the row's) and writes it whole into `<run>/records/<kind>/iter_NNNN/` (`misc/` for a baseline) as
+  `mac-<pid>-<ms>-<n>-c<chooser>.jsonl.gz`. `gamedb.executor` maps `src` 'mac' to 'remote'; the build line's engine id
+  is the commit's (platform-independent), so `gamedb ingest` takes them as it takes the Mac's anchor records.
+* **The parallel lane**: the watcher's lane 'mac' runs `cells_mac_jobs // 2` measurements at once
+  (`yardsticks.lane_parallel`; `cells_mac_jobs` 6: 3 measurements, 6 processes on the Mac), each in its own thread
+  and child process, the oldest due first; `pending(busy=...)` skips the measurements under way, and a cell whose
+  baseline is under way waits (`item_ready`). Every other lane keeps one at a time, in the lane's thread, as before
+  (`lane_parallel` 1). The fit lane still waits for the measurements of its checkpoint (`after`).
+* **Settings** (`yardsticks`; all new, defaults keep everything as before): `cells_backend` 'mac' (with
+  `cells_device` 'cpu': the Mac has no CUDA - refused otherwise - and not with sequential cells, `cells_target_se`,
+  as for 'farm'), `cells_mac_jobs` (6, >= 2), `cells_mac_threads` (4), `cells_mac_groups` (2),
+  `cells_mac_torch_threads` (2), `cells_mac_nice` (10, 0-20). `mtgz.az.MAC_PYTHON` names the Mac's venv interpreter
+  (the remote spec uses it too).
+* **`--take-over` and a venv launcher** (from an uncommitted fix in the `fix/take-over-launcher` worktree, carried
+  here): on Windows a venv's python.exe is a launcher - the supervisor records the launcher's pid as the companion,
+  the lock holds its child's (the interpreter). The take-over now accepts the lock's owner when it is the companion's
+  pid or a descendant of it (`_is_or_child_of`) and kills the companion's whole tree from the launcher.
+
+### 198.3 Tests
+
+`tests/test_cells_mac.py` (12): the live run's switch setting accepted exactly, cells and gen-over-gen cells both in
+the lane 'mac', its parallelism, `pending(busy=...)`; the refusals (cuda, sequential, jobs < 2, nice, threads, an
+unknown backend); both chooser matches under way at once (a barrier) with every argument of the local backend's
+`h2h.match` call and the same results; the files on the Mac (the run's name and models/ kept, `ckpt_id` the same, the
+config beside them, nothing sent again, a rewritten file sent again, a baseline sending one file); `put` refusing a
+wrong sha256, `have` listing missing files and removing a stale config; the records written into the measurement's
+directory (kind, iteration, src, meta, A in seat gid % 2, the checkpoint's id and sha) and records that disagree with
+the results refused, nothing written; **a mirror cell on identical deals with different networks** (both chooser
+matches on the same seed, A the checkpoint and B the reference) scoring what its games say - 0.7 by construction, in
+both halves - on the Mac as here, never 0.5 by structure; the watcher's lane with `cells_mac_jobs` 4 running exactly
+two at once, every measurement once, each cell after its baseline, the oldest checkpoint first; the take-over of a
+launcher's child; the ssh command line (nice, OMP threads, the commit) and the job protocol (a fake Mac process: the
+result line, the stderr in the console, a failure raised with its trace); the Mac process ending when its stdin closes
+(exit 75); a dirty checkout refused. The Mac's side runs here (`play_job`, `have`, `put`) on a fake `zero.h2h.match`.
+
+The 104-iteration Mac A/B's mirrors (m1_cells.py, 2026-11-18) read exactly 0.5 in the Delver and Sneak mirrors in every
+half. Not reproduced through the yardstick's path: gen0 against iteration 496 of `legacy-meta3-r1` on the desktop
+(4 games each, 16 sims, the cells' seat and specs) were decisive (Delver mirror 11, 9, 10, 21 rounds; Sneak mirror 10,
+16, 9, 12), and the mac path's results equal the local path's in the test above. Two networks that never end a game do
+read 0.5 exactly: tiny random networks hit the 60-turn cap in every game of both mirrors (a draw, [0.5, 0.5]); that
+script's games are worth checking for `rounds` = 60.
+
+MEASUREMENTS
+
+SWITCH
