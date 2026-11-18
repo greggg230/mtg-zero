@@ -39269,3 +39269,38 @@ searches a spot, 32 and 1,024 sims alike): Urza's 25% right, Mishra's without a 
 `python tools/gate.py python` (warm worktree): GATE PASSED on a5f164fb (319 s; the earlier 2f59365e passed with skips -
 three live-run-hazard tests fenced while a supervisor was live). Engine untouched, digests unchanged. This subsection
 is docs only.
+
+## 195. Rolling leases on main and by default: every farm-attached run gets rolling self-play leases (zero-core `feat/rolling-default` 459599f, docs/az.md 54.7; branch `feat/rolling-main`, 2026-11-17)
+
+**Why.** Rolling self-play leases (178; zero-farm PROTOCOL rev 15, section 10) lived on side branches (`feat/rolling-farm`,
+and `feat/rolling-meta3` for legacy-meta3-r1's pin, 188). The coordinator serves them (rev 15/16) and the stable farm
+agent (0.2.14) plays them with memory-safe in-flight sizing. Measured on 2026-11-17 on one farm PC, same network: classic
+128-match leases 471 matches/h, rolling leases at 160 in flight 1,550 matches/h over 65 minutes (3.3x). The user
+approved (2026-11-17) making them the default for every future farm-attached run.
+
+**What.**
+
+* `feat/rolling-farm` 97c13ba3 merged into main (178, placed between main's 177 and 179). The zero-core pin moves from
+  68b6a40 (`feat/game-records-all`) to 459599f (`feat/rolling-default`): 425459a merges zero-core `feat/rolling-farm`
+  1338d49 (the worker's rolling jobs, `pool_rolling` with per-row staleness, the pool's lock order: docs/az.md 54, 55)
+  into 68b6a40 without conflicts, and 459599f flips the default.
+* **A deliberate behaviour change** (zero-core docs/az.md 54.7): `zero.run.DEFAULTS['pool_rolling']` '' -> `'auto'`
+  (`{"inflight": "auto", "gpu_inflight": "auto"}`). It is read only by the farm pool (`selfplay_remote` naming a
+  `pool:` entry), so a run without a farm pool plays and trains byte for byte as before (the gate's checkpoint
+  compatibility and digests below). A farm run on this pin: every self-play PUT carries `selfplay.rolling`; staleness is
+  judged per row, so **which farm rows are kept changes** (a game straddling the window keeps its newer rows); and the
+  pool refuses loudly a `pool_worker` that does not announce `rolling` (no silent fallback to classic leases). A run
+  whose `config.json` already saved `pool_rolling` '' (started on a core that knew the key) stays classic when resumed;
+  one whose config predates the key takes 'auto'. Off: `pool_rolling=''` - which a worker build before rolling jobs
+  needs explicitly. legacy-meta3-r1 and delver-bo3-pb3 pin older cores and are unaffected.
+* **The farm-compat step checks the feature.** `tools/farm_compat.py` gains check 3: the release worker's `info`
+  (`--ort-dll none`) must announce `rolling` with a build id; its JSON summary carries `features` and its final line
+  says "features rolling announced (build ...)". gate.py's `check_farm_compat` (the engine, encoding, search-core,
+  optin-core and repin tiers' `farm-compat` step) refuses a summary without `features` `passed` and `rolling` listed,
+  even under a "PASSED" line, so a build that loses the feature fails the gate. `tests/test_gate.py::
+  test_the_farm_compat_checker_wants_positive_evidence` covers a missing feature, a missing build id and a missing
+  `features` key.
+
+**Tests.** zero-core 459599f: `tests/test_farm_pool.py::test_default_pool_rolling_is_auto` (a pool with the default PUTs
+`selfplay.rolling` {"inflight": "auto", "gpu_inflight": "auto"}; '' PUTs no `rolling`), the classic farm-pool tests
+with `pool_rolling` '' unchanged; cargo test --workspace (the worker's rolling suite included) and the core pytest.

@@ -244,10 +244,11 @@ def FUZZ_SHARDS(pool, games, hidden=False, passed=True, matches_skipped=None):
     return line + '\n' + json.dumps({'fuzz_shards': s}) + '\n'
 FARM_SUMMARY = {'preset': 'delver-mirror-bo3-dealt', 'games': 6, 'passed': True,
                 'gate2': {'passed': True, 'result': {'games': 6, 'rows': 1210, 'batches_compared': 150, 'identical': True}},
-                'gate3': {'passed': True, 'result': {'games': 6, 'rows': 1190, 'setups': 6, 'identical': True}}}
+                'gate3': {'passed': True, 'result': {'games': 6, 'rows': 1190, 'setups': 6, 'identical': True}},
+                'features': {'features': ['rolling'], 'build_id': 'a' * 24, 'missing': [], 'passed': True}}
 FARM_COMPAT_OK = (json.dumps(FARM_SUMMARY) + '\nfarm compat: PASSED - delver-mirror-bo3-dealt: gate 2 (worker vs the Python '
                   'remote worker) identical: 6 games, 1210 rows, 150 batches; gate 3 (records -> trainer rows) identical: '
-                  '6 games, 1190 rows, 6 decks compared (gates/tmp/x)\n')
+                  '6 games, 1190 rows, 6 decks compared; features rolling announced (build aaaa) (gates/tmp/x)\n')
 
 
 # ---------------------------------------------------------------------------- the fake gate
@@ -1330,6 +1331,17 @@ def test_the_farm_compat_checker_wants_positive_evidence():
     assert lying != FARM_COMPAT_OK and not G.check_farm_compat(lying, 0)[0]
     no_json = FARM_COMPAT_OK.splitlines()[-1] + '\n'
     assert not G.check_farm_compat(no_json, 0)[0], 'the line without its JSON summary is not evidence'
+    # ENGINE.md 195: a worker that loses the feature `rolling` fails the step, even under a PASSED line
+    for feats in ({'features': [], 'build_id': 'a' * 24, 'missing': ['rolling'], 'passed': True},
+                  {'features': ['rolling'], 'build_id': None, 'missing': [], 'passed': False}, None):
+        s = dict(FARM_SUMMARY)
+        if feats is None:
+            del s['features']
+        else:
+            s['features'] = feats
+        bad = json.dumps(s) + '\n' + FARM_COMPAT_OK.splitlines()[-1] + '\n'
+        ok, why, _ = G.check_farm_compat(bad, 0)
+        assert not ok and 'rolling' in why, (feats, why)
 
 
 def test_the_worker_build_checker(tmp_path):
