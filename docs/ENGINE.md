@@ -38970,3 +38970,112 @@ delverai checkout present a dry run through the real uploader. delverai test/upl
 mapping (overall = the mean; a 23.5% score with a +41.3 gain reads "A better"), the tab's order, `--overall-only`,
 manifest cells entries, an incomplete measurement pending, the Worker accepting the record (93 pass). By hand (CPU,
 2 games, 2 sims, dry-run posts): h2h, keep_h2h and cells-match with `--publish`. Gate: the python tier.
+
+## 194. The Bauble targeting blunder measure: the game database's `bauble` table, the per-iteration series, the run page's card and Bauble canary spots (branch `feat/bauble-blunders`, delverai branch `bauble-blunders`, 2026-11-17)
+
+Branch `feat/bauble-blunders` from main 39492759, main 8b4bac07 (192's remembered looks) merged in. Why: the user
+watched the Delver line misuse its Baubles (the value-of-information note of 2026-11-17: Urza's Bauble at itself 39-63%
+of the time, Mishra's Bauble at itself with nothing to act on), and wants a standing measure of it per iteration, from
+the game database (187), with the rules of a blunder stated once. No rule, card, encoding, setting or default of a run
+changes: tools, docs, the canary library's data and the site.
+
+### 194.1 The rules (the user's)
+
+* **Urza's Bauble** ("{T}, Sacrifice: Look at a card at random in target player's hand. You draw a card at the
+  beginning of the next turn's upkeep"): targeting itself is a blunder, unless the opponent has no cards in hand or the
+  activator already knows every card in the opponent's hand.
+* **Mishra's Bauble** ("look at the top card of target player's library"): targeting itself is a blunder when the
+  activator has no fetchland available (none in hand, none uncracked on its battlefield), unless it already knows the
+  opponent's top card (a remembered look, 192). Itself with a fetchland is not a blunder (look, then shuffle a bad card
+  away): counted on its own, with the library manipulation in hand (Brainstorm, Ponder, ...) as a column for later.
+* Excluded, with a count: activations where targeting the opponent is impossible or meaningless - the target decision
+  did not offer the opponent, Mishra's at an empty opponent library - and (found on the first real sample, 194.4) one
+  whose game stopped at its target decision (a resignation there: no target, never dropped).
+
+### 194.2 The table, the view, the series
+
+`tools/gamedb_bauble.py` (docs/gamedb.md "Bauble targeting"). A full replay (187.2) also feeds every step to its
+`Reader`: an activation is the engine's "P<n> activates <Bauble> (...)" line; its conditions are the spectator state
+before that step - the hands, the fetchlands in hand and on the battlefield (sacrifice-and-search lands: the ten
+fetches, Prismatic Vista, Fabled Passage, Evolving Wilds, Terramorphic Expanse), the library sizes - and the export's
+`known` block, the engine's exact hidden-information state (`Obj.known`, 72): the opponent's hand cards the activator
+knows, whether it knows the card on top of the opponent's library (and its own). The target is the first "target P<n>"
+line after the activation; the opponent was targetable when the target decision offered two players. Partial
+knowledge (clouds, 192's `peeks`) is not counted as knowing a card. `classify` applies 194.1 -> `excluded`, `blunder`,
+`blunder_reason` (`self_with_unknown_opponent_hand`, `ok_opponent_hand_empty`, `ok_opponent_hand_known`,
+`self_without_fetch`, `ok_opponent_top_known`, `ok_self_with_fetch`, `ok_target_opponent`).
+
+`tools/gamedb.py`, additive: one more table `bauble` (TABLES, its schema, the reader beside combo_stats' in
+`replay_full`), the view `bauble_activations` (the game's kind and the activator's checkpoint from `games` where it has
+them - feat/gamedb-all's `kind` / `p0_ckpt` - else self-play and `iter_NNNN` of `net_hi`; deck, opponent's deck,
+pairing), `bauble_blunder_series(run, since_iter, by_kind, kind)` and `gamedb.py bauble RUN`: per iteration and Bauble
+(and `all`), activations, excluded, counted, self-targets, blunders, self-with-fetch (and with manipulation), and the
+shares with standard errors clustered by game. A database ingested before the table needs `ingest --redo` for it.
+
+The publisher (`tools/delverai_publish.py bauble_record`): a run with a game database gets `bauble_targeting` {kind
+'selfplay', rows} in its progress record (never a reason to drop the post). delverai (branch `bauble-blunders`): a card
+"Bauble targeting" on the best-of-one, best-of-three and metagame run pages - the blunder share per Bauble with a ±1 SE
+band, Mishra's at itself with a fetchland as a thin line; the worker validates the block. Not deployed (194.6).
+
+### 194.3 Validation
+
+* **Unit**: `tests/test_gamedb_bauble.py` - the rules case by case (15 cases), the reader on hand-made play-by-play
+  (a choice of target, an engine-answered one-target decision -> excluded, the activator's knowledge of the opponent's
+  top card and hand, a game that ended before the target), and 60 random-move Delver mirror games ingested: one row per
+  Bauble activation the play-by-play shows, every row's conditions recomputed from a fresh replay to its action equal,
+  its classification the rules', the series' counts the rows'.
+* **Every activation, every record set**: the `activate ... Bauble` events of the detailed games = the rows, on all
+  four sets below (24, 647, 7, 618).
+* **Hand-checked, 24 activations** (the state at the activating action printed - both hands, the battlefield, the
+  `known` entries with their masks, the decision, the lines after - and the class confirmed by reading it; stratified
+  over every class): 8 of the real meta3 records, 7 of the wheel records, 9 of the new a3198 records. All 24 right. Among
+  them: Mishra's at itself with the opponent's top card known to the activator only (mask = the activator's bit,
+  owner's bit clear: 192's remembered look) -> `ok_opponent_top_known`, twice; with a top known to both players (an
+  old-engine record) -> the same; Mishra's at itself with Polluted Delta on the battlefield / Misty Rainforest in hand ->
+  `ok_self_with_fetch`; Urza's at itself with an uncracked Misty Rainforest -> still a blunder (a fetch is no excuse for
+  Urza's); Urza's at itself into an empty hand -> `ok_opponent_hand_empty`; Mishra's at itself with Island, Volcanic
+  Island and Ponder but no fetchland -> `self_without_fetch` (Ponder in `manipulation_in_hand`); the resigned game's
+  target-less activation -> excluded.
+* **Old records replay on their engine only**: the sets made before 192 were ingested by this code in a checkout of
+  main 39492759 (the engine that played them; 192 re-recorded the digests); the a3198 set on this branch's engine.
+* **feat/gamedb-all**: merged into this branch in a scratch checkout without a conflict; its tests and these together
+  pass there (32: test_gamedb_bauble, test_gamedb, test_gamedb_all - after this branch's one Bauble query in
+  docs/gamedb.md was made inline: test_gamedb_all counts the docs' SQL blocks).
+
+### 194.4 Measured
+
+| records (engine) | games | Urza's: activations, blunders | Mishra's: activations, blunders | Mishra's at itself with a fetch | opponent's top known |
+|---|---|---|---|---|---|
+| a3198 (v7r1) self-play, Delver mirror best-of-one, pb3's search settings, 64 sims, CPU, 240 games (this engine, 192) | 240 (210 resigned) | 129: **49 = 38.0% ± 4.5** (self 38.8%) | 489 (1 excluded): **186 = 38.1% ± 2.4** (self 62.9%) | 113 = 23.2% ± 2.0 (78 with Brainstorm/Ponder/...) | 13 (8 then at itself) |
+| meta3's iteration-156 network, its settings, 64 games (187.3's real set; before 192) | 64 | 6: 6 | 18: 10 = 56% ± 11 | 1 | 1 |
+| 187.3's wheel set: the metagame spec, a uniform evaluator (not a network), 600 games (before 192) | 600 | 129: 66 = 51.2% ± 4.5 | 518: 197 = 38.0% ± 2.1 | 86 = 16.6% ± 1.7 | 2 |
+
+(Shares of the counted activations, ± one standard error clustered by game.) a3198 blunders on about 38% of both
+Baubles' activations: Urza's at itself 39% of the time - the VOI note's range - and nearly always with opponent cards it
+didn't know; Mishra's at itself 63%, three fifths of those with no fetchland. 131 of its 186 Mishra blunders and 37 of
+49 Urza blunders had Brainstorm, Ponder or similar in hand. Remembered looks show up: 13 Mishra's activations with the
+opponent's top card known to the activator (a second Bauble after a first at the opponent). a3198 was trained before
+192, so it never saw a remembered look; a run on this engine is where the series should move.
+
+### 194.5 Canary spots
+
+The canary library (docs/blunders.md 6a) gets three kinds, mined from the a3198 records by `gamedb_bauble.spots` (the
+target decision of an activation, one a game, whichever target was chosen; watched option: the activator itself) and
+added by `delver_blunders.py library-add --live-ckpt a3198` (undecided games only: 6 decided spots left out), each with
+its fingerprint and position: `bauble_urza_self` 4 (answer `bad`), `bauble_mishra_self_no_fetch` 3 (`bad`) and
+`bauble_mishra_fetch_control` 5 - a new answer `control`: no right answer, the score is the share of searches choosing
+the watched option, the kind is reported but stays out of "all kinds" and out of the site's pass counts. The library's
+rules epoch is main's (192's re-record), so no re-record was needed and none conflicts. None is user-reviewed: the
+sidecar scores them at once, the site counts them only when the user keeps them on the review page. a3198 on them (8
+searches a spot, 32 and 1,024 sims alike): Urza's 25% right, Mishra's without a fetch 0%, the control 78% at itself.
+
+### 194.6 Not done / open
+
+* A best-of-three run's self-play records (pb3's `game_episodes`) do not replay in the database yet (a record ends
+  inside a match; some hold episode boundaries in their steps: feat/gamedb-all leaves chained contests out too), so the
+  series exists for best-of-one and metagame runs with records; pb3's page shows the card once that lands.
+* The site's card is a preview (hub `delverai_bauble` :5367, before `delverai_bauble_base` :5368), drawn on a synthetic
+  fixture block in the preview's own D1 (no run has records in a database yet): screenshots for the user's approval,
+  no deploy.
+* The SE treats each game's activations as one cluster; iterations of a few dozen games give wide bands (Urza's ±4.5
+  points at 240 games).
