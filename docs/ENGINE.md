@@ -39277,3 +39277,8 @@ tests/test_delver_review_apply.py). The library's scored spots go from 53 to 62 
 Urza's, three Mishra's without a fetch, two with an unusable one; the three controls are never scored), so its
 `library_id` changes (20e61a21959c -> 1beec510534c). The site labels the new kind ("Mishra's Bauble at itself, its
 fetchland too late").
+
+**Gate**: `python tools/gate.py python` (warm worktree): GATE PASSED on 00c6aec2 (588 s). A first run on the same
+commit failed one load-sensitive timeout (tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]: no match rows
+within 600 s on a busy machine; code this branch does not touch; the test passes alone). Engine untouched, digests
+unchanged. This paragraph is docs only.
