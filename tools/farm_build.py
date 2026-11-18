@@ -1,6 +1,8 @@
 """Build, sign and publish zero-farm builds of this checkout (docs/ENGINE.md 114.3; zero-farm PROTOCOL.md 2).
 
     python tools/farm_build.py --profile release|fuzz [--runtime-id BUILD_ID] [--root CHECKOUT] [--publish] [--url URL]
+    python tools/farm_build.py --profile release|fuzz --platform macos-arm64 [--runtime-id ID] [--root CHECKOUT] [--publish]
+    python tools/farm_build.py --runtime --pack macos-cpu [--ort-version V] [--check-worker MAC_PATH] [--publish]
     python tools/farm_build.py --runtime [--ort-dll PATH] [--msvc-dir DIR] [--publish] [--url URL]
     python tools/farm_build.py --runtime --pack winml [--winml-version V | --winml-nupkg F] [--publish] [--url URL]
     python tools/farm_build.py --runtime --pack cuda --msvc-dir DIR [--check-net EXPORT_DIR] [--publish] [--url URL]
@@ -53,6 +55,32 @@ DirectML providers. With them, unmodified, the package's own license files (WINM
 Microsoft Software License Terms of the Windows ML runtime - DirectML ships in the same package -, and
 `ThirdPartyNotices.txt`; zero-farm README "Third-party components"). Checked through a release build (`info`: every DLL from the pack; `probe-providers --providers
 cpu` on this PC: the CPU passes its self-test) before it is signed.
+
+macOS on Apple silicon (zero-farm PROTOCOL.md 11, docs/ENGINE.md 197), on the maintainer's Mac (`MTGZ_MAC` in
+~/.config/zero/local.env, as tools/mac.sh): `--platform macos-arm64` builds `mtgz-worker` there at exactly the clean
+checkout's commit - the commit pushed to the Mac's mirror (`mac` remote, refs/heads/farm-build-<sha12>) and the zero-core
+pin to its core mirror (tools/mac.sh's), checked out forced and clean in the Mac's one farm checkout
+~/mtg-zero-wt/farm-build (HEAD and the submodule checked there), built with that cargo profile under `nice -n 15` in its
+own target dir ~/cargo-target/mtg-zero/farm-build with no RUSTFLAGS (mac.sh's `-undefined dynamic_lookup` is for the
+PyO3 module: a farm executable must resolve every symbol at link time) - then copied back and checked here (a thin
+arm64 Mach-O executable whose only libraries are /usr/lib's and /System's: `MAC_DYLIB_PREFIXES`; an ad-hoc code
+signature, which the arm64 linker adds) and there (`codesign --verify`, `info`, `fuzz-check`). Its build directory holds
+`mtgz-worker` (no extension), signed with `farm-release sign ... --platform macos-arm64 --entry mtgz-worker --min-agent
+0.3.0` (PROTOCOL.md 11.3: a manifest that names a platform needs agents from 0.3.0), then the signed manifest is
+copied next to the executable on the Mac and `info` / `fuzz-check` read it there (build_id, commit, profile). Signed
+here, never on the Mac (the release key stays on this machine).
+
+The macOS runtime pack (`--runtime --pack macos-cpu`): ONNX Runtime's official osx-arm64 library from the NuGet package
+Microsoft.ML.OnnxRuntime (`--ort-version`, default MAC_ORT_VERSION = the Windows CPU pack's 1.31.1; the GitHub release
+tarballs are not reachable here): the package checked against nuget.org's catalog hash (SHA-512), its nuspec's version
+and license file, `runtimes/osx-arm64/native/libonnxruntime.dylib` (the library itself, the name the worker loads from a
+runtime_dir) and, unmodified, the package's `LICENSE` and `ThirdPartyNotices.txt` (byte for byte the Windows CPU
+pack's). The dylib is checked here (a thin arm64 Mach-O dylib, its LC_BUILD_VERSION minimum macOS recorded) and on the
+Mac (`codesign --verify --strict`, signed by Microsoft's Developer ID team MAC_ORT_TEAM), then loaded through a macOS
+release worker (`--check-worker`: a path on the Mac; default the release farm build of this checkout, built there):
+`info --runtime-dir` (the library loaded from the pack) and `probe-providers --providers cpu` (the CPU passes its
+self-test). `runtime.json` like the Windows pack's (each file's version, signer, sha256, source; the licenses; the
+package), signed `--kind runtime --platform macos-arm64 --min-agent 0.3.0`.
 
 Prints the build_id (last line: `build_id <id>`). The release key: `--key` (default
 ~/.config/zero-farm/release.key, DPAPI: this Windows user); the admin token: the file
@@ -121,6 +149,16 @@ VCREDIST_LICENSE_TITLE = b'MICROSOFT VISUAL C++ 2015 - 2022 RUNTIME'
 VS_REDIST_TXT = ('Licenses', '1033', 'Redist.txt')
 VS_REDIST_TXT_TITLE = b'Distributable Code for Microsoft Visual Studio 2022'
 # what a statically linked worker may import: Windows itself
+# macOS (PROTOCOL.md 11): what a farm worker may link (the system's own libraries), the agents that know platforms,
+# the Mac's farm checkout and target dir (relative to its home), the ONNX Runtime of the macOS pack (NuGet) and the
+# Developer ID team that signs Microsoft's macOS binaries
+MAC_DYLIB_PREFIXES = ('/usr/lib/', '/System/Library/')
+PLATFORM_MIN_AGENT = '0.3.0'
+MAC_FARM_CHECKOUT = 'mtg-zero-wt/farm-build'
+MAC_FARM_TARGET = 'cargo-target/mtg-zero/farm-build'
+MAC_ORT_PACKAGE = 'microsoft.ml.onnxruntime'
+MAC_ORT_VERSION = '1.31.1'
+MAC_ORT_TEAM = 'UBF8T346G9'
 SYSTEM_DLLS = ('kernel32.dll', 'ntdll.dll', 'advapi32.dll', 'psapi.dll', 'bcryptprimitives.dll', 'user32.dll', 'ws2_32.dll',
                'userenv.dll', 'shell32.dll', 'ole32.dll', 'bcrypt.dll', 'secur32.dll', 'crypt32.dll', 'dbghelp.dll',
                'dxgi.dll')  # dxgi: the worker lists the PC's graphics adapters by LUID (zero-farm PROTOCOL.md 8)
@@ -766,6 +804,306 @@ def resign_worker(a):
     return bid, d
 
 
+# ------------------------------------------------------------------------------------------- macOS (PROTOCOL.md 11)
+
+def macho_info(path):
+    """A thin 64-bit Mach-O file -> {cputype, filetype, dylibs, rpaths, minos, signed}: its header and load commands
+    (LC_LOAD_DYLIB and its weak / re-export / upward kinds, LC_RPATH, LC_BUILD_VERSION, LC_CODE_SIGNATURE)."""
+    with open(path, 'rb') as f:
+        b = f.read()
+    magic = struct.unpack_from('<I', b, 0)[0]
+    if magic != 0xFEEDFACF:
+        die(f'{path}: not a thin 64-bit Mach-O file (magic {magic:#x}; a universal binary is not what the pack ships)')
+    cputype, _sub, filetype, ncmds, _size, _flags, _res = struct.unpack_from('<iiIIIII', b, 4)
+    out = {'cputype': cputype, 'filetype': filetype, 'dylibs': [], 'rpaths': [], 'minos': None, 'signed': False}
+    off = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from('<II', b, off)
+        if cmd in (0xC, 0x80000018, 0x8000001F, 0x80000023):
+            name = struct.unpack_from('<I', b, off + 8)[0]
+            out['dylibs'].append(b[off + name:off + size].split(b'\0')[0].decode())
+        elif cmd == 0x8000001C:
+            name = struct.unpack_from('<I', b, off + 8)[0]
+            out['rpaths'].append(b[off + name:off + size].split(b'\0')[0].decode())
+        elif cmd == 0x32:
+            v = struct.unpack_from('<I', b, off + 12)[0]
+            out['minos'] = f'{v >> 16}.{(v >> 8) & 0xFF}.{v & 0xFF}'
+        elif cmd == 0x1D:
+            out['signed'] = True
+        off += size
+    return out
+
+
+CPU_TYPE_ARM64 = 0x0100000C
+
+
+def check_mac_executable(exe):
+    """The macOS worker as a farm executable must be (module docs) -> its Mach-O info."""
+    m = macho_info(exe)
+    if m['cputype'] != CPU_TYPE_ARM64 or m['filetype'] != 2:
+        die(f'{exe}: cputype {m["cputype"]:#x}, filetype {m["filetype"]}: want an arm64 executable')
+    bad = [d for d in m['dylibs'] if not d.startswith(MAC_DYLIB_PREFIXES)]
+    if bad or m['rpaths']:
+        die(f'{exe} links {bad} (rpaths {m["rpaths"]}): a farm worker links only the system\'s libraries {MAC_DYLIB_PREFIXES}')
+    if not m['signed']:
+        die(f'{exe}: no code signature (the arm64 linker signs ad hoc; macOS kills an unsigned arm64 executable)')
+    return m
+
+
+def mac_host():
+    h = os.environ.get('MTGZ_MAC') or local_config.get('MTGZ_MAC')
+    if not h:
+        die('--platform macos-arm64 builds on the Mac: set MTGZ_MAC=user@host in ~/.config/zero/local.env (tools/local.env.example)')
+    return h
+
+
+def mac_run(script, what, timeout=None):
+    """A bash script on the Mac (sent on stdin; `set -euo pipefail`, the Mac's cargo and Homebrew on PATH) -> its
+    stdout; a failure dies with its output's end."""
+    head = 'set -euo pipefail\nexport PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"\n'
+    p = subprocess.run(['ssh', '-o', 'BatchMode=yes', mac_host(), 'bash -s'], input=head + script, capture_output=True, text=True,
+                       timeout=timeout)
+    if p.returncode:
+        die(f'on the Mac, {what} (exit {p.returncode}):\n{(p.stdout + p.stderr)[-3000:]}')
+    return p.stdout
+
+
+def mac_copy(src, dst, back=False):
+    """scp a file or directory to the Mac (`dst` relative to its home), or back (`back`: `src` on the Mac)."""
+    args = ['scp', '-q', '-o', 'BatchMode=yes', '-r']
+    args += [f'{mac_host()}:{src}', dst] if back else [src, f'{mac_host()}:{dst}']
+    p = subprocess.run(args, capture_output=True, text=True)
+    if p.returncode:
+        die(f'scp {"from" if back else "to"} the Mac: {p.stderr.strip()[-500:]}')
+
+
+def mac_json(text, what):
+    for ln in reversed(text.splitlines()):
+        if ln.startswith('{'):
+            try:
+                return json.loads(ln)
+            except ValueError:
+                pass
+    die(f'{what}: no JSON in its output:\n{text[-1500:]}')
+
+
+def mac_build(profile, ec, cc):
+    """mtgz-worker built on the Mac at exactly `ec` (zero-core `cc`) with cargo profile `profile` (module docs) -> the
+    executable's path on the Mac, relative to its home."""
+    host = mac_host()
+    tag = f'farm-build-{ec[:12]}'
+    mac_run('[ -d mtg-zero.git ] || git init -q --bare mtg-zero.git\n[ -d mtg-zero-core.git ] || git init -q --bare mtg-zero-core.git\n',
+            'the mirrors')
+    git('push', '-q', '-f', f'{host}:mtg-zero.git', f'{ec}:refs/heads/{tag}')
+    git('push', '-q', '-f', f'{host}:mtg-zero-core.git', f'{cc}:refs/heads/pin-{cc}', cwd=os.path.join(ROOT, 'third_party', 'zero-core'))
+    exe = f'{MAC_FARM_TARGET}/{profile}/mtgz-worker'
+    print(f'building mtgz-worker (profile {profile}) at {ec[:12]} on the Mac in ~/{MAC_FARM_CHECKOUT} (target ~/{MAC_FARM_TARGET})',
+          flush=True)
+    out = mac_run(f"""
+[ -d "$HOME/mtg-zero/.git" ] || git clone -q --no-checkout "$HOME/mtg-zero.git" "$HOME/mtg-zero"
+cd "$HOME/mtg-zero"
+git config submodule.third_party/zero-core.url "$HOME/mtg-zero-core.git"
+git fetch -q origin "+refs/heads/{tag}:refs/remotes/origin/{tag}"
+WT="$HOME/{MAC_FARM_CHECKOUT}"
+LOCK="$WT.mac-lock"
+mkdir -p "$(dirname "$WT")"
+while ! mkdir "$LOCK" 2>/dev/null; do
+  OWNER="$(cat "$LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$OWNER" ] && ! kill -0 "$OWNER" 2>/dev/null; then rm -rf "$LOCK"; continue; fi
+  sleep 10
+done
+echo $$ > "$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT
+[ -d "$WT" ] || git worktree add -q --detach "$WT" {ec}
+cd "$WT"
+git checkout -q -f --detach {ec}
+git clean -fdq
+git -c protocol.file.allow=always submodule update -q --init --force third_party/zero-core
+git -C third_party/zero-core clean -fdq
+test "$(git rev-parse HEAD)" = {ec}
+test "$(git -C third_party/zero-core rev-parse HEAD)" = {cc}
+test -z "$(git status --porcelain --untracked-files=no --ignore-submodules=none)"
+unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
+export CARGO_TARGET_DIR="$HOME/{MAC_FARM_TARGET}" CARGO_BUILD_JOBS="${{CARGO_BUILD_JOBS:-6}}"
+nice -n 15 cargo build --profile {profile} -p mtgz_worker 2>&1 | tail -3
+EXE="$HOME/{exe}"
+codesign --verify "$EXE"
+file "$EXE"
+otool -L "$EXE"
+""", f'the build at {ec[:12]}', timeout=6 * 3600)
+    print(out.strip()[-1500:])
+    return exe
+
+
+def mac_worker_json(exe_rel, *args, what=None, env=''):
+    """`<worker on the Mac> args...` -> its last JSON line (exit status not checked: probe-providers exits 2 when not
+    even the CPU passes, which the caller judges)."""
+    q = ' '.join("'" + x.replace("'", "'\\''") + "'" for x in args)
+    out = mac_run(f'cd "$HOME" && {env} "$HOME/{exe_rel}" {q} || true\n', what or f'{exe_rel} {args[0]}')
+    return mac_json(out, what or args[0])
+
+
+def build_worker_mac(a):
+    """The macOS release / fuzz worker build (module docs) -> (build_id, directory)."""
+    ec, cc = clean_tree()
+    exe_rel = mac_build(a.profile, ec, cc)
+    tdir = target_dir()
+    version = f'mtg-{ec[:7]}-{a.profile}-macos-arm64'
+    d = os.path.join(a.out or os.path.join(tdir, 'dist'), version)
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    exe = os.path.join(d, 'mtgz-worker')
+    mac_copy(exe_rel, exe, back=True)
+    m = check_mac_executable(exe)
+    print(f'mtgz-worker (macOS): arm64 executable, minimum macOS {m["minos"]}, links {m["dylibs"]}, ad-hoc signed')
+    info = mac_worker_json(exe_rel, 'info', '--ort-dll', 'none', what='info')
+    if info.get('platform') != 'macos-arm64':
+        die(f'the Mac\'s worker says platform {info.get("platform")!r}')
+    zo = info['zero_onnx']
+    sign = ['--kind', 'worker', '--version', version, '--game', 'mtg', '--engine-commit', ec, '--core-commit', cc,
+            '--profile', a.profile, '--aw', '1', '--zero-onnx', ','.join(map(str, zo)) if a.profile == 'release' else '',
+            '--min-agent', max_semver(a.min_agent, PLATFORM_MIN_AGENT), '--entry', 'mtgz-worker', '--platform', 'macos-arm64']
+    if a.profile == 'release':
+        if not a.runtime_id:
+            die('a release build plays networks: give --runtime-id (the macOS runtime pack it loads ONNX Runtime from)')
+        sign += ['--requires-runtime', a.runtime_id]
+    bid = sign_publish(a, d, sign)
+    # the signed build on the Mac: its info names the build, its fuzz-check the commit and profile
+    remote = f'mtgz-macfarm/builds/{bid}'
+    mac_run(f'rm -rf "$HOME/{remote}" && mkdir -p "$HOME/{remote}"\n', 'the build directory')
+    for n in os.listdir(d):
+        mac_copy(os.path.join(d, n), f'{remote}/{n}')
+    mac_run(f'chmod 755 "$HOME/{remote}/mtgz-worker"\n', 'chmod')
+    info = mac_worker_json(f'{remote}/mtgz-worker', 'info', '--ort-dll', 'none', what='info (signed)')
+    want_kinds = ['selfplay', 'eval', 'fuzz'] if a.profile == 'release' else ['fuzz']
+    if info['build_id'] != bid or info['kinds'] != want_kinds or info.get('zero_onnx') != zo:
+        die(f'the signed worker on the Mac says build {info["build_id"]}, kinds {info["kinds"]}, zero_onnx {info.get("zero_onnx")} '
+            f'(want {bid}, {want_kinds}, {zo})')
+    chk = mac_worker_json(f'{remote}/mtgz-worker', 'fuzz-check', '--mode', 'games', what='fuzz-check (signed)')
+    if chk.get('commit') != ec or chk.get('profile') != a.profile:
+        die(f'fuzz-check of the signed worker on the Mac: {chk}')
+    print(f'signed macOS worker on the Mac: ~/{remote} (build {bid}, commit {ec[:12]}, profile {a.profile})')
+    return bid, d
+
+
+def max_semver(x, y):
+    return x if git_semver_ge(x, y) else y
+
+
+def nuget_package(name, version, cache_dir):
+    """The NuGet package `name` `version` from nuget.org, cached in `cache_dir`, checked against nuget.org's catalog
+    (its packageHash, SHA-512) -> (path, {url, sha256, sha512, catalog})."""
+    import base64
+    import urllib.request
+    reg = f'https://api.nuget.org/v3/registration5-gz-semver2/{name}/{version}.json'
+    req = urllib.request.Request(reg, headers={'Accept-Encoding': 'gzip'})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        body = r.read()
+        if r.headers.get('Content-Encoding') == 'gzip' or body[:2] == b'\x1f\x8b':
+            import gzip
+            body = gzip.decompress(body)
+    leaf = json.loads(body)
+    with urllib.request.urlopen(leaf['catalogEntry'], timeout=60) as r:
+        cat = json.load(r)
+    if cat.get('packageHashAlgorithm') != 'SHA512':
+        die(f'{name} {version}: the catalog\'s hash is {cat.get("packageHashAlgorithm")}')
+    url = leaf['packageContent']
+    os.makedirs(cache_dir, exist_ok=True)
+    path = os.path.join(cache_dir, f'{name}.{version}.nupkg')
+    sha512 = lambda p: base64.b64encode(hashlib.sha512(open(p, 'rb').read()).digest()).decode()
+    if not (os.path.exists(path) and sha512(path) == cat['packageHash']):
+        print(f'fetching {url}', flush=True)
+        tmp = path + '.part'
+        with urllib.request.urlopen(url, timeout=3600) as r, open(tmp, 'wb') as f:
+            shutil.copyfileobj(r, f, 1 << 20)
+        if sha512(tmp) != cat['packageHash']:
+            die(f'{url}: not the package nuget.org\'s catalog names (SHA-512)')
+        os.replace(tmp, path)
+    return path, {'url': url, 'sha256': file_sha256(path), 'sha512': cat['packageHash'], 'catalog': leaf['catalogEntry'],
+                  'published': cat.get('published')}
+
+
+def build_mac_runtime(a):
+    """The macOS runtime pack (module docs) -> (build_id, directory)."""
+    import io
+    import zipfile
+    version = a.ort_version or MAC_ORT_VERSION
+    tdir = target_dir()
+    path, src = nuget_package(MAC_ORT_PACKAGE, version, a.wheel_dir or os.path.join(tdir, 'nuget'))
+    member = 'runtimes/osx-arm64/native/libonnxruntime.dylib'
+    with zipfile.ZipFile(path) as z:
+        nuspec = next(n for n in z.namelist() if n.endswith('.nuspec') and '/' not in n)
+        spec = z.read(nuspec).decode('utf-8-sig', 'replace')
+        if f'<version>{version}</version>' not in spec:
+            die(f'{nuspec} is not version {version}')
+        if '<license type="file">LICENSE</license>' not in spec:
+            die(f'{nuspec}: the package no longer names LICENSE as its license (look at what it ships now)')
+        dylib = z.read(member)
+        lic = {n: z.read(n) for n in ORT_LICENSE_FILES}
+    pack = f'ort-{version}-cpu-macos-arm64'
+    d = os.path.join(a.out or os.path.join(tdir, 'dist'), pack)
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    with open(os.path.join(d, 'libonnxruntime.dylib'), 'wb') as f:
+        f.write(dylib)
+    for n, data in lic.items():
+        with open(os.path.join(d, n), 'wb') as f:
+            f.write(data)
+    m = macho_info(os.path.join(d, 'libonnxruntime.dylib'))
+    if m['cputype'] != CPU_TYPE_ARM64 or m['filetype'] != 6:
+        die(f'{member}: cputype {m["cputype"]:#x}, filetype {m["filetype"]}: want an arm64 dylib')
+    bad = [x for x in m['dylibs'] if not x.startswith(MAC_DYLIB_PREFIXES) and not x.startswith('@rpath/libonnxruntime')]
+    if bad:
+        die(f'{member} links {bad}: the pack carries ONNX Runtime alone (the system\'s libraries only)')
+    # on the Mac: Microsoft's signature, then loaded through a macOS release worker
+    worker = a.check_worker
+    if not worker:
+        ec, cc = clean_tree()
+        worker = mac_build('release', ec, cc)
+    remote = f'mtgz-macfarm/packs/{pack}'
+    mac_run(f'rm -rf "$HOME/{remote}" && mkdir -p "$HOME/{remote}"\n', 'the pack directory')
+    for n in os.listdir(d):
+        mac_copy(os.path.join(d, n), f'{remote}/{n}')
+    sig = mac_run(f'cd "$HOME/{remote}" && codesign --verify --strict libonnxruntime.dylib && codesign -dv --verbose=2 libonnxruntime.dylib 2>&1\n',
+                  'codesign of the dylib')
+    team = next((ln.split('=', 1)[1].strip() for ln in sig.splitlines() if ln.startswith('TeamIdentifier=')), None)
+    auth = next((ln.split('=', 1)[1].strip() for ln in sig.splitlines() if ln.startswith('Authority=')), None)
+    if team != MAC_ORT_TEAM:
+        die(f'libonnxruntime.dylib: signed by team {team!r} ({auth}), not Microsoft\'s {MAC_ORT_TEAM}')
+    info = mac_worker_json(worker, 'info', '--runtime-dir', f'{remote}', what='info --runtime-dir')
+    ort = info['onnxruntime']
+    loaded = (ort.get('modules') or {}).get('libonnxruntime.dylib') or ''
+    if 'error' in ort or not loaded.endswith(f'/{remote}/libonnxruntime.dylib'):
+        die(f'the pack did not load from itself on the Mac: {ort}')
+    probe = mac_worker_json(worker, 'probe-providers', '--runtime-dir', f'{remote}', '--providers', 'cpu', '--reps', '0',
+                            what='probe-providers --providers cpu')
+    if probe.get('providers') != ['cpu']:
+        die(f'probe-providers --providers cpu through the pack on the Mac: {json.dumps(probe)[:1500]}')
+    data = open(os.path.join(d, 'libonnxruntime.dylib'), 'rb').read()
+    files = {'libonnxruntime.dylib': {'version': version, 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data),
+                                      'signature': 'Developer ID (codesign --verify --strict)', 'signer': auth, 'team': team,
+                                      'minos': m['minos'], 'source': f'{os.path.basename(path)}/{member}'}}
+    licenses = {n: {'sha256': hashlib.sha256(x).hexdigest(), 'size': len(x), 'component': 'ONNX Runtime',
+                    'source': f'{os.path.basename(path)}/{n}'} for n, x in lic.items()}
+    rj = {'runtime': pack, 'onnxruntime': version, 'provider': 'cpu', 'platform': 'macos-arm64', 'minos': m['minos'],
+          'nuget': {'package': MAC_ORT_PACKAGE, 'version': version, **src}, 'files': files, 'licenses': licenses,
+          'ort_build_info': ort.get('version'),
+          'check': {'available': ort.get('available'),
+                    'cpu_selftest_max_abs': next(r['selftest']['max_abs'] for r in probe['results'] if r['provider'] == 'cpu')}}
+    with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(rj, f, indent=1)
+    print(f'runtime pack {pack}: ONNX Runtime {version} for macOS {m["minos"]}+ ({", ".join(ort.get("available", []))}), signed by '
+          f'{auth}; loaded from the pack on the Mac, the CPU self-test passed')
+    bid = sign_publish(a, d, ['--kind', 'runtime', '--version', pack, '--min-agent', max_semver(a.min_agent, PLATFORM_MIN_AGENT),
+                              '--platform', 'macos-arm64'])
+    mac_copy(os.path.join(d, 'runtime.json'), f'{remote}/runtime.json')
+    for n in ('manifest.json', 'manifest.json.minisig'):
+        mac_copy(os.path.join(d, n), f'{remote}/{n}')
+    return bid, d
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     g = ap.add_mutually_exclusive_group(required=True)
@@ -775,8 +1113,12 @@ def main():
     g.add_argument('--publish-dir', metavar='BUILD_DIR', help='publish a signed build directory (verified first)')
     ap.add_argument('--root', help='the checkout to build (default: this one): a clean worktree at the commit to release')
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')
-    ap.add_argument('--pack', choices=('cpu', 'winml', 'cuda'), default='cpu',
-                    help='--runtime: the CPU pack (default), the Windows ML GPU pack or the CUDA pack (NVIDIA, PROTOCOL 9)')
+    ap.add_argument('--pack', choices=('cpu', 'winml', 'cuda', 'macos-cpu'), default='cpu',
+                    help='--runtime: the CPU pack (default), the Windows ML GPU pack, the CUDA pack (NVIDIA, PROTOCOL 9) or the '
+                         'macOS CPU pack (Apple silicon, PROTOCOL 11)')
+    ap.add_argument('--platform', choices=('windows-x64', 'macos-arm64'), default='windows-x64',
+                    help='--profile: the worker\'s platform (macos-arm64: built on the Mac, PROTOCOL 11)')
+    ap.add_argument('--ort-version', help=f'--pack macos-cpu: the Microsoft.ML.OnnxRuntime version (default {MAC_ORT_VERSION})')
     ap.add_argument('--wheel-dir', help='--pack cuda: where the PyPI wheels are cached (default <target>/farm-build/wheels)')
     ap.add_argument('--zst-level', type=int, default=19, help='--pack cuda: the zstd level of the compressed copies (PROTOCOL 9.3)')
     ap.add_argument('--no-gpu-check', action='store_true', help='--pack cuda: sign even if the CUDA provider fails on this PC')
@@ -813,7 +1155,9 @@ def main():
     if a.resign:
         bid, d = resign_worker(a)
     elif a.runtime:
-        bid, d = {'winml': build_winml, 'cuda': build_cuda}.get(a.pack, build_runtime)(a)
+        bid, d = {'winml': build_winml, 'cuda': build_cuda, 'macos-cpu': build_mac_runtime}.get(a.pack, build_runtime)(a)
+    elif a.platform == 'macos-arm64':
+        bid, d = build_worker_mac(a)
     else:
         bid, d = build_worker(a)
     print(f'build directory {d}')

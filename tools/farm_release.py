@@ -37,6 +37,23 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
    ids, runtimes, workers, the gate lines, each step's seconds. The full result also in
    `<builds>/releases/<sha12>.json` (a failure too, with its step).
 
+**`--mac`** (opt-in; zero-farm PROTOCOL.md 11, docs/ENGINE.md 197; needs the Mac, `MTGZ_MAC`): after the gates,
+11. **mac-build**: `farm_build.py --root <release worktree> --profile release --platform macos-arm64 --runtime-id
+   <mac_runtime>` - the same commit built on the Mac, signed here (not published) - and with `--mac-fuzz` the macOS
+   fuzz build (`--profile fuzz --platform macos-arm64`), each copied to ~/mtgz-macfarm/builds/<build_id>/ on the Mac;
+12. **mac-gates** (`--mac-gates`): `farm_gates.py --mac` with that worker and pack on the reference (farm parity on
+   the Mac, the reference export's records replayed here with 0 refused and rows identical; with `--mac-fuzz` also a
+   fuzz chunk on both fuzz builds, outcomes identical);
+13. **mac-plan**: what the runs and campaigns would need - printed and saved (`releases/<sha12>/mac-plan.json`), never
+   PUT: for each `--mac-run RUN=<config.json>` (default the reference run) the libm check (`check-config --platform
+   macos-arm64` of this commit's Windows worker: a run whose replay depends on the platform's libm gets no macOS
+   alternate), the config change (`pool_alternates` + the macOS build: the farm pool makes it a CPU alternate,
+   zero-core docs/az.md 62) and the PUT body and definition builds it would send; for each `--mac-campaign ID` its
+   configuration (GET, read only), the libm check of its mode (`fuzz-check --platform macos-arm64`) and the PUT with
+   `"alternates": [{"build_id": <macOS fuzz build>, "when": {"platform": "macos-arm64"}}]`.
+The macOS builds are not published (`--mac-publish` publishes them too: only once the coordinator takes platforms,
+migration 0013) and get no index entry of their own: the entry's `mac` field records them.
+
 Publishing makes a build AVAILABLE: no run is attached or changed. Heavy steps (build, modules, gates) each hold a slot
 of tools/slotd.sh (`--no-slot`: not), and the whole release runs below normal priority. One release at a time on the
 machine (`<builds>/.release.lock`).
@@ -72,6 +89,8 @@ DEFAULTS = {
     'cpu_runtime': 'd531424bd1a16307d491418c',     # ort-1.31.1-cpu+msvc (ENGINE.md 114.10)
     'cuda_runtime': '855d21629a0246f0f91e6790',    # cuda-12.8-cudnn-9.28-ort-1.24.4 (farm-cuda, PROTOCOL 9)
     'cuda_min_agent': '0.2.11',
+    'mac_runtime': None,                           # the macOS CPU pack (farm_build.py --runtime --pack macos-cpu)
+    'mac_min_agent': '0.3.0',                      # agents that know platforms (PROTOCOL 11)
     'python': None,
     'url': 'https://farm.greggg230.com',
     'reference': None,
@@ -334,21 +353,147 @@ class Release:
             cuda = {'build_id': cid, 'runtime': self.s['cuda_runtime'], 'min_agent': self.s['cuda_min_agent'], 'selftest': st}
         tpl = self.timed('template', self.template, exe, bid)
         gates = self.timed('gates', self.gates, exe)
+        mac = None
+        if self.a.mac:
+            mac = {'release': self.timed('mac-build', self.mac_build, 'release')}
+            r['steps']['mac'] = mac
+            fz = self.timed('mac-build-fuzz', self.mac_build, 'fuzz') if self.a.mac_fuzz else None
+            if fz:
+                mac['fuzz'] = fz
+            if self.a.mac_gates:
+                mac['gates'] = self.timed('mac-gates', self.mac_gates, mac['release'], fz)
+            mac['plan'] = self.timed('mac-plan', self.mac_plan, exe, mac['release'], fz, cuda)
+            mac['runtime'] = self.s['mac_runtime']
         if self.a.no_publish:
             self.say('--no-publish: signed and checked, not published (no index entry)')
-            return dict(r, build_id=bid, runtime=rt, cuda=cuda, template=tpl, gates=gates, published=False)
+            return dict(r, build_id=bid, runtime=rt, cuda=cuda, mac=mac, template=tpl, gates=gates, published=False)
         worker = self.timed('publish', self.publish, bdir)
         if cuda:
             cuda['worker'] = slash(os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe'))
+        if mac and self.a.mac_publish:
+            for k in ('release', 'fuzz'):
+                if k in mac:
+                    mac[k]['published'] = slash(self.timed(f'publish-mac-{k}', self.publish, mac[k]['dir']))
         e = {'commit': sha, 'built_at': sha, 'rust_key': key, 'core_commit': r['core_commit'], 'build_id': bid,
              'version': os.path.basename(os.path.normpath(bdir)), 'runtime': rt, 'worker': slash(os.path.join(worker, 'mtgz-worker.exe')),
-             'cuda': cuda, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
+             'cuda': cuda, 'mac': mac, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
              'gates': gates, 'reference': {k: local_config.portable_path(v) for k, v in self.s['reference'].items()},
              'url': self.s['url'], 'published': True, 'created': now(), 'seconds': r['seconds']}
         return FB.add(e)
 
     def target_root(self):
         return release_worktree()[1]
+
+    # ------------------------------------------------------------------ macOS (--mac)
+    def mac_runtime_name(self):
+        rt = self.s.get('mac_runtime')
+        if not rt:
+            raise Failed('mac-build', 'no mac_runtime in release.json (farm_build.py --runtime --pack macos-cpu, then copy the '
+                                      'signed pack to <builds>/<id>/)')
+        with open(os.path.join(self.runtime_dir(rt, 'mac-build'), 'manifest.json'), encoding='utf-8') as f:
+            m = json.load(f)
+        if m.get('platform') != 'macos-arm64':
+            raise Failed('mac-build', f'mac_runtime {rt} is a {m.get("platform") or "windows-x64"} pack')
+        return rt, m['version']
+
+    def mac_build(self, profile):
+        rt, _ = self.mac_runtime_name()
+        args = ['--root', self.wt, '--profile', profile, '--platform', 'macos-arm64', '--min-agent', self.s['mac_min_agent']]
+        if profile == 'release':
+            args += ['--runtime-id', rt]
+        bid, d = self.farm_build(f'mac-build-{profile}', *args)
+        return {'build_id': bid, 'dir': d, 'mac_path': f'mtgz-macfarm/builds/{bid}/mtgz-worker', 'profile': profile}
+
+    def mac_gates(self, mac, fuzz):
+        ref = self.s['reference']
+        rt, pack = self.mac_runtime_name()
+        out = os.path.join(self.log_dir, 'mac-gates')
+        cmd = [self.s['python'], 'tools/farm_gates.py', '--mac', '--mac-worker', mac['mac_path'], '--mac-runtime',
+               f'mtgz-macfarm/packs/{pack}', '--config', ref['config'], '--model', os.path.join(ref['export'], 'model.onnx'),
+               '--out', out]
+        if fuzz:
+            cmd += ['--fuzz-worker', self.local_fuzz_worker(), '--mac-fuzz-worker', fuzz['mac_path']]
+        self.run('mac-gates', cmd, cwd=self.wt, env=dict(os.environ, CUDA_VISIBLE_DEVICES=''), slot=True, timeout=12 * 3600)
+        with open(os.path.join(out, 'summary.json'), encoding='utf-8') as f:
+            sm = json.load(f)
+        if not sm.get('passed'):
+            raise Failed('mac-gates', f'MAC FARM GATES FAILED: {json.dumps(sm)[:1500]}')
+        return {k: v for k, v in sm['parts'].items()}
+
+    def local_fuzz_worker(self):
+        """This commit's Windows fuzz build (the fuzz identity's other side): built in the release target dir."""
+        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(self.target, 'farm-build'), RUSTFLAGS='-C target-feature=+crt-static')
+        env.setdefault('CARGO_BUILD_JOBS', '8')
+        self.run('mac-gates', ['cargo', 'build', '--profile', 'fuzz', '-p', 'mtgz_worker'], cwd=self.wt, env=env, slot=True,
+                 log='mac-gates-fuzz-build')
+        return os.path.join(self.target, 'farm-build', 'fuzz', 'mtgz-worker.exe')
+
+    def mac_plan(self, exe, mac, fuzz, cuda):
+        """The runs' and campaigns' changes for the macOS builds (module docs, step 13): printed and returned, never PUT."""
+        from zero import farm_def as FD
+        plan = {'runs': [], 'campaigns': [], 'applied': False}
+        rt, _ = self.mac_runtime_name()
+        runs = [x.split('=', 1) for x in self.a.mac_run] or [[None, self.s['reference']['config']]]
+        client = None
+        try:
+            client = FD.Client(self.s['url'], token=FD.read_token())
+        except SystemExit as e:
+            self.say(f'mac-plan: no coordinator access ({e}): the plan without the runs\' current state')
+        for run_id, cfg in runs:
+            with open(cfg, encoding='utf-8') as f:
+                c = json.load(f)
+            run_id = run_id or next((s.split(':', 1)[1] for s in str(c.get('selfplay_remote', '')).split(',') if s.startswith('pool:')), None)
+            p = subprocess.run([exe, 'check-config', cfg, '--json', '--platform', 'macos-arm64'], capture_output=True, text=True)
+            chk = json.loads([ln for ln in p.stdout.splitlines() if ln.startswith('{')][-1]) if '{' in p.stdout else {}
+            refused = chk.get('libm_refusals') or []
+            alts = [a for a in str(c.get('pool_alternates') or '').replace(' ', '').split(',') if a]
+            entry = {'run': run_id, 'config': local_config.portable_path(cfg), 'libm_refusals': refused}
+            if refused:
+                entry['change'] = None
+                entry['why'] = 'the run\'s replay depends on the platform\'s libm: no macOS alternate'
+            else:
+                new_alts = alts + [mac['build_id']]
+                entry['change'] = {'pool_alternates': ','.join(new_alts)}
+                put_alts = [{'build_id': b, 'runtime': self.s['cuda_runtime'], 'when': {'vendor': 'nvidia'}}
+                            for b in alts if cuda and b == cuda.get('build_id')]
+                if client is not None and run_id:
+                    try:
+                        cur = client.call('GET', f'/v1/admin/run/{run_id}')
+                        put_alts = list(cur.get('alternates') or [])
+                        entry['current'] = {'build_id': cur.get('build_id'), 'runtime': cur.get('runtime'), 'alternates': put_alts}
+                    except Exception as e:      # noqa: BLE001 - a plan without the current state
+                        entry['current'] = f'GET failed: {e}'
+                put_alts = [a for a in put_alts if (a.get('when') or {}).get('platform', 'windows-x64') != 'macos-arm64']
+                put_alts.append({'build_id': mac['build_id'], 'runtime': rt, 'when': {'platform': 'macos-arm64'}})
+                entry['put'] = {'path': f'/v1/admin/run/{run_id}', 'alternates': put_alts}
+                default = (entry.get('current') or {}).get('build_id') if isinstance(entry.get('current'), dict) else None
+                entry['definition_builds'] = [default or c.get('pool_build')] + [a['build_id'] for a in put_alts]
+            plan['runs'].append(entry)
+        for cid in self.a.mac_campaign:
+            entry = {'campaign': cid}
+            if not fuzz:
+                entry['why'] = 'no macOS fuzz build (--mac-fuzz)'
+            elif client is None:
+                entry['why'] = 'no coordinator access'
+            else:
+                cur = client.call('GET', f'/v1/admin/campaign/{cid}')
+                env = [f'{k}={v}' for k, v in sorted((cur.get('env') or {}).items())]
+                p = subprocess.run([self.local_fuzz_worker(), 'fuzz-check', '--mode', cur.get('mode', ''),
+                                    *sum((['--env', e] for e in env), []), '--platform', 'macos-arm64'], capture_output=True, text=True)
+                entry['mode'], entry['env'] = cur.get('mode'), env
+                if p.returncode:
+                    entry['why'] = (p.stderr or p.stdout).strip()[-600:]
+                else:
+                    keys = ('build_id', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'state', 'needs', 'gpu', 'providers',
+                            'min_agent', 'share')
+                    body = {k: cur.get(k) for k in keys if k in cur}
+                    body['alternates'] = [{'build_id': fuzz['build_id'], 'when': {'platform': 'macos-arm64'}}]
+                    entry['put'] = {'path': f'/v1/admin/campaign/{cid}', 'body': body}
+            plan['campaigns'].append(entry)
+        with open(os.path.join(self.log_dir, 'mac-plan.json'), 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(plan, f, indent=1)
+        self.say('mac-plan (NOT applied):\n' + json.dumps(plan, indent=1))
+        return plan
 
 
 def gate_summary(sm, path):
@@ -458,6 +603,13 @@ def main(argv=None):
     r.add_argument('--no-publish', action='store_true', help='sign and check only (no publish, no index entry)')
     r.add_argument('--no-cuda', action='store_true', help='no CUDA alternate (and no GPU self-test)')
     r.add_argument('--no-slot', action='store_true', help='heavy steps without tools/slotd.sh')
+    r.add_argument('--mac', action='store_true', help='also the macOS worker, signed (module docs: mac-build, mac-plan)')
+    r.add_argument('--mac-fuzz', action='store_true', help='with --mac: the macOS fuzz build too (campaign alternates)')
+    r.add_argument('--mac-gates', action='store_true', help='with --mac: tools/farm_gates.py --mac on the reference')
+    r.add_argument('--mac-run', action='append', default=[], help='with --mac: RUN=<config.json> whose change the plan prints')
+    r.add_argument('--mac-campaign', action='append', default=[], help='with --mac-fuzz: a campaign whose alternate the plan prints')
+    r.add_argument('--mac-publish', action='store_true', help='with --mac: publish the macOS builds too (a coordinator with '
+                   'platforms only)')
     r.add_argument('--normal-priority', action='store_true')
     r.add_argument('--lock-wait', type=float, default=6 * 3600)
     lk = sub.add_parser('lookup')
