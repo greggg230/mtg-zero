@@ -38546,3 +38546,17 @@ Recording rides a restart: the run's code (its pinned worktree, the Mac's eval c
 4. Start the ingest beside the run: `python tools/gamedb.py ingest <run> --follow 120` (CPU, below-normal priority; its
    database in `$ZERO_BIG_DISK/mtg-zero-gamedb/<run>`), and when wanted `gamedb.py prune <run> --keep-iters 64
    --old-sample 0.1 --delete-raw`.
+
+### 187.7 The gates (on 02e2faf0, zero-core pin 5c2d3f39)
+
+* `python` tier: GATE PASSED WITH SKIPS (the live-run-hazard tests fenced beside the live run: 1 + 5 + 2) in 484 s -
+  pytest 4 shards (`tests/test_gamedb.py` on the desktop, duckdb present), the run-loop smoke on the Mac.
+* `optin-core` tier (`--baseline-root` = main 5477e859): GATE PASSED WITH SKIPS (core pytest: 17 live-run-hazard tests
+  fenced) in 2,059 s - core build + `cargo test --release` (208 passed), checkpoint_compat byte-identical, digest formats
+  (constructed e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0) and dealt
+  e802d9df793c9993 = the recorded files, `--test az` / `--test hidden`, the three other games built against the core,
+  core pytest, the release worker built, farm compat identical. (A first run on 328071f9 failed one core test under the
+  machine's load: `test_infoset_merge::test_remote_workers_merge_and_the_quotas_stay_exact` - its remote worker took no
+  game before the quota filled; it passed alone, and the gate on 02e2faf0 passed it.)
+* By hand: farm compat with `--set game_records=1` (both gates identical), `tools/farm_gates.py` with the live run's
+  build, config and iteration-156 checkpoint and `--set game_records=1` (passed), the smoke on / off (187.3).
