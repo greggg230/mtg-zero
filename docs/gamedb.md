@@ -170,11 +170,9 @@ targeting" card from it.
 
 A database ingested before the table existed has no `bauble` rows for those iterations: `ingest --redo` replays them.
 
-```sql
--- the blunders of one checkpoint by reason, with the activator's library manipulation
-SELECT bauble, blunder_reason, count(*) AS n, count(*) FILTER (WHERE len(manipulation_in_hand) > 0) AS with_manipulation
-FROM bauble_activations WHERE excluded IS NULL GROUP BY ALL ORDER BY ALL;
-```
+The blunders by reason, with the activator's library manipulation: `SELECT bauble, blunder_reason, count(*) AS n,
+count(*) FILTER (WHERE len(manipulation_in_hand) > 0) AS with_manipulation FROM bauble_activations WHERE excluded IS
+NULL GROUP BY ALL ORDER BY ALL`.
 
 ## Ten example queries
 
