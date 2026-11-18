@@ -1,8 +1,9 @@
 # The game database (`tools/gamedb.py`)
 
-Every self-play game of a run, replayed through the engine's play-by-play, in Parquet tables that DuckDB queries in
-well under a second. Design and measurements: `docs/ENGINE.md` 187. This page is the schema and the queries: enough to
-write SQL against it cold.
+Every game of a run - its self-play, its evaluations, its yardsticks, its publisher's - and of the standalone tools that
+play games, replayed through the engine's play-by-play, in Parquet tables that DuckDB queries in well under a second.
+Design and measurements: `docs/ENGINE.md` 187 (self-play) and 189 (every other game, the engine identity). This page is
+the schema and the queries: enough to write SQL against it cold.
 
 ## Pipeline
 
@@ -10,18 +11,91 @@ write SQL against it cold.
    accepts, from every executor (this machine's driver, the remote workers, the farm pool), is one JSON line in
    `<run>/records/iter_NNNN/<source>-<pid>.jsonl.gz`: its seed, every action, the spec (by key), the setup (the decks
    and the metagame's pairing), the outcome, the resignation, the networks. Outside the training window: never rolled
-   off by `keep_data`. `DONE.json` closes an iteration.
-2. **Ingest** (`python tools/gamedb.py ingest RUN`): each new complete iteration replayed game by game on the CPU at
-   below-normal priority, written to `<db>/<table>/iter=NNNN/part.parquet`. Incremental and idempotent (`<db>/state.json`).
+   off by `keep_data`. `DONE.json` closes an iteration. **Every other game** the run plays with the same setting (the
+   kinds below) is a record of the same format plus its `kind`, its `players` (per seat) and `meta`, in
+   `<run>/records/<kind>/iter_NNNN/*.jsonl.gz` (one whole file per match or batch); a standalone tool's with `--records
+   DIR` in `DIR/<kind>/misc/`. The publisher's replays (`<run>/replays/`) are indexed as they are (no copy). Every
+   records file names the engine that played it (below: "The engine").
+2. **Ingest** (`python tools/gamedb.py ingest RUN`; a standalone tool's: `ingest --records DIR --db DB`): each new unit
+   - a complete self-play iteration, a records file, a replay - replayed game by game on the CPU at below-normal
+   priority, written to `<db>/<table>/iter=NNNN/part.parquet` (self-play), `<db>/<table>/m=<kind>.<sub>/<file>.parquet`
+   (a records file) or `r=publisher/<file>.parquet`. Incremental and idempotent (`<db>/state.json`).
    Every game gets a `games` row (light replay); a deterministic share `--sample` (default 1.0: all) is replayed in
    full: `events` and the combo tables. The full replay reads each step with `tools/combo_stats.py`'s Reader, the code
    `combo_stats.py scan` runs, so the combo tables are its numbers (validated game by game: ENGINE.md 187.4).
 3. **Query**: `python tools/gamedb.py query RUN "SQL" [--csv|--json]`, `python tools/gamedb.py shell RUN`, or from
    Python `gamedb.connect(db)` (a DuckDB connection with every table and view below).
-4. **Retention**: `python tools/gamedb.py prune RUN --keep-iters 64 --old-sample 0.1 [--delete-raw]`.
+4. **Retention**: `python tools/gamedb.py prune RUN --keep-iters 64 --old-sample 0.1 [--delete-raw]` (self-play
+   iterations; the other kinds are kept whole). **The raw records are kept by default** (the user's choice: no
+   `--delete-raw` unless asked; they are what replays a game on its own engine). Their cost on disk: ~150 bytes a
+   self-play game (148 measured, ENGINE.md 187.4) - the metagame run's ~61,000 games an hour are ~9 MB an hour, ~0.2 GB a
+   day -; an evaluation or yardstick game (played out, no resignation) ~400-600 bytes (ENGINE.md 189.5): its ~1,000 a day
+   (the anchors' 100 every 16 iterations, the cells' 400-1,200 a measured generation) are well under 1 MB a day.
+   `gamedb.py status RUN` prints the raw records' size.
 
 The database of run R: `$MTGZ_GAMEDB/R`, else `<ZERO_BIG_DISK>/mtg-zero-gamedb/R`, else `~/.cache/mtg-zero-gamedb/R`
 (`--db DIR` overrides). Needs `pip install duckdb pyarrow`.
+
+## Kinds
+
+| kind | played by | `iter` | players (`p0_*` / `p1_*`, per seat) |
+|---|---|---|---|
+| `selfplay` | the run's self-play (every executor) | the accepting iteration | both the network its samples were searched with ('<run>/iter_NNNN' of `net_hi`) |
+| `eval` | the run's evaluation: the yardstick and random games (zero-core `Run.evaluate`; on the Mac with `eval_remote`, copied back) | the evaluated iteration | the checkpoint ('iter_NNNN') and the bot |
+| `elo` | the Elo matches against older checkpoints (`elo_games` > 0) | the evaluation's iteration | both checkpoints ('iter_NNNN') |
+| `anchor` | the fixed anchors' games (`elo_anchors`) and an anchor's calibration | the evaluation's iteration | the checkpoint and the anchor ('anchor:<label>') |
+| `ref` | the reference games (random vs the yardstick bot) | the evaluation's iteration | both bots |
+| `cells`, `cells_gen` | the yardsticks' metagame cells (local or farm) against a reference / the previous generation | the measured checkpoint | the checkpoint ('iter_NNNN') and the reference (its label: 'gen0', 'iter_0016') |
+| `cells_base` | a cells baseline (the reference against itself) | none | the reference twice |
+| `bo1` | the yardsticks' best-of-one against a fixed opponent (local or farm) | the measured checkpoint | the checkpoint and the opponent (its name) |
+| `combo` | `tools/combo_stats.py play --records DIR`; the publisher's combo pass (the run's `records/combo/iter_NNNN`) | the generation (publisher), none | the checkpoint at each player's simulations |
+| `combo_selfplay` | `combo_stats.py selfplay --records DIR` (the forced find on) | none | as `combo` |
+| `h2h` | `python -m mtgz.az.h2h A B --records DIR` (any zero.h2h match; `--records-kind` names another) | none | A and B (`--label-a`, `--label-b`) |
+| `keep_h2h` | `python -m mtgz.az.keep_h2h ... --records DIR` (chained best-of-three: kept, not replayed here) | none | A and B |
+| `publisher` | the delverai publisher's recorded games (`<run>/replays/`, recorded with `game_records`) | the recorded generation | the replay's seats |
+
+A player is `{ckpt, sha, label, sims, rule}`: `ckpt` '<run>/iter_NNNN' (a run's checkpoint) or the file's name (an
+anchor's, a frozen reference's), `sha` sha256[:12] of the file - the identity across machines (the Mac's mirror names an
+anchor's file by its label) -, `label` what the code that played it calls it, `sims` and `rule` its simulations and
+move rule; a bot: `ckpt` NULL, its name as the label. `meta` (JSON) is the code's own: the driver seed, `paired`, a
+cells match's `pair` and `chooser`, a batch's `batch` / `gid_offset`, `backend` 'farm'. `executor` is 'local', 'remote'
+(the Mac), 'farm' (a farm play job's traced game, or the pool's self-play), 'publisher' or 'combo'.
+
+Not recorded (no whole game to keep): the canary library (`blunders`: positions searched, not games played), the cells'
+joint fit (no games), a cached cells baseline (its games were recorded when they were played). zero-core's standalone
+`zero.farm_h2h` (its eval jobs run without `eval_trace`: the farm returns no moves; the yardsticks' farm jobs, by
+`mtgz.az.farm_campaign`, trace every game and are recorded). A chained contest (a best-of-three match: `keep_h2h`, a
+best-of-three run's evaluation) is recorded but not replayed by the database (its steps hold episode boundaries; ingest
+says how many it skipped).
+
+## The engine
+
+A record replays only on the engine that played it: an engine change (a rule, a card, the play-by-play) makes an older
+game replay differently or not at all. Every records file starts with a build line (zero-core `docs/az.md` 59.4):
+`commit` (the mtg-zero commit), `core` (the zero-core commit), `engine` (sha256[:16] over the blob ids of every Rust input
+- `mtgz.az.ENGINE_PATHS`, the artifact cache's: engine/, card_ir/, py/, worker/, data/, the Cargo files - and zero-core's
+crates: a Python or docs commit keeps it, any engine change moves it; 'dirty' when built from uncommitted engine
+changes), `module` (the engine module's sha256). `python tools/gamedb.py engine` prints this checkout's.
+
+`ingest` replays only the units of this checkout's engine. A unit of another engine is **refused loudly**: the log names
+it with the commits that made it, `state.json` keeps it under `refused`, `status` lists them, and the command exits 3.
+To ingest them, use a checkout of that engine:
+
+```bash
+git worktree add --detach ../mtgz-engine-<sha12> <the commit the refusal names>
+(cd ../mtgz-engine-<sha12> && git submodule update --init && bash tools/build_py.sh)   # (or tools/zcache.py fetch pyd)
+python tools/gamedb.py ingest RUN --engine-checkout ../mtgz-engine-<sha12>
+```
+
+`--engine-checkout PATH` asks PATH's gamedb for its engine id and hands it the refused units of that engine (`python
+PATH/tools/gamedb.py ingest RUN --db <the same db> --only-engine <id>`): they are replayed by the engine that played them
+and written into the same database (its tables read by name: a later checkout's columns are NULL in an earlier one's
+files). The checkout must be at or after this page's ENGINE.md 189 (the build lines exist from there). So records made
+before an engine change - the play-by-play export in view.rs, Mishra's Bauble remembering what it saw - stay ingestible
+after it: run the ingest of the new commit, then `--engine-checkout` a checkout of the old one (`refused` names its
+commit). A unit without an engine id (records of zero-core 5c2d3f39, before the build lines) is refused unless
+`--allow-unidentified`, from a checkout of the engine that played them; a replay without one (recorded without
+`game_records`) is not a record and is skipped (counted in the log).
 
 Conventions: seats are 0 and 1 (`deck0` plays seat 0); `turn` is the game's turn number (both players' turns
 counted, as the engine and the play-by-play count them); card names are the engine's (a split / double-faced card by
@@ -35,8 +109,17 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 
 | column | meaning |
 |---|---|
-| game_id | BIGINT, unique (a hash of iteration, source, game id, seed, actions) |
-| iter, src, executor | the accepting iteration; the record's source ('local', 'w0', 'mac/w1', 'pool:<farm run>'); executor 'local' / 'remote' / 'farm' |
+| game_id | BIGINT, unique (a hash of iteration, source, game id, seed, actions; another kind's: of its unit, game id, seed, actions) |
+| iter | self-play: the accepting iteration; another kind's: see "Kinds" (NULL for a standalone tool's) |
+| kind | the game's kind (above: `selfplay`, `eval`, `elo`, `anchor`, `ref`, `cells`, `cells_gen`, `cells_base`, `bo1`, `combo`, `h2h`, `keep_h2h`, `publisher`, ...) |
+| unit | its unit (`iter=NNNN`, `m=<kind>.<sub>/<file>`, `r=publisher/<file>`) |
+| engine | the engine id that played it (and replayed it here) |
+| p0_ckpt, p1_ckpt | each seat's player: its checkpoint id (NULL: a bot) |
+| p0_label, p1_label | each seat's player's label ('iter_0120', 'gen0', 'anchor:fork0', 'heuristic') |
+| p0_sha, p1_sha | each seat's checkpoint file's sha256[:12] |
+| p0_sims, p1_sims, p0_rule, p1_rule | each seat's simulations and move rule |
+| meta | JSON: the record's `meta` (the code's own: pairing, chooser, driver seed, batch, backend) |
+| src, executor | the record's source ('local', 'w0', 'mac/w1', 'pool:<farm run>', 'remote', 'farm', 'publisher'); executor 'local' / 'remote' / 'farm' / 'publisher' |
 | machine | a farm game's machine as a short hash (never the machine id) |
 | gid, seed, spec | the driver's game id, the game's seed (text: a u64), the spec's key |
 | deck0, deck1 | each seat's decklist (data/decks names, e.g. `doomsday_8027957`) |
@@ -89,21 +172,22 @@ player, card, turn, `how` (`show`, `sneak`, `cast`, `other`).
 
 | view | one row per | columns |
 |---|---|---|
-| game_results | game x seat | game_id, iter, seat, deck, opp_deck, on_play, score, outcome (win / loss / draw), method, turns, resigned, executor, mulligans |
-| mulligans | game x seat | game_id, iter, seat, deck, opp_deck, on_play, mulligans, score, outcome |
-| doomsday_piles | resolved Doomsday | game_id, iter, idx, caster, caster_deck, opp_deck, turn, pile, pile_size, card1..card5 (top first), oracle (class), oracle_in_pile, oracle_in_hand, oracle_where, oracle_place (`in_pile` / `in_hand` / `not_findable` / `missed`), forced (the wheel chose the Oracle), ff_drawn, forced_find_p, life, hand, choices, won (the caster won the game), win_method (its method when it won), method, turns |
-| doomsday_pile_cards | card of a pile | game_id, iter, idx, caster, caster_deck, opp_deck, oracle, forced, won, win_method, pos (1 = top), card |
-| casts | cast | game_id, iter, seq, turn, step, player, card, cast_from, deck, opp_deck, won |
-| show_and_tell | resolved Show and Tell | game_id, iter, idx, caster, caster_deck, opp_deck, turn, put_caster, put_opponent, caster_pick / opponent_pick (the first of each list), won, method |
-| sneak_attack | Sneak Attack activation | game_id, iter, idx, player, deck, turn, sneaked_in (what entered by Sneak Attack that turn), won, method |
+| game_results | game x seat | game_id, iter, kind, seat, deck, opp_deck, player, player_label, opp_player, opp_label, on_play, score, outcome (win / loss / draw), method, turns, resigned, executor, mulligans |
+| mulligans | game x seat | game_id, iter, kind, seat, deck, opp_deck, on_play, mulligans, score, outcome |
+| doomsday_piles | resolved Doomsday | game_id, iter, kind, idx, caster, caster_deck, caster_label, opp_label, opp_deck, turn, pile, pile_size, card1..card5 (top first), oracle (class), oracle_in_pile, oracle_in_hand, oracle_where, oracle_place (`in_pile` / `in_hand` / `not_findable` / `missed`), forced (the wheel chose the Oracle), ff_drawn, forced_find_p, life, hand, choices, won (the caster won the game), win_method (its method when it won), method, turns |
+| doomsday_pile_cards | card of a pile | game_id, iter, kind, idx, caster, caster_deck, opp_deck, oracle, forced, won, win_method, pos (1 = top), card |
+| casts | cast | game_id, iter, kind, seq, turn, step, player, card, cast_from, deck, opp_deck, won |
+| show_and_tell | resolved Show and Tell | game_id, iter, kind, idx, caster, caster_deck, opp_deck, turn, put_caster, put_opponent, caster_pick / opponent_pick (the first of each list), won, method |
+| sneak_attack | Sneak Attack activation | game_id, iter, kind, idx, player, deck, turn, sneaked_in (what entered by Sneak Attack that turn), won, method |
 
-Rates over the combo tables and `events` use detailed games only: with `--sample` below 1, count the denominators
+Every view holds every kind: add `WHERE kind = 'selfplay'` (or another) for one kind's games - the ten queries below
+were written for self-play. Rates over the combo tables and `events` use detailed games only: with `--sample` below 1, count the denominators
 from `games WHERE detailed` (every query below does that implicitly by joining the detailed tables).
 
 ## The Doomsday series (for a publisher)
 
 `gamedb.doomsday_series(run, since_iter=0, by_opponent=False, deck='doomsday_8027957', db=None)` (CLI: `python
-tools/gamedb.py series RUN [--since N] [--by-opponent]`) returns plain dicts, one per iteration (and opponent deck with
+tools/gamedb.py series RUN [--since N] [--by-opponent]`) - self-play's games only - returns plain dicts, one per iteration (and opponent deck with
 `by_opponent`; `opp_deck` None otherwise), from one query of a few milliseconds:
 
 | key | meaning |
@@ -170,10 +254,51 @@ WHERE d.oracle = 'voluntary' AND NOT d.won AND e.turn >= d.turn AND e.type IN ('
 ORDER BY d.game_id, e.seq LIMIT 50;
 ```
 
+## Every kind: examples
+
+```sql
+-- 11. The cells games of generation N (here 128): the checkpoint's score per deck pair and seat, against each reference
+SELECT g.p0_label = 'iter_0128' AS ckpt_in_seat0, r.deck, r.opp_deck, r.opp_label AS reference, count(*) AS games,
+       round(avg(r.score), 3) AS ckpt_score
+FROM games g JOIN game_results r USING (game_id)
+WHERE g.kind = 'cells' AND g.iter = 128 AND r.player_label = 'iter_0128' GROUP BY ALL ORDER BY ALL;
+
+-- 12. Anchor games by opponent: each evaluated checkpoint's score against each anchor, per evaluation
+SELECT iter, player_label AS ckpt, opp_label AS anchor, count(*) AS games, round(avg(score), 3) AS score
+FROM game_results WHERE kind = 'anchor' AND player_label LIKE 'iter_%' AND opp_label LIKE 'anchor:%'
+GROUP BY ALL ORDER BY iter, anchor;
+
+-- 13. Doomsday piles in evaluation vs self-play: how the Oracle stood at each resolution, per kind
+SELECT kind, oracle, count(*) AS piles, round(avg(CASE WHEN won THEN 1.0 ELSE 0.0 END), 3) AS caster_won
+FROM doomsday_piles WHERE iter >= 120 GROUP BY ALL ORDER BY kind, piles DESC;
+
+-- 14. What each kind of game is: games, players, mean length (the database's contents)
+SELECT kind, count(*) AS games, count(DISTINCT p0_label) AS players, round(avg(turns), 1) AS turns,
+       min(iter) AS first, max(iter) AS last FROM games GROUP BY kind ORDER BY games DESC;
+
+-- 15. The best-of-one against a fixed opponent, per generation and play / draw (bo1 records)
+SELECT iter, opp_label, on_play, count(*) AS games, round(avg(score), 3) AS score
+FROM game_results WHERE kind = 'bo1' AND player_label LIKE 'iter_%' GROUP BY ALL ORDER BY ALL;
+```
+
 More shapes: the Oracle's position in its piles (`SELECT pos, count(*) FROM doomsday_pile_cards WHERE card =
 'Thassa''s Oracle' GROUP BY pos`), what gets countered (`SELECT card, count(*) FROM events WHERE type = 'counter' GROUP
 BY 1`), the wheel's share of forced piles over iterations (`SELECT iter, avg(forced::INT) FROM doomsday_piles GROUP BY
 iter`), self-play resignations per iteration (`SELECT iter, avg(resigned::INT) FROM games GROUP BY iter`), a game's
 whole play-by-play (`SELECT seq, turn, step, player, type, card, from_zone, to_zone, detail FROM events WHERE game_id =
-... ORDER BY seq`). Replaying a game in the engine: its record is in `<run>/records/iter_NNNN/` until pruned
-(`zero.gamerec.read_iteration`, `actions_of`: `Game('mtg', spec, 2, seed)` then `step` each action).
+... ORDER BY seq`). Replaying a game in the engine: its record is in `<run>/records/iter_NNNN/` (self-play) or its unit's file
+(`<run>/records/<kind>/<sub>/<file>.jsonl.gz`: `zero.gamerec.read_file`) until pruned (`zero.gamerec.read_iteration`,
+`actions_of`: `Game('mtg', spec, 2, seed)` then `step` each action) - on a checkout of its engine (`games.engine`).
+
+## Turning it all on (a run)
+
+One setting: the run's `game_records` 1 (`--game-records 1` at the launch; zero-core docs/az.md 59). With it, on a
+commit at or after ENGINE.md 189 (the run's pinned worktree and the Mac's eval checkout of it):
+* self-play on every executor (as ENGINE.md 187), each file with its build line;
+* the evaluation (`eval`, `elo`, `anchor`, `ref`): here, or on the Mac with `eval_remote` 'mac' (the mirror gets the run's
+  config, records there, and the files come back with the result);
+* the yardsticks' watcher (`tools/run_yardsticks.py watch`, the run's companion: it reads the run's config.json) -
+  `cells`, `cells_gen`, `cells_base`, `bo1`, local or farm;
+* the delverai publisher (it reads the run's config.json): its replays carry their build (kind `publisher`) and its
+  combo pass's games are recorded (`combo`).
+Then `python tools/gamedb.py ingest <run> --follow 120` picks up every kind (the units of another engine: above).

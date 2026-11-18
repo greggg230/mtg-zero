@@ -584,7 +584,9 @@ def combo_pass(run, cfg, state_dir, it, ckpt, games, sims, threads, device='cpu'
         if progress is not None:
             progress.update(pairing=k + 1, of=len(combo_pairings(names)))
         CS.play(ckpt, [a, b], [sims, sims], games, out, label=lab, seed=1000 + it, batch=games, threads=threads,
-                device=device, log=log)
+                device=device, log=log,
+                # (the run keeps its games, docs/gamedb.md: these too, kind 'combo' under the run's records)
+                records=os.path.join(run, 'records') if cfg.get('game_records') else None, records_it=it)
         files = sorted(glob.glob(os.path.join(out, f'{lab}.b*.games.json.gz')))
         res = CS.scan(files, log=log)
         bad = sum(len(e) for _, _, e in res)

@@ -1163,6 +1163,12 @@ def one_pass(run, a, key, log=print, kick=None, settle_s=30):
         RECORDING.clear()
     if len(reps) != a.games:
         raise RuntimeError(f'iteration {it}: {len(reps)} games recorded of {a.games}: not marked recorded')
+    if cfg.get('game_records'):
+        # (the run keeps its games, docs/gamedb.md: each replay names the engine that played it - tools/gamedb.py indexes
+        # the replays as kind 'publisher' records, replayed only on that engine)
+        from zero import gamerec as GR
+        for r in reps:
+            r['build'] = GR.build_info()
     out = os.path.join(a.state_dir or run, 'replays')
     saved = []
     for r in reps:

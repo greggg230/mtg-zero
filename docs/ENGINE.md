@@ -38560,3 +38560,100 @@ Recording rides a restart: the run's code (its pinned worktree, the Mac's eval c
   game before the quota filled; it passed alone, and the gate on 02e2faf0 passed it.)
 * By hand: farm compat with `--set game_records=1` (both gates identical), `tools/farm_gates.py` with the live run's
   build, config and iteration-156 checkpoint and `--set game_records=1` (passed), the smoke on / off (187.3).
+
+## 189. Every game recorded: the evaluations, the yardsticks, the tools and the publisher in the game database, each record naming its players and its engine (branch `feat/gamedb-all`, zero-core `feat/game-records-all`, docs/az.md 59.3-59.5; 2026-11-17)
+
+Branch `feat/gamedb-all` from main b3245a81; zero-core pin 5c2d3f39 -> e6bab23 (`feat/game-records-all`, from
+`feat/game-records`). Why: 187 recorded self-play only; the user: "record them all". The metagame run's questions
+reach its evaluation and yardstick games too - the cells of generation N, the anchor games by opponent, the Doomsday
+piles the network builds in evaluation against those of self-play - and those games were thrown away after their
+score. Now one setting, the run's `game_records` 1, keeps every game the system plays, and the database ingests every
+kind. No rule, encoding, search or training change: the same games from the same seeds with the setting on and off;
+digests untouched. Note: ENGINE.md section numbers 189+ may collide with the open branches that changed the engine
+meanwhile (fix/full-log-export, fix/opp-look-memory, feat/adaptive-budget at 187; feat/rolling-meta3 at 188).
+
+### 189.1 What records, where (the `kind` of each record)
+
+| kind | path | how |
+|---|---|---|
+| `eval`, `elo`, `anchor`, `ref` | `<run>/records/<kind>/iter_NNNN/` | zero-core `Run.play_match` / `play_matches` / `bots_match` with `game_records` (docs/az.md 59.3); with `eval_remote` 'mac' the mirror records and `RemoteEval` copies the files back |
+| `cells`, `cells_gen`, `cells_base`, `bo1` | the same | `mtgz.az.yardsticks`: the measurement's sink (`records_dir(run, cfg)` = `<run>/records` when the run's config has `game_records`) around the local zero.h2h matches (each chooser match: `pair`, `chooser`, a sequential batch's `batch` / `gid_offset` in `meta`); the farm backends' games from the campaign rows' traced records (`eval_trace`: no protocol change, `_farm_records` / `gamerec.from_trace`); `cells-match --records DIR` |
+| `h2h` | `--records DIR` | `python -m mtgz.az.h2h A B ... --records DIR [--records-kind K --label-a X --label-b Y]` (zero.h2h) |
+| `keep_h2h` | `--records DIR` | `python -m mtgz.az.keep_h2h ... --records DIR` (chained best-of-three: kept, not replayed by the database) |
+| `combo`, `combo_selfplay` | `--records DIR`; the publisher's under `<run>/records/combo/iter_NNNN/` | `tools/combo_stats.py play/selfplay --records DIR`; the metagame publisher's combo pass (`tools/delverai_meta.py`) with the run's `game_records` |
+| `publisher` | `<run>/replays/` (indexed, not copied) | `tools/delverai_publish.py` stamps each replay with its build when the run has `game_records`; gamedb rebuilds the game from the replay's driver seed (zero.play's slot seeds: `gamedb.replay_seed`, checked against a real PyDriver) and its frames' actions |
+| `selfplay` | `<run>/records/iter_NNNN/` | 187, now with each file's build line |
+
+Not recorded: the canary library (`blunders`: positions, not games), the cells' joint fit (no games), a cached baseline
+(recorded when it was played), zero-core's standalone `zero.farm_h2h` (its eval jobs run without `eval_trace`, so the farm
+returns no moves; turning it on would change its jobs' signed template - left out).
+
+The record schema additions (zero-core docs/az.md 59.3): `kind`, `it` (the evaluation's / the measured checkpoint's
+iteration, null standalone), `players` per seat in seat order (`ckpt` '<run>/iter_NNNN' or the file's name, `sha`
+sha256[:12] of the file - the identity across machines -, `label` the caller's name for it: 'iter_0128', 'gen0',
+'anchor:fork0', a bot's name; `sims`, `rule`), `meta` (driver seed, paired, pair, chooser, batch, backend). The game's
+seed, actions, spec, setup and result are self-play's fields. `games` gains `kind`, `unit`, `engine`, `p0_ckpt`,
+`p1_ckpt`, `p0_label`, `p1_label`, `p0_sha`, `p1_sha`, `p0_sims`, `p1_sims`, `p0_rule`, `p1_rule`, `meta`; the views
+gain `kind` (and `game_results` the seat's `player` / `player_label` / `opp_player` / `opp_label`, `doomsday_piles`
+`caster_label` / `opp_label`); the joins are on `game_id` alone (a standalone record has no iteration); the Doomsday
+series is self-play's only. docs/gamedb.md: "Kinds", "The engine", queries 11-15 (the cells games of generation N,
+anchor games by opponent, Doomsday piles in evaluation vs self-play, the contents per kind, the best-of-one per
+generation), "Turning it all on". The database format is now `mtgz-gamedb/2` (a format-1 database is refused: ingest
+into a new one; the raw records are kept).
+
+### 189.2 The engine identity
+
+A record replays only on the engine that played it (an engine change - another agent is changing the play-by-play
+export in view.rs and Mishra's Bauble's memory of the opponent's library right now - makes an older game diverge; seen
+on the way: a 2026-11-07 Delver replay's first state rebuilds exactly from its derived seed and goes illegal at move 25
+on today's engine). Every records file starts with a build line (zero-core `gamerec.build_info`): the mtg-zero commit,
+the zero-core commit, `engine` = sha256[:16] over the blob ids of every Rust input (`mtgz.az.ENGINE_PATHS`, the artifact
+cache's RUST_PATHS - a test keeps them equal - and zero-core's crates; a Python or docs commit keeps it), the module's
+sha256. `gamedb.py ingest` replays only units of its own engine: another engine's unit is refused loudly (logged with
+the commits and the commands, kept in `state.json`'s `refused`, listed by `status`, exit 3); `--engine-checkout PATH`
+hands those of PATH's engine to PATH's own gamedb (`--only-engine`, the same database; the tables are read by name, so
+the two checkouts' files mix). Records without an engine id (5c2d3f39's self-play records) need `--allow-unidentified`
+from a checkout of their engine; a replay without one is skipped (counted). The workflow for the records made before the
+engine change: docs/gamedb.md "The engine".
+
+### 189.3 Opt-in and byte identity
+
+Everything rides `game_records` (default 0) or an explicit `--records DIR`: off, no driver logs, no file, the code paths
+of before (`gamerec.recording(None)` is a plain block; the yardsticks' sink is None). On, the games come from the
+driver's game log (its failure log, zero-core docs/search.md 2.20): the same games, results, Elo pools and cells.
+Checked: zero-core `tests/test_gamerec_all.py` (h2h and sequential on/off identical; the run's evaluate + elo_update
+on/off - yardstick, random, Elo offsets, two anchors with a calibration, reference games - the same metrics and Elo
+pool; a remote evaluation's records copied back); the real metagame network below (the same 24 games' rows).
+
+### 189.4 Tests
+
+`tests/test_gamedb_all.py`: every kind ingested with its players (cells of two generations, anchor games, self-play)
+and the views (`game_results`' players, `doomsday_piles`' kind), the series self-play's only, incremental ingest of
+other units, another engine / no engine refused (log, state, exit 3), `--engine-checkout`'s hand-off, `--only-engine`'s
+guard, `--allow-unidentified`, the engine paths = zcache's, the publisher replays (the derived seeds equal zero.play's
+PyDriver's games; two replays indexed, one without a build skipped), the yardsticks' recording context (kind,
+iteration, labels, each chooser match's pair and chooser; none without a records directory), a farm job's traced games
+as records the database replays, and every SQL query of docs/gamedb.md run on a database of every kind.
+`tests/test_gamedb.py` (187) unchanged and passing. zero-core: 59.5.
+
+### 189.5 Measured
+
+The desktop's CPU, 2026-11-17, beside other agents' benchmarks (all slots busy): a cells match of the metagame run's
+iteration-207 network (Doomsday vs Delver, chooser 0, 24 games, 16 simulations, one torch thread) played twice with
+records and twice without: the same 24 games (gid, result, rounds, over); wall 330 / 349 s off, 312 / 294 s on (noise:
+the log costs nothing measurable); the records 5.5 KB (**~230 bytes a game**, played out, no resignation), written in
+0.004 s (0.16 s the first time in a process: the build identity's git calls, once). Per game the cost is one JSON line
+and a gzip write per match; for the metagame run's evaluation and yardsticks (anchors 100 games every 16 iterations,
+cells 400-1,200 a measured generation) well under a second and 1 MB a day. Ingest of such games: 70-86 ms a game
+(187.4's evaluation games).
+
+### 189.6 Turning it on for the metagame run
+
+All of it is the one run setting `game_records` 1, on a commit with this branch (the run's pinned worktree and the
+Mac's eval checkout: the repin of 187.6, gated `repin`):
+1. The launch flags gain `--game-records 1` (config.json then carries it: the Mac's mirror, the yardsticks' watcher and
+   the publisher read it there).
+2. The yardsticks' companion and the publisher restart with the run (their code from the pinned worktree).
+3. `python tools/gamedb.py ingest <run> --follow 120` ingests every kind; after the engine change lands, the
+   records made before it: `--engine-checkout` a checkout of their commit (docs/gamedb.md "The engine").
+4. Raw records are kept (no `--delete-raw`): ~0.2 GB a day of self-play at the run's rate, the rest under 1 MB a day.

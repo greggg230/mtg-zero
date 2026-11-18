@@ -13,7 +13,8 @@ opponents and the canary library, on every evaluated checkpoint, once each, in o
   python tools/run_yardsticks.py cells-fit RUN [--json] [--boot B]       (the joint fit from the records only: no games)
   python tools/run_yardsticks.py cells-freeze RUN --iter N [--label L] [--to PATH]    (the next reference)
   python tools/run_yardsticks.py cells-match CKPT --ref PATH [--games G] [--sims S] [--decks a,b,c] [--cache DIR]
-                                 [--out FILE.jsonl] [--device cpu|cuda] [--json]      (standalone, local games)
+                                 [--out FILE.jsonl] [--device cpu|cuda] [--json] [--records DIR]   (standalone, local
+                                 games; --records: every game a game record, docs/gamedb.md)
 
 `watch`: follows the run (RUN: its directory) and measures what its setting `yardsticks` asks for (config.json's,
 else its preset's; `--yardsticks` replaces it for a hand start) in two lanes - the head-to-heads (the GPU) and the
@@ -741,7 +742,8 @@ def cmd_match(a):
     cdir = a.cache or os.path.join(os.path.dirname(os.path.abspath(a.out or a.ckpt)), 'cells_base')
     rows, s = Y.measure_cells_standalone(os.path.abspath(a.ckpt), os.path.abspath(a.ref), ys, cdir,
                                          label=a.ref_label, rows_out=a.out,
-                                         log=lambda m: print('# ' + m, file=sys.stderr, flush=True))
+                                         log=lambda m: print('# ' + m, file=sys.stderr, flush=True),
+                                         records=os.path.abspath(a.records) if a.records else None)
     if a.json:
         print(json.dumps({'summary': s, 'rows': rows}, indent=1))
     else:
@@ -802,6 +804,9 @@ def main(argv=None):
     m.add_argument('--decks', default=None, help='comma-separated data/decks names (default the metagame\'s three)')
     m.add_argument('--cache', default=None, help='the baselines\' cache directory (default <out or ckpt dir>/cells_base)')
     m.add_argument('--out', default=None, help='append every row to this JSONL file')
+    m.add_argument('--records', default=None, metavar='DIR',
+                   help='keep every game played as a game record under DIR/cells/misc/ and DIR/cells_base/misc/ '
+                        '(docs/gamedb.md: tools/gamedb.py ingest --records DIR)')
     m.add_argument('--json', action='store_true')
     m.add_argument('--yardsticks', default=None, help='more cells_* options as JSON')
     a = ap.parse_args(argv)
