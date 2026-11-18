@@ -336,7 +336,7 @@ class Release:
         gates = self.timed('gates', self.gates, exe)
         if self.a.no_publish:
             self.say('--no-publish: signed and checked, not published (no index entry)')
-            return dict(r, build_id=bid, cuda=cuda, template=tpl, gates=gates, published=False)
+            return dict(r, build_id=bid, runtime=rt, cuda=cuda, template=tpl, gates=gates, published=False)
         worker = self.timed('publish', self.publish, bdir)
         if cuda:
             cuda['worker'] = slash(os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe'))
