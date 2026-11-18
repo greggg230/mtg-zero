@@ -39084,6 +39084,30 @@ mapping (overall = the mean; a 23.5% score with a +41.3 gain reads "A better"), 
 manifest cells entries, an incomplete measurement pending, the Worker accepting the record (93 pass). By hand (CPU,
 2 games, 2 sims, dry-run posts): h2h, keep_h2h and cells-match with `--publish`. Gate: the python tier.
 
+### 193.7 Per-arm code and farm arms (branch `feat/ab-arm-code-farm`, 2026-11-17)
+
+Why: the Bauble-fix A/B (an engine change: ENGINE.md 192) needs each arm on its own engine, and A/Bs should use the
+farm by default. Both are opt-in spec options; a spec without them behaves as before.
+
+* `code.arms`: `{"<arm>": {"worktree", "sha", "python"}}` - an arm's own pinned checkout. Its fork_run, supervisor,
+  pause_run and farm gates run there; `check` checks every worktree's sha and engine build. The judge keeps the common
+  `code.worktree` (the checkout every arm is measured on).
+* `farm`: `{"gates": true, "pause_when_done": true}`. A farm arm is one whose settings name a pool (`selfplay_remote`
+  'pool:<farm run>', with pool_build / pool_worker / pool_alternates / lease settings as ordinary overrides, in
+  `common` or per arm). `ab.py farm-gates SPEC [ARM]` runs tools/farm_gates.py on the arm's forked config.json and
+  checkpoint K with its pool_worker in the arm's checkout (`<out>/farm_gates/<arm>/summary.json`); `launch` refuses a
+  farm arm without a passed summary for that exact worker, and `go` runs missing gates before the first arm. The
+  coordinator's farm run is created by the pool's first PUT; `go` pauses it after the arm ends (`ab.py farm-pause SPEC
+  ARM` by hand: the whole body as GET returns it with "state" "paused", minus the GET-only alternates[].problems). The
+  worker builds stay a step before the spec (tools/farm_build.py --publish per engine, the CUDA re-sign): publishing
+  signs with the release key, which a harness should not do implicitly.
+* `go --no-judge`: train the arms and stop before the cells judge (an A/B measured otherwise, e.g. paired best-of-one
+  head-to-heads against an anchor).
+
+Tests: tests/test_ab.py +2 (per-arm code and its refusals; farm_run, the launch refusal reasons - no summary, another
+worker, gates off, no `farm` block - and farm_pause against a fake coordinator: GET, then PUT paused without
+`problems`). Gate: the python tier.
+
 ## 194. The Bauble targeting blunder measure: the game database's `bauble` table, the per-iteration series, the run page's card and Bauble canary spots (branch `feat/bauble-blunders`, delverai branch `bauble-blunders`, 2026-11-17)
 
 Branch `feat/bauble-blunders` from main 39492759, main 8b4bac07 (192's remembered looks) merged in. Why: the user

@@ -154,3 +154,52 @@ def test_publish_dry_run_through_the_uploader(tmp_path, capsys):
     cell = rec['matches'][3]          # Doomsday into Delver: a 23.5% score, a +41.3 gain
     assert (cell['a_score'], cell['elo_diff'], cell['elo_se']) == (0.235, 41.3, 15.0) and 'GAIN' in cell['note']
     assert str(tmp_path) not in line
+
+
+def test_per_arm_code(tmp_path):
+    s = ab.normalize(spec(code={'worktree': '/wt/main', 'sha': 'aaaa', 'python': '/py',
+                                'arms': {'ctrl': {'worktree': '/wt/old', 'sha': 'bbbb'}}}))
+    assert ab.worktree(s, 'ctrl') == '/wt/old' and ab.code_sha(s, 'ctrl') == 'bbbb' and ab.python(s, 'ctrl') == '/py'
+    assert ab.worktree(s, 'adapt') == '/wt/main' and ab.code_sha(s, 'adapt') == 'aaaa' and ab.worktree(s) == '/wt/main'
+    for bad in ({'zzz': {'worktree': '/x'}}, {'ctrl': {'branch': 'x'}}, {'ctrl': '/x'}):
+        with pytest.raises(SystemExit, match='code.arms'):
+            ab.normalize(spec(code={'arms': bad}))
+    assert ab.normalize(spec())['farm'] is None
+    assert ab.normalize(spec(farm={}))['farm'] == {'gates': True, 'pause_when_done': True}
+
+
+def test_farm_arms(tmp_path):
+    assert ab.farm_run({'selfplay_remote': 'mac,pool:bab-fix'}) == 'bab-fix'
+    assert ab.farm_run({'selfplay_remote': 'mac'}) is None and ab.farm_run({}) is None
+    s = ab.normalize(spec(out=str(tmp_path / 'out'), runs_dir=str(tmp_path), farm={}))
+    d = tmp_path / 'meta3-x-adapt'
+    d.mkdir()
+    (d / 'config.json').write_text(json.dumps({'selfplay_remote': 'pool:meta3-x-adapt', 'pool_worker': 'E:/b/w.exe'}))
+    assert 'no passed farm gates' in ab.farm_gate_missing(s, 'adapt')
+    g = tmp_path / 'out' / 'farm_gates' / 'adapt'
+    g.mkdir(parents=True)
+    (g / 'summary.json').write_text(json.dumps({'passed': True, 'worker': 'E:/b/other.exe'}))
+    assert 'not the arm\'s pool_worker' in ab.farm_gate_missing(s, 'adapt')
+    (g / 'summary.json').write_text(json.dumps({'passed': True, 'worker': 'E:\\b\\w.exe'}))
+    assert ab.farm_gate_missing(s, 'adapt') is None and ab.farm_gate_missing(s, 'ctrl') is None
+    assert ab.farm_gate_missing(ab.normalize(spec(out=str(tmp_path / 'out'), runs_dir=str(tmp_path), farm={'gates': False})),
+                                'adapt') is None
+    assert 'needs "farm"' in ab.farm_gate_missing(ab.normalize(spec(runs_dir=str(tmp_path))), 'adapt')
+    assert ab.farm_run(ab.overrides(ab.normalize(spec(common={'selfplay_remote': 'pool:x'})), 'ctrl', 207)) == 'x'
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def call(self, method, path, body=None):
+            self.calls.append((method, path, body))
+            return {'id': 'meta3-x-adapt', 'state': 'active', 'build': 'b1',
+                    'alternates': [{'build_id': 'b2', 'problems': ['x'], 'when': {'vendor': 'nvidia'}}]}
+
+    c = Client()
+    assert ab.farm_pause(s, 'adapt', client=c) == 'meta3-x-adapt'
+    (m1, p1, _), (m2, p2, body) = c.calls
+    assert (m1, p1, m2, p2) == ('GET', '/v1/admin/run/meta3-x-adapt', 'PUT', '/v1/admin/run/meta3-x-adapt')
+    assert body['state'] == 'paused' and body['build'] == 'b1'
+    assert body['alternates'] == [{'build_id': 'b2', 'when': {'vendor': 'nvidia'}}]
+    assert ab.farm_pause(s, 'ctrl', client=c) is None and len(c.calls) == 2
