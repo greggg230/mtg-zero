@@ -429,6 +429,12 @@ assert not set(REAL_DECKS_SETTINGS) & set(ROLLING_SETTINGS), 'two features of th
 assert not set(MATCHUP_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS)), 'two features declare one setting'
 assert not set(FORCED_FIND_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS) | set(MATCHUP_SETTINGS)), 'two features declare one setting'
 
+# Every Rust input of the engine (tools/zcache.py's RUST_PATHS; tests/test_gamedb.py keeps them equal): with zero-core's
+# crates they name the engine that played a game record (zero-core docs/az.md 59.4, docs/gamedb.md "The engine"): a
+# record replays only on that engine
+ENGINE_PATHS = ('engine', 'card_ir', 'py', 'worker', 'data', 'Cargo.toml', 'Cargo.lock', '.cargo', 'rust-toolchain',
+                'rust-toolchain.toml')
+
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
     # the belief target (docs/ENGINE.md 66, zero-core docs/az.md 15): the decider's opponent's hand by
@@ -476,6 +482,7 @@ PACKAGE = register(GamePackage(
     # (docs/ENGINE.md 180, mtgz.az.forced_find: forced_find_schedule {} = off), through the same hook after it
     settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, **FORCED_FIND_SETTINGS, publish={}, yardsticks={}),
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
+    engine_paths=ENGINE_PATHS,
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',

@@ -3,7 +3,7 @@ decks did on the way (Doomsday piles, Show and Tell, Sneak Attack, Thassa's Orac
 Measuring only: no rule, encoding or search change. Read-only for runs (writes only under --out).
 
   python tools/combo_stats.py play CKPT --decks doomsday_8027957,izzet_delver_8016541 --sims 1024,64 \\
-      --games 100 --out DIR [--label L] [--seed 1] [--batch 25] [--threads 4] [--device cpu]
+      --games 100 --out DIR [--label L] [--seed 1] [--batch 25] [--threads 4] [--device cpu] [--records DIR]
   python tools/combo_stats.py selfplay CKPT --p 0.5 --decks ... (the same flags)   # with the forced find: NOT a measurement
   python tools/combo_stats.py scan DIR/L.b000.games.json.gz [...] [--jobs 4]   # rebuild + per-game stats
   python tools/combo_stats.py report DIR/*.stats.jsonl [--md OUT.md] [--json OUT.json]
@@ -142,8 +142,11 @@ def seats_for(ckpt, sims, chance_k=2, c_puct=1.0):
 
 
 def play(ckpt, decks, sims, games, out, label=None, seed=1, batch=25, threads=4, groups=2, conc=None, device='cpu',
-         max_steps=20000, sparse=True, max_turns=60, log=say, forced_find=None):
-    """`forced_find` None: a measurement (the spec refuses the forced find); a share p: `selfplay` (module docs)."""
+         max_steps=20000, sparse=True, max_turns=60, log=say, forced_find=None, records=None, records_it=None):
+    """`forced_find` None: a measurement (the spec refuses the forced find); a share p: `selfplay` (module docs).
+    `records`: a game records directory (docs/gamedb.md): every game a record under <records>/combo/misc/ (`selfplay`'s:
+    combo_selfplay; `records_it`: under <records>/combo/iter_NNNN/ instead, a run's generation), None: none (the same
+    games either way)."""
     from zero import games as G
     from zero.infer import NetEvaluator, drive
     from zero.net import load
@@ -167,6 +170,12 @@ def play(ckpt, decks, sims, games, out, label=None, seed=1, batch=25, threads=4,
         meta['selfplay'] = True                 # (the forced find on: not a measurement, docs/ENGINE.md 180)
         meta['forced_find'] = json.loads(spec)['forced_find']
     nb = (games + batch - 1) // batch
+    sink = None
+    if records:
+        from zero import gamerec as GR
+        sink = GR.MatchSink(records, 'combo' if forced_find is None else 'combo_selfplay', it=records_it,
+                            meta={'tool': 'combo_stats', 'label': label, 'decks': list(decks)})
+        players = [GR.net_player(ckpt, None, st) for st in seats]
     for b in range(nb):
         n = min(batch, games - b * batch)
         path = os.path.join(out, f'{label}.b{b:03d}.games.json.gz')
@@ -175,10 +184,14 @@ def play(ckpt, decks, sims, games, out, label=None, seed=1, batch=25, threads=4,
         dseed = int(seed) + b
         drv = G.Driver('mtg', [list(seats) for _ in range(n)], spec=spec, concurrency=min(conc or n, n), seed=dseed,
                        threads=threads, groups=groups, max_steps=max_steps, move_log=1_000_000, sparse=bool(sparse))
+        if sink is not None:
+            drv.set_game_log(True)              # (game records: the games are the same)
         t0, c0 = time.time(), time.process_time()
         drive(drv, {'a': ev})
         wall, cpu = time.time() - t0, time.process_time() - c0
         rows = sorted(drv.take_results(), key=lambda r: r['gid'])
+        if sink is not None:
+            sink.add_rows(rows, lambda g: players, {'batch': b, 'driver_seed': dseed})
         fails = drv.take_failures() if hasattr(drv, 'take_failures') else []
         if fails:
             write_failures(out, fails, label, b)
@@ -1066,6 +1079,9 @@ def _play_args(p):
     p.add_argument('--max-steps', type=int, default=20000)
     p.add_argument('--max-turns', type=int, default=60)
     p.add_argument('--torch-threads', type=int, default=None)
+    p.add_argument('--records', default=None, metavar='DIR',
+                   help='keep every game as a game record under DIR/combo/misc/ (selfplay: DIR/combo_selfplay/misc/; '
+                        'docs/gamedb.md: tools/gamedb.py ingest --records DIR)')
 
 
 def main(argv=None):
@@ -1143,7 +1159,8 @@ def main(argv=None):
         if len(decks) != 2 or len(sims) != 2:
             ap.error('--decks and --sims take two values')
         play(a.ckpt, decks, sims, a.games, a.out, a.label, a.seed, a.batch, a.threads, a.groups, a.conc, a.device,
-             a.max_steps, max_turns=a.max_turns, forced_find=a.p if a.cmd == 'selfplay' else None)
+             a.max_steps, max_turns=a.max_turns, forced_find=a.p if a.cmd == 'selfplay' else None,
+             records=os.path.abspath(a.records) if a.records else None)
     elif a.cmd == 'scan':
         files = [f for x in a.files for f in (sorted(glob.glob(x)) or [x])]
         res = scan(files, a.jobs)

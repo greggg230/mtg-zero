@@ -1,9 +1,12 @@
-"""The game database (docs/gamedb.md, docs/ENGINE.md 187): every self-play game of a run, replayed through the engine's
-play-by-play, as Parquet tables a DuckDB query answers in well under a second - "how often does a Doomsday pile hold
-card X since iteration 120, by opponent" is one SQL query.
+"""The game database (docs/gamedb.md, docs/ENGINE.md 187, 190): every game a run plays - its self-play, its evaluations,
+its yardsticks, its publisher's - replayed through the engine's play-by-play, as Parquet tables a DuckDB query answers in
+well under a second - "how often does a Doomsday pile hold card X since iteration 120, by opponent" is one SQL query.
 
-  python tools/gamedb.py ingest RUN [--sample 1.0] [--jobs 1] [--iters A-B] [--db DIR] [--redo]   # new iterations
+  python tools/gamedb.py ingest RUN [--sample 1.0] [--jobs 1] [--iters A-B] [--db DIR] [--redo]   # what is new
   python tools/gamedb.py ingest RUN --follow 60       # ... and again every 60 s, until stopped (beside a live run)
+  python tools/gamedb.py ingest --records DIR --db DB  # a standalone tool's records (h2h / cells-match / combo --records)
+  python tools/gamedb.py ingest RUN --engine-checkout PATH   # records of another engine, by that engine's checkout
+  python tools/gamedb.py engine                          # this checkout's engine identity (JSON)
   python tools/gamedb.py query RUN "SELECT ..." [--csv | --json] [--max-rows 200]
   python tools/gamedb.py shell RUN                       # an SQL prompt (statements end with ';')
   python tools/gamedb.py prune RUN [--keep-iters 64] [--old-sample 0.1] [--delete-raw]
@@ -13,13 +16,16 @@ card X since iteration 120, by opponent" is one SQL query.
   python tools/gamedb.py bench RUN [--iter N] [--games 200]   # replay cost per game (light and full)
   python tools/gamedb.py import-combo OUT_RUN FILES...    # combo_stats games files -> game records (validation)
 
-RUN is a run directory (its records: <run>/records/iter_NNNN/, zero-core's `game_records` setting, zero/gamerec.py) or,
-for query / shell / status / prune of a database alone, a run name. The database of run R lives in
+RUN is a run directory (its records: <run>/records/iter_NNNN/ - self-play - and <run>/records/<kind>/iter_NNNN/ - every
+other game -, zero-core's `game_records` setting, zero/gamerec.py; its publisher's replays: <run>/replays/) or, for query
+/ shell / status / prune of a database alone, a run name. The database of run R lives in
 `$MTGZ_GAMEDB/R`, else `<ZERO_BIG_DISK>/mtg-zero-gamedb/R` on a machine that names a big disk (~/.config/zero/local.env),
 else `~/.cache/mtg-zero-gamedb/R`; `--db DIR` names the directory itself.
 
-ingest. Each complete iteration of records (its DONE.json; an iteration already in the database is skipped: idempotent,
-incremental) is replayed game by game from its seed and actions - CPU only, in --jobs processes at below-normal priority:
+ingest. Each complete iteration of self-play records (its DONE.json), each file of other records (a match, a batch:
+written whole) and each publisher replay that names its engine - a unit already in the database is skipped: idempotent,
+incremental - is replayed game by game from its seed and actions - CPU only, in --jobs processes at below-normal
+priority:
 * every game LIGHT: the engine with the play-by-play on, the state exported only before the last move and at the end ->
   its `games` row (the decks of each seat, who was on the play, mulligans, the result and the end's method, turns,
   decisions, the resignation, the executor);
@@ -27,8 +33,16 @@ incremental) is replayed game by game from its seed and actions - CPU only, in -
   step and read by tools/combo_stats.py's Reader (the same code as `combo_stats.py scan`) -> its `events` (every
   play-by-play line and every choice of two or more options) and the combo tables (`doomsday`, `shows`, `spells`,
   `sneak`, `entered`); its `games` row is the full replay's (`detailed` true).
-Tables are written per iteration (`<db>/<table>/iter=NNNN/part.parquet`, replaced whole); `<db>/state.json` lists the
-iterations ingested. A game that does not replay is never dropped silently: the iteration fails loudly.
+Tables are written per unit (`<db>/<table>/iter=NNNN/part.parquet` for a self-play iteration, replaced whole;
+`<db>/<table>/m=<kind>.<sub>/<file>.parquet` for a records file, `r=publisher/<file>.parquet` for a replay);
+`<db>/state.json` lists the units ingested. A game that does not replay is never dropped silently: its unit fails loudly.
+
+The engine (docs/gamedb.md "The engine"). A record replays only on the engine that played it: every records file names
+it (a build line: the mtg-zero commit, the zero-core commit and the engine id - zero.gamerec.engine_id over every Rust
+input). Ingest replays only the units of this checkout's engine; another engine's are refused loudly (listed in
+state.json's `refused`, with the commits that made them) - `--engine-checkout PATH` hands them to the gamedb of a
+checkout of that engine (its engine built), which writes them into the same database. A unit without an engine id
+(records of a core before it) is refused unless --allow-unidentified.
 
 prune. Keeps every game of the newest --keep-iters iterations and a deterministic --old-sample of the older ones (the
 games, events and combo rows of the other games deleted); --delete-raw deletes the raw records of every ingested
@@ -64,7 +78,7 @@ for _p in (ROOT, os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'third_party', 
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-FORMAT = 'mtgz-gamedb/1'
+FORMAT = 'mtgz-gamedb/2'           # (2: every kind of game, players, the engine: docs/ENGINE.md 190)
 TABLES = ('games', 'events', 'doomsday', 'shows', 'spells', 'sneak', 'entered')
 NO_CHOICE_EVENT = ('Priority', 'PayMana')     # decisions that are not `choice` events (their effects are lines)
 TABLES += ('bauble',)                         # the Bauble activations (tools/gamedb_bauble.py, docs/ENGINE.md 194)
@@ -89,9 +103,15 @@ def db_dir(run, db=None):
 def read_state(db):
     try:
         with open(os.path.join(db, 'state.json'), encoding='utf-8') as f:
-            return json.load(f)
+            st = json.load(f)
     except (OSError, ValueError):
-        return {'format': FORMAT, 'iterations': {}}
+        return {'format': FORMAT, 'iterations': {}, 'units': {}, 'refused': {}}
+    if st.get('format') != FORMAT:
+        raise SystemExit(f'{db}: a database of format {st.get("format")!r}, this tool writes {FORMAT!r} (docs/ENGINE.md '
+                         f'190): ingest into a new --db (the raw records are kept: the whole run again)')
+    st.setdefault('units', {})
+    st.setdefault('refused', {})
+    return st
 
 
 def write_state(db, st):
@@ -115,8 +135,12 @@ def below_normal():
 # ====================================================================================== ids and sampling
 def game_id(rec):
     """A game's id: 63 bits of blake2b over (iteration, source, game id, seed, actions) - unique across sources and
-    restarts (a restarted worker's game ids begin again; its seeds and moves differ)."""
-    k = f'{rec["it"]}|{rec["src"]}|{rec["gid"]}|{rec["seed"]}|{rec["n_actions"]}'.encode()
+    restarts (a restarted worker's game ids begin again; its seeds and moves differ). A game that is not self-play: over
+    (its unit - the records file -, game id, seed, actions)."""
+    if rec.get('_unit'):
+        k = f'{rec["_unit"]}|{rec["gid"]}|{rec["seed"]}|{rec["n_actions"]}'.encode()
+    else:
+        k = f'{rec["it"]}|{rec["src"]}|{rec["gid"]}|{rec["seed"]}|{rec["n_actions"]}'.encode()
     return int.from_bytes(hashlib.blake2b(k, digest_size=8).digest(), 'little') & ((1 << 63) - 1)
 
 
@@ -132,7 +156,9 @@ def sampled(gid, rate):
 
 def executor(src):
     s = str(src)
-    return 'farm' if s.startswith('pool') else 'local' if s == 'local' else 'combo' if s == 'combo' else 'remote'
+    if s.startswith('pool') or s == 'farm':
+        return 'farm'
+    return s if s in ('local', 'combo', 'publisher') else 'remote'
 
 
 # ====================================================================================== decks of a game
@@ -361,6 +387,21 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
 
 
 # ====================================================================================== one chunk of games
+def players_of(rec):
+    """A record's players, one dict per seat ({ckpt, label, sha, sims, rule}; docs/gamedb.md): a game that is not
+    self-play names them (`players`); a self-play game's seats are both the network its samples were searched with
+    (the newest of `nets`: '<run>/iter_NNNN'), {} without one."""
+    pl = rec.get('players')
+    if pl:
+        return [pl[i] if i < len(pl) and isinstance(pl[i], dict) else {} for i in (0, 1)]
+    nets = rec.get('nets')
+    if nets and nets[1] is not None:
+        lab = f'iter_{int(nets[1]):04d}'
+        p = {'ckpt': f'{rec["_run"]}/{lab}' if rec.get('_run') else lab, 'label': lab}
+        return [p, p]
+    return [{}, {}]
+
+
 def _worker_init():
     below_normal()
     import mtgz.az  # noqa: F401
@@ -376,6 +417,7 @@ def ingest_chunk(args):
     t0 = time.process_time()
     for rec, spec_txt in items:
         gid = game_id(rec)
+        it = int(rec['it']) if rec.get('it') is not None else None
         spec = json.loads(spec_txt)
         decks, mains = seat_decks(spec, rec.get('setup'))
         ff = (spec.get('forced_find') or {}).get('p')
@@ -386,10 +428,18 @@ def ingest_chunk(args):
             else:
                 f, events, combo = replay_light(E, C, spec_txt, rec, decks), None, None
         except Exception as e:         # a game that does not replay: loud (the iteration fails)
-            raise RuntimeError(f'iteration {rec["it"]} source {rec["src"]} game {rec["gid"]} (seed {rec["seed"]}): '
-                               f'{type(e).__name__}: {e}') from e
+            raise RuntimeError(f'{rec.get("_unit") or "iteration " + str(rec["it"])} source {rec["src"]} game '
+                               f'{rec["gid"]} (seed {rec["seed"]}): {type(e).__name__}: {e}') from e
         nets = rec.get('nets') or [None, None]
-        row = {'game_id': gid, 'iter': int(rec['it']), 'src': str(rec['src']), 'executor': executor(rec['src']),
+        pl = players_of(rec)
+        row = {'game_id': gid, 'iter': it, 'kind': rec.get('kind') or 'selfplay',
+               'unit': rec.get('_unit') or f'iter={it:04d}', 'engine': rec.get('_engine'),
+               'p0_ckpt': pl[0].get('ckpt'), 'p1_ckpt': pl[1].get('ckpt'), 'p0_label': pl[0].get('label'),
+               'p1_label': pl[1].get('label'), 'p0_sha': pl[0].get('sha'), 'p1_sha': pl[1].get('sha'),
+               'p0_sims': pl[0].get('sims'), 'p1_sims': pl[1].get('sims'), 'p0_rule': pl[0].get('rule'),
+               'p1_rule': pl[1].get('rule'),
+               'meta': json.dumps(rec['meta'], separators=(',', ':'), sort_keys=True) if rec.get('meta') else None,
+               'src': str(rec['src']), 'executor': executor(rec['src']),
                'machine': rec.get('machine'), 'gid': int(rec['gid']), 'seed': str(rec['seed']), 'spec': rec['spec'],
                'deck0': decks[0], 'deck1': decks[1], 'net_lo': nets[0], 'net_hi': nets[1], 'forced_find_p': ff,
                'over': bool(rec.get('over')), 'aborted': bool(rec.get('aborted')),
@@ -399,7 +449,6 @@ def ingest_chunk(args):
         out['games'].append(row)
         if not full:
             continue
-        it = int(rec['it'])
         for seq, step_ix, t, s, p, kind, card, fz, tz, det in events:
             out['events'].append({'game_id': gid, 'iter': it, 'seq': seq, 'action': step_ix, 'turn': t, 'step': s,
                                   'player': p, 'type': kind, 'card': card, 'from_zone': fz, 'to_zone': tz,
@@ -434,7 +483,10 @@ def schemas():
     import pyarrow as pa
     s, i, b, f, ls = pa.string(), pa.int32(), pa.bool_(), pa.float64(), pa.list_(pa.string())
     return {
-        'games': pa.schema([('game_id', pa.int64()), ('iter', i), ('src', s), ('executor', s), ('machine', s), ('gid', pa.int64()),
+        'games': pa.schema([('game_id', pa.int64()), ('iter', i), ('kind', s), ('unit', s), ('engine', s),
+                            ('p0_ckpt', s), ('p1_ckpt', s), ('p0_label', s), ('p1_label', s), ('p0_sha', s), ('p1_sha', s),
+                            ('p0_sims', i), ('p1_sims', i), ('p0_rule', s), ('p1_rule', s), ('meta', s),
+                            ('src', s), ('executor', s), ('machine', s), ('gid', pa.int64()),
                             ('seed', s), ('spec', s), ('deck0', s), ('deck1', s), ('net_lo', i), ('net_hi', i),
                             ('forced_find_p', f), ('over', b), ('aborted', b), ('resigned', b), ('n_actions', i),
                             ('detailed', b), ('lines_lost', i), ('last_attackers', s), ('starting', i), ('turns', i),
@@ -478,6 +530,115 @@ def write_part(db, table, it, rows):
     return os.path.getsize(os.path.join(d, 'part.parquet'))
 
 
+def write_unit(db, table, part, name, rows):
+    """A records file's rows of `table` -> <db>/<table>/<part>/<name>.parquet (a temp file renamed; none for no rows)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    path = os.path.join(db, table, part, name + '.parquet')
+    if not rows:
+        if os.path.exists(path):
+            os.remove(path)
+        return 0
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + f'.tmp{os.getpid()}'
+    pq.write_table(pa.Table.from_pylist(rows, schema=schemas()[table]), tmp, compression='zstd')
+    os.replace(tmp, path)
+    return os.path.getsize(path)
+
+
+# ====================================================================================== the engine (docs/gamedb.md)
+def my_build():
+    """This checkout's engine (zero.gamerec.build_info: the mtg-zero and zero-core commits, the engine id)."""
+    import mtgz.az  # noqa: F401
+    from zero import gamerec as GR
+    return GR.build_info()
+
+
+def judge(builds, mine, allow_unidentified=False):
+    """A unit's build lines against this checkout's engine -> (ok, why, the unit's build). `why`: None (ok),
+    'unidentified' (no engine id: records of a core before it), 'other_engine', 'dirty' (played by a build of
+    uncommitted engine changes: only that very module replays it), 'mixed' (a file of several engines: never written)."""
+    if not builds:
+        return allow_unidentified, (None if allow_unidentified else 'unidentified'), {}
+    engines = {b.get('engine') for b in builds}
+    b = builds[0]
+    if len(engines) > 1:
+        return False, 'mixed', b
+    e = engines.pop()
+    if e is None:
+        return allow_unidentified, (None if allow_unidentified else 'unidentified'), b
+    if e == 'dirty':
+        ok = mine.get('engine') == 'dirty' and all(x.get('module') == mine.get('module') for x in builds)
+        return ok, (None if ok else 'dirty'), b
+    return (True, None, b) if e == mine.get('engine') else (False, 'other_engine', b)
+
+
+def engine_hint(b):
+    """How to ingest a refused unit of build `b` (docs/gamedb.md "The engine")."""
+    c = (b.get('commit') or '?')[:12]
+    return (f'engine {b.get("engine")} (mtg-zero {c}, zero-core {(b.get("core") or "?")[:12]}): ingest it from a checkout '
+            f'of that engine - git worktree add --detach <dir> {c} && (cd <dir> && git submodule update --init && bash '
+            f'tools/build_py.sh), then: python tools/gamedb.py ingest ... --engine-checkout <dir>')
+
+
+def checkout_engine(path):
+    """The engine id of the checkout at `path` (its `gamedb.py engine`), or SystemExit."""
+    import subprocess
+    tool = os.path.join(path, 'tools', 'gamedb.py')
+    if not os.path.exists(tool):
+        raise SystemExit(f'--engine-checkout {path}: no tools/gamedb.py there')
+    r = subprocess.run([sys.executable, tool, 'engine'], capture_output=True, text=True, cwd=path)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise SystemExit(f'--engine-checkout {path}: `gamedb.py engine` there failed (exit {r.returncode}; a checkout '
+                         f'before docs/ENGINE.md 190 has none): {(r.stderr or r.stdout).strip()[-400:]}') from None
+
+
+# ====================================================================================== publisher replays
+def replay_seed(driver_seed, k):
+    """The game seed of game `k` of a zero.replay recording driven by `driver_seed` (zero.play.PyDriver: each slot's
+    rng from the driver's, in game order; its np, search, then the game's seed)."""
+    import random
+    rng = random.Random(int(driver_seed))
+    r = None
+    for _ in range(int(k) + 1):
+        r = random.Random(rng.randrange(1 << 30))
+    r.randrange(1 << 30)
+    r.randrange(1 << 30)
+    return r.getrandbits(63)
+
+
+def replay_record(rep, unit):
+    """A publisher replay (zero-replay/1, mtgz.az.replays: every step a frame with its action) -> (record, spec JSON) as
+    a game record of kind 'publisher', or None for a chained contest (a best-of-three match: not replayed here)."""
+    import array
+    if rep.get('games') is not None:
+        return None
+    from mtgz import _engine as E
+    from zero import gamerec as GR
+    seed = replay_seed(rep['seed'], rep['game_index'])
+    g = E.Game(rep['game'], rep['spec'], len(rep['seats']), seed)
+    pr = (json.loads(g.export_state()).get('match') or {}).get('pairing')
+    setup = json.dumps({'pairing': pr}, separators=(',', ':')) if pr else ''
+    acts = [int(f['a']) for f in rep['frames']]
+    src = rep.get('source') or {}
+    players = []
+    for x in rep['seats']:
+        ck = (f'{x["run"]}/iter_{int(x["iter"]):04d}' if x.get('run') and x.get('iter') is not None
+              else os.path.splitext(os.path.basename(x['checkpoint']))[0] if x.get('checkpoint') else None)
+        players.append({'ckpt': ck, 'label': x.get('name'), 'sims': x.get('sims'), 'rule': x.get('select', 'visits')}
+                       if x.get('kind') == 'nn' else {'ckpt': None, 'bot': x.get('name'), 'label': x.get('name')})
+    rec = {'v': 1, 'kind': 'publisher', 'it': src.get('iter'), 'src': 'publisher', 'gid': int(rep['game_index']),
+           'seed': seed, 'spec': GR.spec_key(rep['spec']), 'n': len(rep['seats']),
+           'actions': base64.b64encode(array.array('H', acts).tobytes()).decode('ascii'), 'n_actions': len(acts),
+           'setup': setup, 'over': bool(rep.get('over')), 'aborted': bool(rep.get('abort_reason')), 'resigned': None,
+           'result': rep.get('result'), 'decisions': None, 'rounds': rep.get('rounds'), 'players': players,
+           'meta': {'title': rep.get('title'), 'driver_seed': rep['seed'], 'selfplay': rep.get('selfplay')},
+           '_unit': unit}
+    return rec, rep['spec']
+
+
 # ====================================================================================== ingest
 def parse_iters(s):
     if not s:
@@ -486,59 +647,198 @@ def parse_iters(s):
     return int(a), int(b) if b else int(a)
 
 
-def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, log=say):
+def _replay_items(items, sample, jobs_pool, chunk):
+    parts = [(items[k:k + chunk], sample) for k in range(0, len(items), chunk)]
+    res = list(jobs_pool.map(ingest_chunk, parts)) if jobs_pool else [ingest_chunk(x) for x in parts]
+    rows = {t: [x for r in res for x in r[t]] for t in TABLES}
+    ids = [r['game_id'] for r in rows['games']]
+    if len(set(ids)) != len(ids):
+        raise SystemExit(f'{len(ids) - len(set(ids))} duplicate game ids')
+    return rows, sum(r['_cpu_s'] for r in res)
+
+
+def units(run=None, records=None, replays=None):
+    """Every unit of records there is (not yet judged) -> [(key, what, info)]: ('iter=NNNN', 'selfplay', it) for each
+    complete self-play iteration of `run`, ('m=<kind>.<sub>/<file>', 'match', (kind, sub, path)) for each file of other
+    records (under `records`, default <run>/records), ('r=publisher/<file>', 'replay', path) for each replay (under
+    `replays`, default <run>/replays)."""
+    from zero import gamerec as GR
+    out = []
+    if run and os.path.isdir(os.path.join(run, GR.DIR)):
+        out += [(f'iter={it:04d}', 'selfplay', it) for it in GR.done_iterations(run)]
+    rdir = records or (os.path.join(run, GR.DIR) if run else None)
+    if rdir:
+        for kind, sub, path in GR.match_files(rdir):
+            stem = os.path.basename(path)[:-len('.jsonl.gz')]
+            out.append((f'm={kind}.{sub}/{stem}', 'match', (kind, sub, path)))
+    pdir = replays or (os.path.join(run, 'replays') if run else None)
+    if pdir and os.path.isdir(pdir):
+        for path in sorted(glob.glob(os.path.join(pdir, '*.json.gz'))):
+            out.append((f'r=publisher/{os.path.basename(path)[:-len(".json.gz")]}', 'replay', path))
+    return out
+
+
+def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, log=say, records=None, replays=None,
+           allow_unidentified=False, only_engine=None, engine_checkout=None):
+    """Ingest every new unit (module docs) of this checkout's engine -> the state. `only_engine`: refuse unless this
+    checkout's engine is it (the delegate of another checkout's --engine-checkout). `engine_checkout`: then hand the
+    refused units of that checkout's engine to its gamedb (the same database)."""
     from zero import gamerec as GR
     below_normal()
-    db = db_dir(run, db)
+    if not run and not records:
+        raise SystemExit('ingest: a run directory or --records DIR')
+    db = db_dir(run or records, db)
     st = read_state(db)
-    st.setdefault('run', os.path.basename(os.path.normpath(run)))
-    todo = [it for it in GR.done_iterations(run) if (redo or str(it) not in st['iterations'])
-            and (iters is None or iters[0] <= it <= iters[1])]
+    st.setdefault('run', os.path.basename(os.path.normpath(run or records)))
+    mine = my_build()
+    if only_engine and mine.get('engine') != only_engine:
+        raise SystemExit(f'--only-engine {only_engine}: this checkout\'s engine is {mine.get("engine")}')
+    rname = os.path.basename(os.path.normpath(run)) if run else None
+    todo = []
+    for key, what, info in units(run, records, replays):
+        if what == 'selfplay':
+            if (not redo and str(info) in st['iterations']) or (iters is not None and not iters[0] <= info <= iters[1]):
+                continue
+        elif not redo and key in st['units']:
+            continue
+        todo.append((key, what, info))
     if not todo:
-        log(f'{run}: nothing new to ingest ({len(st["iterations"])} iterations in {db})')
-        return st
+        log(f'{run or records}: nothing new to ingest ({len(st["iterations"])} self-play iterations, {len(st["units"])} '
+            f'other units in {db})')
     pool = None
-    if jobs > 1:
+    if jobs > 1 and todo:
         from concurrent.futures import ProcessPoolExecutor
         pool = ProcessPoolExecutor(jobs, initializer=_worker_init)
+    unknown = 0
     try:
-        for it in todo:
+        for key, what, info in todo:
             t0 = time.time()
-            specs, recs = GR.read_iteration(run, it)
+            builds = []
+            if what == 'selfplay':
+                fb = {}
+                specs, recs = GR.read_iteration(run, info, fb)
+                builds = [b for name in sorted(fb) for b in (fb[name] or [None])]
+                builds = [b for b in builds if b is not None] if all(fb.values()) else []
+            elif what == 'match':
+                specs, recs = GR.read_file(info[2], builds)
+            else:
+                with gzip.open(info, 'rt', encoding='utf-8') as f:
+                    rep = json.load(f)
+                if not rep.get('build'):
+                    unknown += 1                   # (a replay recorded without game_records: not a record)
+                    continue
+                builds = [rep['build']]
+            ok, why, b = judge(builds, mine, allow_unidentified)
+            if only_engine and why == 'other_engine':
+                continue                           # (the delegating checkout's: not this one's)
+            if not ok:
+                if st['refused'].get(key, {}).get('why') != why:
+                    log(f'{key}: REFUSED ({why}) - ' + (engine_hint(b) if why == 'other_engine' else
+                        'records without an engine id (zero-core before docs/az.md 59.4): --allow-unidentified from a '
+                        'checkout of the engine that played them' if why == 'unidentified' else
+                        'played by a build of uncommitted engine changes: only that module replays it'))
+                st['refused'][key] = {'why': why, 'engine': b.get('engine'), 'commit': b.get('commit'),
+                                      'core': b.get('core'), 'time': time.time()}
+                write_state(db, st)
+                continue
+            st['refused'].pop(key, None)
+            eng = b.get('engine')
+            if what == 'replay':
+                x = replay_record(rep, key)
+                if x is None:
+                    st['units'][key] = {'kind': 'publisher', 'games': 0, 'skipped': 'chained contest', 'time': time.time()}
+                    write_state(db, st)
+                    continue
+                specs, recs = {x[0]['spec']: x[1]}, [x[0]]
             if not recs:
-                raise SystemExit(f'iteration {it}: DONE.json lists no records (an empty iteration is never ingested '
-                                 f'silently: look at {GR.iter_dir(run, it)})')
-            items = [(r, specs[r['spec']]) for r in recs]
-            parts = [(items[k:k + chunk], sample) for k in range(0, len(items), chunk)]
-            res = list(pool.map(ingest_chunk, parts)) if pool else [ingest_chunk(p) for p in parts]
-            rows = {t: [x for r in res for x in r[t]] for t in TABLES}
-            ids = [r['game_id'] for r in rows['games']]
-            if len(set(ids)) != len(ids):
-                raise SystemExit(f'iteration {it}: {len(ids) - len(set(ids))} duplicate game ids')
-            size = sum(write_part(db, t, it, rows[t]) for t in TABLES)
-            cpu = sum(r['_cpu_s'] for r in res)
-            done = GR.read_done(run, it)
-            st['iterations'][str(it)] = {'games': len(rows['games']), 'detailed': sum(1 for g in rows['games'] if g['detailed']),
-                                         'sample': sample, 'events': len(rows['events']), 'bytes': size,
-                                         'cpu_s': round(cpu, 2), 'wall_s': round(time.time() - t0, 2),
-                                         'records_bytes': done.get('bytes'), 'missing': done.get('missing'),
-                                         'time': time.time()}
-            write_state(db, st)
+                raise SystemExit(f'{key}: no records (an empty unit is never ingested silently)')
+            items = []
+            chained = 0
+            for r in recs:
+                r = dict(r, _engine=eng)
+                if what == 'selfplay':
+                    r['_run'] = rname
+                else:
+                    r['_unit'] = key
+                if r.get('actions') is None and not all(isinstance(a, int) for a in r.get('steps') or []):
+                    chained += 1                   # (a chained contest: episode boundaries in its steps)
+                    continue
+                items.append((r, specs[r['spec']]))
+            if chained:
+                log(f'{key}: {chained} chained contest(s) (a best-of-three match: episode boundaries in its moves) NOT '
+                    f'replayed - the database replays single games (docs/gamedb.md)')
+            rows, cpu = _replay_items(items, sample, pool, chunk) if items else ({t: [] for t in TABLES}, 0.0)
             n = len(rows['games'])
-            log(f'iter {it}: {n} games ({st["iterations"][str(it)]["detailed"]} detailed), {len(rows["events"])} events, '
-                f'{size / 1e6:.2f} MB parquet, {cpu:.1f} CPU-s ({cpu / max(1, n) * 1000:.1f} ms a game), '
-                f'{time.time() - t0:.1f} s' + (f'; MISSING records {done["missing"]}' if done.get('missing') else ''))
+            info_d = {'games': n, 'detailed': sum(1 for g in rows['games'] if g['detailed']), 'sample': sample,
+                      'events': len(rows['events']), 'cpu_s': round(cpu, 2), 'wall_s': round(time.time() - t0, 2),
+                      'engine': eng, 'commit': b.get('commit'), 'time': time.time()}
+            if chained:
+                info_d['chained_skipped'] = chained
+            if what == 'selfplay':
+                size = sum(write_part(db, t, info, rows[t]) for t in TABLES)
+                done = GR.read_done(run, info)
+                info_d.update(bytes=size, records_bytes=done.get('bytes'), missing=done.get('missing'))
+                st['iterations'][str(info)] = info_d
+                label = f'iter {info}'
+            else:
+                part, name = key.split('/', 1)
+                size = sum(write_unit(db, t, part, name, rows[t]) for t in TABLES)
+                info_d.update(bytes=size, kind=recs[0].get('kind') if recs else None,
+                              it=recs[0].get('it') if recs else None)
+                st['units'][key] = info_d
+                label = key
+            write_state(db, st)
+            log(f'{label}: {n} games ({info_d["detailed"]} detailed), {len(rows["events"])} events, {size / 1e6:.2f} MB '
+                f'parquet, {cpu:.1f} CPU-s ({cpu / max(1, n) * 1000:.1f} ms a game), {time.time() - t0:.1f} s'
+                + (f'; MISSING records {info_d["missing"]}' if info_d.get('missing') else ''))
     finally:
         if pool:
             pool.shutdown()
+    if unknown:
+        log(f'{unknown} replay(s) without an engine id (recorded without game_records) not indexed')
+    if engine_checkout and st['refused']:
+        theirs = checkout_engine(engine_checkout)
+        eid = theirs.get('engine')
+        mine_keys = [k for k, v in st['refused'].items() if v.get('engine') == eid]
+        if not mine_keys:
+            log(f'--engine-checkout {engine_checkout}: engine {eid}; no refused unit is of that engine')
+        else:
+            import subprocess
+            cmd = [sys.executable, os.path.join(engine_checkout, 'tools', 'gamedb.py'), 'ingest'] + (
+                [os.path.abspath(run)] if run else []) + ['--db', os.path.abspath(db), '--only-engine', eid,
+                                                          '--sample', str(sample), '--jobs', str(jobs),
+                                                          '--chunk', str(chunk)]
+            if records:
+                cmd += ['--records', os.path.abspath(records)]
+            if replays:
+                cmd += ['--replays', os.path.abspath(replays)]
+            log(f'--engine-checkout: {len(mine_keys)} unit(s) of engine {eid} -> {" ".join(cmd)}')
+            r = subprocess.run(cmd, cwd=engine_checkout)
+            if r.returncode:
+                raise SystemExit(f'--engine-checkout {engine_checkout}: its ingest failed (exit {r.returncode})')
+            st = read_state(db)
     return st
+
+
+def refused_summary(st):
+    """The refused units by engine (docs/gamedb.md "The engine") -> lines."""
+    by = collections.defaultdict(list)
+    for k, v in st.get('refused', {}).items():
+        by[(v.get('why'), v.get('engine'), v.get('commit'), v.get('core'))].append(k)
+    return [f'{len(ks)} unit(s) REFUSED ({why}): ' + (engine_hint({'engine': e, 'commit': c, 'core': co})
+                                                     if why == 'other_engine' else why)
+            for (why, e, c, co), ks in sorted(by.items(), key=lambda x: str(x[0]))]
 
 
 # ====================================================================================== query
 VIEWS = r"""
 CREATE OR REPLACE VIEW game_results AS
-SELECT g.game_id, g.iter, s.seat, CASE s.seat WHEN 0 THEN g.deck0 ELSE g.deck1 END AS deck,
-       CASE s.seat WHEN 0 THEN g.deck1 ELSE g.deck0 END AS opp_deck, (g.starting = s.seat) AS on_play,
+SELECT g.game_id, g.iter, g.kind, s.seat, CASE s.seat WHEN 0 THEN g.deck0 ELSE g.deck1 END AS deck,
+       CASE s.seat WHEN 0 THEN g.deck1 ELSE g.deck0 END AS opp_deck,
+       CASE s.seat WHEN 0 THEN g.p0_ckpt ELSE g.p1_ckpt END AS player,
+       CASE s.seat WHEN 0 THEN g.p0_label ELSE g.p1_label END AS player_label,
+       CASE s.seat WHEN 0 THEN g.p1_ckpt ELSE g.p0_ckpt END AS opp_player,
+       CASE s.seat WHEN 0 THEN g.p1_label ELSE g.p0_label END AS opp_label, (g.starting = s.seat) AS on_play,
        CASE s.seat WHEN 0 THEN g.score0 ELSE g.score1 END AS score,
        CASE WHEN g.winner = s.seat THEN 'win' WHEN g.winner IS NULL THEN 'draw' ELSE 'loss' END AS outcome,
        g.method, g.turns, g.resigned, g.executor,
@@ -546,10 +846,12 @@ SELECT g.game_id, g.iter, s.seat, CASE s.seat WHEN 0 THEN g.deck0 ELSE g.deck1 E
 FROM games g, (SELECT 0 AS seat UNION ALL SELECT 1) s;
 
 CREATE OR REPLACE VIEW mulligans AS
-SELECT game_id, iter, seat, deck, opp_deck, on_play, mulligans, score, outcome FROM game_results;
+SELECT game_id, iter, kind, seat, deck, opp_deck, on_play, mulligans, score, outcome FROM game_results;
 
 CREATE OR REPLACE VIEW doomsday_piles AS
-SELECT d.game_id, d.iter, d.idx, d.caster, CASE d.caster WHEN 0 THEN g.deck0 ELSE g.deck1 END AS caster_deck,
+SELECT d.game_id, d.iter, g.kind, d.idx, d.caster, CASE d.caster WHEN 0 THEN g.deck0 ELSE g.deck1 END AS caster_deck,
+       CASE d.caster WHEN 0 THEN g.p0_label ELSE g.p1_label END AS caster_label,
+       CASE d.caster WHEN 0 THEN g.p1_label ELSE g.p0_label END AS opp_label,
        CASE d.caster WHEN 0 THEN g.deck1 ELSE g.deck0 END AS opp_deck, d.turn, d.pile, d.pile_size,
        d.pile[1] AS card1, d.pile[2] AS card2, d.pile[3] AS card3, d.pile[4] AS card4, d.pile[5] AS card5,
        d.oracle, d.oracle_in_pile, d.oracle_in_hand, d.oracle_where,
@@ -557,30 +859,30 @@ SELECT d.game_id, d.iter, d.idx, d.caster, CASE d.caster WHEN 0 THEN g.deck0 ELS
             WHEN d.oracle = 'not_findable' THEN 'not_findable' ELSE 'missed' END AS oracle_place,
        (d.oracle = 'forced') AS forced, d.ff_drawn, g.forced_find_p, d.life, d.hand, d.choices,
        (g.winner = d.caster) AS won, CASE WHEN g.winner = d.caster THEN g.method END AS win_method, g.method, g.turns
-FROM doomsday d JOIN games g USING (game_id, iter);
+FROM doomsday d JOIN games g USING (game_id);
 
 CREATE OR REPLACE VIEW doomsday_pile_cards AS
-SELECT p.game_id, p.iter, p.idx, p.caster, p.caster_deck, p.opp_deck, p.oracle, p.forced, p.won, p.win_method,
+SELECT p.game_id, p.iter, p.kind, p.idx, p.caster, p.caster_deck, p.opp_deck, p.oracle, p.forced, p.won, p.win_method,
        u.pos, u.card
 FROM doomsday_piles p, UNNEST(p.pile) WITH ORDINALITY AS u(card, pos);
 
 CREATE OR REPLACE VIEW casts AS
-SELECT e.game_id, e.iter, e.seq, e.turn, e.step, e.player, e.card, e.from_zone AS cast_from,
+SELECT e.game_id, e.iter, g.kind, e.seq, e.turn, e.step, e.player, e.card, e.from_zone AS cast_from,
        CASE e.player WHEN 0 THEN g.deck0 ELSE g.deck1 END AS deck, CASE e.player WHEN 0 THEN g.deck1 ELSE g.deck0 END AS opp_deck,
        (g.winner = e.player) AS won
-FROM events e JOIN games g USING (game_id, iter) WHERE e.type = 'cast';
+FROM events e JOIN games g USING (game_id) WHERE e.type = 'cast';
 
 CREATE OR REPLACE VIEW show_and_tell AS
-SELECT s.game_id, s.iter, s.idx, s.caster, CASE s.caster WHEN 0 THEN g.deck0 ELSE g.deck1 END AS caster_deck,
+SELECT s.game_id, s.iter, g.kind, s.idx, s.caster, CASE s.caster WHEN 0 THEN g.deck0 ELSE g.deck1 END AS caster_deck,
        CASE s.caster WHEN 0 THEN g.deck1 ELSE g.deck0 END AS opp_deck, s.turn, s.put_caster, s.put_opponent,
        s.put_caster[1] AS caster_pick, s.put_opponent[1] AS opponent_pick, (g.winner = s.caster) AS won, g.method
-FROM shows s JOIN games g USING (game_id, iter);
+FROM shows s JOIN games g USING (game_id);
 
 CREATE OR REPLACE VIEW sneak_attack AS
-SELECT s.game_id, s.iter, s.idx, s.player, CASE s.player WHEN 0 THEN g.deck0 ELSE g.deck1 END AS deck, s.turn,
+SELECT s.game_id, s.iter, g.kind, s.idx, s.player, CASE s.player WHEN 0 THEN g.deck0 ELSE g.deck1 END AS deck, s.turn,
        (SELECT list(e.card) FROM entered e WHERE e.game_id = s.game_id AND e.player = s.player AND e.how = 'sneak'
           AND e.turn = s.turn) AS sneaked_in, (g.winner = s.player) AS won, g.method
-FROM sneak s JOIN games g USING (game_id, iter);
+FROM sneak s JOIN games g USING (game_id);
 """
 
 
@@ -588,10 +890,13 @@ def connect(db):
     import duckdb
     con = duckdb.connect()
     for t in TABLES:
-        files = glob.glob(os.path.join(db, t, 'iter=*', '*.parquet'))
+        files = glob.glob(os.path.join(db, t, '*=*', '*.parquet'))
         if files:
-            pat = os.path.join(db, t, 'iter=*', '*.parquet').replace('\\', '/')
-            con.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet('{pat}', hive_partitioning = false)")
+            # (every unit's partition - iter=NNNN, m=<kind>.<sub>, r=publisher -; union_by_name: a later checkout's
+            # columns read as NULL in an earlier one's files)
+            pat = os.path.join(db, t, '*=*', '*.parquet').replace('\\', '/')
+            con.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet('{pat}', hive_partitioning = false, "
+                        f"union_by_name = true)")
         else:
             con.register(f'_{t}_empty', schemas()[t].empty_table())
             con.execute(f'CREATE VIEW {t} AS SELECT * FROM _{t}_empty')
@@ -643,13 +948,13 @@ WITH r AS (
          count(*) FILTER (WHERE oracle = 'missed') AS missed,
          count(*) FILTER (WHERE ff_drawn IS NOT TRUE) AS undrawn,
          count(*) FILTER (WHERE ff_drawn IS NOT TRUE AND oracle = 'voluntary') AS undrawn_own_pile
-  FROM doomsday_piles WHERE caster_deck = $deck AND iter >= $since GROUP BY ALL),
+  FROM doomsday_piles WHERE kind = 'selfplay' AND caster_deck = $deck AND iter >= $since GROUP BY ALL),
 g AS (
   SELECT iter, {opp} AS opp_deck, count(*) AS games, count(*) FILTER (WHERE detailed) AS detailed_games,
          count(*) FILTER (WHERE outcome = 'win') AS wins,
          count(*) FILTER (WHERE outcome = 'win' AND method = 'oracle') AS oracle_wins
   FROM game_results JOIN (SELECT game_id, detailed FROM games) USING (game_id)
-  WHERE deck = $deck AND iter >= $since GROUP BY ALL)
+  WHERE kind = 'selfplay' AND deck = $deck AND iter >= $since GROUP BY ALL)
 SELECT g.iter, g.opp_deck, g.games, g.detailed_games, g.wins, g.oracle_wins,
        coalesce(r.resolutions, 0) AS resolutions, coalesce(r.own_pile, 0) AS own_pile, coalesce(r.forced, 0) AS forced,
        coalesce(r.in_hand, 0) AS in_hand, coalesce(r.not_findable, 0) AS not_findable, coalesce(r.missed, 0) AS missed,
@@ -753,10 +1058,23 @@ def status(run, db=None):
         tot = {k: sum(st['iterations'][str(i)].get(k) or 0 for i in its) for k in ('games', 'detailed', 'events', 'bytes', 'cpu_s')}
         say(f'  {tot["games"]} games ({tot["detailed"]} detailed), {tot["events"]} events, {tot["bytes"] / 1e6:.1f} MB, '
             f'{tot["cpu_s"]:.0f} CPU-s ingesting ({tot["cpu_s"] / max(1, tot["games"]) * 1000:.1f} ms a game)')
+    by = collections.Counter()
+    games = collections.Counter()
+    for v in st.get('units', {}).values():
+        by[v.get('kind')] += 1
+        games[v.get('kind')] += v.get('games') or 0
+    for k in sorted(by, key=str):
+        say(f'  {k}: {games[k]} games in {by[k]} file(s)')
     if run and os.path.isdir(os.path.join(run, 'records')):
         from zero import gamerec as GR
         pend = [it for it in GR.done_iterations(run) if str(it) not in st['iterations']]
-        say(f'  records waiting: {len(pend)} iteration(s)' + (f' ({pend[0]}-{pend[-1]})' if pend else ''))
+        say(f'  records waiting: {len(pend)} self-play iteration(s)' + (f' ({pend[0]}-{pend[-1]})' if pend else ''))
+        other = [k for k, w, _ in units(run) if w == 'match' and k not in st.get('units', {})]
+        say(f'  other records waiting: {len(other)} file(s)')
+        raw = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(os.path.join(run, 'records')) for f in fs)
+        say(f'  raw records on disk: {raw / 1e6:.1f} MB (kept: prune --delete-raw removes self-play iterations only)')
+    for line in refused_summary(st):
+        say('  ' + line)
 
 
 # ====================================================================================== bench
@@ -848,8 +1166,16 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('ingest')
-    p.add_argument('run')
+    p.add_argument('run', nargs='?', default=None, help='a run directory (or none with --records)')
     p.add_argument('--db', default=None)
+    p.add_argument('--records', default=None, help='a records directory of its own (a standalone tool\'s --records; '
+                   'default: the run\'s records/)')
+    p.add_argument('--replays', default=None, help='the publisher\'s replays directory (default: the run\'s replays/)')
+    p.add_argument('--engine-checkout', default=None, metavar='PATH',
+                   help='a checkout of another engine (built): its gamedb ingests the units of its engine refused here')
+    p.add_argument('--allow-unidentified', action='store_true',
+                   help='ingest records without an engine id (from a checkout of the engine that played them)')
+    p.add_argument('--only-engine', default=None, help=argparse.SUPPRESS)
     p.add_argument('--sample', type=float, default=1.0, help='share of the games replayed full (events, combo tables)')
     p.add_argument('--jobs', type=int, default=1)
     p.add_argument('--iters', default=None, help='A-B (inclusive) or N')
@@ -892,17 +1218,28 @@ def main(argv=None):
     d.add_argument('--since', type=int, default=0)
     d.add_argument('--by-opponent', action='store_true')
     d.add_argument('--deck', default='doomsday_8027957')
+    sub.add_parser('engine', help="this checkout's engine identity (JSON: the commits and the engine id)")
     c = sub.add_parser('import-combo')
     c.add_argument('out_run')
     c.add_argument('files', nargs='+')
     c.add_argument('--iter', type=int, default=1)
     a = ap.parse_args(argv)
-    if a.cmd == 'ingest':
+    if a.cmd == 'engine':
+        print(json.dumps(my_build()))
+    elif a.cmd == 'ingest':
         while True:
             # (following: a timestamp on each line, the idle polls' "nothing new" left out)
             quiet = lambda m: None if 'nothing new' in m else say(time.strftime('%H:%M:%S ') + m)  # noqa: E731
-            ingest(a.run, a.db, a.sample, a.jobs, parse_iters(a.iters), a.redo, a.chunk, log=quiet if a.follow else say)
+            st = ingest(a.run, a.db, a.sample, a.jobs, parse_iters(a.iters), a.redo, a.chunk,
+                        log=quiet if a.follow else say, records=a.records, replays=a.replays,
+                        allow_unidentified=a.allow_unidentified, only_engine=a.only_engine,
+                        engine_checkout=a.engine_checkout)
             if not a.follow:
+                left = [] if a.only_engine else refused_summary(st)
+                for line in left:
+                    say(line)
+                if left:
+                    sys.exit(3)                    # (refused units: loudly, docs/gamedb.md "The engine")
                 break
             a.redo = False
             time.sleep(a.follow)

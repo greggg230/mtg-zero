@@ -736,6 +736,44 @@ def bo1_precision(cfg):
     return str(cfg.get('infer_precision') or 'fp32').lower()
 
 
+def records_dir(run, cfg):
+    """The run's game records directory when it keeps its games (zero-core's run setting `game_records`, docs/gamedb.md):
+    every yardstick game is then a record under <run>/records/<kind>/ (kinds bo1, cells, cells_gen, cells_base); else
+    None (nothing written, the games of before)."""
+    return os.path.join(run, 'records') if (cfg or {}).get('game_records') else None
+
+
+def _sink(records, kind, it, a_label, b_label, meta=None):
+    """A measurement's game records writer (zero.gamerec.MatchSink: A and B as zero.h2h's sides), None without
+    `records`."""
+    if not records:
+        return None
+    from zero import gamerec as GR
+    return GR.MatchSink(records, kind, it=it, labels={'a': a_label, 'b': b_label}, meta=meta)
+
+
+def _ck_label(it, ck):
+    from zero import gamerec as GR
+    return f'iter_{int(it):04d}' if it is not None else GR.ckpt_id(ck)
+
+
+def _farm_records(sink, rows, spec, a, b, sims, rule, meta=None):
+    """A farm play job's traced rows (each with its game's record: eval_trace, mtgz.az.farm_campaign) -> the sink's
+    records, A (`a`) in seat gid % 2 as the job's seats [net 1, net 2] put it (a baseline: both the reference)."""
+    if sink is None:
+        return
+    from zero import gamerec as GR
+    pa = GR.net_player(a, sink.labels.get('a'), {'sims': sims}, rule)
+    pb = GR.net_player(b, sink.labels.get('b'), {'sims': sims}, rule)
+    items = []
+    for r in rows:
+        if not isinstance(r.get('rec'), dict):
+            raise RuntimeError(f'{sink.kind} (farm): game {r.get("gid")} has no record (eval_trace off?): not recorded')
+        items.append(GR.from_trace(r['rec'], spec, sink.kind, [pa, pb] if int(r['gid']) % 2 == 0 else [pb, pa], sink.it,
+                                   'farm'))
+    sink.add(items, meta)
+
+
 def measure_bo1(run, it, opp, cfg=None, ys=None):
     """One best-of-one head-to-head: the run's checkpoint `it` against the opponent named `opp` -> the result row
     (played where bo1_backend says: here, or a farm play job with the same numbers)."""
@@ -751,6 +789,14 @@ def measure_bo1(run, it, opp, cfg=None, ys=None):
             raise FileNotFoundError(p)
     if bo1_backend(run, cfg, ys, o) == 'farm':
         return measure_bo1_farm(run, it, o, cfg, ys)
+    from zero import gamerec as GR
+    sink = _sink(records_dir(run, cfg), 'bo1', it, _ck_label(it, ck), o['name'], {'opp': opp})
+    with GR.recording(sink):
+        return _measure_bo1_local(run, it, opp, o, ck, cfg, ys)
+
+
+def _measure_bo1_local(run, it, opp, o, ck, cfg, ys):
+    from zero import h2h
     spec = bo1_spec(cfg, ys)
     seat = bo1_seat(ck)
     t0 = time.time()
@@ -812,6 +858,12 @@ def measure_bo1_farm(run, it, o, cfg, ys, client=None, opts=None, log=None):
     out = res['readout']
     if out is None or out.get('games') != ys['bo1_games']:
         raise RuntimeError(f"best-of-one {it} vs {o['name']} (farm): {out and out.get('games')} games of {ys['bo1_games']}")
+    sink = _sink(records_dir(run, cfg), 'bo1', it, _ck_label(it, ck), o['name'], {'opp': o['name']})
+    if sink is not None:
+        # (game records, docs/gamedb.md: the job's traced games, A = net 1 in seat gid % 2)
+        _farm_records(sink, sorted(C.games(d), key=lambda r: r['gid']), spec, ck, o['path'], ys['bo1_sims'],
+                      h2h._tag(C.match_seat(ck, ys['bo1_sims'], rule)),
+                      {'driver_seed': int(ys['bo1_seed']), 'paired': True, 'backend': 'farm'})
     pairs = out.get('pairs') or {}
     return {'kind': 'bo1', 'iter': int(it), 'opp': o['name'], 'opp_label': o['label'], 'opp_sha': sha12(o['path']),
             'score': out['a_score'], 'se': out['se'], 'elo_diff': out.get('elo_diff'), 'elo_se': out.get('elo_se'),
@@ -1463,15 +1515,17 @@ def play_pair_local(a, b, pair, games, ys, seat, log=print, stop=None):
     'select'}. Sequential cells (cells_target_se, docs/ENGINE.md 182): the specs in batches (batch k of each seeded
     its seed + 7919 k, game ids following on), `stop(results)` asked after each batch (None: every batch, a
     baseline's) -> also 'batches', 'stop'."""
-    from zero import h2h
+    from zero import gamerec as GR, h2h
     out = {'results': {}, 'unfinished': 0, 'select': None}
     if cells_sequential(ys):
         return _play_pair_batches(a, b, pair, games, ys, seat, log, stop)
+    sink = GR.active()
     for j in pair_jobs(pair, games, ys):
         t0 = time.time()
-        m = h2h.match(a, b, j['games'], ys['cells_sims'], seed=j['seed'], threads=ys['bo1_threads'],
-                      groups=ys['bo1_groups'], device=ys['cells_device'], spec=j['spec'], seat_a=dict(seat),
-                      seat_b=dict(seat), paired=False, rows=True, sparse=bool(ys['sparse']))
+        with GR.recording(sink.with_meta(pair=list(pair), chooser=j['chooser']) if sink is not None else None):
+            m = h2h.match(a, b, j['games'], ys['cells_sims'], seed=j['seed'], threads=ys['bo1_threads'],
+                          groups=ys['bo1_groups'], device=ys['cells_device'], spec=j['spec'], seat_a=dict(seat),
+                          seat_b=dict(seat), paired=False, rows=True, sparse=bool(ys['sparse']))
         rows = m['rows']
         if [r['gid'] for r in rows] != list(range(j['games'])):
             raise RuntimeError(f"cells {pair} chooser {j['chooser']}: {len(rows)} games of {j['games']}")
@@ -1484,7 +1538,8 @@ def play_pair_local(a, b, pair, games, ys, seat, log=print, stop=None):
 
 
 def _play_pair_batches(a, b, pair, games, ys, seat, log, stop):
-    from zero import h2h
+    from zero import gamerec as GR, h2h
+    sink = GR.active()
     jobs = pair_jobs(pair, games, ys)
     per = batch_games(pair, ys)
     nb = jobs[0]['games'] // per
@@ -1493,9 +1548,11 @@ def _play_pair_batches(a, b, pair, games, ys, seat, log, stop):
     t0 = time.time()
     for k in range(nb):
         for j in jobs:
-            m = h2h.match(a, b, per, ys['cells_sims'], seed=j['seed'] + SEQ_SEED * k, threads=ys['bo1_threads'],
-                          groups=ys['bo1_groups'], device=ys['cells_device'], spec=j['spec'], seat_a=dict(seat),
-                          seat_b=dict(seat), paired=False, rows=True, sparse=bool(ys['sparse']))
+            with GR.recording(sink.with_meta(pair=list(pair), chooser=j['chooser'], batch=k, gid_offset=k * per)
+                              if sink is not None else None):
+                m = h2h.match(a, b, per, ys['cells_sims'], seed=j['seed'] + SEQ_SEED * k, threads=ys['bo1_threads'],
+                              groups=ys['bo1_groups'], device=ys['cells_device'], spec=j['spec'], seat_a=dict(seat),
+                              seat_b=dict(seat), paired=False, rows=True, sparse=bool(ys['sparse']))
             rows = m['rows']
             if [r['gid'] for r in rows] != list(range(per)):
                 raise RuntimeError(f"cells {pair} chooser {j['chooser']} batch {k}: {len(rows)} games of {per}")
@@ -1519,7 +1576,7 @@ def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, cli
     it), its games traced, spot-replayed here, the missing ones played here after bo1_farm_wait_s. A baseline (`a` is
     `b`): self seats [net 1, net 1] of the reference. -> play_pair_local's dict + 'farm' {chooser: digest, spot,
     local}."""
-    from zero import farm_eval as FE, h2h
+    from zero import farm_eval as FE, gamerec as GR, h2h
     from . import farm_campaign as C
     pool = C.run_pool(cfg)
     if pool is None:
@@ -1542,6 +1599,11 @@ def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, cli
         FE.a_seat_of(rows, {'net': 1})
         if [r['gid'] for r in rows] != list(range(j['games'])):
             raise RuntimeError(f"cells {pair} chooser {j['chooser']} (farm): {len(rows)} games of {j['games']}")
+        # (game records, docs/gamedb.md: the job's traced games under the measurement's sink, A = net 1 in seat gid % 2)
+        _farm_records(GR.active(), rows, j['spec'], a, b, ys['cells_sims'],
+                      h2h._tag(C.match_seat(rule_ck, ys['cells_sims'], rule)),
+                      {'pair': list(pair), 'chooser': j['chooser'], 'driver_seed': int(j['seed']), 'paired': False,
+                       'backend': 'farm'})
         out['results'][str(j['chooser'])] = [float(r['result'][r['gid'] % 2]) for r in rows]
         out['unfinished'] += sum(1 for r in rows if not r.get('over'))
         out['select'] = h2h._tag(C.match_seat(rule_ck, ys['cells_sims'], rule))
@@ -1568,9 +1630,10 @@ def _spec_sha(pair, games, ys):
     return hashlib.sha256('\n'.join(j['spec'] for j in pair_jobs(pair, games, ys)).encode()).hexdigest()[:12]
 
 
-def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print):
+def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print, records=None):
     """A pair's baseline (the reference against itself, the two specs and seeds), from the cache or played and
-    cached -> its 'cells_base' row."""
+    cached -> its 'cells_base' row. `records`: the game records directory (docs/gamedb.md; kind 'cells_base': the
+    games played, none for a cached baseline), None: no records."""
     if pair[0] == pair[1]:
         raise ValueError(f'cells: a mirror ({pair[0]}) has no baseline games (0.5 exactly)')
     key, kd = base_key(ref, pair, games, ys, seat)
@@ -1578,7 +1641,9 @@ def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', 
     t0 = time.time()
     cached = data is not None
     if data is None:
-        p = _play(backend, ref, ref, pair, games, ys, seat, farm, log)
+        from zero import gamerec as GR
+        with GR.recording(_sink(records, 'cells_base', None, label, label, {'ref': label})):
+            p = _play(backend, ref, ref, pair, games, ys, seat, farm, log)
         data = dict(kd, key=key, results={c: res_code(r) for c, r in p['results'].items()},
                     unfinished=p['unfinished'], select=p['select'], backend=backend,
                     seconds=round(time.time() - t0, 1), time=round(time.time()))
@@ -1596,11 +1661,12 @@ def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', 
 
 
 def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print,
-                       base_games=None, role=None):
+                       base_games=None, role=None, records=None):
     """Checkpoint `ck` against reference `ref` in the pair's cells (its baseline from the cache; none for a mirror)
     -> the 'cells' / 'cells_gen' row. The pool mode (docs/ENGINE.md 186): `games` a share of the pair's, against the
     baseline of `base_games` (the reference's one baseline, cells_games: its first game ids are these games' seeds)
-    cut to the same first units; `role` ('main' | 'cont' | 'gen0') goes in the row."""
+    cut to the same first units; `role` ('main' | 'cont' | 'gen0') goes in the row. `records`: the game records
+    directory (docs/gamedb.md: kind `kind`), None: no records."""
     for p in (ck, ref):
         if not os.path.exists(p):
             raise FileNotFoundError(p)
@@ -1624,7 +1690,9 @@ def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, ba
             bs = cell_units(pair, _prefix(bres, n)) if bres is not None else None
             return all(cell_stats(u, bs[c] if bs is not None else None, boot=0)['se'] <= target for c, u in us.items())
     t0 = time.time()
-    p = _play(backend, ck, ref, pair, games, ys, seat, farm, log, stop=stop)
+    from zero import gamerec as GR
+    with GR.recording(_sink(records, kind, it, _ck_label(it, ck), label, {'ref': label, **({'role': role} if role else {})})):
+        p = _play(backend, ck, ref, pair, games, ys, seat, farm, log, stop=stop)
     units = cell_units(pair, {int(c): r for c, r in p['results'].items()})
     if bres is not None:                        # (the baseline's same first units: all of them unless stopped early)
         bunits = cell_units(pair, _prefix(bres, len(p['results']['0'])))
@@ -1665,7 +1733,7 @@ def measure_cells(run, it, label, pair, cfg=None, ys=None, kind='cells', log=pri
     ck = model_path(run, it)
     return measure_cells_core(kind, ck, int(it), ref, label, pair, games, ys, cells_seat(run), cache_dir(run, ys),
                               backend, _farm(run, cfg, ck, kind, it, ref, pair, games, ys), log, base_games=full,
-                              role=role)
+                              role=role, records=records_dir(run, cfg))
 
 
 def measure_cells_base(run, label, pair, games, cfg=None, ys=None, log=print):
@@ -1677,22 +1745,26 @@ def measure_cells_base(run, label, pair, games, cfg=None, ys=None, log=print):
         raise FileNotFoundError(ref)
     backend = cells_backend(run, cfg, ys, ref)
     return measure_base_core(ref, label, pair, int(games), ys, cells_seat(run), cache_dir(run, ys), backend,
-                             _farm(run, cfg, model_path(run, 0), 'cells_base', None, ref, pair, games, ys), log)
+                             _farm(run, cfg, model_path(run, 0), 'cells_base', None, ref, pair, games, ys), log,
+                             records=records_dir(run, cfg))
 
 
-def measure_cells_standalone(ck, ref, ys, cdir, label='ref', seat=None, rows_out=None, log=print, kind='cells'):
+def measure_cells_standalone(ck, ref, ys, cdir, label='ref', seat=None, rows_out=None, log=print, kind='cells',
+                             records=None):
     """Every pair's cells of checkpoint `ck` against `ref` outside a run's watcher (local games; the baselines from
     / into `cdir`): `seat` (default: bo1_seat of `ck` - its run's rule) -> (rows, summary). Each row is also appended
-    to `rows_out` (a JSONL file) as it lands."""
+    to `rows_out` (a JSONL file) as it lands. `records`: a game records directory (docs/gamedb.md: every game played
+    under <records>/cells/misc/ and <records>/cells_base/misc/), None: none."""
     seat = dict(seat) if seat is not None else bo1_seat(ck)
     rows, cells = [], {}
     games = ys['cells_games'] or ys['cells_gen_games']
     for pair in cell_pairs(ys):
         todo = []
         if pair[0] != pair[1]:
-            todo.append(lambda pair=pair: measure_base_core(ref, label, pair, games, ys, seat, cdir, log=log))
+            todo.append(lambda pair=pair: measure_base_core(ref, label, pair, games, ys, seat, cdir, log=log,
+                                                            records=records))
         todo.append(lambda pair=pair: measure_cells_core(kind, ck, None, ref, label, pair, games, ys, seat, cdir,
-                                                         log=log))
+                                                         log=log, records=records))
         for f in todo:
             r = f()
             rows.append(r)
