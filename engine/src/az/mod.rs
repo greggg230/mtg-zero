@@ -464,6 +464,14 @@ pub fn needs_layout_v7(d: &crate::db::CardDef) -> Option<String> {
 }
 
 impl MtgSpec {
+    /// Why replaying a game of this spec depends on the platform's libm (`SearchGame::libm_replay`, docs/ENGINE.md
+    /// 197): a sealed seat built by the deck builder. Everything else the engine decides from a seed and the moves is
+    /// integer or exactly rounded arithmetic (the search's libm - noise, the prior's softmax, the deck tilt's weights,
+    /// the belief's powers - only steers which moves are played).
+    pub fn libm_replay(&self) -> Option<String> {
+        self.sealed.as_deref().and_then(|s| s.libm_replay())
+    }
+
     pub fn parse(json: &str) -> Result<MtgSpec, String> {
         let mut s = MtgSpec::default();
         if json.trim().is_empty() {
@@ -1573,6 +1581,10 @@ impl SearchGame for MtgAz {
     /// record carries and its replay compares (zero-core docs/search.md 2.17, ENGINE.md 114.7) - a sealed deck is
     /// built from the seed by a builder that calls the platform's libm, so a record of a deck another machine
     /// built differently is refused, never trained on.
+    fn libm_replay(spec: &MtgSpec) -> Option<String> {
+        spec.libm_replay()
+    }
+
     fn record_setup(&self) -> String {
         let decks: Vec<Vec<DefId>> = (0..2).map(|p| self.m.deck(p as crate::ids::PlayerId)).collect();
         // (a metagame's pairing, ENGINE.md 176: the record says which cell the game was; no key for any other spec)

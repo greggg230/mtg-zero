@@ -287,6 +287,21 @@ fn names(db: &CardDb, ids: &[DefId]) -> Value {
 }
 
 impl SealedSpec {
+    /// Why a game of this spec depends on the platform's libm, else None (zero-farm PROTOCOL.md 11.4, zero-core
+    /// docs/az.md 62, docs/ENGINE.md 197): a seat built from a pool (generated or given) is built by `builder`, whose
+    /// weights are `f64::powf` and `exp` (and a deck choice by an evaluator scores and draws with `exp`), so another
+    /// platform's C runtime can build another deck from the same seed - its records then fail the replay's deck check
+    /// (`record_setup`). Given decks are played as they are.
+    pub fn libm_replay(&self) -> Option<String> {
+        let built: Vec<usize> = (0..2).filter(|&p| !matches!(self.seats[p], SeatSource::Build { .. })).collect();
+        (!built.is_empty()).then(|| {
+            format!(
+                "sealed: seat(s) {built:?} built from a pool by the sealed deck builder (f64 powf / exp: engine::az::sealed::builder{})",
+                if self.deck_choice.is_some() { "; the deck choice" } else { "" }
+            )
+        })
+    }
+
     /// Parse the spec's `"sealed"` object (module docs).
     pub fn parse(v: &Value) -> Result<SealedSpec, String> {
         let db = db();
