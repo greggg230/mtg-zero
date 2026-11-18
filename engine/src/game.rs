@@ -985,6 +985,9 @@ pub struct Game {
     /// sorted; set by the match. `None`: open decklists.
     pub(crate) known_pools: [Option<std::sync::Arc<[DefId]>>; 2],
     pub(crate) log: Option<Vec<String>>,
+    /// The log's length when the last `apply` began (ENGINE.md 189): the spectator view exports every line from
+    /// there on, so consecutive exported states carry the whole play-by-play. Read only by the view.
+    pub(crate) log_mark: usize,
 }
 
 /// `Game::seen`: some card of the game has ascend; an ability discount
@@ -1401,6 +1404,7 @@ impl Game {
             entering_cast: false,
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
+            log_mark: 0,
         }
     }
 
@@ -1577,6 +1581,11 @@ impl Game {
     }
     pub fn log_lines(&self) -> &[String] {
         self.log.as_deref().unwrap_or(&[])
+    }
+    /// The log's length when the last decision's answer began to run (`apply`; 0 before the first): the lines from
+    /// there on are what that answer wrote (ENGINE.md 189).
+    pub fn log_mark(&self) -> usize {
+        self.log_mark.min(self.log_lines().len())
     }
     pub fn def_of(&self, idx: CardIdx) -> &'static CardDef {
         self.db.def(self.objs[idx.i()].def)

@@ -326,8 +326,9 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
         k = nxt['log_n'] - st['log_n']
         lines = nxt['log'][-k:] if k > 0 else []
         if k > len(nxt['log']):
-            # (a step that wrote more lines than the exported tail - a resolving Doomsday exiling a library: the
-            # oldest are gone, as for combo_stats; an event says how many)
+            # (a step whose lines the next state does not all carry: never since the engine exports every line a step
+            # writes, ENGINE.md 189 - before it a state carried its newest 40 and a resolving Doomsday's oldest exile
+            # lines were lost. Kept as a check: an event says how many, as combo_stats marks them)
             lost += k - len(nxt['log'])
             lines = ['(log lines lost)'] + lines
             events.append((len(events), i, nxt.get('turn'), nxt.get('step'), None, 'lines_lost', None, None, None,

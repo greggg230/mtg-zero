@@ -38487,7 +38487,7 @@ with each state (`view.rs` LOG_TAIL), and a resolving Doomsday exiles the rest o
 one step (~50 lines), so that step's oldest lines - exile moves - are not in `events` (`games.lines_lost`, a
 `lines_lost` event with the count: 2,735 lines in the probe's 1,200 games, ~6 a real self-play game). `combo_stats`
 reads the same tail (its "(log lines lost)"); the `doomsday` rows come from the state, not the lines. Exporting the whole
-step's lines would be an engine (view) change: left for a later branch if the exile moves are ever wanted.
+step's lines would be an engine (view) change: left for a later branch if the exile moves are ever wanted. (Done: section 189 - the view now carries every line a step writes; `lines_lost` is 0.)
 
 ### 187.4 Measured
 
@@ -38560,3 +38560,59 @@ Recording rides a restart: the run's code (its pinned worktree, the Mac's eval c
   game before the quota filled; it passed alone, and the gate on 02e2faf0 passed it.)
 * By hand: farm compat with `--set game_records=1` (both gates identical), `tools/farm_gates.py` with the live run's
   build, config and iteration-156 checkpoint and `--set game_records=1` (passed), the smoke on / off (187.3).
+
+## 189. The spectator view exports every play-by-play line of a step (branch `fix/full-log-export`, 2026-11-17)
+
+The user's call after 187.3's limit: make the exported play-by-play lossless.
+
+### 189.1 The gap
+
+`export_state`'s view (`az/view.rs`, spec `"log": true`) carried the log's newest 40 lines (`LOG_TAIL`) and its length
+`log_n`; every reader (the replay viewer on delverai, `mtgz/az/replays.py`'s recordings, `tools/gamedb.py`,
+`tools/combo_stats.py`, `tools/delver_blunders.py`, `tools/delver_fingerprints.py`) rebuilds the whole log from
+consecutive states: state k's new lines are the last `log_n[k] - log_n[k-1]` of its tail. A step that writes more than
+40 lines lost its oldest: a resolving Doomsday exiles the rest of its caster's library in one step (~50 lines), so ~6
+lines of a real self-play game were missing (`games.lines_lost`: 2,735 in the three-deck probe's 1,200 games, 187.3).
+
+### 189.2 The fix
+
+`Game::log_mark` (a new field, `log_mark()`): the log's length when the last `apply` began, set at the top of
+`Game::apply` (0 before the first answer, and in a new game of a match: a new `Game`). The view's tail starts at
+`min(log_n - 40, log_mark)`: every line the last answer wrote, however many, and at least the newest 40 as before. The
+shape is unchanged (`VIEW_VERSION` 1, `log` still the log's last lines ending at `log_n`), so every reader's rebuild
+works as it was and is now gap-free when consecutive states are consecutive steps - which they are for the replay
+recorder (zero-core `replay.py` stores the state before every step, forced ones included; an unchanged state is stored
+once, and an unchanged state wrote no line), gamedb's full replay and combo_stats (both export after every step). A
+state is longer only where a step wrote more than 40 lines. View only: nothing in play, the encodings or the search
+reads `log_mark` (`public_state.rs`: Derived; `describe` lists it as not described).
+
+### 189.3 Tests
+
+`engine/tests/view.rs`: `every_state_of_mirror_games` now checks each state's tail length is
+`max(min(log_n, 40), log_n - previous log_n)` and that the log rebuilt from the states equals the game's whole log
+(`rebuild`; six heuristic / random Delver mirror games); `a_step_that_writes_more_than_forty_lines_exports_all_of_them`
+(new): Doomsday resolving over a 50-card library, every decision answered and exported, one step writes more than 40
+lines, and the rebuilt log equals `Game::log_lines`. `exporting_and_the_log_change_nothing` unchanged.
+
+### 189.4 The game database and combo_stats
+
+No code change was needed: both read `log_n` and the tail as before, and their `lines_lost` / "(log lines lost)" paths
+stay as a check (comments and `docs/gamedb.md` updated: 0 since this section). Re-validated with this branch's engine
+(the scripts of 187.3):
+
+* **the three-deck probe's 1,200 games** (`import-combo` of the probe's games files, `ingest --sample 1.0`, a fresh
+  `combo_stats.py scan` of the same files): **no per-field difference** in 1,200 games, every view total equal (324
+  resolved Doomsdays: in_hand 83, missed 175, not_findable 58, voluntary 8; 8 Oracle piles; 69 caster wins after a
+  resolution; 411 Show and Tells; wins combat 774, damage 129, pact 114, decking 96, oracle 20). `lines_lost` 2,735 ->
+  **0** (186 games had a loss); the 204 `lines_lost` events are gone and the lines are back: events 472,590 -> 475,121
+  (+2,531 = 2,735 - 204), of them moves +2,660 (to exile **+2,625**, to the battlefield +35), other +71, damage +2,
+  trigger +2.
+* **the wheel's 600 self-play records** (`validate_records.py`): 88 resolutions, no difference; `lines_lost` 1,133 -> 0,
+  events +1,133 (exile moves +1,098).
+* **the 64 real self-play records** (iteration-156 network): 26 resolutions, no difference; `lines_lost` 402 -> 0,
+  events +402 (all exile moves).
+
+### 189.5 Digests, farm
+
+Behaviour digests unchanged (the view is read by nothing in play; the gates below). The release worker plays and
+records exactly as before (self-play runs with the log off, and nothing it plays reads the view); farm compat runs in the engine tier.

@@ -1,7 +1,8 @@
 //! A spectator's view of a game (zero-core `export_state`, its docs/replays.md): the replay
 //! recorder stores it at every step and the replay viewer (delverai.greggg230.com) draws the
 //! board from it. Everything is shown, both hands included (a spectator, not a seat), with the
-//! pending decision's options in words and the tail of the game log (spec `"log": true`).
+//! pending decision's options in words and the game log's newest lines, every line since the last decision
+//! included (spec `"log": true`).
 //!
 //! Read only: nothing in a game depends on it (behaviour digests unchanged).
 
@@ -16,8 +17,11 @@ use serde_json::{json, Value};
 /// Bump when the shape changes (the viewer checks it).
 pub const VIEW_VERSION: u32 = 1;
 
-/// Log lines carried by each exported state (the viewer rebuilds the whole log from the
-/// consecutive states' tails and `log_n`).
+/// Each exported state carries the log's newest lines (`log`, ending at line `log_n`): every line the last
+/// decision's answer wrote (`Game::log_mark`, however many: a resolving Doomsday exiles a library in one step), and
+/// at least the newest `LOG_TAIL`. So consecutive states' tails cover the whole log without a gap (ENGINE.md 189;
+/// before, at most 40 lines a state, and a step that wrote more lost its oldest). A reader rebuilds the log as before:
+/// state k's new lines are the last `log_n[k] - log_n[k-1]` of its tail.
 const LOG_TAIL: usize = 40;
 
 pub(crate) const KWS: [(Kw, &str); 22] = [
@@ -464,7 +468,7 @@ impl Game {
     pub fn spectator_view(&self) -> Value {
         let t = self.turn();
         let log = self.log_lines();
-        let tail = &log[log.len().saturating_sub(LOG_TAIL)..];
+        let tail = &log[log.len().saturating_sub(LOG_TAIL).min(self.log_mark())..];
         let mut v = json!({
             "v": VIEW_VERSION,
             "turn": t.number,
