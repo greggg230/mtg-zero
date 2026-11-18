@@ -39712,6 +39712,69 @@ half. Not reproduced through the yardstick's path: gen0 against iteration 496 of
 read 0.5 exactly: tiny random networks hit the 60-turn cap in every game of both mirrors (a draw, [0.5, 0.5]); that
 script's games are worth checking for `rounds` = 60.
 
-MEASUREMENTS
+Gate: `python tools/gate.py python` on eb5189d6 (the code of this section): **GATE PASSED WITH SKIPS python eb5189d62dd9 in 503s** (skipped: one live-run-hazard test fenced off; pytest 222 + 121 + 123 + 121 on the Mac, 46 on the desktop, the mtg-smoke loop); `tests/test_cells_mac.py` also passed on the Mac by hand.
 
-SWITCH
+### 198.4 Measured (2026-11-18, on a scratch copy of `legacy-meta3-r1`; the run itself untouched)
+
+The copy held the run's config.json, generation 0, iterations 256 and 512 and its gen0 Delver/Doomsday baseline (the
+farm's); a hand watcher `--once` with the switch's setting (198.5) at 40 and then 8 games a cell played everything
+due for iteration 512 on the Mac, beside the run's 3 self-play workers on the Mac.
+
+* **The cache key is the run's**: from a checkout of this branch with the run's engine module (the pinned worktree's
+  `_engine.pyd`, engine sha 99b96a587887), the switch's wanted items on the live run name the farm's gen0
+  Delver/Doomsday baseline 73cf0ded6e8c95e5 as done and the farm's in-flight Delver/Sneak one (743f52e3e373ecb1) by its
+  key: neither is played again.
+* **Games**: every baseline and cell measurement landed (rows `backend: mac`, `mac.commit`); the Delver mirror of
+  iteration 512 against gen0 read +89 +- 37 at 40 games (0.70 and 0.55 in its two halves: decisive games, 0 draws);
+  gen0's Delver/Doomsday baseline 1.000 / 0.000 at 40 games (the farm's: 0.99 / 0.0 at 200).
+* **Records**: 4 Mac files of 40 games each in `records/cells_base/misc/`; `tools/gamedb.py ingest` took them (kind
+  cells_base, executor remote, src mac, players gen0 / gen0, 160 games, mean 13.4 turns, 0 draws).
+* **A stopped measurement leaves nothing on the Mac**: the watcher's process tree killed twice mid-match (its 6 and 4
+  ssh processes); the Mac's judge processes were gone within 8 s each time.
+* **The first smoke's failure**: every match ended `exit 255` after printing its result - "Fatal Python error:
+  _enter_buffered_busy: could not acquire lock for <_io.BufferedReader name='<stdin>'> at interpreter shutdown,
+  possibly due to daemon threads": the stdin watcher's daemon thread sat in sys.stdin's buffered read when the
+  interpreter shut down. Fixed: raw reads of the descriptor and `os._exit` once the result is out (a test runs the Mac
+  side with stdin held open).
+* **Throughput** (CPU, 64 sims, the run's cells seat; small matches, so a match's last games run with idle threads):
+  each process ~1.1-1.3 cores at nice 10 (load 14-21 on 16 cores with the self-play); 40-game matches 994-1,172 s and
+  20-game mirror matches 610-650 s: **~115-145 games/h per process**, ~750-850 games/h with 6 processes (part of it
+  beside a gate's pytest on the Mac), ~500-600 with 4. The prior one-off Mac judge (adaptive-budget A/B, 8 processes at
+  ~1.6 cores, 200-game matches) did 3,000 games in 71 min (~320 per process-hour).
+* **Cost to the run's Mac self-play** ("running" leaves/s in the run log, the hours before: 7,100-8,800 mean per hour):
+  6 judges 3,200-4,400; 6 judges and a gate's pytest 1,800-2,900; 4 judges 2,550-2,700. The anchor evaluation of
+  iteration 560 took ~8 min instead of ~5. The Mac's self-play is ~7% of the run's self-play leaves, so judging costs
+  the run ~3-4% of its self-play while it runs.
+
+### 198.5 Switching `legacy-meta3-r1` (live) to the Mac
+
+From a pinned worktree of the merged commit (its `mtgz/_engine.pyd` copied from the run's pinned worktree, so the
+engine sha - and so every cached baseline's key - is the run's), its Mac checkout prepared (`bash tools/mac.sh
+--eval-checkout` there), with a shell where `MTGZ_MAC_HOME` is not exported:
+
+    python tools/launch_hidden.py E:/mtg-zero/runs/legacy-meta3-r1/yardsticks_console.txt \
+      python tools/run_yardsticks.py watch E:/mtg-zero/runs/legacy-meta3-r1 --take-over --yardsticks \
+      '{"bo1_games": 0, "blunders": false, "cells_mode": "pool", "cells_games": 200, "cells_refs": ["iter0"],
+        "cells_gen_games": 200, "cells_gen_every": 256, "cells_every": 256, "cells_device": "cpu",
+        "bo1_threads": 16, "bo1_groups": 4, "timeout_s": 14400, "cells_batch": 40, "from": 512,
+        "bo1_farm_share": 1.0, "cells_backend": "mac"}'
+
+(config.json's setting with the Mac backend and the gen-over-gen cells back on at the cells' cadence: iteration N
+against N - 256.) Per 256 iterations (~5.5 h): 1,800 games against gen0, 1,800 against the checkpoint 256 back and
+1,200 for that checkpoint's 3 baselines - 4,800 games, ~870 games/h; the first window also plays gen0's
+Doomsday/Sneak baseline and, unless the farm finishes it first, its Delver/Sneak one (800).
+
+### 198.6 Open points
+
+* **The Mac cannot carry 4,800 games per 256 iterations beside the run's self-play at a third of its cores.** At the
+  measured ~120-145 games per process-hour (small matches; the 200-game matches should do better), 4 processes give
+  ~500-600 games/h and halve the Mac's self-play; 870 games/h needs ~7 processes. Choices: fewer gen-over-gen games
+  (`cells_gen_games` 100: 3,300 games a window), gen over gen every 512, or more Mac (`cells_mac_jobs` 6-8) with the
+  self-play's cost above. Measured on the run's first window, it decides.
+* **The farm lane is still one measurement at a time.** `lane_parallel` is the hook: a farm setting (campaigns at once)
+  would let the farm backend's straggler tails overlap the same way; not turned on here (the bo1 farm measurements share
+  that lane).
+* **The gate beside a live run**: when 5 Mac steps push a new sha to the Mac's bare repo at once, some pushes fail
+  ("failed to update ref") and those steps fall back to the desktop, where `test_mac_remote::
+  test_the_macs_selfplay_settings` fails because Git Bash converts the exported `MTGZ_MAC_HOME` (main fails the same
+  way through tools/slotd.sh). Rerunning the gate (the sha already pushed) puts them on the Mac.
