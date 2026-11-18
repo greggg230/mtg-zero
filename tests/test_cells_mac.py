@@ -63,13 +63,13 @@ def test_the_switch_setting_is_accepted_and_both_cell_kinds_play_on_the_mac(tmp_
     assert (ys['cells_backend'], ys['cells_mode'], ys['cells_games'], ys['cells_gen_games']) == ('mac', 'pool', 200, 200)
     assert (ys['cells_every'], ys['cells_gen_every'], ys['from'], ys['cells_device']) == (256, 256, 512, 'cpu')
     assert (ys['cells_mac_jobs'], ys['cells_mac_threads'], ys['cells_mac_groups'], ys['cells_mac_torch_threads'],
-            ys['cells_mac_nice']) == (6, 4, 2, 2, 10)
+            ys['cells_mac_nice']) == (4, 4, 2, 2, 10)
     run, cfg = _run(tmp_path, (0, 240, 256, 496, 512, 528), SWITCH)
     w = Y.wanted(run, cfg, ys, settle=0)
     assert {x.get('iter') for x in w} == {None, 512}                     # (from 512, every 256)
     assert {x['lane'] for x in w if x['kind'] != Y.FIT_KIND} == {'mac'}
     assert Y.lanes(run, cfg, ys) == ['fit', 'mac']
-    assert Y.lane_parallel(ys, 'mac') == 3 and Y.lane_parallel(ys, 'farm') == 1 and Y.lane_parallel(ys, 'fit') == 1
+    assert Y.lane_parallel(ys, 'mac') == 2 and Y.lane_parallel(ys, 'farm') == 1 and Y.lane_parallel(ys, 'fit') == 1
     kinds = [(x['kind'], x['ref']) for x in w if x['kind'] != Y.FIT_KIND]
     assert kinds.count(('cells_base', 'gen0')) == 3 and kinds.count(('cells', 'gen0')) == 6
     assert kinds.count(('cells_base', 'iter_0256')) == 3 and kinds.count(('cells_gen', 'iter_0256')) == 6

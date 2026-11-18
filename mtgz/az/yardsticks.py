@@ -84,7 +84,7 @@ other, against the reference piloting both on the same seeds (common random numb
                    --eval-checkout`), each chooser match one process there at nice cells_mac_nice (10) with
                    cells_mac_threads search threads (4), cells_mac_groups driver groups (2) and
                    cells_mac_torch_threads torch / OMP threads (2); the watcher's lane 'mac' runs cells_mac_jobs // 2
-                   measurements at once (cells_mac_jobs 6: 6 processes on the Mac), the two chooser matches of each
+                   measurements at once (cells_mac_jobs 4: 4 processes on the Mac), the two chooser matches of each
                    at once; the same games, seeds, seats and baselines (the same cache keys) as 'local', every game
                    recorded as a game record (src 'mac')
   cells_seed       the seeds' base (0: the same deals every generation)
@@ -175,7 +175,7 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             'cells_mode': 'ladder', 'cells_pool_active': 3, 'cells_promote_every': 64, 'cells_auto_promote': False,
             'cells_main_share': 0.75, 'cells_gen0_share': 0.1, 'cells_fit_boot': 200,
             # the cells' games on the MacBook (cells_backend 'mac', docs/ENGINE.md 198)
-            'cells_mac_jobs': 6, 'cells_mac_threads': 4, 'cells_mac_groups': 2, 'cells_mac_torch_threads': 2,
+            'cells_mac_jobs': 4, 'cells_mac_threads': 4, 'cells_mac_groups': 2, 'cells_mac_torch_threads': 2,
             'cells_mac_nice': 10}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)

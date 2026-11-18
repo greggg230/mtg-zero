@@ -39672,13 +39672,13 @@ evaluations; the user accepts judging taking about a third of it.
   `mac-<pid>-<ms>-<n>-c<chooser>.jsonl.gz`. `gamedb.executor` maps `src` 'mac' to 'remote'; the build line's engine id
   is the commit's (platform-independent), so `gamedb ingest` takes them as it takes the Mac's anchor records.
 * **The parallel lane**: the watcher's lane 'mac' runs `cells_mac_jobs // 2` measurements at once
-  (`yardsticks.lane_parallel`; `cells_mac_jobs` 6: 3 measurements, 6 processes on the Mac), each in its own thread
+  (`yardsticks.lane_parallel`; `cells_mac_jobs` 4: 2 measurements, 4 processes on the Mac), each in its own thread
   and child process, the oldest due first; `pending(busy=...)` skips the measurements under way, and a cell whose
   baseline is under way waits (`item_ready`). Every other lane keeps one at a time, in the lane's thread, as before
   (`lane_parallel` 1). The fit lane still waits for the measurements of its checkpoint (`after`).
 * **Settings** (`yardsticks`; all new, defaults keep everything as before): `cells_backend` 'mac' (with
   `cells_device` 'cpu': the Mac has no CUDA - refused otherwise - and not with sequential cells, `cells_target_se`,
-  as for 'farm'), `cells_mac_jobs` (6, >= 2), `cells_mac_threads` (4), `cells_mac_groups` (2),
+  as for 'farm'), `cells_mac_jobs` (4, >= 2), `cells_mac_threads` (4), `cells_mac_groups` (2),
   `cells_mac_torch_threads` (2), `cells_mac_nice` (10, 0-20). `mtgz.az.MAC_PYTHON` names the Mac's venv interpreter
   (the remote spec uses it too).
 * **`--take-over` and a venv launcher** (from an uncommitted fix in the `fix/take-over-launcher` worktree, carried
