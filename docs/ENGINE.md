@@ -38050,3 +38050,33 @@ kingdombuilder built against the core.
   different copies' logits (step 1, B 64, row 54: action 11 written twice, logits 0.34157 against 0.34117).
   Tolerances not loosened. In MTG the same holds for duplicate cards in hand (their logits differ only through their
   slots); a deterministic rule (e.g. max over the copies) would change the answers and needs its own decision.
+
+## 188. Rolling self-play leases on the metagame run's pin: branch `feat/rolling-meta3` from a6b21835, zero-core `feat/rolling-meta3` (216942b + `feat/rolling-farm` 1338d49; 2026-11-17)
+
+(Section number: 187 is `feat/gamedb`'s.)
+
+**Why.** Section 178 built rolling self-play leases (zero-farm PROTOCOL rev 15, section 10; zero-core docs/az.md 54) on
+the best-of-three line (4c7c3b58, zero-core 2c67426). The three-deck metagame run `legacy-meta3-r1` runs a6b21835
+(zero-core 216942b: value-only decisions, the speed wins, network arithmetic - sections 181-183), and its farm builds
+predate rolling. This branch puts exactly the rolling work on that pin, so the run can be restarted onto rolling leases
+with nothing else in its code changing.
+
+**What.**
+
+* zero-core `feat/rolling-meta3` **c1676ed**: 216942b with `feat/rolling-farm` 1338d49 merged (46f7625 the worker,
+  c2a2980 the pool, 878f728 docs/az.md 54, 347eb6c the quit guard, d32bf98 the lock order already in 216942b). The merge
+  had no conflicts. Since the merge base d32bf98 the run pin's side touched, of the worker's inputs, only the search crate
+  (value-only decisions, docs/search.md 3.20, which a rolling job drives through the same driver calls as a classic one)
+  and `run_settings.json` (`infer_precision` and `train_tf32`, both trainer-class: the native worker infers through its
+  ONNX graph in float32 whatever the run's precision, docs/az.md 57). Its Python side (the remote workers' batch rule and
+  `end`'s `linger` key, docs/az.md 56; precision) is `zero.remoteplay`'s and the trainer's; `zero.farm_pool` merged
+  with only the rolling changes.
+* Here: `feat/rolling-farm` 97c13ba3 merged (section 178 with 178.1 / 178.2, placed in order) and the pin moved from
+  216942b to c1676ed. Nothing else changes.
+
+**Defaults byte-identical**, as in 178: a job line without `rolling` runs the classic loop of before; `pool_rolling` ''
+(the default, and `legacy-meta3-r1`'s config) sends every PUT body of before and judges staleness per game. On this
+pin the run plays and trains as on a6b21835 until `pool_rolling` is set.
+
+**Tests before the gate.** zero-core on c1676ed: `cargo test --release -p zero_worker` 55 passed (lib 32, evaljob 6,
+job 6, job_tail 4, rolling 7); `tests/test_farm_pool.py` 13 passed.
