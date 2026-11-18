@@ -101,7 +101,7 @@ P<n>" line after it.
 | opp_library, opp_top_known, own_top_known | the opponent's library size; the activator knows the opponent's top card (a remembered look: ENGINE.md 192; on an engine before it only when the owner knew it too) / its own top card |
 | fetch_in_hand, fetch_on_battlefield, fetch_available | the activator's fetchlands (the sacrifice-and-search lands, `FETCHLANDS`) in hand / on its battlefield (uncracked, tapped or not); either |
 | manipulation_in_hand, brainstorm_in_hand, ponder_in_hand | the cards in its hand that see or rearrange its own top card (Brainstorm, Ponder, Preordain, ..., `LIBRARY_MANIPULATION`); Brainstorm / Ponder among them |
-| excluded | why the opponent could not be targeted, or meaninglessly (`opponent_not_targetable`, `opponent_library_empty` for Mishra's); NULL for a counted activation |
+| excluded | why the opponent could not be targeted, or meaninglessly (`opponent_not_targetable`, `opponent_library_empty` for Mishra's), or the game stopped before the target was chosen (`game_ended_before_target`: a resignation at the target decision; `target` NULL); NULL for a counted activation |
 | blunder, blunder_reason | the user's rules (below); NULL when excluded |
 
 ## Views

@@ -56,6 +56,8 @@ LABELS = {
     'fow_over_free_daze': 'Force of Will where Daze was free',
     'fourth_land_empty_hand': 'Played out a 4th land from an empty hand',
     'bauble_trick_missed': 'Missed the Bauble trick',
+    'bauble_urza_self': "Urza's Bauble at itself",
+    'bauble_mishra_self_no_fetch': "Mishra's Bauble at itself with no fetchland",
 }
 
 

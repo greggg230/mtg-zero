@@ -99,7 +99,9 @@ def test_the_reader_on_play_by_play():
     R.step(1, state(), {}, ["T1 Main1 P0 activates Urza's Bauble (Activated(0))"])
     with pytest.raises(ValueError):
         R.finish(True)
-    assert R.finish(False) == []
+    # ... and in a game that stopped there (a resignation at the target decision): a row with no target, excluded
+    (e,) = R.finish(False)
+    assert (e['target'], e['excluded'], e['blunder'], e['opp_targetable']) == (None, 'game_ended_before_target', None, False)
 
 
 @pytest.fixture(scope='module')

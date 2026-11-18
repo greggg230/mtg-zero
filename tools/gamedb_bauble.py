@@ -12,7 +12,8 @@ The rules (the user's, 2026-11-17):
   activator held (Brainstorm, Ponder, ...) as a column.
 * An activation where targeting the opponent is impossible or meaningless is excluded (`excluded`, `blunder` NULL): the
   opponent was not a legal target (no target decision offered it), or for Mishra's Bauble the opponent's library was
-  empty.
+  empty. So is one whose game stopped before its target was chosen (a resignation at the target decision: `target`
+  NULL, 'game_ended_before_target').
 
 Every condition is the engine's: the spectator state (`export_state`) before the action that activated the Bauble - the
 hands, the battlefield, the library sizes - and its `known` block (`view_known`, the engine's exact hidden-information
@@ -80,7 +81,8 @@ def conditions(st, p):
             'opp_hand_all_known': opp_known >= opp_hand, 'opp_library': int(op.get('library') or 0),
             'opp_top_known': _knows_top(known, opp, p), 'own_top_known': _knows_top(known, p, p),
             'fetch_in_hand': fib, 'fetch_on_battlefield': fob, 'fetch_available': fib + fob > 0,
-            'manipulation_in_hand': manip, 'brainstorm_in_hand': 'Brainstorm' in hand, 'ponder_in_hand': 'Ponder' in hand}
+            'manipulation_in_hand': manip, 'brainstorm_in_hand': 'Brainstorm' in hand,
+            'ponder_in_hand': 'Ponder' in hand}
 
 
 def classify(r):
@@ -116,7 +118,8 @@ class Reader:
 
     def step(self, i, st, decision, lines):
         """Step `i`: `st` the state before the action, `decision` its decision (dict), `lines` the lines it wrote."""
-        if self.pending is not None and decision.get('kind') == 'Target' and decision.get('player') == self.pending['activator']:
+        p = self.pending
+        if p is not None and decision.get('kind') == 'Target' and decision.get('player') == p['activator']:
             if self.pending['n_target_opts'] is None:
                 self.pending['n_target_opts'] = len(decision.get('options') or [])
         for ln in lines:
@@ -145,9 +148,18 @@ class Reader:
                 self.rows.append(r)
 
     def finish(self, over=True):
-        """The game's end: an activation that never chose a target is a broken read (loud) in a game that ended."""
-        if self.pending is not None and over:
-            raise ValueError(f'a Bauble activation at step {self.pending["action"]} never chose a target')
+        """The game's end: an activation that never chose a target is a broken read (loud) in a game the rules ended;
+        in a game that stopped before its target (a resignation at the target decision, an unfinished game) it is a
+        row with no target, excluded ('game_ended_before_target'), never dropped."""
+        if self.pending is not None:
+            if over:
+                raise ValueError(f'a Bauble activation at step {self.pending["action"]} never chose a target')
+            r = self.pending
+            self.pending = None
+            r['opp_targetable'] = (r.pop('n_target_opts') or 0) >= 2
+            r.update(target=None, excluded='game_ended_before_target', blunder=None, blunder_reason=None,
+                     idx=len(self.rows))
+            self.rows.append(r)
         return self.rows
 
 
@@ -245,8 +257,8 @@ def series(con, since_iter=0, by_kind=False, kind=None):
 # ====================================================================================== canary spots
 # The canary library's Bauble kinds (tools/delver_blunders.py library-add, docs/blunders.md): the target decision of an
 # activation, watched option = the activator itself. 'bad' kinds score the searches that avoid it; the control kind
-# (a Mishra's Bauble at oneself with a fetchland ready: not a blunder) is reported as the share choosing it and stays out
-# of the right-answer means (answer 'control').
+# (a Mishra's Bauble at oneself with a fetchland ready: not a blunder) is reported as the share choosing it and stays
+# out of the right-answer means (answer 'control').
 SPOT_KINDS = {
     'bauble_urza_self': ('bad', "Urza's Bauble at itself while the opponent holds cards it doesn't know: looking at a "
                                 "random card of its own hand tells it nothing; the opponent's hand was the only "
@@ -274,9 +286,9 @@ def spot_kind(r):
 
 def spots(run, db, source, per_kind=6, log=print):
     """Canary spots of a run's recorded games (tools/delver_blunders.py library-add's input: {'spots': [...]}): per
-    SPOT_KINDS kind, the first `per_kind` activations in game order whose target decision offered both players, each
-    as the game's seed and actions up to that decision, the watched option (the one that targets the activator: found
-    by stepping each option), the decider, the answer and why. `source` labels them (e.g. the checkpoint)."""
+    SPOT_KINDS kind, the first `per_kind` activations in game order (one a game) whose target decision offered both
+    players, each as the game's seed and actions up to that decision, the watched option (the one that targets the
+    activator: found by stepping each option), the decider, the answer and why. `source` labels them (e.g. the checkpoint)."""
     import gamedb
     from mtgz import _engine as E
     from zero import gamerec as GR
@@ -290,10 +302,10 @@ def spots(run, db, source, per_kind=6, log=print):
         specs, rs = GR.read_iteration(run, it)
         for x in rs:
             recs[gamedb.game_id(x)] = (x, specs[x['spec']])
-    out, taken = [], {k: 0 for k in SPOT_KINDS}
+    out, taken, seen = [], {k: 0 for k in SPOT_KINDS}, set()
     for r in rows:
         kind = spot_kind(r)
-        if kind is None or taken[kind] >= per_kind or r['game_id'] not in recs:
+        if kind is None or taken[kind] >= per_kind or r['game_id'] not in recs or (r['game_id'], kind) in seen:
             continue
         rec, spec = recs[r['game_id']]
         acts = gamedb.actions_of(rec)
@@ -318,11 +330,13 @@ def spots(run, db, source, per_kind=6, log=print):
         if watch is None:
             raise ValueError(f'game {r["game_id"]} step {k}: no option targets the activator')
         answer, why = SPOT_KINDS[kind]
-        out.append({'kind': kind, 'source': source, 'gid': int(rec['gid']), 'k': k, 'spec': spec, 'seed': int(rec['seed']),
-                    'actions': [int(a) for a in acts[:k]], 'watch': watch, 'decider': r['activator'], 'turn': st['turn'],
+        out.append({'kind': kind, 'source': source, 'gid': int(rec['gid']), 'k': k, 'spec': spec,
+                    'seed': int(rec['seed']), 'actions': [int(a) for a in acts[:k]], 'watch': watch,
+                    'decider': r['activator'], 'turn': st['turn'],
                     'step': st['step'], 'answer': answer, 'why': why, 'chose_self': r['target'] == 'self',
                     'conditions': {c: r[c] for c in ('opp_hand', 'opp_hand_known', 'opp_library', 'fetch_in_hand',
                                                      'fetch_on_battlefield', 'manipulation_in_hand', 'own_turn')}})
         taken[kind] += 1
+        seen.add((r['game_id'], kind))
     log(f'{len(out)} Bauble spots: {taken}')
     return {'spots': out}
