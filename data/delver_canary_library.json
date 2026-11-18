@@ -2,11 +2,11 @@
  "format": "delver-canary-library/1",
  "what": "Delver mirror canary spots with their right answers (tools/delver_blunders.py, docs/blunders.md 6a)",
  "engine": {
-  "checkout": "~\\mtg-zero-wt\\integrate-fable",
-  "commit": "2d17c659b7f2a4c00de1b693d272d64495df6c1c",
-  "branch": "integrate/fable-1112",
+  "checkout": "~/mtg-zero-wt/opp-look",
+  "commit": "86c4de8506b0c39ced439df4c211dc21f6c2d9d2",
+  "branch": "fix/opp-look-memory",
   "dirty": true,
-  "engine_sha256": "40f46b8335f440a7",
+  "engine_sha256": "c9ff60700ab1072f",
   "digest": null
  },
  "reference": {
@@ -315,7 +315,7 @@
     "date": "2026-11-03"
    },
    "value": 0.8464,
-   "pos": "57cb6333a72b39d3",
+   "pos": "c74e44d1e8c4a19e",
    "rerecord": {
     "epoch": 1794687704,
     "old_steps": 47,
@@ -435,7 +435,7 @@
     "date": "2026-11-03"
    },
    "value": 0.362,
-   "pos": "f81bcffef2eaa2e9",
+   "pos": "5d08a3f8b6937abd",
    "rerecord": {
     "epoch": 1794687704,
     "old_steps": 89,
@@ -1347,7 +1347,7 @@
     "date": "2026-11-03"
    },
    "value": 0.5071,
-   "pos": "079f1ce2e4d7e99c",
+   "pos": "dff47129118c532e",
    "rerecord": {
     "epoch": 1794687704,
     "old_steps": 233,
@@ -4650,7 +4650,7 @@
     "by": "user",
     "date": "2026-11-03"
    },
-   "pos": "af6ea92b2d25453e",
+   "pos": "644f3f5f78226edb",
    "rerecord": {
     "epoch": 1794687704,
     "old_steps": 62,
@@ -4833,7 +4833,7 @@
     "by": "user",
     "date": "2026-11-03"
    },
-   "pos": "0e438c9b45a90afc",
+   "pos": "b2dcfa4af1452590",
    "rerecord": {
     "epoch": 1794687704,
     "old_steps": 145,
@@ -11421,7 +11421,7 @@
   }
  },
  "live_rule": "spots only in undecided games: the decider's raw value at the spot, by the network that played it, between 0.10 and 0.90",
- "rules_epoch": 1794687704,
+ "rules_epoch": 1794970741,
  "recorded": [
   {
    "engine": {
@@ -11609,6 +11609,22 @@
    "spots": 60,
    "dropped": [],
    "replaces": "2d17c659b7f2:data/delver_canary_library.json"
+  },
+  {
+   "engine": {
+    "checkout": "~/mtg-zero-wt/opp-look",
+    "commit": "86c4de8506b0c39ced439df4c211dc21f6c2d9d2",
+    "branch": "fix/opp-look-memory",
+    "dirty": true,
+    "engine_sha256": "c9ff60700ab1072f",
+    "digest": null
+   },
+   "rules_epoch": 1794970741,
+   "date": "2026-11-17",
+   "how": "tools/delver_rerecord.py rerecord (docs/ENGINE.md 100.8)",
+   "spots": 60,
+   "dropped": [],
+   "replaces": "86c4de8506b0:data/delver_canary_library.json"
   }
  ]
 }

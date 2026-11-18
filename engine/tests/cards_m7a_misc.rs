@@ -374,7 +374,9 @@ fn mishras_bauble_looks_at_the_top_card_and_draws_next_upkeep() {
         Some(DecisionKind::Target) => Some(player(1)),
         _ => None,
     });
-    // (Keyed for P0; not kept as knowledge: its owner doesn't know it.)
+    // (Keyed for P0, and remembered though its owner doesn't know it:
+    // ENGINE.md 192.)
+    assert!(g.knows(0, top), "P0 knows the card it saw on top");
     assert!(!g.knows(1, top), "P1 didn't look");
     let hand = g.player(0).hand.len();
     quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Draw);

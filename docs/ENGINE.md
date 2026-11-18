@@ -2950,7 +2950,11 @@ delayed return about the exiled card (a new object, 400.7).
   naming one of those slots is widened to the library.
 * **Looking at another player's library card that its owner doesn't know** (Mishra's
   Bauble): the look is keyed for the looker but not remembered; the owner's determinize may
-  change that card, and the looker's clouds could not stay consistent with it. A random hand
+  change that card, and the looker's clouds could not stay consistent with it. **Fixed in
+  section 192** (2026-11-17): the look is remembered (Mishra's Bauble and Jace, the Mind
+  Sculptor's +2); the owner's worlds deal the card again with the looker's knowledge on it and
+  keep the looker's clouds true; after a shuffle or search it is the looker's private cloud
+  entry, drawn again in the owner's worlds. A random hand
   card seen (Urza's Bauble) is remembered (its owner knows it; so its key is public, section
   71.1). Cards cast from exile or a
   graveyard are public.
@@ -15302,6 +15306,8 @@ with an untrained input (55.6's size of effect).
 
 * A Mishra's Bauble at a card its owner does not know is still not remembered (23.7), and a
   shuffle followed by a draw still drops the cloud it made (10): the bot's own knowledge.
+  (The first part is **fixed in section 192**: such a look is remembered, and `TOP_OTHER` /
+  the `OPP_LIBRARY_KNOWN` bag carry it.)
 * The belief head (66) predicts the opponent's hand only and the weighted deal (69) tilts the hand;
   the opponent's known top cards are dealt uniformly. A belief over them is a later step, and now
   has an input to learn from.
@@ -38487,7 +38493,7 @@ with each state (`view.rs` LOG_TAIL), and a resolving Doomsday exiles the rest o
 one step (~50 lines), so that step's oldest lines - exile moves - are not in `events` (`games.lines_lost`, a
 `lines_lost` event with the count: 2,735 lines in the probe's 1,200 games, ~6 a real self-play game). `combo_stats`
 reads the same tail (its "(log lines lost)"); the `doomsday` rows come from the state, not the lines. Exporting the whole
-step's lines would be an engine (view) change: left for a later branch if the exile moves are ever wanted.
+step's lines would be an engine (view) change: left for a later branch if the exile moves are ever wanted. (Done: section 191 - the view now carries every line a step writes; `lines_lost` is 0.)
 
 ### 187.4 Measured
 
@@ -38634,19 +38640,19 @@ loss and entropy, games per minute. Estimate ~2.5 h of GPU. The launch script li
   skipped), farm compat identical. By hand (189.3): farm compat with the rule on, with game_records on, both;
   driver_settings_dump old vs new and against the worker.
 
-## 191. Every game recorded: the evaluations, the yardsticks, the tools and the publisher in the game database, each record naming its players and its engine (branch `feat/gamedb-all`, zero-core `feat/game-records-all`, docs/az.md 59.3-59.5; 2026-11-17)
+## 190. Every game recorded: the evaluations, the yardsticks, the tools and the publisher in the game database, each record naming its players and its engine (branch `feat/gamedb-all`, zero-core `feat/game-records-all`, docs/az.md 59.3-59.5; 2026-11-17)
 
-Branch `feat/gamedb-all` from main b3245a81, main c106f7e8 merged in; zero-core pin 3161bd9 -> 68b6a40
+Branch `feat/gamedb-all` from main b3245a81, main c106f7e8 and 8b4bac07 merged in; zero-core pin 3161bd9 -> 68b6a40
 (`feat/game-records-all`: e6bab23 on `feat/game-records` 5c2d3f39, `feat/adaptive-budget` 3161bd9 merged in, then
 68b6a40: co-training's primary - its own play_match - gets the calls of before, `Run.rec_kw`). Why: 187 recorded self-play only; the user: "record them all". The metagame run's questions
 reach its evaluation and yardstick games too - the cells of generation N, the anchor games by opponent, the Doomsday
 piles the network builds in evaluation against those of self-play - and those games were thrown away after their
 score. Now one setting, the run's `game_records` 1, keeps every game the system plays, and the database ingests every
 kind. No rule, encoding, search or training change: the same games from the same seeds with the setting on and off;
-digests untouched. Note: ENGINE.md section numbers 191+ may collide with the open branches that changed the engine
+digests untouched. Note: ENGINE.md section numbers 190+ may collide with the open branches that changed the engine
 meanwhile (fix/full-log-export, fix/opp-look-memory, feat/adaptive-budget at 187; feat/rolling-meta3 at 188).
 
-### 191.1 What records, where (the `kind` of each record)
+### 190.1 What records, where (the `kind` of each record)
 
 | kind | path | how |
 |---|---|---|
@@ -38675,10 +38681,11 @@ anchor games by opponent, Doomsday piles in evaluation vs self-play, the content
 generation), "Turning it all on". The database format is now `mtgz-gamedb/2` (a format-1 database is refused: ingest
 into a new one; the raw records are kept).
 
-### 191.2 The engine identity
+### 190.2 The engine identity
 
-A record replays only on the engine that played it (an engine change - another agent is changing the play-by-play
-export in view.rs and Mishra's Bauble's memory of the opponent's library right now - makes an older game diverge; seen
+A record replays only on the engine that played it (an engine change - such as 191's lossless play-by-play export
+and 192's remembered looks, merged into this branch with main 8b4bac07: the engine id moved with them - makes an
+older game diverge; seen
 on the way: a 2026-11-07 Delver replay's first state rebuilds exactly from its derived seed and goes illegal at move 25
 on today's engine). Every records file starts with a build line (zero-core `gamerec.build_info`): the mtg-zero commit,
 the zero-core commit, `engine` = sha256[:16] over the blob ids of every Rust input (`mtgz.az.ENGINE_PATHS`, the artifact
@@ -38690,7 +38697,7 @@ the two checkouts' files mix). Records without an engine id (5c2d3f39's self-pla
 from a checkout of their engine; a replay without one is skipped (counted). The workflow for the records made before the
 engine change: docs/gamedb.md "The engine".
 
-### 191.3 Opt-in and byte identity
+### 190.3 Opt-in and byte identity
 
 Everything rides `game_records` (default 0) or an explicit `--records DIR`: off, no driver logs, no file, the code paths
 of before (`gamerec.recording(None)` is a plain block; the yardsticks' sink is None). On, the games come from the
@@ -38699,7 +38706,7 @@ Checked: zero-core `tests/test_gamerec_all.py` (h2h and sequential on/off identi
 on/off - yardstick, random, Elo offsets, two anchors with a calibration, reference games - the same metrics and Elo
 pool; a remote evaluation's records copied back); the real metagame network below (the same 24 games' rows).
 
-### 191.4 Tests
+### 190.4 Tests
 
 `tests/test_gamedb_all.py`: every kind ingested with its players (cells of two generations, anchor games, self-play)
 and the views (`game_results`' players, `doomsday_piles`' kind), the series self-play's only, incremental ingest of
@@ -38710,7 +38717,7 @@ iteration, labels, each chooser match's pair and chooser; none without a records
 as records the database replays, and every SQL query of docs/gamedb.md run on a database of every kind.
 `tests/test_gamedb.py` (187) unchanged and passing. zero-core: 59.5.
 
-### 191.5 Measured
+### 190.5 Measured
 
 The desktop's CPU, 2026-11-17, beside other agents' benchmarks (all slots busy): a cells match of the metagame run's
 iteration-207 network (Doomsday vs Delver, chooser 0, 24 games, 16 simulations, one torch thread) played twice with
@@ -38721,7 +38728,7 @@ and a gzip write per match; for the metagame run's evaluation and yardsticks (an
 cells 400-1,200 a measured generation) well under a second and 1 MB a day. Ingest of such games: 70-86 ms a game
 (187.4's evaluation games).
 
-### 191.6 Turning it on for the metagame run
+### 190.6 Turning it on for the metagame run
 
 All of it is the one run setting `game_records` 1, on a commit with this branch (the run's pinned worktree and the
 Mac's eval checkout: the repin of 187.6, gated `repin`):
@@ -38731,3 +38738,334 @@ Mac's eval checkout: the repin of 187.6, gated `repin`):
 3. `python tools/gamedb.py ingest <run> --follow 120` ingests every kind; after the engine change lands, the
    records made before it: `--engine-checkout` a checkout of their commit (docs/gamedb.md "The engine").
 4. Raw records are kept (no `--delete-raw`): ~0.2 GB a day of self-play at the run's rate, the rest under 1 MB a day.
+
+## 191. The spectator view exports every play-by-play line of a step (branch `fix/full-log-export`, 2026-11-17)
+
+The user's call after 187.3's limit: make the exported play-by-play lossless.
+
+### 191.1 The gap
+
+`export_state`'s view (`az/view.rs`, spec `"log": true`) carried the log's newest 40 lines (`LOG_TAIL`) and its length
+`log_n`; every reader (the replay viewer on delverai, `mtgz/az/replays.py`'s recordings, `tools/gamedb.py`,
+`tools/combo_stats.py`, `tools/delver_blunders.py`, `tools/delver_fingerprints.py`) rebuilds the whole log from
+consecutive states: state k's new lines are the last `log_n[k] - log_n[k-1]` of its tail. A step that writes more than
+40 lines lost its oldest: a resolving Doomsday exiles the rest of its caster's library in one step (~50 lines), so ~6
+lines of a real self-play game were missing (`games.lines_lost`: 2,735 in the three-deck probe's 1,200 games, 187.3).
+
+### 191.2 The fix
+
+`Game::log_mark` (a new field, `log_mark()`): the log's length when the last `apply` began, set at the top of
+`Game::apply` (0 before the first answer, and in a new game of a match: a new `Game`). The view's tail starts at
+`min(log_n - 40, log_mark)`: every line the last answer wrote, however many, and at least the newest 40 as before. The
+shape is unchanged (`VIEW_VERSION` 1, `log` still the log's last lines ending at `log_n`), so every reader's rebuild
+works as it was and is now gap-free when consecutive states are consecutive steps - which they are for the replay
+recorder (zero-core `replay.py` stores the state before every step, forced ones included; an unchanged state is stored
+once, and an unchanged state wrote no line), gamedb's full replay and combo_stats (both export after every step). A
+state is longer only where a step wrote more than 40 lines. View only: nothing in play, the encodings or the search
+reads `log_mark` (`public_state.rs`: Derived; `describe` lists it as not described).
+
+### 191.3 Tests
+
+`engine/tests/view.rs`: `every_state_of_mirror_games` now checks each state's tail length is
+`max(min(log_n, 40), log_n - previous log_n)` and that the log rebuilt from the states equals the game's whole log
+(`rebuild`; six heuristic / random Delver mirror games); `a_step_that_writes_more_than_forty_lines_exports_all_of_them`
+(new): Doomsday resolving over a 50-card library, every decision answered and exported, one step writes more than 40
+lines, and the rebuilt log equals `Game::log_lines`. `exporting_and_the_log_change_nothing` unchanged.
+
+### 191.4 The game database and combo_stats
+
+No code change was needed: both read `log_n` and the tail as before, and their `lines_lost` / "(log lines lost)" paths
+stay as a check (comments and `docs/gamedb.md` updated: 0 since this section). Re-validated with this branch's engine
+(the scripts of 187.3):
+
+* **the three-deck probe's 1,200 games** (`import-combo` of the probe's games files, `ingest --sample 1.0`, a fresh
+  `combo_stats.py scan` of the same files): **no per-field difference** in 1,200 games, every view total equal (324
+  resolved Doomsdays: in_hand 83, missed 175, not_findable 58, voluntary 8; 8 Oracle piles; 69 caster wins after a
+  resolution; 411 Show and Tells; wins combat 774, damage 129, pact 114, decking 96, oracle 20). `lines_lost` 2,735 ->
+  **0** (186 games had a loss); the 204 `lines_lost` events are gone and the lines are back: events 472,590 -> 475,121
+  (+2,531 = 2,735 - 204), of them moves +2,660 (to exile **+2,625**, to the battlefield +35), other +71, damage +2,
+  trigger +2.
+* **the wheel's 600 self-play records** (`validate_records.py`): 88 resolutions, no difference; `lines_lost` 1,133 -> 0,
+  events +1,133 (exile moves +1,098).
+* **the 64 real self-play records** (iteration-156 network): 26 resolutions, no difference; `lines_lost` 402 -> 0,
+  events +402 (all exile moves).
+
+### 191.5 Digests, farm
+
+Behaviour digests unchanged (the view is read by nothing in play; the gates below). The release worker plays and
+records exactly as before (self-play runs with the log off, and nothing it plays reads the view); farm compat runs in the engine tier.
+
+### 191.6 The gates (on 1c036e03)
+
+* `suite`: GATE PASSED in 1,110 s - the full engine suite 2,703 passed (24 binaries); the sharded 2,000-game fuzz of
+  the default pool (2,000 games, 100 matches), the default pool with hidden decklists (2,000 games) and
+  `FUZZ_POOL=delver_dealt` (2,000 games, 100 matches + 100 post-sideboard), all clean.
+* `engine --tested-sha 1c036e03`: GATE PASSED WITH SKIPS (5 live-run-hazard tests fenced beside the paused live run) in
+  781 s - digests **unchanged**: full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, constructed e1177d609d6c1aee,
+  eoe 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993 (each = the
+  recorded files); `--test az` 54, `limits` 13, `hidden` 28; pytest 4 shards + the desktop part; the smoke; the
+  release worker built and farm compat identical (gate 2: 6 games, 2,484 rows; gate 3: 6 games, 2,556 rows).
+* **Again on the merge with main c106f7e8** (e8492cc8; zero-core pin 3161bd9; the section renumbered 189 -> 191):
+  `suite` GATE PASSED in 1,014 s (2,703 passed; the three 2,000-game fuzz pools clean); `engine --tested-sha e8492cc8`
+  GATE PASSED WITH SKIPS (4 live-run-hazard tests fenced) in 735 s - every digest unchanged (as above), `--test az` 54,
+  pytest, the smoke, farm compat identical (gate 2: 6 games, 2,484 rows).
+
+## 192. A look at the opponent's library card that its owner doesn't know is remembered (Mishra's Bauble, Jace's +2; branch `fix/opp-look-memory`, 2026-11-17)
+
+The user's call after the value-of-information experiment (branch `exp/voi-bauble`, `tools/voi_bauble.py`; the
+maintainer's notes of 2026-11-17): a Mishra's Bauble at the opponent was worth exactly 0 to every network, because the
+engine forgot the look (23.7, 72.7: "the look is keyed for the looker but not remembered"). After the look the looker's
+encoding was bit for bit the encoding without it (1,049 of 1,050 positions), and the next decision's search dealt that
+card again.
+
+### 192.1 The rules
+
+Mishra's Bauble: "{T}, Sacrifice Mishra's Bauble: Look at the top card of target player's library. Draw a card at the
+beginning of the next turn's upkeep." Jace, the Mind Sculptor's +2: "Look at the top card of target player's library.
+You may put that card on the bottom of that player's library." The library is a face-down pile whose order nobody may
+look at or change (CR 401.2); the looker has seen the card on top and knows it there until it moves (a draw, a mill,
+cards put above it keep it where it is in the pile - the engine's library positions are physical, section 10) or the
+pile is shuffled (701.20) or searched. Its owner did not look. Who looked is public (72.1).
+
+The supported pools' non-owner looks at a library: these two only (the cube's Mishra's Bauble and Jace, the Mind
+Sculptor; the legacy decks' Mishra's Bauble; EoE none - every other "target player" look is at a hand, which its owner
+knows: Gitaxian Probe, Urza's Bauble, Thoughtseize, ...). Both had the same gap (`resolve_ext.rs` `Ext::LookAtTopOf`,
+`resolve_walkers.rs` `Ext::LookAtTopMayBottom`). A look at one's own library (a Bauble at oneself, Ponder, Delver's
+upkeep look) was always remembered.
+
+### 192.2 The fix
+
+* Both looks `learn` the card for the looker whoever knows it (before: only when the looker was its owner or its owner
+  knew it). The card stays known to the looker on top, at the bottom after Jace's "put it on the bottom" (a hidden ->
+  hidden move keeps its knowledge bits), in its owner's hand after a draw (now known to both: Urza's Bauble's state),
+  until it leaves for a public zone (then public).
+* **The looker's worlds** keep it where it is (a card the viewer knows is never dealt, section 10).
+* **The owner's worlds** deal it again with the owner's other unknown library cards; the looker's knowledge bit stays on
+  the card, so the looker knows whatever card the world put there - the opponent's private knowledge, as with the
+  looker's own hand in the owner's worlds. Who knows is public (`g5::TOP_OTHER`, `view_of`), the same in every world.
+* **The looker's clouds stay true in the owner's worlds** (`Game::deal_keeping_others`, new). Before, no player knew a
+  card of the other's library its owner didn't, so the owner's plain shuffle of its unknown cards kept every one of the
+  other player's clouds (their domains' unknown part kept its multiset). Now a dealt card can be known to the other
+  player, and a plain shuffle could move a listed identity of its cloud onto that card ("Counterspell is among the cards
+  of my library I don't know" false in the world). The owner's deal places each of the other player's clouds' listed
+  identities (less those its domain's undealt cards hold) among the domain's dealt cards that player doesn't know, the
+  rest over every remaining place - `resample_with_clouds`'s deal, for the other player's clouds. It runs only when the
+  other player has a cloud over the owner and knows a dealt card or holds a private entry; otherwise the deal (and the
+  random stream) is the old one.
+* **A shuffle or search** (`scramble`; `forget_order` for "a random order") turns the looker's exact knowledge into a
+  cloud entry ("that card is somewhere in that library"), as for a card both knew - but its identity is the looker's
+  private knowledge: the owner never saw it. Such an entry is recorded as private (`Game::peeks`: viewer, owner,
+  identity; it lives in the viewer's cloud over the library, and `tidy_peeks` drops it when the cloud no longer lists
+  it - a card of that identity left or was seen, or the cloud was dropped). The owner's worlds draw the private entries
+  again after the deal, uniformly without replacement from the identities of their cloud's domain cards the looker
+  doesn't know, less the cloud's other entries: a world never shows the owner what the looker saw (the looker's
+  simulated encoding in the owner's search reads a drawn card, not the true one). With hidden decklists the entry is
+  also the looker's sighting record (140.9: what it saw stays in R), which the cloud keeps consistent.
+* Who-knows inputs: no layout change. The looker's encoding reads the card where the engine already writes known library
+  cards: the tops block's "known to the viewer" and its identity, the `OPP_LIBRARY_KNOWN` bag (out of `OPP_HIDDEN`), and
+  `g5::TOP_OTHER` of the opponent's library from the looker's side; the owner's `g5::TOP_OTHER` of its own library says
+  the opponent knows its top card. These inputs existed (layout v5/v7); the remembered opponent's-top case is new to
+  every network (the VOI experiment's "counterfactual" row is now the real one): it must be trained in.
+* `describe` (ENGINE.md 95) refuses a game with a private entry (`peeks`: unsupported unless empty; a built game could
+  not tell its owner's worlds which entries to redraw); exact knowledge of the opponent's library was already described
+  (`library_known` with `known_by`).
+* `view.rs`'s `known.order` (kept for a seat's view to follow a look the engine did not remember) is no longer needed
+  for that: the card is in `known.library` with its mask.
+
+### 192.3 Tests
+
+`engine/tests/az.rs`:
+* `cr_401_2_a_look_at_the_opponents_top_card_its_owner_doesnt_know_is_remembered`: P1's Bauble at P0's top Counterspell
+  (P0 doesn't know it): P1 knows it, P0 doesn't; both encode "the other player knows P0's top" (`TOP_OTHER`); the same
+  position with the Forest below swapped on top encodes differently for P1 and identically for P0; P1's 60 worlds keep
+  the Counterspell on top (encoding equal), P0's 60 worlds deal it again (at least four identities; P1's bit on the card;
+  P0's encoding equal; `check_knowledge`); P0's next draw takes it into its hand, known to both.
+* `cr_701_20_a_shuffle_leaves_the_looker_a_private_cloud_entry_and_the_owners_look_a_shared_one`: P0's fetch land after
+  the look: P1's cloud over P0's library lists the Counterspell; P1's worlds keep the entry, P0's draw it again (at least
+  four identities across 60 worlds, P0's encoding equal, clouds true); Ponder after the look: P0 sees the card, and P1's
+  knowledge is a cloud over Ponder's cards listing it.
+* `the_owners_worlds_keep_the_lookers_clouds_true`: Brainstorm (P0 knows its two put back), P1's first Bauble (a card
+  both know), a fetch land's shuffle (P1's cloud), P1's second Bauble at a top card P0 doesn't know; 200 worlds of each
+  player: clouds true, P0's encoding equal, P0's top card dealt again in more than half of P0's worlds.
+* `who_knows_a_librarys_top_cards_is_encoded` (72.5) unchanged and passing (a Bauble at a card its owner knows).
+* `cards_m7a_misc::mishras_bauble_looks_at_the_top_card_and_draws_next_upkeep` and
+  `cards_m7b_walkers::jace_the_mind_sculptor_plus_two_looks_at_the_top_card_and_may_bottom_it` now expect the looker to
+  know the card (on top; at the bottom), its owner not.
+
+The public-state gate (58, 72.4): a perturbation "the other player learns the top card of a library its owner doesn't
+know" (`public_state.rs`; both views and both encodings must change: the looker's identity inputs, the owner's
+`TOP_OTHER`), kept out of the pairwise gate's partner draws (`COMBO_EXCLUDED`, as 142.12's) so every position's partners
+are as before. (Drawn as a partner it shifts the draws, and the pairwise gate then meets three layout-v6 EoE collisions
+no known gap covers - a granted trigger on a Mountain that lost all its abilities, with and without a lose-all
+duration: `public_states_encode_apart`, GATE_SEED 4242. They are not about this change - EoE has no look at another
+library - and stay for a decision: layout v6 is EoE's until its run 2.)
+
+`engine/tests/fuzz.rs` `a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game` (173): three of its nine seeds
+no longer reach the look it needs (the worlds' random draws moved); replaced by three that do (a scan of 600 seeds
+found 41), the check unchanged.
+
+The Delver canary library (`data/delver_canary_library.json`, 100.8) is re-recorded for the new rules epoch
+(`tools/position_lab.py` `RULES_EPOCH` 1794970741): five of its 60 spots reach their position with more knowledge
+(their history holds a Bauble at the opponent), so their recorded `pos` (the exported state's hash, `known` included)
+no longer matched. `tools/delver_rerecord.py rerecord --knowledge-change` (new: a rules change of what the players
+know only - the old and new states compared without who knows what, every action, zone, order and public fact
+exactly; a spot whose path is the same keeps its last re-record's record and gets this engine's `sig` / `pos`): 60 of
+60 re-recorded, the same paths, none dropped (the old side: main's engine, `--any-old-engine`).
+
+### 192.4 Digests (re-recorded on purpose, `DIGEST_WRITE=1`)
+
+Behaviour changes where a look at another library happens: the looker's encoding, and so a searched game's choices.
+
+| digest | old | new | lines that differ |
+|---|---|---|---|
+| cube best-of-one, full | 8f71ccb0d89031a6 | **53eda75d63b2743b** | 68 of 2,500 games |
+| cube best-of-one, encoding-free (`DIGEST_ENCODING=0`) | 41e27319acdae5b5 | **e65b965d025c800f** | (the knowledge bits are state) |
+| constructed | e1177d609d6c1aee | **dab59f1ff2a6d02e** | 316 of 570 |
+| metagame | 8b2b74f436d338a0 | **284d8312cc21c587** | 70 of 288 |
+| driver (zero-core's) | 6f7b863096e47dcd | **6a03572828250b86** | 21 of 21 |
+| dealt | e802d9df793c9993 | **f78ada3d3d114826** | 69 of 80 |
+| dealt per seat | 26c9751332e70c73 | **776bf9c1b6db07bc** | 49 of 60 |
+| EoE | 2efe956d589840ce | 2efe956d589840ce, unchanged | none (no look at another library) |
+
+### 192.5 The value of information, re-measured
+
+`tools/voi_bauble.py measure` (branch `exp/voi-bauble`, run with this branch's engine; its rebuild accepts a position
+whose history held an earlier look at the opponent, whose exported knowledge now differs) on the Delver line's
+layout-v7 anchor a3198 (its 894 mirror positions, value network only, CPU), Mishra's Bauble at the opponent, positions
+where neither the look's card was drawn before the next decision nor the looker knew it already (pp of win
+probability, game-clustered SE):
+
+| | before (main) | this branch |
+|---|---|---|
+| the looker's post-look row = the no-look control's (bitwise), its owner not knowing the card | 340 / 340 | **1 / 332** |
+| V(after the look) - V(control), owner not knowing the card | **0** (340 positions) | **+0.57 +- 0.20** (332) |
+| expected VOI under the network, E_uniform[V(X)] - V(control) | (+0.17 +- 0.09: counterfactual, never played) | +0.17 +- 0.09 |
+| expected VOI, the search's own deals | (+0.17 +- 0.09) | +0.17 +- 0.09 |
+| spread of V(X) over the possible cards | 8.9 pp | 8.9 pp |
+| owner knowing its top card (remembered before too) | -1.59 +- 0.92 (76) | -1.60 +- 0.92 (76), unchanged |
+| own top, exact posterior (a control) | +0.36 +- 0.06 | +0.37 +- 0.06 |
+
+The look's value is no longer identically 0: the looker's encoding after it differs from the control in 331 of 332
+positions, and the real look's value equals the value of the true card built in (the realised VOI, one draw of the
+card: +0.57 +- 0.20 pp). Its expectation under today's network, +0.17 +- 0.09 pp, is the experiment's "counterfactual"
+number again - the same input, which no network has trained on yet: noise, not a learned value. It has to be trained
+in (a fork from the current line; nothing has to be retrained from scratch). One position more than before is refused
+by `describe` (a private cloud entry, 192.2).
+
+### 192.6 Farm, runs
+
+The release worker plays this engine: it must be rebuilt (the engine tier builds it and runs farm compat). A run picks
+this up only at a re-pin, and its networks see a new input there (the user's call: which run, when).
+
+### 192.7 The gates (on the merge with main c106f7e8, zero-core pin 3161bd9)
+
+* `suite` on 86c4de85: GATE PASSED in 1,094 s - the full engine suite 2,705 passed (24 binaries); the sharded
+  2,000-game fuzz of seven pools, all clean: default (100 matches), default with hidden decklists, `delver_dealt`,
+  `delver`, `meta`, `cross` and `delver_dealt2` (each 2,000 games, 100 matches + 100 post-sideboard).
+* `engine` on d604db12 (`--tested-sha 86c4de85`: the commit after it touched no engine file - the canary library,
+  `delver_rerecord.py`, `position_lab.py`): GATE PASSED WITH SKIPS (3 live-run-hazard tests fenced) in 1,442 s -
+  every digest = 192.4's (full 53eda75d63b2743b, encoding-free e65b965d025c800f, constructed dab59f1ff2a6d02e, eoe
+  2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt f78ada3d3d114826); `--test az` 57,
+  `limits` 13, `hidden` 28; pytest 4 shards + the desktop part; the smoke; the release worker rebuilt and farm compat
+  identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 6 games, 2,556 rows). (The first engine gate, on
+  86c4de85, failed two pytest tests - the canary library's five spots, 192.3 - fixed by d604db12.)
+
+## 193. Running and publishing an A/B: `tools/ab.py`, and results to delverai's Head-to-heads tab by default (`--publish`; branch `feat/ab-publish`, delverai branch `ab-publish`, 2026-11-17)
+
+Branch `feat/ab-publish` from main c106f7e8. Why: the meta3 A/B of 189 (the playout cap's rule) ran from a one-off
+launcher, and its verdict - like the LR check's the same day - lived in a scratch report nobody else sees. The user
+(2026-11-17): experiment results publish to the Delver AI site automatically, by default. No rule, card, encoding,
+setting or default of a run changes; tools only (`tools/ab.py` drives runs through the existing fork / supervise /
+pause tools).
+
+### 193.1 The harness
+
+`python tools/ab.py check|fork|go|launch|status|stop|judge|publish SPEC` - 189's one-off launcher, generalized (its
+docstring is the manual). The spec (JSON):
+
+* `id`, `title`, `description` - the experiment (`h2h.<id>` on the site; the arms' runs `<run_prefix><arm>`);
+* `source` {`run`, `iter`: N or "newest"}, `iterations` (each arm trains K+1 .. K+iterations);
+* `arms` {name: setting overrides}, `control` (default the first arm; the others are treatments), `labels` {name:
+  name on the site}, `common` (every arm's overrides; `publish` and `iters` are ab.py's and refused there);
+* `runs_dir`, `run_prefix`, `out` (judge/ and ab_state.json; relative to the spec), `code` {`worktree`, `sha`,
+  `python`} (the pinned checkout the arms run from; default this one), `env` (the supervisors' extra environment),
+  `require_source_idle`;
+* `judge` {`games` (per cell), `device`, `sims`, `seed`, `decks`, `yardsticks`, `vs_start`};
+* `publish` {`h2h` (default true), `live` (default true), `live_options`, `link`, `url`}.
+
+`fork`: tools/fork_run.py --copy per arm with --set for common + the arm's overrides + `iters` + `publish`; K goes to
+<out>/ab_state.json. `go`: fork if needed, the control then each treatment to its last checkpoint, one at a time,
+then `judge`. `judge`: cells-match (177) of each treatment's last checkpoint against the control's
+(`<t>_vs_<ctrl>.json`), and with `vs_start` each arm's against the common start (`<arm>_vs_start.json`), one baseline
+cache; report.json / report.md with each arm's metrics over its own iterations (speed, losses; the playout budget when
+the run logs one). The file names are those of 189's launcher, so its judge publishes through a spec without running
+anything again (193.5).
+
+### 193.2 Publishing at judge time (default on)
+
+`judge` (and `go`) end by posting one Head-to-heads experiment `h2h.<id>` - `--no-publish` or `"publish": {"h2h":
+false}` opts out, `ab.py publish SPEC [--dry-run] [--replace]` posts (again) later. `go` checks the uploader and the
+key before the first fork, not hours later. The post goes through the site's own uploader (delverai
+tools/upload_h2h.py, extended with `--from-cells` and manifest `cells` entries: one uploader, its path check, its
+merge); ab.py writes judge/h2h_manifest.json and runs it with `--manifest`. The matches:
+
+* each treatment against the control: the overall match (the mean of the 9 cells) and one match per cell (the
+  treatment piloting each deck against the control piloting each deck);
+* each arm against the common start: its overall match, the arm's speed and losses in the note.
+
+The tab's records carry mtgz.az.h2h's fields (a_score, se, elo_diff, elo_se, pairs). A cross-deck cell is a GAIN, not
+a score: C piloting X against R piloting Y, compared with R piloting X against R on the same deals (177). So
+`elo_diff` / `elo_se` = the cell's gain +- its paired se (the tab's verdict and bar read only these: "A better" = the
+treatment gains in that seat); `a_score` / `se` / `games` / `pairs` = C's raw games as X (se over deals from the units'
+pentanomial; a pair = one deal played twice with the side that chooses play or draw swapped). Each match's note says
+so ("A's score above is the raw share of points, mostly the matchup's", the baseline's score beside C's). A mirror
+cell's baseline is 0.5, so it is a plain paired match. The overall match: elo_diff the mean of the cells' gains,
+elo_se sqrt(sum se^2) / 9 (the cells are independent deals, as `summarize`), a_score the cells' mean raw score, pairs
+summed; its note gives the deck means. Labels only ("Prior-uncertainty budget, gen 235", "Start, gen 207"), never a
+path. Order on the tab (newest first, then by key descending): every match carries the judge's finish time, and the
+keys rank the treatments' overall matches first (`9-...overall`), then the arms against the start (`5-...`), then the
+cells in grid order (`1-...cNN...`).
+
+### 193.3 Live arms: the run-owned publisher as a side run
+
+With `publish.live` each arm's `publish` setting is the run-owned publisher's (163 already had `side`): {"side":
+true, "title": "<id>: <arm>", "note": the arm and the experiment, "forks": [], every 8, games 6, CPU, census 0, plus
+`live_options`} - each arm's progress is on the site while it trains and it never takes the default run. `forks: []`:
+no fork record goes to the site's forks.json (the arm's metrics up to K are copied with the fork, so its charts start
+from the source's history anyway).
+
+### 193.4 `--publish` on the measuring tools
+
+`python -m mtgz.az.h2h`, `python -m mtgz.az.keep_h2h` and `tools/run_yardsticks.py cells-match` take `--publish
+EXPERIMENT [--title T] [--description D] [--a-label ..] [--b-label ..] [--publish-key K] [--publish-note N]
+[--publish-link RUN] [--publish-replace] [--publish-dry-run]` (mtgz.az.site_h2h): the result goes to the tab when the
+measurement ends. Before any game: the uploader is found ($MTGZ_DELVERAI_UPLOADER, else ~/delverai/tools/upload_h2h.py),
+a key exists, and the experiment is read back from the site (an existing one keeps its title / description / link, so
+a later match never trips the uploader's "another title" refusal; a new one needs --title); h2h refuses a match that
+is not `--paired`. The result is saved under <temp>/mtgz-site-h2h/ first; a post that fails says PUBLISH FAILED with
+the exact retry command and the tool exits 3 after printing its result as usual. Defaults: h2h's sides named by the
+uploader (run and generation); keep_h2h's "<run>, gen N (sideboards)" / "(keeps its 60)" with the per-game win in the
+note; cells-match's keys prefixed by the sides (`<a run>-gN-vs-<b run>-gM.`), `--publish-overall-only` for the overall
+match alone. The zero.h2h wrapper strips the options before zero-core's parser and tees stdout for the result line
+(zero-core unchanged).
+
+### 193.5 Backfill (2026-11-17)
+
+* `meta3-lr-check`: legacy-meta3-r1 generation 171 (LR 1e-4) against 131 (LR 3e-5), 9 cells x 200 games: overall
+  +6.9 +- 9.1 Elo (no clear difference); the one cell past 2 se, Sneak and Show into Doomsday, +63.7 +- 29.4.
+  Uploaded with `upload_h2h.py --from-cells <its cells rows>`, read back from GET /api/h2h and rendered through the
+  tab's own functions (verdicts, scores, ranges, pairs as expected).
+* `meta3-adaptive-budget` (189's A/B): its judge was still running. A spec reproducing its launcher
+  (meta3-adaptive-budget.json beside it: the same arms, overrides and worktree, `publish.live` false as the arms were
+  forked) publishes it with `python tools/ab.py publish <that spec>` once judge/ holds its three results; `ab.py
+  check` / `status` on that spec read the live arms correctly.
+
+### 193.6 Tests and gate
+
+tests/test_ab.py (13): the spec's defaults and refusals, each arm's overrides (the live side-run publish dict through
+mtgz.az.publish.normalize and its command: `--side`, the title), the judge's matches, the manifest (ranks, labels,
+dates, nothing path-like sent), the publishing options (pop_args, labels, keys, the pre-run checks), and with the
+delverai checkout present a dry run through the real uploader. delverai test/upload_h2h.test.mjs (+3): the cells
+mapping (overall = the mean; a 23.5% score with a +41.3 gain reads "A better"), the tab's order, `--overall-only`,
+manifest cells entries, an incomplete measurement pending, the Worker accepting the record (93 pass). By hand (CPU,
+2 games, 2 sims, dry-run posts): h2h, keep_h2h and cells-match with `--publish`. Gate: the python tier.

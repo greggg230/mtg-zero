@@ -108,7 +108,9 @@ fn a_listed_card_s_find_with_the_deck_known_cross_post_sideboard_match_98() {
 /// 3) carries the card's identity". The engine keyed nothing private: the card was the viewer's own, and the look was
 /// the game that ended's. The check now reads the hand the look saw. The seeds were found under the `fuzz` profile
 /// (determinize checks 1 in 4); the denominator is drawn from the match's random stream, so they are replayed at 4 in
-/// every profile (`CHECKPOINT_EVERY_OVERRIDE`). Each must reach such a look (positive evidence).
+/// every profile (`CHECKPOINT_EVERY_OVERRIDE`). Each must reach such a look (positive evidence). (ENGINE.md 192: the
+/// remembered looks at another library moved the worlds' random draws; 52, 163 and 3,900,000,197 no longer reach one,
+/// 30, 55 and 3,900,000,012 do - a scan of seeds 0..300 and 3,900,000,000..300 found 41.)
 #[test]
 fn a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game() {
     use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENDED_GAME_HAND_LOOKS};
@@ -120,7 +122,7 @@ fn a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game() {
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
     let r = std::panic::catch_unwind(|| {
         let mut short = Vec::new();
-        for seed in [52u64, 95, 135, 163, 3_900_000_015, 3_900_000_026, 3_900_000_079, 3_900_000_151, 3_900_000_197] {
+        for seed in [30u64, 55, 95, 135, 3_900_000_012, 3_900_000_015, 3_900_000_026, 3_900_000_079, 3_900_000_151] {
             let looks0 = PK_ENDED_GAME_HAND_LOOKS.load(Relaxed);
             let mut stats = HiddenStats::default();
             let p = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_spec(seed, &match_spec(seed), true, &mut stats)))

@@ -198,6 +198,8 @@ pub fn fields() -> Vec<Field> {
         w6: Derived "EoE workstream W6's state: its fields are classified under W6State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",
         log: Derived "the human-readable log (tests and the viewer)",
+        peeks: Hidden "which entries of a player's library cloud name a card its owner never saw (ENGINE.md 192): the viewer's own knowledge, redrawn in the owner's worlds",
+        log_mark: Derived "the log's length when the last answer began to run: the spectator view's start (ENGINE.md 191)",
     });
     {
         use crate::eoe_w3::W3State;
@@ -1566,8 +1568,9 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         // ---- Obj ----
         // Who knows a hidden card (ENGINE.md 72; `learn` keeps the clouds
-        // right). A library card the other player knows its owner knows too
-        // (ENGINE.md 23.7): the other player's look learns both.
+        // right). The other player's look at a library card its owner knows,
+        // and (ENGINE.md 192: a Mishra's Bauble or Jace's +2 at a card its
+        // owner doesn't know, remembered since) at one its owner doesn't.
         p!("the owner learns the top card of their library", "Obj.known", |a, r| {
             let p = player(r);
             let c = *a.g.players[p as usize].library.last()?;
@@ -1584,6 +1587,15 @@ pub fn perturbations() -> Vec<Perturbation> {
                 return None;
             }
             a.g.learn(p, c);
+            a.g.learn(opp(p), c);
+            Some(format!("P{} learns P{p}'s", opp(p)))
+        }),
+        p!("the other player learns the top card of a library its owner doesn't know", "Obj.known", |a, r| {
+            let p = player(r);
+            let c = *a.g.players[p as usize].library.last()?;
+            if a.g.knows(opp(p), c) || a.g.knows(p, c) {
+                return None;
+            }
             a.g.learn(opp(p), c);
             Some(format!("P{} learns P{p}'s", opp(p)))
         }),
@@ -2793,7 +2805,7 @@ pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) 
 /// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
 /// effect it added ended) while it stays in the view. Each is still compared alone with every
 /// state.
-pub const COMBO_EXCLUDED: [&str; 21] = [
+pub const COMBO_EXCLUDED: [&str; 22] = [
     "a permanent leaves the battlefield",
     "a graveyard card is exiled",
     "an exiled card is turned face down",
@@ -2819,6 +2831,9 @@ pub const COMBO_EXCLUDED: [&str; 21] = [
     // position's partners are as before.)
     "the top library card is its owner's search's find",
     "a search's find is no longer told apart",
+    // (ENGINE.md 192: a look at a library card its owner doesn't know, remembered since - added after the partner
+    // draws were set, kept out so that every position's partners are as before.)
+    "the other player learns the top card of a library its owner doesn't know",
     // (ENGINE.md 151.4: CR 508.8's record. A partner that makes a creature attack makes it inert -
     // while one is attacking, its attacking flag says the steps follow - while the view keeps it; and
     // added after the partner draws were set, so every position's partners are as before. Compared

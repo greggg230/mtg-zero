@@ -2,7 +2,7 @@
 
 Every game of a run - its self-play, its evaluations, its yardsticks, its publisher's - and of the standalone tools that
 play games, replayed through the engine's play-by-play, in Parquet tables that DuckDB queries in well under a second.
-Design and measurements: `docs/ENGINE.md` 187 (self-play) and 191 (every other game, the engine identity). This page is
+Design and measurements: `docs/ENGINE.md` 187 (self-play) and 190 (every other game, the engine identity). This page is
 the schema and the queries: enough to write SQL against it cold.
 
 ## Pipeline
@@ -29,7 +29,7 @@ the schema and the queries: enough to write SQL against it cold.
    iterations; the other kinds are kept whole). **The raw records are kept by default** (the user's choice: no
    `--delete-raw` unless asked; they are what replays a game on its own engine). Their cost on disk: ~150 bytes a
    self-play game (148 measured, ENGINE.md 187.4) - the metagame run's ~61,000 games an hour are ~9 MB an hour, ~0.2 GB a
-   day -; an evaluation or yardstick game (played out, no resignation) ~230 bytes (ENGINE.md 191.5): its ~1,000 a day
+   day -; an evaluation or yardstick game (played out, no resignation) ~230 bytes (ENGINE.md 190.5): its ~1,000 a day
    (the anchors' 100 every 16 iterations, the cells' 400-1,200 a measured generation) are well under 1 MB a day.
    `gamedb.py status RUN` prints the raw records' size.
 
@@ -90,7 +90,7 @@ python tools/gamedb.py ingest RUN --engine-checkout ../mtgz-engine-<sha12>
 `--engine-checkout PATH` asks PATH's gamedb for its engine id and hands it the refused units of that engine (`python
 PATH/tools/gamedb.py ingest RUN --db <the same db> --only-engine <id>`): they are replayed by the engine that played them
 and written into the same database (its tables read by name: a later checkout's columns are NULL in an earlier one's
-files). The checkout must be at or after this page's ENGINE.md 191 (the build lines exist from there). So records made
+files). The checkout must be at or after this page's ENGINE.md 190 (the build lines exist from there). So records made
 before an engine change - the play-by-play export in view.rs, Mishra's Bauble remembering what it saw - stay ingestible
 after it: run the ingest of the new commit, then `--engine-checkout` a checkout of the old one (`refused` names its
 commit). A unit without an engine id (records of zero-core 5c2d3f39, before the build lines) is refused unless
@@ -136,7 +136,7 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 | score0, score1 | the result per seat (1 / 0 / 0.5) |
 | detailed | replayed in full (its events and combo rows exist) |
 | last_attackers | JSON {turn, attackers} of the winner's last attack (detailed games) |
-| lines_lost | play-by-play lines lost to the engine's 40-line exported tail (detailed games): a step that writes more (Doomsday exiling a library, ~50 lines) keeps its newest 40; ~6 a real self-play game |
+| lines_lost | play-by-play lines a state did not carry (detailed games): 0 since the engine exports every line a step writes (ENGINE.md 191), a check; before it a state carried the newest 40 and a step that wrote more (Doomsday exiling a library, ~50 lines) lost its oldest, ~6 a real self-play game |
 
 **events** - one row per play-by-play line and per choice of a detailed game.
 
@@ -146,7 +146,7 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 | action | the index of the action that produced it (-1: before the first action, the opening hands) |
 | turn, step | the turn and the step name (`Main1`, `Upkeep`, `DeclareAttackers`, `Setup`, ...) |
 | player | the seat (for a zone move: the seat whose destination zone holds the card, when exactly one does) |
-| type | `cast`, `land` (a land played), `activate`, `mana` (a mana ability), `move` (a zone change), `find` (a search's pick), `trigger` (a trigger put on the stack), `counter` (a spell countered), `attack`, `look`, `choose`, `turn` (a turn begins), `forced_find` (the wheel's draw line), `empty_draw`, `mulligan` (detail `n`: the mulligan's number), `damage` (detail `amount`; `card` the damaged object, or `player` the damaged seat with detail `player` true), `target` (a spell or ability's target as it is chosen: `card`, or `player`), `life_half` (Doomsday's cost: detail `amount`), `fizzle`, `wins`, `lines_lost` (detail `n`: a step wrote more lines than the engine's exported 40-line tail - a resolving Doomsday exiling the rest of a library - and its oldest `n` are not in `events`; `combo_stats` reads the same tail, and the `doomsday` rows come from the state, not the lines), `choice` (a decision with two or more options other than priority and mana payment: mulligans, targets, modes, piles, Brainstorm's put-backs, ...), `other` |
+| type | `cast`, `land` (a land played), `activate`, `mana` (a mana ability), `move` (a zone change), `find` (a search's pick), `trigger` (a trigger put on the stack), `counter` (a spell countered), `attack`, `look`, `choose`, `turn` (a turn begins), `forced_find` (the wheel's draw line), `empty_draw`, `mulligan` (detail `n`: the mulligan's number), `damage` (detail `amount`; `card` the damaged object, or `player` the damaged seat with detail `player` true), `target` (a spell or ability's target as it is chosen: `card`, or `player`), `life_half` (Doomsday's cost: detail `amount`), `fizzle`, `wins`, `lines_lost` (detail `n`: the next state did not carry `n` of a step's lines, which are not in `events`; never since ENGINE.md 191, a check - an engine before it exported a state's newest 40 lines, and a resolving Doomsday exiling the rest of a library lost its oldest; `combo_stats` reads the same lines, and the `doomsday` rows come from the state, not the lines), `choice` (a decision with two or more options other than priority and mana payment: mulligans, targets, modes, piles, Brainstorm's put-backs, ...), `other` |
 | card | the card the line names (cast / land / activate / mana / find / move / trigger / counter / attack: the attacker); a choice's chosen option text |
 | from_zone, to_zone | a move's zones (`Library`, `Hand`, `Battlefield`, `Graveyard`, `Stack`, `Exile`); a cast's zone it was cast from (`Hand`, `Graveyard`, ...) |
 | detail | JSON: a choice's `kind` (`Mulligan`, `ChooseTarget`, `SearchLibrary`, `PutOnTop`, ...) and `n_options` (and `source` while a spell resolves); an activation's `ability`; the forced find's `class` and `drawn`; an `other` line's `text` |
@@ -293,7 +293,7 @@ whole play-by-play (`SELECT seq, turn, step, player, type, card, from_zone, to_z
 ## Turning it all on (a run)
 
 One setting: the run's `game_records` 1 (`--game-records 1` at the launch; zero-core docs/az.md 59). With it, on a
-commit at or after ENGINE.md 191 (the run's pinned worktree and the Mac's eval checkout of it):
+commit at or after ENGINE.md 190 (the run's pinned worktree and the Mac's eval checkout of it):
 * self-play on every executor (as ENGINE.md 187), each file with its build line;
 * the evaluation (`eval`, `elo`, `anchor`, `ref`): here, or on the Mac with `eval_remote` 'mac' (the mirror gets the run's
   config, records there, and the files come back with the result);

@@ -1,4 +1,4 @@
-"""The game database (docs/gamedb.md, docs/ENGINE.md 187, 191): every game a run plays - its self-play, its evaluations,
+"""The game database (docs/gamedb.md, docs/ENGINE.md 187, 190): every game a run plays - its self-play, its evaluations,
 its yardsticks, its publisher's - replayed through the engine's play-by-play, as Parquet tables a DuckDB query answers in
 well under a second - "how often does a Doomsday pile hold card X since iteration 120, by opponent" is one SQL query.
 
@@ -72,7 +72,7 @@ for _p in (ROOT, os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'third_party', 
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-FORMAT = 'mtgz-gamedb/2'           # (2: every kind of game, players, the engine: docs/ENGINE.md 191)
+FORMAT = 'mtgz-gamedb/2'           # (2: every kind of game, players, the engine: docs/ENGINE.md 190)
 TABLES = ('games', 'events', 'doomsday', 'shows', 'spells', 'sneak', 'entered')
 NO_CHOICE_EVENT = ('Priority', 'PayMana')     # decisions that are not `choice` events (their effects are lines)
 
@@ -101,7 +101,7 @@ def read_state(db):
         return {'format': FORMAT, 'iterations': {}, 'units': {}, 'refused': {}}
     if st.get('format') != FORMAT:
         raise SystemExit(f'{db}: a database of format {st.get("format")!r}, this tool writes {FORMAT!r} (docs/ENGINE.md '
-                         f'191): ingest into a new --db (the raw records are kept: the whole run again)')
+                         f'190): ingest into a new --db (the raw records are kept: the whole run again)')
     st.setdefault('units', {})
     st.setdefault('refused', {})
     return st
@@ -352,8 +352,9 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
         k = nxt['log_n'] - st['log_n']
         lines = nxt['log'][-k:] if k > 0 else []
         if k > len(nxt['log']):
-            # (a step that wrote more lines than the exported tail - a resolving Doomsday exiling a library: the
-            # oldest are gone, as for combo_stats; an event says how many)
+            # (a step whose lines the next state does not all carry: never since the engine exports every line a step
+            # writes, ENGINE.md 191 - before it a state carried its newest 40 and a resolving Doomsday's oldest exile
+            # lines were lost. Kept as a check: an event says how many, as combo_stats marks them)
             lost += k - len(nxt['log'])
             lines = ['(log lines lost)'] + lines
             events.append((len(events), i, nxt.get('turn'), nxt.get('step'), None, 'lines_lost', None, None, None,
@@ -578,7 +579,7 @@ def checkout_engine(path):
         return json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
         raise SystemExit(f'--engine-checkout {path}: `gamedb.py engine` there failed (exit {r.returncode}; a checkout '
-                         f'before docs/ENGINE.md 191 has none): {(r.stderr or r.stdout).strip()[-400:]}') from None
+                         f'before docs/ENGINE.md 190 has none): {(r.stderr or r.stdout).strip()[-400:]}') from None
 
 
 # ====================================================================================== publisher replays

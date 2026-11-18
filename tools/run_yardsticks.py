@@ -13,8 +13,10 @@ opponents and the canary library, on every evaluated checkpoint, once each, in o
   python tools/run_yardsticks.py cells-fit RUN [--json] [--boot B]       (the joint fit from the records only: no games)
   python tools/run_yardsticks.py cells-freeze RUN --iter N [--label L] [--to PATH]    (the next reference)
   python tools/run_yardsticks.py cells-match CKPT --ref PATH [--games G] [--sims S] [--decks a,b,c] [--cache DIR]
-                                 [--out FILE.jsonl] [--device cpu|cuda] [--json] [--records DIR]   (standalone, local
-                                 games; --records: every game a game record, docs/gamedb.md)
+                                 [--out FILE.jsonl] [--device cpu|cuda] [--json] [--records DIR]   (standalone, local games;
+                                 --records: every game a game record, docs/gamedb.md)
+                                 [--publish EXPERIMENT --title T [--a-label ..]]     (and to delverai's h2h tab:
+                                 the overall match and one per cell, mtgz.az.site_h2h, ENGINE.md 193)
 
 `watch`: follows the run (RUN: its directory) and measures what its setting `yardsticks` asks for (config.json's,
 else its preset's; `--yardsticks` replaces it for a hand start) in two lanes - the head-to-heads (the GPU) and the
@@ -52,7 +54,7 @@ import traceback
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from mtgz.az import yardsticks as Y  # noqa: E402
+from mtgz.az import site_h2h as S, yardsticks as Y  # noqa: E402
 
 LANES = ('gpu', 'cpu', 'cpu_bo1')
 
@@ -739,6 +741,7 @@ def cmd_match(a):
     if a.decks:
         ov['cells_decks'] = a.decks.split(',')
     ys = Y.normalize(ov)
+    S.check(a)
     cdir = a.cache or os.path.join(os.path.dirname(os.path.abspath(a.out or a.ckpt)), 'cells_base')
     rows, s = Y.measure_cells_standalone(os.path.abspath(a.ckpt), os.path.abspath(a.ref), ys, cdir,
                                          label=a.ref_label, rows_out=a.out,
@@ -748,6 +751,15 @@ def cmd_match(a):
         print(json.dumps({'summary': s, 'rows': rows}, indent=1))
     else:
         print_summary(s, ys['cells_decks'], f'{a.ckpt} against {a.ref}:')
+    if a.publish:
+        # the sides by their run and generation (never a path); B the reference's label when its file says nothing
+        a.a_label = a.a_label or S.checkpoint_label(a.ckpt)
+        rl = S.checkpoint_label(a.ref)
+        a.b_label = a.b_label or (rl if rl != a.a_label and S.checkpoint_side(a.ref)[1] is not None else a.ref_label)
+        name = S.default_key(a.ckpt, a.ref)
+        a.publish_key = a.publish_key or name[:44] + '.'     # (the keys' prefix: another measurement's never collide)
+        if S.publish_cells({'summary': s, 'rows': rows}, a, name, overall_only=a.publish_overall_only) != 0:
+            return S.EXIT_PUBLISH_FAILED
     return 0
 
 
@@ -809,6 +821,9 @@ def main(argv=None):
                         '(docs/gamedb.md: tools/gamedb.py ingest --records DIR)')
     m.add_argument('--json', action='store_true')
     m.add_argument('--yardsticks', default=None, help='more cells_* options as JSON')
+    S.add_args(m)
+    m.add_argument('--publish-overall-only', action='store_true', help='with --publish: the overall match only, no '
+                   'match per cell')
     a = ap.parse_args(argv)
     if a.cmd == 'one':
         return cmd_one(a)
