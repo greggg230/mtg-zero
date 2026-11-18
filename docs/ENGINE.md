@@ -39420,3 +39420,182 @@ shards and the run-loop smoke ran on the Mac); a first run failed only `test_mac
 on a shard that fell back to the desktop (174.1's Git Bash path conversion of `MTGZ_MAC_HOME`), passed when rerun with
 `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`. zero-core 459599f against the other games: `tools/smoke_all.sh --with-this-core
 --build-only` GREEN, games 3 of 3 checked (glassroad-zero, caverna-zero, kingdombuilder-zero build).
+
+## 196. Farm builds without the friction: declared setting classes, one command for a release, a ready build for every main merge (branch `feat/farm-release`, zero-core `feat/setting-classes` 62f4ba5, docs/az.md 61; zero-farm `docs/setting-classes`; 2026-11-17)
+
+Branch `feat/farm-release` from main 7bd1722d. Why: the user (2026-11-17) wants experiments on friends' PCs without
+waiting for worker builds. Three frictions: a trainer-only setting the release worker doesn't know refused the farm
+(180.5 / 181.5: `forced_find_schedule` forced a new build, a CUDA re-sign and the farm gates); a published build was
+five hand steps (114.3, the launch scripts' notes); and nobody built main's worker until a run needed it. No rule, card,
+encoding, search or training change; digests untouched.
+
+### 196.1 Trainer-only settings no longer force a rebuild (zero-core docs/az.md 61)
+
+* **The classes come from the trainer.** `GamePackage.setting_classes` (new in zero-core; mtgz's `SETTING_CLASSES` in
+  `mtgz/az/__init__.py`: the 26 package settings - the deck evaluator's `evaluator_every` python_only and its params,
+  everything else trainer) and zero-core's own table (`run_settings.json`) give `zero.farm_h2h.run_setting_classes(cfg)`
+  = {key: class} for every key of a run's settings (meta3's config: all 204). tests/test_farm_release.py keeps
+  `SETTING_CLASSES` equal to the worker's `PACKAGE_SETTINGS` (what a build itself knows).
+* **The signed definition carries them.** For a worker build whose `info` / `hello` features list `setting_classes`
+  (new; this branch's builds), the farm pool's self-play template and the eval template (`farm_pool.play_settings`,
+  `farm_h2h.play_settings`) check the run's settings with `"setting_classes": {...}` added, and the template's settings
+  carry the same object - signed with the definition. A build without the feature gets exactly what it got before.
+* **The worker** (`zero_worker::classify`): `setting_classes` is not a setting (no verdict; the driver never reads it).
+  A key the build does not know: declared `trainer` -> unused; `python_only` -> off while off, else unsupported;
+  `param:<switch>` -> off; declared `play`, or not declared at all -> **unknown, refused** (the build cannot play it).
+  A key the build knows but the declaration classes otherwise -> unsupported (the trainer's zero-core reads it another
+  way: rebuild). A malformed declaration -> unsupported, for eval jobs too.
+* **Protocol / min agent: none.** The declaration is a key inside the template's `settings` object, which agents and
+  the coordinator keep opaque (PROTOCOL 7: path-free strings only; class names are). No new definition field (agents
+  refuse unknown fields: an extra field WOULD have needed an agent release and a `min_agent` bump), no agent change, no
+  `min_agent` change. zero-farm `docs/setting-classes` documents it in PROTOCOL.md 7.
+* **The one build it needs.** Builds before this branch don't have the feature; the first release build of a main that
+  has this branch is the last one a trainer-only setting forces. A new **play** setting still needs a build (the worker
+  must implement it), as does a changed class.
+
+Tests (real worker, `tests/test_worker_farm.py`):
+* `test_declared_setting_classes_with_the_real_worker`: the worker announces the feature; mtg-smoke's settings with a
+  forced-find schedule and the declaration pass as without it; a new key `zz_new_setting` passes declared trainer-only
+  (self-play and eval check-config), is refused declared play and refused undeclared; `forced_find_schedule` declared
+  play is refused (unsupported); with `MTGZ_OLD_WORKER` (a published build before the feature, f8606113 here) the new
+  key is refused even when declared trainer-only - an old worker against a new definition stays safe.
+* `test_the_pool_template_declares_the_classes`: `farm_pool.play_settings` with the worker in a build directory of its
+  own: a package setting the build doesn't know but the package classes trainer-only is left out of the template and
+  logged; the template = the play settings + the declaration; a definition with it validates.
+* By hand on legacy-meta3-r1's real config.json: pb3's worker 88c69488 (built before `forced_find_schedule` and
+  `infer_precision` / `train_tf32`) refuses `['infer_precision', 'train_tf32', 'forced_find_schedule']` with or
+  without the declaration (and `setting_classes` itself, unknown to it); this branch's worker: no failure, 51 play keys
+  either way.
+* zero-core: `cargo test -p zero_worker` (the new `classify::tests::declared_classes`: trainer accepted, play / undeclared
+  refused, python_only and param off / on, a known key declared otherwise, three malformed declarations for self-play and
+  eval, the eval reading, the driver unchanged), pytest test_farm_pool / test_farm_h2h / test_worker_settings 27 passed
+  (the stub with and without the feature: an older build refuses a package key as before).
+
+### 196.2 `tools/farm_release.py`: one command for a published build
+
+`python tools/farm_release.py release <commit | clean worktree>` (its docstring is the manual), unattended, failing
+loudly at the first bad step ("farm_release: FAILED at <step>: ...", exit 1, the step's log tail; the result in
+`<builds>/releases/<sha12>/result.json`):
+
+1. **reuse** - `mtgz.az.farm_builds.rust_key(commit)` (the git tree of every Rust path = tools/zcache.py's
+   RUST_PATHS, the zero-core pin, `rustc -vV`, the farm build's profile and `+crt-static`; read from the commit, no
+   checkout) equal to a published entry's: that build is the commit's (an index entry `reused_from`; nothing built,
+   signed or published; `--regate` re-runs the template check and the gates on this commit's Python);
+2. **checkout** - the release worktree `mtg-zero-wt/farm-release` (fixed, reused; its own target dir
+   `$ZERO_BIG_DISK/cargo-target/mtg-zero/farm-release`) at the commit, forced and clean, the submodule at its pin;
+3. **modules** - mtgz/_engine and zero/_engine for the gates' Python (the artifact cache, else built);
+4. **build** - `farm_build.py --root <release worktree> --profile release --runtime-id <CPU pack>` (this checkout's
+   farm_build.py, which gained `--root`: a commit older than the tool releases with the tool's code), signed;
+5. **cuda** - `farm_build.py --resign <build dir> --runtime-id <CUDA pack> --min-agent 0.2.11`: farm-cuda's `--resign`
+   (and `--pack cuda`), merged into this branch (399d1911);
+6. **cuda-selftest** - the CUDA alternate's `probe-providers --providers cuda,cpu --reps 2` on the reference export
+   (a few seconds of GPU): both providers must pass;
+7. **template** - `zero.farm_pool.play_settings` with the signed worker on the reference config: the farm pool's own
+   path to a template (the refusal of 181.5 shows here, before anything is published);
+8. **gates** - the commit's `tools/farm_gates.py` on the reference config + checkpoint with the signed worker and the
+   CPU pack, CPU only (`CUDA_VISIBLE_DEVICES` empty);
+9. **publish** - `farm_build.py --publish-dir` (new) for both builds, then copies in `$ZERO_BIG_DISK/zero-farm-builds/<id>/`;
+10. **index** - `$ZERO_BIG_DISK/zero-farm-builds/index.json`: commit, rust_key, core commit, build id, version, runtime,
+    worker path, the CUDA alternate (id, runtime, min agent, self-test max_abs), features, zero_onnx, the template line,
+    the gate line and counts, the reference, each step's seconds.
+
+Heavy steps hold a tools/slotd.sh slot each; the whole release runs below normal priority; one release at a time
+(`<builds>/.release.lock`). Publishing makes a build available; nothing attaches it to a run. Machine settings in the
+untracked `<builds>/release.json` (`config` prints them): the CPU pack d531424b, the CUDA pack 855d2162 (both as
+`<builds>/<id>/`), the gates' Python (the zero-farm venv: torch, onnx, onnxruntime), the reference
+(`farm_release.py reference --config --checkpoint --export` copies one into `<builds>/reference/`). The reference now:
+legacy-meta3-r1's config.json, its checkpoint 206 and the pool's gen-206 export (layout v7, the metagame spec with the
+forced find - the settings that once forced a rebuild). A layout change needs a new reference (the export would not
+load: the CUDA self-test fails loudly).
+
+**Lookups.** `farm_release.py lookup <commit>` (`--pool-args`: the pool flags; `--json`), `list`. `mtgz.az.farm_builds`
+answers a commit's own release, else one of the same Rust inputs (`exact: false`). Integration:
+* `python -m mtgz.az.run ... --pool-build published[:<rev>]` (so every launch script that passes pool flags): the build
+  of the checkout's commit, plus its `--pool-runtime`, `--pool-worker` and `--pool-alternates` (the CUDA alternate)
+  unless given; the ids land in config.json; no build -> a refusal naming the release command.
+* `tools/ab.py`: an override `"pool_build": "published"` (or `published:<rev>`) the same, for the code's commit.
+
+### 196.3 The end-to-end release of main 7bd1722d
+
+`python tools/farm_release.py release 7bd1722d` (origin/main at the time; the tool from this branch, a cold release
+worktree and target), 2026-11-17 23:44-23:54, beside two live supervisors and other slot holders:
+
+| step | s | what |
+|---|---|---|
+| checkout | 22 | the release worktree created at 7bd1722d, submodule 459599f |
+| modules | 4 | mtgz pyd from the cache (fc52e0ad), zero._engine from the cache |
+| build | 202 | `mtg-7bd1722-release` signed: **9a31bc2469588896035a57f4** (requires the CPU pack d531424b) |
+| cuda | 1 | re-signed for the CUDA pack 855d2162, min agent 0.2.11: **5a56c726333481e950a6df9c** |
+| cuda-selftest | 5 | cuda max_abs 2.4e-6, cpu 3.6e-6 on meta3's gen-206 export (both pass) |
+| template | 1 | the pool's template on meta3's config: 51 play of 204 settings (this build has no `setting_classes`) |
+| gates | 338 | **FARM GATES PASSED: gate 2 8 matches, 491 rows, 200 batches identical (158 s); gate 3 12 matches, 710 rows, nets 206/207, 20 arrays identical (129 s)** |
+| publish | 10 | both published, copied to `$ZERO_BIG_DISK/zero-farm-builds/<id>/` |
+
+10 minutes end to end, published, attached to nothing. `lookup 7bd1722d --pool-args`: `--pool-build
+9a31bc2469588896035a57f4 --pool-runtime d531424bd1a16307d491418c --pool-worker <builds>/9a31bc24.../mtgz-worker.exe
+--pool-alternates 5a56c726333481e950a6df9c`; `lookup 9f14fa3a` (a docs commit before it): the same build, "released
+for 7bd1722dad4f, the same Rust inputs". The gate line first printed "None batches" (a field name), fixed in
+e17bb95f and in that index entry.
+
+**This branch's own build, not published** (`release e17bb95f --no-publish`, 23:55-00:03, the warm target): build 79 s
+(**b6743a19a6dead5aa6ffb8f4**, features `rolling`, `setting_classes`), CUDA re-sign c773a0fe10d7bedaac793482,
+self-test cuda 2.4e-6 / cpu 3.6e-6, template 51 play of 204 with **all 204 settings declared**, FARM GATES PASSED
+(the same counts: gate 2 491 rows, 200 batches; gate 3 710 rows, 20 arrays). The merge of this branch into main is
+the release the watcher will publish: the last build a trainer-only setting forces.
+
+### 196.4 `tools/farm_release_watch.py`: a ready build for every main merge
+
+Polls every 5 minutes: `git fetch origin main`, the head = the newer of `main` and `origin/main`; a head not yet
+handled goes to `farm_release.py release <head>` (below normal priority, hidden child; the heavy steps through
+slotd.sh). A head with the same Rust inputs as a released one becomes an index entry in seconds; one that main passed
+during a release is skipped (only the newest is built); a failed head is not retried (the next merge, or by hand).
+One watcher per machine. Not a web server (no port): no hub row; its state is the log and index.json.
+
+* start (hidden, from a pinned worktree of a commit that has the tool, never one being edited):
+  `python tools/launch_hidden.py <builds>/release_watch.console.txt <zero-farm venv python> tools/farm_release_watch.py --python <same>`
+* check: `python tools/farm_release_watch.py --status` (running?, last head, last result, the log's tail)
+* stop: `python tools/farm_release_watch.py --stop` (exits within 5 s)
+* log: `<builds>/release_watch.log`; each release's own logs: `<builds>/releases/<sha12>/`.
+
+Started 2026-11-18 00:04 from the pinned worktree `mtg-zero-wt/release-watch` (this branch's head) with the
+zero-farm venv; its first poll took origin/main 7bd1722d, already released: nothing to do (0 s).
+
+### 196.5 Tests and gates
+
+* tests/test_farm_release.py (6, no build or network): `SETTING_CLASSES` = the worker's `PACKAGE_SETTINGS`; the
+  rust key (a docs commit keeps it, an engine change moves it), the index, exact and same-inputs lookups, an
+  unpublished entry never looked up, `pool_settings`; `--pool-build published[:<rev>]` in a run's command line (given
+  flags kept, a refusal without a build); `release` of a commit with a published build's Rust inputs = an index entry
+  `reused_from` with nothing built, again = 'released already', another commit stopped at its preflight with
+  result.json naming the step; the watcher's newest head, each head once, a failed head not retried, its log;
+  ab.py's `"pool_build": "published"`.
+* tests/test_worker_farm.py +2 with the real worker (196.1), run with `MTGZ_OLD_WORKER` = the published f8606113.
+* **`optin-core` on 8f59fe42** (`--baseline-root` = a checkout of main 7bd1722d): **GATE PASSED WITH SKIPS AND FLAKY
+  RETRIES optin-core 8f59fe42f748 in 3560s** - privacy; builds (mtgz, the release worker, zero._engine); core cargo
+  test 215 passed; checkpoint_compat identical (visits and cq, 3,303 samples); digest formats = the recorded files
+  (constructed dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587) and dealt
+  f78ada3d3d114826; farm compat identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 6 games, 2,556 rows,
+  6 decks; `rolling` announced); `--test az` 57, `--test hidden` 28; the other three games build against the core;
+  core pytest 719 passed, 1 flaky passed alone (test_remoteplay backoff), 17 live-run-hazard tests fenced (two live
+  supervisors here). Digests untouched.
+* **`python` on 874a6da4** (the code head: 8f59fe42 + the tool fixes e17bb95f / d0813483 + the template test):
+  **GATE PASSED WITH SKIPS python 874a6da432a3 in 357s** - privacy, builds, pytest 187 + 46 (desktop part: the
+  Windows worker) + 108 + 227 + 135 passed, 8 live-run-hazard tests fenced, the run-loop smoke 16 games. Its first run
+  on d0813483 failed one test, `test_a_farm_h2h_definition_holds_the_play_settings_only` (twice: the desktop part and
+  4-of-4): the eval template now carries the declaration (196.1), a deliberate change; the test was updated (874a6da4).
+* zero-core `feat/setting-classes` 62f4ba5: `cargo test -p zero_worker` 57 passed, 1 ignored (34 unit + 23 in its test binaries), pytest
+  test_farm_pool / test_farm_h2h / test_worker_settings 27 passed (the zero-farm venv: onnx).
+
+### 196.6 Open points
+
+* **A new play setting still needs a build** (the worker must implement it). Settings added as play but off by
+  default (189's `p_full_rule` 'random') could be declared "play, at its default" and accepted by a build that lacks
+  them while the value is the off one; not built: the user's rule was to refuse unknown play-affecting settings.
+* **The reference run moves.** The reference is a copy (meta3's gen 206); a layout change makes the CUDA self-test
+  and the gates fail loudly until `farm_release.py reference` takes a run of the new layout.
+* **Reuse trusts the Rust inputs.** A reused build keeps its gates; a commit that changes only the trainer's Python
+  side of the gates (zero-core's remote worker is Rust-pinned, mtgz's Python is not) is not re-gated unless
+  `--regate`. The watcher does not pass `--regate`.
+* **Agents and alternates.** The CUDA alternate is signed with min agent 0.2.11 (pb3's and meta3's); the CPU build
+  keeps farm_build's 0.1.3. Runs still choose their own `pool_min_agent`.
+
