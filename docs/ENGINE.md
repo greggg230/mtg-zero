@@ -38636,8 +38636,9 @@ loss and entropy, games per minute. Estimate ~2.5 h of GPU. The launch script li
 
 ## 191. Every game recorded: the evaluations, the yardsticks, the tools and the publisher in the game database, each record naming its players and its engine (branch `feat/gamedb-all`, zero-core `feat/game-records-all`, docs/az.md 59.3-59.5; 2026-11-17)
 
-Branch `feat/gamedb-all` from main b3245a81, main c106f7e8 merged in; zero-core pin 3161bd9 -> 701edda
-(`feat/game-records-all`: e6bab23 on `feat/game-records` 5c2d3f39, then `feat/adaptive-budget` 3161bd9 merged in). Why: 187 recorded self-play only; the user: "record them all". The metagame run's questions
+Branch `feat/gamedb-all` from main b3245a81, main c106f7e8 merged in; zero-core pin 3161bd9 -> 68b6a40
+(`feat/game-records-all`: e6bab23 on `feat/game-records` 5c2d3f39, `feat/adaptive-budget` 3161bd9 merged in, then
+68b6a40: co-training's primary - its own play_match - gets the calls of before, `Run.rec_kw`). Why: 187 recorded self-play only; the user: "record them all". The metagame run's questions
 reach its evaluation and yardstick games too - the cells of generation N, the anchor games by opponent, the Doomsday
 piles the network builds in evaluation against those of self-play - and those games were thrown away after their
 score. Now one setting, the run's `game_records` 1, keeps every game the system plays, and the database ingests every
