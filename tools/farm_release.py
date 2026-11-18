@@ -270,12 +270,7 @@ class Release:
             sm = json.load(f)
         if not sm.get('passed'):
             raise Failed('gates', f'FARM GATES FAILED: {json.dumps(sm)[:1500]}')
-        g2, g3 = (sm['gate2'].get('result') or {}), (sm['gate3'].get('result') or {})
-        line = (f'FARM GATES PASSED: gate 2 {g2.get("matches", g2.get("games"))} matches, {g2.get("rows")} rows, '
-                f'{g2.get("batches")} batches identical ({sm["gate2"]["seconds"]:.0f} s); gate 3 {g3.get("matches", g3.get("games"))} matches, '
-                f'{g3.get("rows")} rows identical ({sm["gate3"]["seconds"]:.0f} s)')
-        return {'passed': True, 'line': line, 'gate2': {k: g2.get(k) for k in ('matches', 'games', 'rows', 'batches', 'identical')},
-                'gate3': {k: g3.get(k) for k in ('matches', 'games', 'rows', 'identical', 'arrays')}, 'summary': os.path.join(out, 'summary.json')}
+        return gate_summary(sm, os.path.join(out, 'summary.json'))
 
     def publish(self, d):
         """Publish a signed build directory, then copy it to <builds>/<build_id>/ -> that copy."""
@@ -344,9 +339,9 @@ class Release:
             return dict(r, build_id=bid, cuda=cuda, template=tpl, gates=gates, published=False)
         worker = self.timed('publish', self.publish, bdir)
         if cuda:
-            cuda['worker'] = os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe')
+            cuda['worker'] = slash(os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe'))
         e = {'commit': sha, 'built_at': sha, 'rust_key': key, 'core_commit': r['core_commit'], 'build_id': bid,
-             'version': os.path.basename(os.path.normpath(bdir)), 'runtime': rt, 'worker': os.path.join(worker, 'mtgz-worker.exe'),
+             'version': os.path.basename(os.path.normpath(bdir)), 'runtime': rt, 'worker': slash(os.path.join(worker, 'mtgz-worker.exe')),
              'cuda': cuda, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
              'gates': gates, 'reference': {k: local_config.portable_path(v) for k, v in self.s['reference'].items()},
              'url': self.s['url'], 'published': True, 'created': now(), 'seconds': r['seconds']}
@@ -354,6 +349,20 @@ class Release:
 
     def target_root(self):
         return release_worktree()[1]
+
+
+def gate_summary(sm, path):
+    """tools/farm_gates.py's summary.json -> the index's gates record and its one line."""
+    g2, g3 = (sm['gate2'].get('result') or {}), (sm['gate3'].get('result') or {})
+    line = (f'FARM GATES PASSED: gate 2 {g2.get("games")} matches, {g2.get("rows")} rows, {g2.get("batches_compared")} '
+            f'batches identical ({sm["gate2"]["seconds"]:.0f} s); gate 3 {g3.get("games")} matches, {g3.get("rows")} rows, '
+            f'nets {"/".join(map(str, (g3.get("nets") or {})))}, {g3.get("arrays")} arrays identical ({sm["gate3"]["seconds"]:.0f} s)')
+    return {'passed': True, 'line': line, 'gate2': {k: g2.get(k) for k in ('games', 'rows', 'batches_compared', 'identical')},
+            'gate3': {k: g3.get(k) for k in ('games', 'rows', 'nets', 'arrays', 'identical')}, 'summary': path}
+
+
+def slash(p):
+    return p.replace('\\', '/')
 
 
 def preflight(s, cuda=True):
