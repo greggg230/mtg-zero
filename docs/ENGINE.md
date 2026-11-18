@@ -38704,3 +38704,103 @@ records exactly as before (self-play runs with the log off, and nothing it plays
   `suite` GATE PASSED in 1,014 s (2,703 passed; the three 2,000-game fuzz pools clean); `engine --tested-sha e8492cc8`
   GATE PASSED WITH SKIPS (4 live-run-hazard tests fenced) in 735 s - every digest unchanged (as above), `--test az` 54,
   pytest, the smoke, farm compat identical (gate 2: 6 games, 2,484 rows).
+
+## 193. Running and publishing an A/B: `tools/ab.py`, and results to delverai's Head-to-heads tab by default (`--publish`; branch `feat/ab-publish`, delverai branch `ab-publish`, 2026-11-17)
+
+Branch `feat/ab-publish` from main c106f7e8. Why: the meta3 A/B of 189 (the playout cap's rule) ran from a one-off
+launcher, and its verdict - like the LR check's the same day - lived in a scratch report nobody else sees. The user
+(2026-11-17): experiment results publish to the Delver AI site automatically, by default. No rule, card, encoding,
+setting or default of a run changes; tools only (`tools/ab.py` drives runs through the existing fork / supervise /
+pause tools).
+
+### 193.1 The harness
+
+`python tools/ab.py check|fork|go|launch|status|stop|judge|publish SPEC` - 189's one-off launcher, generalized (its
+docstring is the manual). The spec (JSON):
+
+* `id`, `title`, `description` - the experiment (`h2h.<id>` on the site; the arms' runs `<run_prefix><arm>`);
+* `source` {`run`, `iter`: N or "newest"}, `iterations` (each arm trains K+1 .. K+iterations);
+* `arms` {name: setting overrides}, `control` (default the first arm; the others are treatments), `labels` {name:
+  name on the site}, `common` (every arm's overrides; `publish` and `iters` are ab.py's and refused there);
+* `runs_dir`, `run_prefix`, `out` (judge/ and ab_state.json; relative to the spec), `code` {`worktree`, `sha`,
+  `python`} (the pinned checkout the arms run from; default this one), `env` (the supervisors' extra environment),
+  `require_source_idle`;
+* `judge` {`games` (per cell), `device`, `sims`, `seed`, `decks`, `yardsticks`, `vs_start`};
+* `publish` {`h2h` (default true), `live` (default true), `live_options`, `link`, `url`}.
+
+`fork`: tools/fork_run.py --copy per arm with --set for common + the arm's overrides + `iters` + `publish`; K goes to
+<out>/ab_state.json. `go`: fork if needed, the control then each treatment to its last checkpoint, one at a time,
+then `judge`. `judge`: cells-match (177) of each treatment's last checkpoint against the control's
+(`<t>_vs_<ctrl>.json`), and with `vs_start` each arm's against the common start (`<arm>_vs_start.json`), one baseline
+cache; report.json / report.md with each arm's metrics over its own iterations (speed, losses; the playout budget when
+the run logs one). The file names are those of 189's launcher, so its judge publishes through a spec without running
+anything again (193.5).
+
+### 193.2 Publishing at judge time (default on)
+
+`judge` (and `go`) end by posting one Head-to-heads experiment `h2h.<id>` - `--no-publish` or `"publish": {"h2h":
+false}` opts out, `ab.py publish SPEC [--dry-run] [--replace]` posts (again) later. `go` checks the uploader and the
+key before the first fork, not hours later. The post goes through the site's own uploader (delverai
+tools/upload_h2h.py, extended with `--from-cells` and manifest `cells` entries: one uploader, its path check, its
+merge); ab.py writes judge/h2h_manifest.json and runs it with `--manifest`. The matches:
+
+* each treatment against the control: the overall match (the mean of the 9 cells) and one match per cell (the
+  treatment piloting each deck against the control piloting each deck);
+* each arm against the common start: its overall match, the arm's speed and losses in the note.
+
+The tab's records carry mtgz.az.h2h's fields (a_score, se, elo_diff, elo_se, pairs). A cross-deck cell is a GAIN, not
+a score: C piloting X against R piloting Y, compared with R piloting X against R on the same deals (177). So
+`elo_diff` / `elo_se` = the cell's gain +- its paired se (the tab's verdict and bar read only these: "A better" = the
+treatment gains in that seat); `a_score` / `se` / `games` / `pairs` = C's raw games as X (se over deals from the units'
+pentanomial; a pair = one deal played twice with the side that chooses play or draw swapped). Each match's note says
+so ("A's score above is the raw share of points, mostly the matchup's", the baseline's score beside C's). A mirror
+cell's baseline is 0.5, so it is a plain paired match. The overall match: elo_diff the mean of the cells' gains,
+elo_se sqrt(sum se^2) / 9 (the cells are independent deals, as `summarize`), a_score the cells' mean raw score, pairs
+summed; its note gives the deck means. Labels only ("Prior-uncertainty budget, gen 235", "Start, gen 207"), never a
+path. Order on the tab (newest first, then by key descending): every match carries the judge's finish time, and the
+keys rank the treatments' overall matches first (`9-...overall`), then the arms against the start (`5-...`), then the
+cells in grid order (`1-...cNN...`).
+
+### 193.3 Live arms: the run-owned publisher as a side run
+
+With `publish.live` each arm's `publish` setting is the run-owned publisher's (163 already had `side`): {"side":
+true, "title": "<id>: <arm>", "note": the arm and the experiment, "forks": [], every 8, games 6, CPU, census 0, plus
+`live_options`} - each arm's progress is on the site while it trains and it never takes the default run. `forks: []`:
+no fork record goes to the site's forks.json (the arm's metrics up to K are copied with the fork, so its charts start
+from the source's history anyway).
+
+### 193.4 `--publish` on the measuring tools
+
+`python -m mtgz.az.h2h`, `python -m mtgz.az.keep_h2h` and `tools/run_yardsticks.py cells-match` take `--publish
+EXPERIMENT [--title T] [--description D] [--a-label ..] [--b-label ..] [--publish-key K] [--publish-note N]
+[--publish-link RUN] [--publish-replace] [--publish-dry-run]` (mtgz.az.site_h2h): the result goes to the tab when the
+measurement ends. Before any game: the uploader is found ($MTGZ_DELVERAI_UPLOADER, else ~/delverai/tools/upload_h2h.py),
+a key exists, and the experiment is read back from the site (an existing one keeps its title / description / link, so
+a later match never trips the uploader's "another title" refusal; a new one needs --title); h2h refuses a match that
+is not `--paired`. The result is saved under <temp>/mtgz-site-h2h/ first; a post that fails says PUBLISH FAILED with
+the exact retry command and the tool exits 3 after printing its result as usual. Defaults: h2h's sides named by the
+uploader (run and generation); keep_h2h's "<run>, gen N (sideboards)" / "(keeps its 60)" with the per-game win in the
+note; cells-match's keys prefixed by the sides (`<a run>-gN-vs-<b run>-gM.`), `--publish-overall-only` for the overall
+match alone. The zero.h2h wrapper strips the options before zero-core's parser and tees stdout for the result line
+(zero-core unchanged).
+
+### 193.5 Backfill (2026-11-17)
+
+* `meta3-lr-check`: legacy-meta3-r1 generation 171 (LR 1e-4) against 131 (LR 3e-5), 9 cells x 200 games: overall
+  +6.9 +- 9.1 Elo (no clear difference); the one cell past 2 se, Sneak and Show into Doomsday, +63.7 +- 29.4.
+  Uploaded with `upload_h2h.py --from-cells <its cells rows>`, read back from GET /api/h2h and rendered through the
+  tab's own functions (verdicts, scores, ranges, pairs as expected).
+* `meta3-adaptive-budget` (189's A/B): its judge was still running. A spec reproducing its launcher
+  (meta3-adaptive-budget.json beside it: the same arms, overrides and worktree, `publish.live` false as the arms were
+  forked) publishes it with `python tools/ab.py publish <that spec>` once judge/ holds its three results; `ab.py
+  check` / `status` on that spec read the live arms correctly.
+
+### 193.6 Tests and gate
+
+tests/test_ab.py (13): the spec's defaults and refusals, each arm's overrides (the live side-run publish dict through
+mtgz.az.publish.normalize and its command: `--side`, the title), the judge's matches, the manifest (ranks, labels,
+dates, nothing path-like sent), the publishing options (pop_args, labels, keys, the pre-run checks), and with the
+delverai checkout present a dry run through the real uploader. delverai test/upload_h2h.test.mjs (+3): the cells
+mapping (overall = the mean; a 23.5% score with a +41.3 gain reads "A better"), the tab's order, `--overall-only`,
+manifest cells entries, an incomplete measurement pending, the Worker accepting the record (93 pass). By hand (CPU,
+2 games, 2 sims, dry-run posts): h2h, keep_h2h and cells-match with `--publish`. Gate: the python tier.
