@@ -904,7 +904,10 @@ impl Game {
     /// `owner` rearranges cards privately: every other player loses track
     /// of which card is which among the domain (`slots`, plus the hand,
     /// plus the library). What they knew exactly there, and the clouds the
-    /// domain touches, become one cloud.
+    /// domain touches, become one cloud. A card another player knew that its
+    /// owner does not (a look at the opponent's library, ENGINE.md 192) is
+    /// listed too, as that player's private entry (`Game::peeks`): the
+    /// owner's worlds draw it again (`deal_keeping_others`).
     pub(crate) fn scramble(&mut self, owner: PlayerId, slots: &[CardIdx], hand: bool, library: bool) {
         for q in 0..2u8 {
             if q == owner {
@@ -930,6 +933,11 @@ impl Game {
                 if o.known & (1 << q) != 0 {
                     o.known &= !(1 << q);
                     insert_sorted(&mut k.defs, d);
+                    if o.known & (1 << owner) == 0 {
+                        // (only a library card: the owner knows its hand and its looked-at piles)
+                        debug_assert!(library, "a private entry outside a library cloud");
+                        self.peeks.push((q, owner, d));
+                    }
                 }
             }
             self.clouds.push(k);
@@ -941,7 +949,9 @@ impl Game {
     /// owner forgets them (an owner's knowledge is exact or nothing), and
     /// what another player knew of them becomes "somewhere in that
     /// library" (a cloud over the library: the owner's own determinize
-    /// keeps them there, so it stays true in every world).
+    /// keeps them there, so it stays true in every world); a card its owner
+    /// did not know is that player's private entry (as `scramble`, ENGINE.md
+    /// 192).
     pub(crate) fn forget_order(&mut self, owner: PlayerId, cards: &[CardIdx]) {
         for &c in cards {
             self.untrack_found(c);
@@ -963,6 +973,9 @@ impl Game {
                 if o.known & (1 << q) != 0 {
                     o.known &= !(1 << q);
                     insert_sorted(&mut defs, o.def);
+                    if o.known & (1 << owner) == 0 {
+                        self.peeks.push((q, owner, o.def));
+                    }
                 }
             }
             if !defs.is_empty() {
@@ -981,6 +994,7 @@ impl Game {
     /// anyway; hidden decklists keep them, ENGINE.md 102.1).
     fn tidy_clouds(&mut self) {
         if self.clouds.is_empty() {
+            self.peeks.clear();
             return;
         }
         let mut i = 0;
@@ -1028,6 +1042,29 @@ impl Game {
         let keep_whole = self.spec.hidden_decklists || self.spec.deck_clouds;
         self.clouds.retain(|k| !(k.defs.is_empty() || (k.hand && k.library && !keep_whole)));
         self.clouds.sort_by_key(|k| (k.viewer, k.owner, k.hand, k.library, k.slots.first().copied()));
+        self.tidy_peeks();
+    }
+
+    /// The private entries (`Game::peeks`, ENGINE.md 192) follow their clouds: each lives in its (viewer, owner)'s
+    /// cloud over the library (a library scramble made it, and a cloud never loses its library); an entry that cloud
+    /// no longer lists - a card of that identity left or was seen (the entry may have been it: the remaining one of a
+    /// public entry and a private one is the private one), or the cloud was dropped - goes.
+    fn tidy_peeks(&mut self) {
+        if self.peeks.is_empty() {
+            return;
+        }
+        let mut keep: Vec<(PlayerId, PlayerId, DefId)> = Vec::with_capacity(self.peeks.len());
+        for &(q, o, d) in &self.peeks {
+            let listed = self
+                .clouds
+                .iter()
+                .find(|k| k.viewer == q && k.owner == o && k.library)
+                .map_or(0, |k| k.defs.iter().filter(|&&x| x == d).count());
+            if keep.iter().filter(|&&x| x == (q, o, d)).count() < listed {
+                keep.push((q, o, d));
+            }
+        }
+        self.peeks = keep;
     }
 
     fn domains_meet(&self, a: &Cloud, b: &Cloud) -> bool {
@@ -1323,6 +1360,9 @@ impl Game {
     fn deal_owner(&mut self, viewer: PlayerId, owner: PlayerId, payer: Option<PlayerId>, rng: &mut Rng) {
         let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
         let mut defs: SVec<DefId, 64> = slots.iter().map(|&c| self.ident(c)).collect();
+        if viewer == owner && self.deal_keeping_others(owner, &slots, rng) {
+            return;
+        }
         if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
             rng.shuffle(&mut defs);
             for (&c, &d) in slots.iter().zip(defs.iter()) {
@@ -1331,6 +1371,115 @@ impl Game {
             return;
         }
         self.resample_with_clouds(viewer, owner, &slots, &pinned, defs.to_vec(), rng);
+    }
+
+    /// The owner's deal of its own hidden cards `slots` (`viewer == owner`: its library) when the other player knows
+    /// some of them exactly and has clouds over the owner's cards (ENGINE.md 192: a look at a library card its owner
+    /// doesn't know - Mishra's Bauble, Jace's +2 - and a cloud of that player's from an earlier card both knew). A
+    /// plain shuffle keeps every card that player knows a card it knows, but could move a cloud's listed identity onto
+    /// one of them, and the cloud ("these identities are among the domain's cards I don't know") would be false in the
+    /// world. So each such cloud's listed identities - less those of its domain's cards it doesn't know that the deal
+    /// leaves (the owner's known cards) - are placed among the domain's dealt cards that player doesn't know, the rest
+    /// of the pool over every remaining place: `resample_with_clouds`'s deal, for the other player's clouds. And that
+    /// player's private entries (`Game::peeks`: the identity of a card it saw that the owner did not, listed since a
+    /// shuffle or search) are not the owner's to know: they are drawn again, after the deal, from the identities of
+    /// their cloud's domain cards that player doesn't know, less the cloud's other entries (uniform, without
+    /// replacement) - the world never shows the owner what the other player saw. -> false (nothing dealt) when the
+    /// other player has no cloud over the owner, or no dealt card is known to it and no entry is private: then a plain
+    /// shuffle keeps its knowledge (every dealt card is unknown to it, so every domain's unknown part keeps its
+    /// multiset - the invariant before section 192).
+    fn deal_keeping_others(&mut self, owner: PlayerId, slots: &[CardIdx], rng: &mut Rng) -> bool {
+        let q = crate::ids::opp(owner);
+        let private: Vec<DefId> = self.peeks.iter().filter(|x| x.0 == q && x.1 == owner).map(|x| x.2).collect();
+        if !self.clouds.iter().any(|k| k.viewer == q && k.owner == owner)
+            || (private.is_empty() && !slots.iter().any(|&c| self.objs[c.i()].known & (1 << q) != 0))
+        {
+            return false;
+        }
+        let clouds: Vec<&Cloud> = self.clouds.iter().filter(|k| k.viewer == q && k.owner == owner).collect();
+        let unknown_to_q = |c: CardIdx| self.objs[c.i()].known & (1 << q) == 0;
+        let home: Vec<Option<usize>> = slots
+            .iter()
+            .map(|&c| {
+                let z = self.objs[c.i()].zone;
+                if unknown_to_q(c) {
+                    clouds.iter().position(|k| Self::in_domain_at(k, owner, c, z))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let mut needs: Vec<Vec<DefId>> = Vec::with_capacity(clouds.len());
+        for (ki, k) in clouds.iter().enumerate() {
+            let mut need = k.defs.clone();
+            // (The private entries are drawn after the deal: only the cloud's other entries place cards.)
+            if k.library {
+                for &d in &private {
+                    assert!(take_one(&mut need, d), "determinize: P{q}'s private entry {d} is not in its cloud {k:?}");
+                }
+            }
+            // (Its domain's cards it doesn't know that the deal leaves hold some of the listed identities.)
+            for c in self.domain(k) {
+                if unknown_to_q(c) && !slots.contains(&c) {
+                    take_one(&mut need, self.ident(c));
+                }
+            }
+            let room = home.iter().filter(|&&h| h == Some(ki)).count();
+            assert!(need.len() <= room, "determinize: P{q}'s cloud {k:?} lists more than its domain's dealt cards hold");
+            needs.push(need);
+        }
+        let mut pool: Vec<DefId> = slots.iter().map(|&c| self.ident(c)).collect();
+        pool.sort_unstable();
+        for need in &needs {
+            for &d in need {
+                assert!(take_one(&mut pool, d), "determinize: P{q}'s cloud card {d} is not among P{owner}'s hidden cards");
+            }
+        }
+        rng.shuffle(&mut pool);
+        let mut free = pool.into_iter();
+        let mut per_cloud = needs;
+        for (ki, v) in per_cloud.iter_mut().enumerate() {
+            let room = home.iter().filter(|&&h| h == Some(ki)).count();
+            while v.len() < room {
+                v.push(free.next().expect("pool covers every place"));
+            }
+            rng.shuffle(v);
+        }
+        let mut next = vec![0usize; per_cloud.len()];
+        for (i, &c) in slots.iter().enumerate() {
+            let d = match home[i] {
+                Some(ki) => {
+                    next[ki] += 1;
+                    per_cloud[ki][next[ki] - 1]
+                }
+                None => free.next().expect("pool covers every place"),
+            };
+            self.set_ident(c, d);
+        }
+        if !private.is_empty() {
+            let ki = self.clouds.iter().position(|k| k.viewer == q && k.owner == owner && k.library).expect("the private entries' cloud");
+            let k = &self.clouds[ki];
+            let mut public = k.defs.clone();
+            for &d in &private {
+                take_one(&mut public, d);
+            }
+            let mut pool: Vec<DefId> = self.domain(k).into_iter().filter(|&c| self.objs[c.i()].known & (1 << q) == 0).map(|c| self.ident(c)).collect();
+            pool.sort_unstable();
+            for &d in &public {
+                assert!(take_one(&mut pool, d), "determinize: P{q}'s cloud entry {d} is not among its domain's cards");
+            }
+            assert!(pool.len() >= private.len(), "determinize: P{q}'s private entries outnumber its domain's free cards");
+            rng.shuffle(&mut pool);
+            let drawn: Vec<DefId> = pool[..private.len()].to_vec();
+            let mut defs = public;
+            for &d in &drawn {
+                insert_sorted(&mut defs, d);
+            }
+            self.clouds[ki].defs = defs;
+            self.peeks.retain(|x| !(x.0 == q && x.1 == owner));
+            self.peeks.extend(drawn.into_iter().map(|d| (q, owner, d)));
+        }
+        true
     }
 
     /// `determinize_weighted`'s plan of `owner`'s cards `slots` (identities

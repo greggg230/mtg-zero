@@ -4,6 +4,7 @@ approximate spot.
 
     python tools/delver_rerecord.py check [--library L] [--stamp]
     python tools/delver_rerecord.py rerecord --old-engine CHECKOUT [--library L] [--out L] [--report R.json]
+                                             [--knowledge-change]
     python tools/delver_rerecord.py trace --engine CHECKOUT --library L --out TRACE.json   # rerecord's old side
 
 A spot is a source game's seed and its actions from the deal to the decision (the raw steps, single-option
@@ -50,6 +51,12 @@ the exported state's hash at the spot) and `rerecord` (the epoch, the old path's
 decisions' indices by question); an index of the old path (`k_main1`) is mapped onto the new path. The
 file gets `rules_epoch` (tools/position_lab.py's RULES_EPOCH), this checkout's `engine`, and `recorded`
 (every engine it was recorded on, oldest first).
+
+`--knowledge-change` (a rules change of what the players know and nothing else - ENGINE.md 192: a look at the
+opponent's library card its owner doesn't know is remembered): the exported states are compared without who knows
+what (`known`'s per-card masks and seen hands; the libraries' order stays), so every action, zone, order, counter
+and public fact must still match exactly, and the spot gets this engine's `sig` and `pos` with its knowledge (a spot
+whose path is the same keeps its last re-record's record, `rerecord`).
 
 `check`: every spot on this engine (its actions legal, the decider, `sig`, the watched option, `pos`) and
 the file's `rules_epoch` against RULES_EPOCH. `--stamp`: when every spot reaches its `pos` exactly (the
@@ -138,8 +145,15 @@ class Fail(Exception):
     pass
 
 
+# (`--knowledge-change`: compare the states without who knows what; module docs)
+KNOWLEDGE_CHANGE = False
+
+
 def pos_of(st):
-    return {k: v for k, v in st.items() if k not in DB.POS_DROP}
+    out = {k: v for k, v in st.items() if k not in DB.POS_DROP}
+    if KNOWLEDGE_CHANGE and 'known' in out:
+        out['known'] = [{'order': k.get('order') or []} for k in out['known']]
+    return out
 
 
 def first_diff(a, b, path=''):
@@ -442,7 +456,12 @@ def rerecord(L, T, E, epoch, info, log=DB.say, replaces=None):
         for a in r['actions']:
             g.step(int(a))
         st = json.loads(g.export_state())
-        new = rerecorded(sp, tr, r, epoch, DB.spot_sig(st), DB.spot_pos(st))
+        if KNOWLEDGE_CHANGE and r['actions'] == sp['actions'] and not r['inserted'] and not r.get('twins') and not r.get('pile'):
+            # (a knowledge change and the same path: the spot as it was - its last re-record's record kept - with this
+            # engine's `sig` and `pos`)
+            new = dict(sp, sig=DB.spot_sig(st), pos=DB.spot_pos(st))
+        else:
+            new = rerecorded(sp, tr, r, epoch, DB.spot_sig(st), DB.spot_pos(st))
         spots.append(new)
         old_l, new_l = set(tr['final']['labels']), set(r['labels'])
         rep = {'id': sp['id'], 'ok': True, 'old_steps': len(tr['steps']), 'steps': len(r['actions']),
@@ -510,6 +529,8 @@ def main(argv=None):
     p.add_argument('--library', default=DB.LIBRARY_PATH)
     p.add_argument('--out', default=None, help='default: --library (rewritten)')
     p.add_argument('--report', default=None, help='the per-spot report (JSON)')
+    p.add_argument('--knowledge-change', action='store_true',
+                   help='a rules change of what the players know only: compare the states without who knows what')
     p = sub.add_parser('trace', help="(rerecord's subprocess) the spots on the old engine")
     p.add_argument('--engine', required=True)
     p.add_argument('--library', required=True)
@@ -550,6 +571,8 @@ def main(argv=None):
             raise SystemExit(1)
         return bad
     # rerecord
+    global KNOWLEDGE_CHANGE
+    KNOWLEDGE_CHANGE = a.knowledge_change
     T = run_trace(a.old_engine, a.library, a.any_old_engine)
     want = (L.get('engine') or {}).get('engine_sha256')
     if not a.any_old_engine and T['engine'].get('engine_sha256') != want:

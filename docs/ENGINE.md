@@ -2950,7 +2950,11 @@ delayed return about the exiled card (a new object, 400.7).
   naming one of those slots is widened to the library.
 * **Looking at another player's library card that its owner doesn't know** (Mishra's
   Bauble): the look is keyed for the looker but not remembered; the owner's determinize may
-  change that card, and the looker's clouds could not stay consistent with it. A random hand
+  change that card, and the looker's clouds could not stay consistent with it. **Fixed in
+  section 192** (2026-11-17): the look is remembered (Mishra's Bauble and Jace, the Mind
+  Sculptor's +2); the owner's worlds deal the card again with the looker's knowledge on it and
+  keep the looker's clouds true; after a shuffle or search it is the looker's private cloud
+  entry, drawn again in the owner's worlds. A random hand
   card seen (Urza's Bauble) is remembered (its owner knows it; so its key is public, section
   71.1). Cards cast from exile or a
   graveyard are public.
@@ -15302,6 +15306,8 @@ with an untrained input (55.6's size of effect).
 
 * A Mishra's Bauble at a card its owner does not know is still not remembered (23.7), and a
   shuffle followed by a draw still drops the cloud it made (10): the bot's own knowledge.
+  (The first part is **fixed in section 192**: such a look is remembered, and `TOP_OTHER` /
+  the `OPP_LIBRARY_KNOWN` bag carry it.)
 * The belief head (66) predicts the opponent's hand only and the weighted deal (69) tilts the hand;
   the opponent's known top cards are dealt uniformly. A belief over them is a later step, and now
   has an input to learn from.
@@ -38704,6 +38710,166 @@ records exactly as before (self-play runs with the log off, and nothing it plays
   `suite` GATE PASSED in 1,014 s (2,703 passed; the three 2,000-game fuzz pools clean); `engine --tested-sha e8492cc8`
   GATE PASSED WITH SKIPS (4 live-run-hazard tests fenced) in 735 s - every digest unchanged (as above), `--test az` 54,
   pytest, the smoke, farm compat identical (gate 2: 6 games, 2,484 rows).
+
+## 192. A look at the opponent's library card that its owner doesn't know is remembered (Mishra's Bauble, Jace's +2; branch `fix/opp-look-memory`, 2026-11-17)
+
+The user's call after the value-of-information experiment (branch `exp/voi-bauble`, `tools/voi_bauble.py`; the
+maintainer's notes of 2026-11-17): a Mishra's Bauble at the opponent was worth exactly 0 to every network, because the
+engine forgot the look (23.7, 72.7: "the look is keyed for the looker but not remembered"). After the look the looker's
+encoding was bit for bit the encoding without it (1,049 of 1,050 positions), and the next decision's search dealt that
+card again.
+
+### 192.1 The rules
+
+Mishra's Bauble: "{T}, Sacrifice Mishra's Bauble: Look at the top card of target player's library. Draw a card at the
+beginning of the next turn's upkeep." Jace, the Mind Sculptor's +2: "Look at the top card of target player's library.
+You may put that card on the bottom of that player's library." The library is a face-down pile whose order nobody may
+look at or change (CR 401.2); the looker has seen the card on top and knows it there until it moves (a draw, a mill,
+cards put above it keep it where it is in the pile - the engine's library positions are physical, section 10) or the
+pile is shuffled (701.20) or searched. Its owner did not look. Who looked is public (72.1).
+
+The supported pools' non-owner looks at a library: these two only (the cube's Mishra's Bauble and Jace, the Mind
+Sculptor; the legacy decks' Mishra's Bauble; EoE none - every other "target player" look is at a hand, which its owner
+knows: Gitaxian Probe, Urza's Bauble, Thoughtseize, ...). Both had the same gap (`resolve_ext.rs` `Ext::LookAtTopOf`,
+`resolve_walkers.rs` `Ext::LookAtTopMayBottom`). A look at one's own library (a Bauble at oneself, Ponder, Delver's
+upkeep look) was always remembered.
+
+### 192.2 The fix
+
+* Both looks `learn` the card for the looker whoever knows it (before: only when the looker was its owner or its owner
+  knew it). The card stays known to the looker on top, at the bottom after Jace's "put it on the bottom" (a hidden ->
+  hidden move keeps its knowledge bits), in its owner's hand after a draw (now known to both: Urza's Bauble's state),
+  until it leaves for a public zone (then public).
+* **The looker's worlds** keep it where it is (a card the viewer knows is never dealt, section 10).
+* **The owner's worlds** deal it again with the owner's other unknown library cards; the looker's knowledge bit stays on
+  the card, so the looker knows whatever card the world put there - the opponent's private knowledge, as with the
+  looker's own hand in the owner's worlds. Who knows is public (`g5::TOP_OTHER`, `view_of`), the same in every world.
+* **The looker's clouds stay true in the owner's worlds** (`Game::deal_keeping_others`, new). Before, no player knew a
+  card of the other's library its owner didn't, so the owner's plain shuffle of its unknown cards kept every one of the
+  other player's clouds (their domains' unknown part kept its multiset). Now a dealt card can be known to the other
+  player, and a plain shuffle could move a listed identity of its cloud onto that card ("Counterspell is among the cards
+  of my library I don't know" false in the world). The owner's deal places each of the other player's clouds' listed
+  identities (less those its domain's undealt cards hold) among the domain's dealt cards that player doesn't know, the
+  rest over every remaining place - `resample_with_clouds`'s deal, for the other player's clouds. It runs only when the
+  other player has a cloud over the owner and knows a dealt card or holds a private entry; otherwise the deal (and the
+  random stream) is the old one.
+* **A shuffle or search** (`scramble`; `forget_order` for "a random order") turns the looker's exact knowledge into a
+  cloud entry ("that card is somewhere in that library"), as for a card both knew - but its identity is the looker's
+  private knowledge: the owner never saw it. Such an entry is recorded as private (`Game::peeks`: viewer, owner,
+  identity; it lives in the viewer's cloud over the library, and `tidy_peeks` drops it when the cloud no longer lists
+  it - a card of that identity left or was seen, or the cloud was dropped). The owner's worlds draw the private entries
+  again after the deal, uniformly without replacement from the identities of their cloud's domain cards the looker
+  doesn't know, less the cloud's other entries: a world never shows the owner what the looker saw (the looker's
+  simulated encoding in the owner's search reads a drawn card, not the true one). With hidden decklists the entry is
+  also the looker's sighting record (140.9: what it saw stays in R), which the cloud keeps consistent.
+* Who-knows inputs: no layout change. The looker's encoding reads the card where the engine already writes known library
+  cards: the tops block's "known to the viewer" and its identity, the `OPP_LIBRARY_KNOWN` bag (out of `OPP_HIDDEN`), and
+  `g5::TOP_OTHER` of the opponent's library from the looker's side; the owner's `g5::TOP_OTHER` of its own library says
+  the opponent knows its top card. These inputs existed (layout v5/v7); the remembered opponent's-top case is new to
+  every network (the VOI experiment's "counterfactual" row is now the real one): it must be trained in.
+* `describe` (ENGINE.md 95) refuses a game with a private entry (`peeks`: unsupported unless empty; a built game could
+  not tell its owner's worlds which entries to redraw); exact knowledge of the opponent's library was already described
+  (`library_known` with `known_by`).
+* `view.rs`'s `known.order` (kept for a seat's view to follow a look the engine did not remember) is no longer needed
+  for that: the card is in `known.library` with its mask.
+
+### 192.3 Tests
+
+`engine/tests/az.rs`:
+* `cr_401_2_a_look_at_the_opponents_top_card_its_owner_doesnt_know_is_remembered`: P1's Bauble at P0's top Counterspell
+  (P0 doesn't know it): P1 knows it, P0 doesn't; both encode "the other player knows P0's top" (`TOP_OTHER`); the same
+  position with the Forest below swapped on top encodes differently for P1 and identically for P0; P1's 60 worlds keep
+  the Counterspell on top (encoding equal), P0's 60 worlds deal it again (at least four identities; P1's bit on the card;
+  P0's encoding equal; `check_knowledge`); P0's next draw takes it into its hand, known to both.
+* `cr_701_20_a_shuffle_leaves_the_looker_a_private_cloud_entry_and_the_owners_look_a_shared_one`: P0's fetch land after
+  the look: P1's cloud over P0's library lists the Counterspell; P1's worlds keep the entry, P0's draw it again (at least
+  four identities across 60 worlds, P0's encoding equal, clouds true); Ponder after the look: P0 sees the card, and P1's
+  knowledge is a cloud over Ponder's cards listing it.
+* `the_owners_worlds_keep_the_lookers_clouds_true`: Brainstorm (P0 knows its two put back), P1's first Bauble (a card
+  both know), a fetch land's shuffle (P1's cloud), P1's second Bauble at a top card P0 doesn't know; 200 worlds of each
+  player: clouds true, P0's encoding equal, P0's top card dealt again in more than half of P0's worlds.
+* `who_knows_a_librarys_top_cards_is_encoded` (72.5) unchanged and passing (a Bauble at a card its owner knows).
+* `cards_m7a_misc::mishras_bauble_looks_at_the_top_card_and_draws_next_upkeep` and
+  `cards_m7b_walkers::jace_the_mind_sculptor_plus_two_looks_at_the_top_card_and_may_bottom_it` now expect the looker to
+  know the card (on top; at the bottom), its owner not.
+
+The public-state gate (58, 72.4): a perturbation "the other player learns the top card of a library its owner doesn't
+know" (`public_state.rs`; both views and both encodings must change: the looker's identity inputs, the owner's
+`TOP_OTHER`), kept out of the pairwise gate's partner draws (`COMBO_EXCLUDED`, as 142.12's) so every position's partners
+are as before. (Drawn as a partner it shifts the draws, and the pairwise gate then meets three layout-v6 EoE collisions
+no known gap covers - a granted trigger on a Mountain that lost all its abilities, with and without a lose-all
+duration: `public_states_encode_apart`, GATE_SEED 4242. They are not about this change - EoE has no look at another
+library - and stay for a decision: layout v6 is EoE's until its run 2.)
+
+`engine/tests/fuzz.rs` `a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game` (173): three of its nine seeds
+no longer reach the look it needs (the worlds' random draws moved); replaced by three that do (a scan of 600 seeds
+found 41), the check unchanged.
+
+The Delver canary library (`data/delver_canary_library.json`, 100.8) is re-recorded for the new rules epoch
+(`tools/position_lab.py` `RULES_EPOCH` 1794970741): five of its 60 spots reach their position with more knowledge
+(their history holds a Bauble at the opponent), so their recorded `pos` (the exported state's hash, `known` included)
+no longer matched. `tools/delver_rerecord.py rerecord --knowledge-change` (new: a rules change of what the players
+know only - the old and new states compared without who knows what, every action, zone, order and public fact
+exactly; a spot whose path is the same keeps its last re-record's record and gets this engine's `sig` / `pos`): 60 of
+60 re-recorded, the same paths, none dropped (the old side: main's engine, `--any-old-engine`).
+
+### 192.4 Digests (re-recorded on purpose, `DIGEST_WRITE=1`)
+
+Behaviour changes where a look at another library happens: the looker's encoding, and so a searched game's choices.
+
+| digest | old | new | lines that differ |
+|---|---|---|---|
+| cube best-of-one, full | 8f71ccb0d89031a6 | **53eda75d63b2743b** | 68 of 2,500 games |
+| cube best-of-one, encoding-free (`DIGEST_ENCODING=0`) | 41e27319acdae5b5 | **e65b965d025c800f** | (the knowledge bits are state) |
+| constructed | e1177d609d6c1aee | **dab59f1ff2a6d02e** | 316 of 570 |
+| metagame | 8b2b74f436d338a0 | **284d8312cc21c587** | 70 of 288 |
+| driver (zero-core's) | 6f7b863096e47dcd | **6a03572828250b86** | 21 of 21 |
+| dealt | e802d9df793c9993 | **f78ada3d3d114826** | 69 of 80 |
+| dealt per seat | 26c9751332e70c73 | **776bf9c1b6db07bc** | 49 of 60 |
+| EoE | 2efe956d589840ce | 2efe956d589840ce, unchanged | none (no look at another library) |
+
+### 192.5 The value of information, re-measured
+
+`tools/voi_bauble.py measure` (branch `exp/voi-bauble`, run with this branch's engine; its rebuild accepts a position
+whose history held an earlier look at the opponent, whose exported knowledge now differs) on the Delver line's
+layout-v7 anchor a3198 (its 894 mirror positions, value network only, CPU), Mishra's Bauble at the opponent, positions
+where neither the look's card was drawn before the next decision nor the looker knew it already (pp of win
+probability, game-clustered SE):
+
+| | before (main) | this branch |
+|---|---|---|
+| the looker's post-look row = the no-look control's (bitwise), its owner not knowing the card | 340 / 340 | **1 / 332** |
+| V(after the look) - V(control), owner not knowing the card | **0** (340 positions) | **+0.57 +- 0.20** (332) |
+| expected VOI under the network, E_uniform[V(X)] - V(control) | (+0.17 +- 0.09: counterfactual, never played) | +0.17 +- 0.09 |
+| expected VOI, the search's own deals | (+0.17 +- 0.09) | +0.17 +- 0.09 |
+| spread of V(X) over the possible cards | 8.9 pp | 8.9 pp |
+| owner knowing its top card (remembered before too) | -1.59 +- 0.92 (76) | -1.60 +- 0.92 (76), unchanged |
+| own top, exact posterior (a control) | +0.36 +- 0.06 | +0.37 +- 0.06 |
+
+The look's value is no longer identically 0: the looker's encoding after it differs from the control in 331 of 332
+positions, and the real look's value equals the value of the true card built in (the realised VOI, one draw of the
+card: +0.57 +- 0.20 pp). Its expectation under today's network, +0.17 +- 0.09 pp, is the experiment's "counterfactual"
+number again - the same input, which no network has trained on yet: noise, not a learned value. It has to be trained
+in (a fork from the current line; nothing has to be retrained from scratch). One position more than before is refused
+by `describe` (a private cloud entry, 192.2).
+
+### 192.6 Farm, runs
+
+The release worker plays this engine: it must be rebuilt (the engine tier builds it and runs farm compat). A run picks
+this up only at a re-pin, and its networks see a new input there (the user's call: which run, when).
+
+### 192.7 The gates (on the merge with main c106f7e8, zero-core pin 3161bd9)
+
+* `suite` on 86c4de85: GATE PASSED in 1,094 s - the full engine suite 2,705 passed (24 binaries); the sharded
+  2,000-game fuzz of seven pools, all clean: default (100 matches), default with hidden decklists, `delver_dealt`,
+  `delver`, `meta`, `cross` and `delver_dealt2` (each 2,000 games, 100 matches + 100 post-sideboard).
+* `engine` on d604db12 (`--tested-sha 86c4de85`: the commit after it touched no engine file - the canary library,
+  `delver_rerecord.py`, `position_lab.py`): GATE PASSED WITH SKIPS (3 live-run-hazard tests fenced) in 1,442 s -
+  every digest = 192.4's (full 53eda75d63b2743b, encoding-free e65b965d025c800f, constructed dab59f1ff2a6d02e, eoe
+  2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt f78ada3d3d114826); `--test az` 57,
+  `limits` 13, `hidden` 28; pytest 4 shards + the desktop part; the smoke; the release worker rebuilt and farm compat
+  identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 6 games, 2,556 rows). (The first engine gate, on
+  86c4de85, failed two pytest tests - the canary library's five spots, 192.3 - fixed by d604db12.)
 
 ## 193. Running and publishing an A/B: `tools/ab.py`, and results to delverai's Head-to-heads tab by default (`--publish`; branch `feat/ab-publish`, delverai branch `ab-publish`, 2026-11-17)
 

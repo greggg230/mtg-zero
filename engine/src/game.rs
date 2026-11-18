@@ -985,6 +985,11 @@ pub struct Game {
     /// sorted; set by the match. `None`: open decklists.
     pub(crate) known_pools: [Option<std::sync::Arc<[DefId]>>; 2],
     pub(crate) log: Option<Vec<String>>,
+    /// The private entries of the clouds (ENGINE.md 192): (viewer, owner, identity) - an entry of the viewer's
+    /// cloud over the owner's library naming a card the viewer saw and the owner did not (a look at the opponent's
+    /// library, then a shuffle or search). The owner's worlds draw them again (`deal_keeping_others`); everywhere
+    /// else they are ordinary entries. Kept by `tidy_clouds`.
+    pub(crate) peeks: Vec<(PlayerId, PlayerId, DefId)>,
     /// The log's length when the last `apply` began (ENGINE.md 191): the spectator view exports every line from
     /// there on, so consecutive exported states carry the whole play-by-play. Read only by the view.
     pub(crate) log_mark: usize,
@@ -1404,6 +1409,7 @@ impl Game {
             entering_cast: false,
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
+            peeks: Vec::new(),
             log_mark: 0,
         }
     }
