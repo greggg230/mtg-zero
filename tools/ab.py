@@ -171,16 +171,16 @@ def normalize(spec, base='.'):
 
 
 def worktree(s, arm=None):
-    return (s['code']['arms'].get(arm) or {}).get('worktree') or s['code']['worktree'] or ROOT
+    return ((s['code'].get('arms') or {}).get(arm) or {}).get('worktree') or s['code'].get('worktree') or ROOT
 
 
 def python(s, arm=None):
-    return (s['code']['arms'].get(arm) or {}).get('python') or s['code']['python'] or sys.executable
+    return ((s['code'].get('arms') or {}).get(arm) or {}).get('python') or s['code'].get('python') or sys.executable
 
 
 def code_sha(s, arm=None):
-    c = s['code']['arms'].get(arm) or {}
-    return c.get('sha') if c.get('worktree') or c.get('sha') else s['code']['sha']
+    c = (s['code'].get('arms') or {}).get(arm) or {}
+    return c.get('sha') if c.get('worktree') or c.get('sha') else s['code'].get('sha')
 
 
 def farm_run(cfg):
@@ -221,10 +221,10 @@ def overrides(s, arm, k):
     o = dict(s['common'], **s['arms'][arm])
     o['iters'] = k + s['iterations']
     o['publish'] = live_publish(s, arm)
-    return published_build(s, o)
+    return published_build(s, o, arm)
 
 
-def published_build(s, o):
+def published_build(s, o, arm=None):
     """`"pool_build": "published"` (or "published:<rev>") -> the published farm build of the arms' code commit (or
     <rev>'s) and, unless the overrides give them, its pool_runtime, pool_worker and pool_alternates (tools/farm_release.py
     lookup, docs/ENGINE.md 196). SystemExit when there is none."""
@@ -232,8 +232,8 @@ def published_build(s, o):
     if not (isinstance(v, str) and (v == 'published' or v.startswith('published:'))):
         return o
     from mtgz.az import farm_builds as FB
-    wt = worktree(s)
-    rev = v.split(':', 1)[1] if ':' in v else (s['code']['sha'] or 'HEAD')
+    wt = worktree(s, arm)                      # (an arm with its own code: its own commit's build)
+    rev = v.split(':', 1)[1] if ':' in v else (code_sha(s, arm) or 'HEAD')
     e = FB.lookup(rev, wt)
     if e is None:
         raise SystemExit(f'pool_build {v!r}: no published farm build for {rev} of {wt} (python tools/farm_release.py release {rev})')
