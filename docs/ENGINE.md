@@ -38080,3 +38080,66 @@ pin the run plays and trains as on a6b21835 until `pool_rolling` is set.
 
 **Tests before the gate.** zero-core on c1676ed: `cargo test --release -p zero_worker` 55 passed (lib 32, evaljob 6,
 job 6, job_tail 4, rolling 7); `tests/test_farm_pool.py` 13 passed.
+
+### 188.1 The gate, the builds and the checks of 60f0618f (docs only)
+
+* `optin-core` on 60f0618f7559 (baseline a6b21835): **GATE PASSED WITH SKIPS** in 1,991 s (the live-run fence only: 17
+  live-run-hazard tests of the core pytest, fenced because the paused metagame run's supervisor is up; 684 passed, 60
+  skipped). checkpoint_compat identical (visits and cq, 3,272 samples each); digests = the recorded files (constructed
+  e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993);
+  farm compat identical (gate 2: 6 games, 2,484 rows, 150 batches; gate 3: 6 games, 2,556 rows); core tests 205, az 54,
+  hidden 28; glassroad-zero, caverna-zero and kingdombuilder-zero built against the core.
+* Farm builds of 60f0618f: release worker **6163e9f1129b04e305e02d76** (`mtg-60f0618-release`, CPU pack d531424b) and
+  its CUDA re-sign **3f6a4991c231aa769e93fc8d** (pack 855d2162, min_agent 0.2.11), published: the same executable
+  (sha256 9a0ac71712bd9ba2...), which announces `features: ["rolling"]` (the run's current build f8606113 announces
+  none, so the pool's check refuses it with `pool_rolling` set).
+* `tools/farm_gates.py` on legacy-meta3-r1's config with its iter 206 checkpoint and published gen-206 graph: **FARM GATES
+  PASSED** (gate 2: 8 games, 491 rows, 200 batches identical; gate 3: 12 games, 692 rows, nets 206 / 207, identical),
+  and again with gen 206's phase spec (forced_find p 0.0; gate 2 and gate 3 identical).
+* **Rolling on == classic** on the run's own network: the release worker played ids [9000, 9008) of gen 206 (conc 4) as
+  a classic job and as a rolling job (all ids released, `finish` when they were in): all 8 game records identical byte
+  for byte (582 rows; the rolling job cut 4 records files by `flush_s`, the classic job 1).
+* A rolling job end to end through `serve` on the CPU (gens 205 and 206, conc 2, flush_s 30): `low` at 2 of 3 ids, a
+  lower `extend` ignored, `extend` to 40, a checkpoint to gen 206 built in the background (`selftest` gen 206, 4.3e-6)
+  while the games went on, five records files (rows of nets 205 and 206), `finish` -> `end` `finish`, `unfinished`
+  [7012, 7040), 163 s.
+* The CUDA build's self-test on gen 206 (`probe-providers --providers cuda,cpu`) on the trainer machine's GPU (cuda max
+  abs 2.4e-6, cpu 3.6e-6) and on the farm's canary GPU PC with its agent's cached pack 855d2162 (cuda 3.5e-6, cpu
+  3.6e-6): all passed, deterministic.
+* The Mac's checkout `run-60f0618f7559` built (`tools/mac.sh --eval-checkout`, `mtgz remote check` ok).
+
+### 188.2 The restart recipe: legacy-meta3-r1 onto rolling leases (prepared, not run)
+
+The run stays as it is until its owner restarts it. Prerequisites outside this repo: the coordinator at zero-farm
+PROTOCOL rev 15 (migration 0011) and agents 0.2.13 on the farm machines that should play it (with `pool_min_agent`
+0.2.13 an older agent gets no lease of this run at all, classic or rolling).
+
+1. The run paused at an iteration boundary (`tools/pause_run.py <run> --wait`) and its supervisor ended
+   (`supervisor_state.json`: its pid exited / state `done`).
+2. A pinned worktree at **60f0618f** (zero-core c1676ed) with its engine modules (`tools/zcache.py fetch pyd`,
+   `core-pyd`); the Mac's checkout of the same commit (`tools/mac.sh --eval-checkout`, done).
+3. The supervisor started from that worktree with the run's current flags (its supervisor log's last start line) except exactly:
+
+       --pool-build 6163e9f1129b04e305e02d76
+       --pool-worker <builds>/6163e9f1129b04e305e02d76/mtgz-worker.exe
+       --pool-alternates 3f6a4991c231aa769e93fc8d
+       --pool-min-agent 0.2.13
+       --pool-rolling auto
+
+   `--pool-runtime d531424bd1a16307d491418c`, `--pool-max-stale 4` and the classic lease sizes (16 CPU / 128 GPU games)
+   stay. `auto` = `{"inflight": "auto", "gpu_inflight": "auto"}` (the coordinator's defaults: a CPU job 4 x its
+   threads, a GPU job from its own bench among 64-512 within its RAM; block 65,536, max_s 7,200, flush_s 120). A JSON
+   object instead sets them, e.g. `--pool-rolling '{"inflight": "auto", "gpu_inflight": "auto", "flush_s": 60}'`.
+4. Resume (`tools/pause_run.py <run> --resume`). Checks: the pool's log line `pool_rolling {...}: the worker build plays
+   rolling jobs` before gen i is published; the farm run's `selfplay.rolling` in its admin GET and `rolling_leases`
+   there; the iteration metrics' pool `stale_rows_dropped` (rows older than i - 5 dropped from held games).
+
+**A thing to decide (the owner's):** the run's iterations take ~112 s (iterations 202-207), the desktop plays ~1,890 of
+the 2,000 games of an iteration, and the farm delivered none at iteration 207. A rolling GPU game lasts several minutes
+(5-7 min at 64-256 in flight in the farm canary measurements of 2026-11-16), so its first rows are ~3 networks old
+when it ends, plus up to `flush_s` before upload; with `pool_max_stale` 4 the window is ~5 iterations (~9 min).
+`flush_s` 30-60 keeps more of those rows; `pool_max_stale` is the other lever.
+
+**Rollback:** pause, relaunch with the old pin a6b21835 and the old flags (build f8606113, alternate 768edc5e, min agent
+0.2.11, no `--pool-rolling`); the resumed pool PUTs the farm run again without `rolling` (classic leases) once its next
+generation is registered.
