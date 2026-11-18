@@ -39626,3 +39626,159 @@ zero-farm venv; its first poll took origin/main 7bd1722d, already released: noth
 * **Agents and alternates.** The CUDA alternate is signed with min agent 0.2.11 (pb3's and meta3's); the CPU build
   keeps farm_build's 0.1.3. Runs still choose their own `pool_min_agent`.
 
+## 197. The farm worker on macOS (Apple silicon): the runtime pack, Mac builds, libm refusals, the Mac's farm gates, evaluator threads (branch `feat/macos-farm`, zero-core `feat/macos-worker`, docs/az.md 62; zero-farm PROTOCOL rev 17; 2026-11-18)
+
+Branch `feat/macos-farm` from main cafd9b10. Why: zero-farm rev 17 (its PROTOCOL section 11) lets Macs on Apple
+silicon take CPU work - their own agent (0.3.0), worker builds (`platform: "macos-arm64"`, `min_agent` 0.3.0) and runtime
+packs, and a run's **CPU alternate** `{build_id, runtime, when: {platform}}`. No rule, card, encoding, search or training
+change; behaviour digests untouched (the engine gains one method that answers a question, `MtgSpec::libm_replay`).
+
+### 197.1 The macOS runtime pack (`farm_build.py --runtime --pack macos-cpu`)
+
+* **Source.** ONNX Runtime **1.31.1** (the Windows CPU pack's, d531424b) for osx-arm64 from the NuGet package
+  Microsoft.ML.OnnxRuntime 1.31.1 (`runtimes/osx-arm64/native/libonnxruntime.dylib`): github.com/microsoft/onnxruntime
+  answers 404 from here (the repository, its releases and their tarballs), and NuGet is where the Windows ML pack comes
+  from already. The package is checked against nuget.org's catalog hash (SHA-512), its nuspec's version and license
+  file; its `LICENSE` and `ThirdPartyNotices.txt` are byte for byte the Windows pack's.
+* **Checks.** Here: a thin arm64 Mach-O dylib (minimum macOS **14.0**: ONNX Runtime 1.31's - PROTOCOL 11's "macOS 13 or
+  newer" does not hold for this pack: a macOS 13 Mac fails the load) linking only the system's frameworks. On the Mac:
+  `codesign --verify --strict`, Developer ID Application: Microsoft Corporation (team UBF8T346G9); loaded from the pack
+  by a macOS release worker (`info --runtime-dir`: the dylib's path in the pack, dyld's list, docs/az.md 62) and the CPU
+  self-test passes (`probe-providers --providers cpu`: max abs 3.0e-7). It has KleidiAI's arm64 kernels (SME2 on an M4:
+  `ArmKleidiAI::MlasGemmBatch`); turning them off (`mlas.disable_kleidiai=1`) halves the native worker's speed (197.5).
+* **Signed and published** `040b1882f2b4949bf73701db` (`ort-1.31.1-cpu-macos-arm64`: `libonnxruntime.dylib` 44,830,288
+  bytes, `LICENSE` 1,094, `ThirdPartyNotices.txt` 344,457, `runtime.json`; `--platform macos-arm64 --min-agent 0.3.0`).
+
+### 197.2 Mac worker builds (`farm_build.py --profile release|fuzz --platform macos-arm64`)
+
+Built on the Mac at exactly the clean checkout's commit (pushed to the Mac's mirrors as tools/mac.sh does; the Mac's
+one farm checkout `~/mtg-zero-wt/farm-build`, forced and clean, HEAD and the submodule checked there; its own target
+dir; **no RUSTFLAGS**: mac.sh's `-undefined dynamic_lookup` is for the PyO3 module, a farm executable must resolve every
+symbol at link time), copied back and checked here (a thin arm64 executable, minimum macOS 11, linking only
+`/usr/lib/libSystem.B.dylib`, ad-hoc signed by the linker) and there (`codesign --verify`, `info` says `macos-arm64`),
+signed here (`--platform macos-arm64 --entry mtgz-worker --min-agent 0.3.0`; the key never leaves the desktop), then
+the signed build is checked on the Mac (`info`: its build id; `fuzz-check`: commit and profile). Published at fbaeb09
+(the branch's Rust as at its end): release `2a12a0c17dc7d0bd6d9e9828` (requires 040b1882), fuzz
+`07af8e24142db2c02977c2ae`. No run or campaign lists them: the coordinator lane runs the end-to-end test.
+
+### 197.3 What a Mac must not play: the platform's libm (zero-core docs/az.md 62)
+
+What the engine alone decides replays exactly on any platform except where it calls the C runtime's transcendental
+functions, whose last bits differ between Windows' ucrt and Apple's libm. Every call reachable from game code:
+
+| Where | Function | What it decides | On a Mac |
+|---|---|---|---|
+| `az/sealed/builder.rs` (randomised build, best guess) | `powf`, `exp` | a sealed seat's deck from its pool and the seed | **refused**: the record's deck check (`record_setup`) would refuse the game |
+| `az/sealed/mod.rs` (deck choice by an evaluator, temperature) | `exp` | which candidate deck a seat plays | **refused** (only with a built seat: covered by the row above) |
+| `az/sealed/scorer.rs` (the deck evaluator's sigmoid) | `exp` | the candidates' scores | **refused** (as above) |
+| `az/hidden_decks.rs` `tilt_probs` / `tilt_decks` | `exp`, `ln` | the deck tilt's weights of the K cached decks | play only (the search's worlds); fuzz: refused (below) |
+| zero-core `game::belief_weight` | `powf` | a belief-weighted deal's weights | play only; fuzz: refused |
+| zero-core `noise.rs`, `tree.rs`, `driver.rs`, `driver/worker.rs` | `ln`, `exp`, `powf`, `tanh` | Dirichlet / Gumbel noise, the prior's softmax and floor, value-choice and temperature picks | play only (the moves a Mac chooses; records replay the moves) |
+| `az/encode.rs` `squash` (features above 128) | `f32::ln_1p` | a feature's value beyond `SQUASH_FROM` | play only: the trainer's rows are its own replay's. **Measured: not portable** - every non-negative f32 through both libms, 152 of 255 exponent buckets differ (all from 2^-23 up); behaviour digests' largest feature is 68.1, so real games rarely reach it |
+| `fuzz/games.rs` `random_weights` (FUZZ_BELIEF, FUZZ_CHANCE) | `exp` | the checks' weighted worlds | fuzz: refused |
+| `hidden_decks.rs` 523/562/1450, `fuzz/games.rs` 4194/5381 | `powi` | prior weights, random predictions | portable: compiler-builtins' multiplications on every target |
+
+`MtgSpec::libm_replay` (both `mtg` and `mtg_eoe`, through zero-core's `SearchGame::libm_replay`): a `"sealed"` spec
+with a seat built from a pool (generated or given) - so `mtg_eoe` and every sealed run; given decks played as they are
+pass. `MtgFuzz::libm_dependence` (zero-core's `FuzzGame`): `FUZZ_POOL=sealed`, `FUZZ_BELIEF`, `FUZZ_CHANCE`,
+`FUZZ_DECK_TILT`, and the matches loop of the constructed best-of-three pools (`delver`, `delver_dealt`,
+`delver_dealt2`, `cross`, `meta`: every checkpoint deals deck-tilted worlds). A macOS build refuses them in
+`check-config`, `fuzz-check` and every job; the desktop's build answers for a Mac with `--platform macos-arm64`
+(tests/test_worker_farm.py `test_libm_settings_are_refused_off_the_reference_platform`: eoe-smoke refused for
+self-play and eval, mtg-smoke and the metagame pass; `games`, `matches`, `delver-games` pass, `delver-matches`,
+`sealed-games`, `FUZZ_BELIEF`, `FUZZ_CHANCE` refused; no platform keys in the reference's own JSON). Of today's active
+campaigns `games`, `hidden-games` and `delver_dealt2-games` may get a Mac alternate, `delver_dealt2-matches` not; the
+legacy-meta3-r1 run passes.
+
+### 197.4 The Mac's farm gates (`farm_gates.py --mac`; off by default, needs the Mac)
+
+Repeatable: `python tools/farm_gates.py --mac --mac-worker <path on the Mac> --mac-runtime <pack there> --config
+<run config> --model <export> [--fuzz-worker <here> --mac-fuzz-worker <there>]` (module docs). On fbaeb09's signed
+build, the pack 040b1882 and legacy-meta3-r1's gen-398 export (CONTENDED: the run's self-play on the Mac):
+
+* **(a) farm parity on the Mac** (tools/farm_compat.py, worker and Python driver both on the Mac): PASSED - gate 2
+  identical (6 matches, 2,890 rows, 150 batches), gate 3 identical (6 matches, 2,556 rows, 6 decks compared), the
+  feature `rolling` announced.
+* **(b) records across platforms**: the Mac worker's 12 matches with the real network through the macOS pack (a switch
+  398 -> 399 after 3) - replayed on the Mac == its shards (724 rows, 20 arrays); copied here and replayed by this PC's
+  engine the farm pool's way: **0 refused** of 12 (header, replay, game seed), and the desktop's rows == the Mac's
+  shards, all 20 arrays bit for bit (724 rows: 243 value-only, 724 with auxiliary targets, nets 398: 180, 399: 544).
+* **(c) fuzz identity**: `games` seeds [0, 400) on this PC's fuzz build and the Mac's (07af8e24): every seed's outcome
+  (fingerprint, result, turns, decisions) identical, 0 failures.
+
+### 197.5 Throughput: the native worker against the Python remote self-play on the Mac
+
+**The baseline** (the run's own data, metrics.jsonl / evals.jsonl): the Mac's SSH self-play (3 procs: conc 768, threads
+12, groups 4, 4 inference threads x 3 torch threads each, float32 on the CPU) is held back by the run's queue, not its
+CPU: the best it did is ~13.5k leaves/s with ~1,000 games in flight (11-17, gens 42-135: 11,300 games/h, 739k rows/h);
+now ~7.2k leaves/s, ~6,900 games/h, ~390k rows/h with ~257 in flight; a Mac evaluation stops self-play (eval lock).
+Leaves/s is the like-for-like measure (games and rows per game shrink with the generations: 67 rows/game at gen 60, 56
+now).
+
+**First finding: one evaluator thread.** The native worker answered every batch on one thread; on the M4 one ONNX
+Runtime session uses its threads poorly (this ~1,000-node token graph: 1 thread 1,770 rows/s, 3 threads 2,530, 6
+threads 2,650; 12 intra-op threads in a job slower than 4), and the 64-row CPU pieces are not the problem (128-1,024 row
+pieces no faster: more padding). So `infer_workers` (zero-core docs/az.md 62): several sessions on evaluator threads of
+their own, answers in launch order - byte-identical shards to one thread's. Second: the CPU session had silently run on
+CoreML (ort's MaxEfficiency policy): fixed to the CPU EP.
+
+**Per-process A/B** (tools/worker_bench.py on the Mac, the run's Mac settings and gen-398 network, 5-minute windows,
+interleaved; CONTENDED: the live run's three procs at nice 5, ours at nice 15+, the load varying 40-130%, so only the
+ratios of neighbouring windows mean anything; the clean-window measurement is still to come):
+
+| Window (in order) | Side, evaluator | leaves/s | games/h | rows/h | rows/batch | ms/batch | load |
+|---|---|---|---|---|---|---|---|
+| 1 | native, 1 thread x 4 intra-op (cafd9b10's design) | 2,819 | 640 | 9,980 | 226 | 67.5 | 74% |
+| 2 | Python (4 inference threads x 3 torch threads) | 9,716 | 7,504 | 293,172 | 229 | 19.5 | 48% |
+| 3 | native signed 2a12a0c1, `infer_workers` 4 x 3 threads | 5,707 | 2,736 | 66,072 | 227 | 92.0 | 81% |
+| 4 | Python | 7,164 | 4,318 | 126,075 | 228 | 26.4 | 114% |
+| 5 | native, the agent's CPU default (threads 16 = 1 session of 16, rolling `inflight` "auto" = 32 in 4 groups) | 651 | 576 | 23,748 | 9.6 | 12.2 | 116% |
+| 6 | native, 4 x 3 | 5,820 | 2,879 | 70,920 | 227 | 88.0 | 85% |
+| 7 | Python | 7,731 | 4,930 | 152,633 | 228 | 24.5 | 85% |
+| 8 | native, 6 x 2 | 5,166 | 2,231 | 49,867 | 227 | 102.9 | 121% |
+
+(Windows 1-2 from the first interleaving, 6-minute windows, the unsigned branch build; 3-8 the signed build. games/h and
+rows/h over 5 minutes with 768 games in flight count mostly the games that started before the window's middle: leaves/s
+is the measure. Earlier unpaired windows: KleidiAI off 3,603 leaves/s at 148 ms/batch, 1 x 12 threads 1,927.)
+
+* **Per process, the native worker is at ~0.75-0.8x of the Python remote worker** with 4 evaluator threads (windows
+  3/4, 6/7: 5,707 / 7,164, 5,820 / 7,731), from 0.29x with one (1/2). Both make the same batches (~227 rows, conc 768 in
+  4 groups); the native evaluator threads are ~2.7 of 4 busy. **The gap is ONNX Runtime's speed per session on the M4**:
+  88-92 ms for a 227-row batch on 3 threads where torch (Apple Accelerate) takes 20-26 ms. Profiled
+  (`ZERO_ORT_PROFILE`): no hot node - LayerNormalization 11.5%, Gemm 10.9%, MatMul 10.3%, FusedMatMul 8.7%, Transpose
+  8.0%, Add 6.9%, Gather 6.6%, Where 4.4% of the kernel time, over ~1,000 nodes a run. ONNX Runtime 1.32.0 (NuGet) is
+  no faster (2,518 vs 2,527 rows/s at 3 threads). Turning KleidiAI off is 2x slower. CoreML is no way out: ONNX Runtime
+  puts 531 of the graph's 2,111 nodes on it in 60 pieces, it fails our empty `where` outputs, and its fp16 would fail the
+  self-test. Not tried: sessions with and without KleidiAI side by side (an M4's SME units are one per cluster; its
+  NEON is per core), a whole-Mac native process (needs the clean window).
+* **The farm's own default is the bigger problem**: an agent sends a CPU job `threads` = its threads (16 on the Mac) and
+  a rolling run's `inflight` "auto" = 32 games in 4 groups (zero-farm PROTOCOL 10.6): 8-10-row batches, 651 leaves/s,
+  **0.09x** of one Python process. From 45c284b a macOS build splits a job's intra-op threads into sessions of 3 when the
+  job line names no `infer_workers` (16: 5 x 3); the games in flight are the agent's and the run's to choose. With the
+  run's `inflight` at its SSH procs' 768 and 4 x 3 evaluator threads the native worker reaches the numbers above.
+
+**What parity on the farm needs** (not in this branch): (1) the macOS agent's CPU plan - games in flight from the
+machine's memory (the measured cost here: 7.9 GB at 768 in flight with 4 sessions, against 64 GB) instead of 32, and
+`infer_workers` / `infer_threads` as job line tuning fields (the worker takes `infer_workers` from this branch on;
+PROTOCOL 5 lists the agent's tuning fields); (2) for the whole Mac, one native process against the three SSH processes'
+~1,000-2,300 games in flight - to be measured in a clean window (`worker_bench.py --python-procs 3` for the SSH side);
+(3) closing the per-session gap (above), or accepting ~0.8x per core.
+
+### 197.6 Release plumbing (`farm_release.py release --mac`; opt-in, nothing applied)
+
+`--mac` builds and signs the macOS release worker for the same commit (`--mac-fuzz`: the fuzz build too;
+`--mac-gates`: 197.4 on the reference), and `mac-plan` prints and saves (`releases/<sha12>/mac-plan.json`) what the runs
+and campaigns would need - never PUT. A dry run with the published builds (read-only GETs): legacy-meta3-r1 passes the
+libm check; its change is `pool_alternates` "c7fc2e5e...,2a12a0c1..." (the farm pool turns the macOS build into a CPU
+alternate itself, zero-core docs/az.md 62), the PUT's alternates the CUDA one as now plus `{"build_id": "2a12a0c1...",
+"runtime": "040b1882...", "when": {"platform": "macos-arm64"}}`, the definition's builds `[5307720f, c7fc2e5e,
+2a12a0c1]`. Campaigns (each with `"alternates": [{"build_id": <macOS fuzz build>, "when": {"platform":
+"macos-arm64"}}]` and the build in its definition's `builds`): `games`, `hidden-games`, `delver_dealt2-games` yes;
+`delver_dealt2-matches` refused (197.3). A campaign's macOS alternate should be its own commit's build.
+
+### 197.7 Gates
+
+zero-core: `cargo test` (212 + 3), `cargo test -p zero_worker` (Windows; on the Mac 36 + the darwin tests), pytest
+test_farm_def / test_farm_pool / test_farm_h2h / test_privacy (56 passed), `smoke_all.sh --with-this-core --build-only`
+GREEN (3 of 3 games). MTG Zero: tests/test_worker_farm.py (the new test and the setting-class tests), the Mac's farm
+gates (197.4), `infer_workers` 3 vs 1 byte-identical shards (Windows, gen-206 network); tier below.
