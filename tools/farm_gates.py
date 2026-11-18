@@ -89,9 +89,10 @@ def mac_host():
 
 def mac_shell(script, timeout=None):
     """A bash script on the Mac (stdin) -> (exit status, output)."""
-    p = subprocess.run(['ssh', '-o', 'BatchMode=yes', mac_host(), 'bash -s'], input='set -eo pipefail\n' + script,
-                       capture_output=True, text=True, timeout=timeout)
-    return p.returncode, p.stdout + p.stderr
+    # (bytes: text mode on Windows would send CRLF line ends)
+    p = subprocess.run(['ssh', '-o', 'BatchMode=yes', mac_host(), 'bash -s'], input=('set -eo pipefail\n' + script).encode(),
+                       capture_output=True, timeout=timeout)
+    return p.returncode, (p.stdout + p.stderr).decode('utf-8', 'replace')
 
 
 def mac_scp(src, dst, back=False):

@@ -861,11 +861,13 @@ def mac_run(script, what, timeout=None):
     """A bash script on the Mac (sent on stdin; `set -euo pipefail`, the Mac's cargo and Homebrew on PATH) -> its
     stdout; a failure dies with its output's end."""
     head = 'set -euo pipefail\nexport PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"\n'
-    p = subprocess.run(['ssh', '-o', 'BatchMode=yes', mac_host(), 'bash -s'], input=head + script, capture_output=True, text=True,
+    # (bytes: text mode on Windows would send CRLF line ends, which bash on the Mac reads as part of each command)
+    p = subprocess.run(['ssh', '-o', 'BatchMode=yes', mac_host(), 'bash -s'], input=(head + script).encode(), capture_output=True,
                        timeout=timeout)
+    out, err = p.stdout.decode('utf-8', 'replace'), p.stderr.decode('utf-8', 'replace')
     if p.returncode:
-        die(f'on the Mac, {what} (exit {p.returncode}):\n{(p.stdout + p.stderr)[-3000:]}')
-    return p.stdout
+        die(f'on the Mac, {what} (exit {p.returncode}):\n{(out + err)[-3000:]}')
+    return out
 
 
 def mac_copy(src, dst, back=False):
