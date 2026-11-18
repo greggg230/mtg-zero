@@ -38734,6 +38734,14 @@ library - and stay for a decision: layout v6 is EoE's until its run 2.)
 no longer reach the look it needs (the worlds' random draws moved); replaced by three that do (a scan of 600 seeds
 found 41), the check unchanged.
 
+The Delver canary library (`data/delver_canary_library.json`, 100.8) is re-recorded for the new rules epoch
+(`tools/position_lab.py` `RULES_EPOCH` 1794970741): five of its 60 spots reach their position with more knowledge
+(their history holds a Bauble at the opponent), so their recorded `pos` (the exported state's hash, `known` included)
+no longer matched. `tools/delver_rerecord.py rerecord --knowledge-change` (new: a rules change of what the players
+know only - the old and new states compared without who knows what, every action, zone, order and public fact
+exactly; a spot whose path is the same keeps its last re-record's record and gets this engine's `sig` / `pos`): 60 of
+60 re-recorded, the same paths, none dropped (the old side: main's engine, `--any-old-engine`).
+
 ### 192.4 Digests (re-recorded on purpose, `DIGEST_WRITE=1`)
 
 Behaviour changes where a look at another library happens: the looker's encoding, and so a searched game's choices.
