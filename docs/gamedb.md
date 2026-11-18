@@ -232,10 +232,17 @@ The user's blunder rules (2026-11-17), `blunder_reason` in brackets:
 * **Urza's Bauble** ("look at a card at random in target player's hand"): at itself is a blunder
   (`self_with_unknown_opponent_hand`) unless the opponent's hand is empty (`ok_opponent_hand_empty`) or the activator
   knows every card in it (`ok_opponent_hand_known`).
-* **Mishra's Bauble** ("look at the top card of target player's library"): at itself is a blunder with no fetchland in
-  hand or on its battlefield (`self_without_fetch`), unless the activator knows the opponent's top card
-  (`ok_opponent_top_known`). At itself with a fetchland is not a blunder (`ok_self_with_fetch`: reported on its own,
-  with `manipulation_in_hand`).
+* **Mishra's Bauble** ("look at the top card of target player's library. Draw a card at the beginning of the next
+  turn's upkeep"): at itself is a blunder unless the activator has a fetchland it can use before that delayed draw, or
+  knows the opponent's top card (`ok_opponent_top_known`). Corrected 2026-11-18 (ENGINE.md 194.8): a fetchland is
+  available when it is on the activator's battlefield and crackable before the draw (`fetch_crackable`: untapped, or
+  tapped on the opponent's turn - it untaps first), or in its hand and playable before the draw
+  (`fetch_in_hand_playable`: its own turn, upkeep through main 2, `land_drop_available` - lands played this turn below
+  1 + the extra drops its permanents grant; checked against the engine's own offer to play the fetchland where the
+  state's decision shows it). At itself with a fetchland available is not a blunder (`ok_self_with_fetch`: reported on
+  its own, with `manipulation_in_hand`); with a fetchland it can't use in time a blunder (`self_with_unusable_fetch`:
+  in hand on the opponent's turn, in its end step, or after its land drop); with none at all `self_without_fetch`. The
+  raw `fetch_in_hand` / `fetch_on_battlefield` counts and `lands_played` are columns too.
 * At the opponent: `ok_target_opponent`. Excluded (`excluded`, not counted): the opponent was not a legal target, or
   (Mishra's) its library was empty.
 

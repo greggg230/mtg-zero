@@ -11310,13 +11310,22 @@
      "Brainstorm",
      "Prismari Charm"
     ],
-    "own_turn": true
+    "own_turn": true,
+    "lands_played": 1,
+    "land_drop_available": false,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 1
    },
    "id": "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:0:26",
    "sig": "8f5265ee9cbd8369",
    "added": "2026-11-17",
    "value": 0.4409,
-   "pos": "4ae9403dd31b5055"
+   "pos": "4ae9403dd31b5055",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
    "kind": "bauble_mishra_fetch_control",
@@ -11635,13 +11644,22 @@
     "manipulation_in_hand": [
      "Prismari Charm"
     ],
-    "own_turn": true
+    "own_turn": true,
+    "lands_played": 0,
+    "land_drop_available": true,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 1
    },
    "id": "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:1:292",
    "sig": "2399d9ec91d79c21",
    "added": "2026-11-17",
    "value": 0.2112,
-   "pos": "1eb26ffaa2890aa9"
+   "pos": "1eb26ffaa2890aa9",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
    "kind": "bauble_urza_self",
@@ -11701,10 +11719,15 @@
    "sig": "4c65fd224d336356",
    "added": "2026-11-17",
    "value": 0.7468,
-   "pos": "f3529fea7ac58c27"
+   "pos": "f3529fea7ac58c27",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
-   "kind": "bauble_mishra_fetch_control",
+   "kind": "bauble_mishra_self_fetch_unusable",
    "source": "a3198-v7r1_selfplay_s64",
    "gid": 4,
    "k": 8,
@@ -11724,8 +11747,8 @@
    "decider": 1,
    "turn": 1,
    "step": "main1",
-   "answer": "control",
-   "why": "a control, not a blunder: Mishra's Bauble with a fetchland available (look at its own top card, then shuffle a bad one away) - the share of searches targeting itself is reported, not scored right or wrong",
+   "answer": "bad",
+   "why": "Mishra's Bauble at itself is the blunder here. It is its own turn 1, main phase 1, but it has already played its land for the turn (Volcanic Island), so the Flooded Strand in its hand can't be played - and so can't be cracked - before the Bauble's delayed draw at the next turn's upkeep. With no fetchland it can crack in time, looking at its own top card only shows the card it is about to draw anyway; the opponent's top card was the information on offer (it is remembered: ENGINE.md 192). (The user's rule of 2026-11-18, docs/ENGINE.md 194.8: a fetchland in hand counts only on the activator's own turn with its land drop unused.)",
    "chose_self": false,
    "conditions": {
     "opp_hand": 7,
@@ -11734,13 +11757,28 @@
     "fetch_in_hand": 1,
     "fetch_on_battlefield": 0,
     "manipulation_in_hand": [],
-    "own_turn": true
+    "own_turn": true,
+    "lands_played": 1,
+    "land_drop_available": false,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 0
    },
-   "id": "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:4:8",
+   "id": "bauble_mishra_self_fetch_unusable:a3198-v7r1_selfplay_s64:4:8",
    "sig": "bef1727d2396d279",
    "added": "2026-11-17",
    "value": 0.6279,
-   "pos": "7c7a7ab9674b3c11"
+   "pos": "7c7a7ab9674b3c11",
+   "reclassified": {
+    "from": "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:4:8",
+    "date": "2026-11-18",
+    "why": "the corrected fetchland rule (ENGINE.md 194.8): its fetchland can't be used before Mishra's Bauble's delayed draw"
+   },
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18",
+    "note": "user: blunder - fetch unusable before Mishra's delayed draw"
+   }
   },
   {
    "kind": "bauble_mishra_self_no_fetch",
@@ -11784,13 +11822,22 @@
     "manipulation_in_hand": [
      "Brainstorm"
     ],
-    "own_turn": true
+    "own_turn": true,
+    "lands_played": 1,
+    "land_drop_available": false,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 0
    },
    "id": "bauble_mishra_self_no_fetch:a3198-v7r1_selfplay_s64:5:17",
    "sig": "8ce9aaedb13704ec",
    "added": "2026-11-17",
    "value": 0.5824,
-   "pos": "c3d6a61f945a0bb2"
+   "pos": "c3d6a61f945a0bb2",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
    "kind": "bauble_urza_self",
@@ -11843,7 +11890,12 @@
    "sig": "8ce9aaedb13704ec",
    "added": "2026-11-17",
    "value": 0.5322,
-   "pos": "5595b5d168bf8e6a"
+   "pos": "5595b5d168bf8e6a",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
    "kind": "bauble_mishra_self_no_fetch",
@@ -11891,13 +11943,22 @@
     "manipulation_in_hand": [
      "Brainstorm"
     ],
-    "own_turn": true
+    "own_turn": true,
+    "lands_played": 1,
+    "land_drop_available": false,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 0
    },
    "id": "bauble_mishra_self_no_fetch:a3198-v7r1_selfplay_s64:6:21",
    "sig": "6521fb0365c455eb",
    "added": "2026-11-17",
    "value": 0.8262,
-   "pos": "70f22923c7eecba4"
+   "pos": "70f22923c7eecba4",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
    "kind": "bauble_urza_self",
@@ -11975,7 +12036,12 @@
    "sig": "8afb2c1081c2964b",
    "added": "2026-11-17",
    "value": 0.185,
-   "pos": "ff3b61f0e1a4674c"
+   "pos": "ff3b61f0e1a4674c",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
    "kind": "bauble_urza_self",
@@ -12020,10 +12086,15 @@
    "sig": "f02decdfc953ddd2",
    "added": "2026-11-17",
    "value": 0.4136,
-   "pos": "0d6fd1b36b1fa568"
+   "pos": "0d6fd1b36b1fa568",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
-   "kind": "bauble_mishra_fetch_control",
+   "kind": "bauble_mishra_self_fetch_unusable",
    "source": "a3198-v7r1_selfplay_s64",
    "gid": 8,
    "k": 33,
@@ -12068,8 +12139,8 @@
    "decider": 0,
    "turn": 2,
    "step": "end",
-   "answer": "control",
-   "why": "a control, not a blunder: Mishra's Bauble with a fetchland available (look at its own top card, then shuffle a bad one away) - the share of searches targeting itself is reported, not scored right or wrong",
+   "answer": "bad",
+   "why": "Mishra's Bauble at itself is the blunder here. It is the opponent's turn 2 (end step): the Misty Rainforest and Polluted Delta in its hand can't be played until its own main phase, and the Bauble's delayed draw comes first, at the beginning of its upkeep. With no fetchland it can crack in time, looking at its own top card only shows the card it is about to draw anyway; the opponent's top card was the information on offer (it is remembered: ENGINE.md 192). (The user's rule of 2026-11-18, docs/ENGINE.md 194.8: a fetchland in hand counts only on the activator's own turn with its land drop unused.)",
    "chose_self": false,
    "conditions": {
     "opp_hand": 7,
@@ -12080,13 +12151,28 @@
     "manipulation_in_hand": [
      "Brainstorm"
     ],
-    "own_turn": false
+    "own_turn": false,
+    "lands_played": 1,
+    "land_drop_available": false,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 0
    },
-   "id": "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:8:33",
+   "id": "bauble_mishra_self_fetch_unusable:a3198-v7r1_selfplay_s64:8:33",
    "sig": "13d8b5f414bc166b",
    "added": "2026-11-17",
    "value": 0.7334,
-   "pos": "a42f603656d75698"
+   "pos": "a42f603656d75698",
+   "reclassified": {
+    "from": "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:8:33",
+    "date": "2026-11-18",
+    "why": "the corrected fetchland rule (ENGINE.md 194.8): its fetchland can't be used before Mishra's Bauble's delayed draw"
+   },
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18",
+    "note": "user: blunder - fetch unusable before Mishra's delayed draw"
+   }
   },
   {
    "kind": "bauble_mishra_self_no_fetch",
@@ -12152,13 +12238,22 @@
     "manipulation_in_hand": [
      "Brainstorm"
     ],
-    "own_turn": false
+    "own_turn": false,
+    "lands_played": 1,
+    "land_drop_available": false,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 0
    },
    "id": "bauble_mishra_self_no_fetch:a3198-v7r1_selfplay_s64:9:39",
    "sig": "0d6d76cfa76d4e7c",
    "added": "2026-11-17",
    "value": 0.5755,
-   "pos": "d028be702467e2fd"
+   "pos": "d028be702467e2fd",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   },
   {
    "kind": "bauble_mishra_fetch_control",
@@ -12300,13 +12395,22 @@
     "manipulation_in_hand": [
      "Ponder"
     ],
-    "own_turn": true
+    "own_turn": true,
+    "lands_played": 1,
+    "land_drop_available": false,
+    "fetch_in_hand_playable": false,
+    "fetch_crackable": 1
    },
    "id": "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:10:115",
    "sig": "78ab14df9944fa4c",
    "added": "2026-11-17",
    "value": 0.12,
-   "pos": "6141b0867adfbd1c"
+   "pos": "6141b0867adfbd1c",
+   "review": {
+    "verdict": "keep",
+    "by": "user",
+    "date": "2026-11-18"
+   }
   }
  ],
  "audit": {
@@ -12320,7 +12424,9 @@
  "moved": {
   "tamiyo_flip_precombat:r3-2b-float550_0550_s32:3:118": "tamiyo_legend_flip (11-02, the user: a Seasoned Scholar was already in play - the legend rule, its own class)",
   "bauble_trick_missed:r3-2b-float550_0550_s32:17:8": "bauble_trick_missed:r3-2b-float550_0550_s32:17:7",
-  "bauble_trick_missed:r3-2b-float550_0550_s32:28:4": "bauble_trick_missed:r3-2b-float550_0550_s32:28:3"
+  "bauble_trick_missed:r3-2b-float550_0550_s32:28:4": "bauble_trick_missed:r3-2b-float550_0550_s32:28:3",
+  "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:4:8": "bauble_mishra_self_fetch_unusable:a3198-v7r1_selfplay_s64:4:8",
+  "bauble_mishra_fetch_control:a3198-v7r1_selfplay_s64:8:33": "bauble_mishra_self_fetch_unusable:a3198-v7r1_selfplay_s64:8:33"
  },
  "dropped": {
   "waste_brainstorm:r3-2b-float550_0550_s32:47:145": "class removed (the user, 11-02: not a clear class of blunder)",
@@ -12468,6 +12574,19 @@
    "dropped": 9,
    "re-anchored": 2,
    "note": "all 5 'played Wasteland, held the fetch' spots dropped; Ponder/surveil turns dropped; the 2 notes moved the blunder to the fetch play (good = Cast Mishra's Bauble first)"
+  },
+  "bauble_targeting_2026-11-18": {
+   "verdicts": 12,
+   "kept": 12,
+   "dropped": 0,
+   "held": 0,
+   "still_to_review": 0,
+   "kinds": [
+    "bauble_mishra_fetch_control",
+    "bauble_mishra_self_fetch_unusable",
+    "bauble_mishra_self_no_fetch",
+    "bauble_urza_self"
+   ]
   }
  },
  "live_rule": "spots only in undecided games: the decider's raw value at the spot, by the network that played it, between 0.10 and 0.90",

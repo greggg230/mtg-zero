@@ -39172,6 +39172,8 @@ changes: tools, docs, the canary library's data and the site.
   activator has no fetchland available (none in hand, none uncracked on its battlefield), unless it already knows the
   opponent's top card (a remembered look, 192). Itself with a fetchland is not a blunder (look, then shuffle a bad card
   away): counted on its own, with the library manipulation in hand (Brainstorm, Ponder, ...) as a column for later.
+  **Corrected in 194.8** (the user, 2026-11-18): a fetchland counts only if it can be used before the Bauble's delayed
+  draw.
 * Excluded, with a count: activations where targeting the opponent is impossible or meaningless - the target decision
   did not offer the opponent, Mishra's at an empty opponent library - and (found on the first real sample, 194.4) one
   whose game stopped at its target decision (a resignation there: no target, never dropped).
@@ -39269,6 +39271,88 @@ searches a spot, 32 and 1,024 sims alike): Urza's 25% right, Mishra's without a 
 `python tools/gate.py python` (warm worktree): GATE PASSED on a5f164fb (319 s; the earlier 2f59365e passed with skips -
 three live-run-hazard tests fenced while a supervisor was live). Engine untouched, digests unchanged. This subsection
 is docs only.
+
+### 194.8 The fetchland timing correction (branch `fix/bauble-fetch-timing`, 2026-11-18)
+
+Branch `fix/bauble-fetch-timing` from main d3ec4957, feat/review-bauble-spots (e0a43429: tools/delver_review_apply.py)
+merged in. The user caught an error in 194.1's Mishra's Bauble rule: it counted any fetchland in hand as available.
+Mishra's Bauble reads "{T}, Sacrifice: Look at the top card of target player's library. Draw a card at the beginning
+of the next turn's upkeep." Looking at its own top card is worth something only if the activator can shuffle that card
+away before the delayed draw; otherwise it only sees the card it is about to draw. No rule, card, encoding, setting or
+default of a run changes: the measure's tool, its tests, docs and the canary library's data.
+
+**The rule now** (`gamedb_bauble.conditions` / `classify`). A fetchland is available when it is
+
+* on the activator's battlefield and crackable before the draw: `fetch_crackable`, the fetchlands it controls that are
+  untapped, or tapped on the opponent's turn (they untap in the activator's untap step, before its upkeep's draw
+  trigger resolves; one tapped on its own turn stays tapped through the opponent's upkeep) - or
+* in its hand and playable before the draw: `fetch_in_hand_playable` = a fetchland in hand and `land_drop_available`:
+  the activator's own turn, a step from which a main phase is under way or still to come (upkeep through main 2), and
+  `lands_played` below its land drops (1 + the extra drops its permanents grant, from the engine's card data:
+  `grants_additional_land_per_turn` of data/cards/*.ir.json - Fastbond, Icetill Explorer; the hand-written legacy cards
+  grant none). That is the engine's land rule (cast.rs `priority_options_all`); where the state's own decision shows it
+  - the activator's priority in its main phase, the stack empty, a fetchland in hand - the engine's offer to play that
+  fetchland must agree with `land_drop_available`, or the read stops (loud). It never disagreed on the 60 random
+  mirror games of the tests or the 240 a3198 games.
+
+A fetchland in hand on the opponent's turn, in the activator's end step, or after its land drop is spent is NOT
+available. Mishra's at itself with a fetchland present but not available is a blunder of its own reason,
+`self_with_unusable_fetch`; with none at all, `self_without_fetch` as before. The raw `fetch_in_hand` and
+`fetch_on_battlefield` stay columns; new columns `lands_played`, `land_drop_available`, `fetch_in_hand_playable`,
+`fetch_crackable` (the table's schema and the view). Urza's rules are unchanged. A database ingested before this needs
+`ingest --redo` for the new columns and classes.
+
+**Tests** (tests/test_gamedb_bauble.py): three more rule cases (a fetch in hand or in play that is not available ->
+`self_with_unusable_fetch`; with the opponent's top known -> still `ok_opponent_top_known`); the timing case by case
+on hand-made states (15: a fetch in hand on its own turn in upkeep, main 1, declare blockers and main 2 with the land
+drop unused -> ok; in hand with its land already played -> blunder; in hand on the opponent's turn, two of them ->
+blunder; in hand in its own end step -> blunder; a second land with Fastbond in play -> ok; an uncracked fetch in play
+-> ok, also in its end step and on the opponent's turn; tapped in play on its own turn -> blunder, on the opponent's
+turn -> ok; no fetch -> `self_without_fetch`); the engine-offer check both ways; and the random mirror games recomputed
+with the new columns.
+
+**Re-measured** on the a3198 set of 194.4 (the 240 v7r1 best-of-one self-play records, ingested again with this code on
+the same engine; the old figures are 194.4's):
+
+| a3198, 240 games | 194.1's rule | 194.8's rule |
+|---|---|---|
+| Urza's: blunders (of 129) | 49 = 38.0% ± 4.5 | 49 = 38.0% ± 4.5 (unchanged) |
+| Mishra's at itself with no fetchland (of 488 counted) | 186 = 38.1% ± 2.4 | 186 = 38.1% ± 2.4 (unchanged) |
+| Mishra's at itself with a fetchland it can't use in time (a blunder now) | - (counted as with a fetch) | 60 = 12.3% ± 1.5 |
+| Mishra's at itself with a fetchland available (not a blunder) | 113 = 23.2% ± 2.0 | 53 = 10.9% ± 1.6 |
+| Mishra's: blunders in all | 186 = 38.1% ± 2.4 | 246 = 50.4% ± 2.5 |
+
+(Shares of the counted activations, ± one SE clustered by game.) Of the 60 now blunders, 36 were on the opponent's
+turn with the fetch in hand and 24 on its own turn after its land drop; 40 had Brainstorm, Ponder or similar in hand.
+Every one of the 53 still-available cases had an uncracked fetch in play: at no Mishra's activation of a3198 was a
+fetch in hand playable (it plays the fetch before activating). 194.3's hand-check "Misty Rainforest in hand ->
+`ok_self_with_fetch`" was read by the old rule; on a3198 such a case is now `self_with_unusable_fetch` (the meta3 and
+wheel sets of 194.4 were not re-ingested: their engine is main 39492759's).
+
+**Canary spots.** A new kind `bauble_mishra_self_fetch_unusable` (answer `bad`; its own kind rather than
+`bauble_mishra_self_no_fetch`, whose reason says "no fetchland in hand or on the battlefield"): `gamedb_bauble.spots`
+mines it, and two of 194.5's five `bauble_mishra_fetch_control` spots become it, each with a `why` that gives its
+timing - `...:4:8` (its own turn 1, main 1, its land already played, Flooded Strand only in hand) and `...:8:33` (the
+opponent's turn 2, end step, Misty Rainforest and Polluted Delta in hand). A spot's id carries its kind, so their ids
+changed (`bauble_mishra_self_fetch_unusable:a3198-v7r1_selfplay_s64:4:8`, `...:8:33`); the library's `moved` map holds
+old id -> new id and each spot a `reclassified` {from, date, why}. The three controls left (`...:0:26`, `...:1:292`,
+`...:10:115`) each have an uncracked fetch in play, checked by replaying each spot under the new rule (the Mishra
+spots' `conditions` gain the four new columns). The 11-03 `bauble_trick_missed` spots are untouched.
+
+**The user's review** (the review page of 194.5's twelve spots, 2026-11-18): all twelve kept - the two reclassified
+spots kept as blunders ("user: blunder - fetch unusable before Mishra's delayed draw"; the user's earlier "unsure" on
+`...:8:33`, given while it was labelled a control, is superseded and not applied). Applied with
+`tools/delver_review_apply.py --date 2026-11-18 --label bauble_targeting_2026-11-18` (dry run first), which now
+resolves a verdict saved under a moved spot's old id through `moved` (a verdict under the new id wins;
+tests/test_delver_review_apply.py). The library's scored spots go from 53 to 62 (the nine kept blunder spots: four
+Urza's, three Mishra's without a fetch, two with an unusable one; the three controls are never scored), so its
+`library_id` changes (20e61a21959c -> 1beec510534c). The site labels the new kind ("Mishra's Bauble at itself, its
+fetchland too late").
+
+**Gate**: `python tools/gate.py python` (warm worktree): GATE PASSED on 00c6aec2 (588 s). A first run on the same
+commit failed one load-sensitive timeout (tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]: no match rows
+within 600 s on a busy machine; code this branch does not touch; the test passes alone). Engine untouched, digests
+unchanged. This paragraph is docs only.
 
 ## 195. Rolling leases on main and by default: every farm-attached run gets rolling self-play leases (zero-core `feat/rolling-default` 459599f, docs/az.md 54.7; branch `feat/rolling-main`, 2026-11-17)
 
