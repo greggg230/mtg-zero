@@ -31,18 +31,26 @@ fn play(spec: &MtgSpec, seed: u64, heuristic: bool, export: bool) -> (Vec<u16>, 
     let mut chance = Vec::new();
     let mut taken = Vec::new();
     let mut log_n = 0u64;
+    let mut views = Vec::new();
     while let Some(p) = g.to_move() {
         let acts = legal(&g);
         if export {
             let v: Value = serde_json::from_str(&g.export_state()).unwrap();
             check(&v, &acts, p, &mut log_n, spec.log);
+            views.push(v);
         }
         let a = if heuristic { bot.choose(&g.g, &acts) } else { acts[rng.below(acts.len() as u32) as usize] };
         taken.push(a);
         g.step(a, &mut chance).unwrap();
         assert!(taken.len() < 20_000, "game {seed} too long");
     }
-    (taken, serde_json::from_str(&g.export_state()).unwrap())
+    let end: Value = serde_json::from_str(&g.export_state()).unwrap();
+    if export {
+        // the whole log, rebuilt from the states (ENGINE.md 191)
+        views.push(end.clone());
+        assert_eq!(rebuild(&views), g.g.log_lines(), "game {seed}");
+    }
+    (taken, end)
 }
 
 fn check(v: &Value, acts: &[u16], p: usize, log_n: &mut u64, log: bool) {
@@ -77,7 +85,9 @@ fn check(v: &Value, acts: &[u16], p: usize, log_n: &mut u64, log: bool) {
     if !log {
         assert_eq!(n, 0);
     }
-    assert_eq!(v["log"].as_array().unwrap().len() as u64, n.min(40));
+    // (ENGINE.md 191: the newest 40 lines, or every line since the previous state when there are more - each state
+    // here is one step after the last)
+    assert_eq!(v["log"].as_array().unwrap().len() as u64, n.min(40).max(n - *log_n));
     *log_n = n;
 }
 
@@ -119,4 +129,62 @@ fn sample() {
     }
     out += &g.export_state();
     std::fs::write(path, out).unwrap();
+}
+
+/// The play-by-play rebuilt from consecutive exported states (each state's new lines: the last
+/// `log_n[k] - log_n[k-1]` of its tail, as the replay viewer and the game database read them); panics on a gap.
+fn rebuild(views: &[Value]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut prev = 0u64;
+    for (k, v) in views.iter().enumerate() {
+        let n = v["log_n"].as_u64().unwrap();
+        let tail = v["log"].as_array().unwrap();
+        let new = (n - prev) as usize;
+        assert!(new <= tail.len(), "state {k}: {new} new lines, a tail of {}", tail.len());
+        out.extend(tail[tail.len() - new..].iter().map(|l| l.as_str().unwrap().to_string()));
+        prev = n;
+    }
+    out
+}
+
+/// ENGINE.md 191: a resolving Doomsday exiles the rest of a 50-card library in one step (~50 lines, more than the
+/// 40-line minimum tail), and the next exported state still carries every one of them: the log rebuilt from the
+/// states equals the game's whole log.
+#[test]
+fn a_step_that_writes_more_than_forty_lines_exports_all_of_them() {
+    use engine::db::CardDb;
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let db = CardDb::constructed();
+    let lib10 = ["Brainstorm", "Ponder", "Consider", "Daze", "Thassa's Oracle", "Dark Ritual", "Lotus Petal", "Island", "Underground Sea", "Polluted Delta"];
+    let lib: Vec<&str> = lib10.iter().cycle().take(50).copied().collect();
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Swamp", "Swamp", "Swamp"])
+        .hand(0, &["Doomsday"])
+        .library(0, &lib)
+        .library(1, &["Island"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    let dd = g.card(0, "Doomsday", Zone::Hand);
+    let mut views = vec![g.spectator_view()];
+    let mut most = 0usize;
+    g.choose(Choice::Cast(dd));
+    views.push(g.spectator_view());
+    // every decision answered with its first option, priority passed, until Doomsday has resolved
+    while g.player(0).graveyard.iter().all(|&c| g.name(c) != "Doomsday") {
+        let d = g.pending_decision().expect("a decision");
+        let a = match d.kind {
+            DecisionKind::Priority => d.action_of(Choice::Pass).unwrap(),
+            _ => d.options[0].action,
+        };
+        let before = g.log_lines().len();
+        g.apply(a, &mut Vec::new()).unwrap();
+        most = most.max(g.log_lines().len() - before);
+        views.push(g.spectator_view());
+        assert!(views.len() < 500, "Doomsday never resolved");
+    }
+    assert!(most > 40, "one step wrote {most} lines");
+    assert_eq!(g.player(0).library.len(), 5);
+    assert_eq!(rebuild(&views), g.log_lines());
 }

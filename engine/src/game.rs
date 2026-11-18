@@ -990,6 +990,9 @@ pub struct Game {
     /// library, then a shuffle or search). The owner's worlds draw them again (`deal_keeping_others`); everywhere
     /// else they are ordinary entries. Kept by `tidy_clouds`.
     pub(crate) peeks: Vec<(PlayerId, PlayerId, DefId)>,
+    /// The log's length when the last `apply` began (ENGINE.md 191): the spectator view exports every line from
+    /// there on, so consecutive exported states carry the whole play-by-play. Read only by the view.
+    pub(crate) log_mark: usize,
 }
 
 /// `Game::seen`: some card of the game has ascend; an ability discount
@@ -1407,6 +1410,7 @@ impl Game {
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
             peeks: Vec::new(),
+            log_mark: 0,
         }
     }
 
@@ -1583,6 +1587,11 @@ impl Game {
     }
     pub fn log_lines(&self) -> &[String] {
         self.log.as_deref().unwrap_or(&[])
+    }
+    /// The log's length when the last decision's answer began to run (`apply`; 0 before the first): the lines from
+    /// there on are what that answer wrote (ENGINE.md 191).
+    pub fn log_mark(&self) -> usize {
+        self.log_mark.min(self.log_lines().len())
     }
     pub fn def_of(&self, idx: CardIdx) -> &'static CardDef {
         self.db.def(self.objs[idx.i()].def)

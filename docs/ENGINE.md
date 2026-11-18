@@ -38493,7 +38493,7 @@ with each state (`view.rs` LOG_TAIL), and a resolving Doomsday exiles the rest o
 one step (~50 lines), so that step's oldest lines - exile moves - are not in `events` (`games.lines_lost`, a
 `lines_lost` event with the count: 2,735 lines in the probe's 1,200 games, ~6 a real self-play game). `combo_stats`
 reads the same tail (its "(log lines lost)"); the `doomsday` rows come from the state, not the lines. Exporting the whole
-step's lines would be an engine (view) change: left for a later branch if the exile moves are ever wanted.
+step's lines would be an engine (view) change: left for a later branch if the exile moves are ever wanted. (Done: section 191 - the view now carries every line a step writes; `lines_lost` is 0.)
 
 ### 187.4 Measured
 
@@ -38639,6 +38639,77 @@ loss and entropy, games per minute. Estimate ~2.5 h of GPU. The launch script li
   `--test az` (54) / `--test hidden` (28), the three other games built against the core, core pytest (721 passed, 51
   skipped), farm compat identical. By hand (189.3): farm compat with the rule on, with game_records on, both;
   driver_settings_dump old vs new and against the worker.
+
+## 191. The spectator view exports every play-by-play line of a step (branch `fix/full-log-export`, 2026-11-17)
+
+The user's call after 187.3's limit: make the exported play-by-play lossless.
+
+### 191.1 The gap
+
+`export_state`'s view (`az/view.rs`, spec `"log": true`) carried the log's newest 40 lines (`LOG_TAIL`) and its length
+`log_n`; every reader (the replay viewer on delverai, `mtgz/az/replays.py`'s recordings, `tools/gamedb.py`,
+`tools/combo_stats.py`, `tools/delver_blunders.py`, `tools/delver_fingerprints.py`) rebuilds the whole log from
+consecutive states: state k's new lines are the last `log_n[k] - log_n[k-1]` of its tail. A step that writes more than
+40 lines lost its oldest: a resolving Doomsday exiles the rest of its caster's library in one step (~50 lines), so ~6
+lines of a real self-play game were missing (`games.lines_lost`: 2,735 in the three-deck probe's 1,200 games, 187.3).
+
+### 191.2 The fix
+
+`Game::log_mark` (a new field, `log_mark()`): the log's length when the last `apply` began, set at the top of
+`Game::apply` (0 before the first answer, and in a new game of a match: a new `Game`). The view's tail starts at
+`min(log_n - 40, log_mark)`: every line the last answer wrote, however many, and at least the newest 40 as before. The
+shape is unchanged (`VIEW_VERSION` 1, `log` still the log's last lines ending at `log_n`), so every reader's rebuild
+works as it was and is now gap-free when consecutive states are consecutive steps - which they are for the replay
+recorder (zero-core `replay.py` stores the state before every step, forced ones included; an unchanged state is stored
+once, and an unchanged state wrote no line), gamedb's full replay and combo_stats (both export after every step). A
+state is longer only where a step wrote more than 40 lines. View only: nothing in play, the encodings or the search
+reads `log_mark` (`public_state.rs`: Derived; `describe` lists it as not described).
+
+### 191.3 Tests
+
+`engine/tests/view.rs`: `every_state_of_mirror_games` now checks each state's tail length is
+`max(min(log_n, 40), log_n - previous log_n)` and that the log rebuilt from the states equals the game's whole log
+(`rebuild`; six heuristic / random Delver mirror games); `a_step_that_writes_more_than_forty_lines_exports_all_of_them`
+(new): Doomsday resolving over a 50-card library, every decision answered and exported, one step writes more than 40
+lines, and the rebuilt log equals `Game::log_lines`. `exporting_and_the_log_change_nothing` unchanged.
+
+### 191.4 The game database and combo_stats
+
+No code change was needed: both read `log_n` and the tail as before, and their `lines_lost` / "(log lines lost)" paths
+stay as a check (comments and `docs/gamedb.md` updated: 0 since this section). Re-validated with this branch's engine
+(the scripts of 187.3):
+
+* **the three-deck probe's 1,200 games** (`import-combo` of the probe's games files, `ingest --sample 1.0`, a fresh
+  `combo_stats.py scan` of the same files): **no per-field difference** in 1,200 games, every view total equal (324
+  resolved Doomsdays: in_hand 83, missed 175, not_findable 58, voluntary 8; 8 Oracle piles; 69 caster wins after a
+  resolution; 411 Show and Tells; wins combat 774, damage 129, pact 114, decking 96, oracle 20). `lines_lost` 2,735 ->
+  **0** (186 games had a loss); the 204 `lines_lost` events are gone and the lines are back: events 472,590 -> 475,121
+  (+2,531 = 2,735 - 204), of them moves +2,660 (to exile **+2,625**, to the battlefield +35), other +71, damage +2,
+  trigger +2.
+* **the wheel's 600 self-play records** (`validate_records.py`): 88 resolutions, no difference; `lines_lost` 1,133 -> 0,
+  events +1,133 (exile moves +1,098).
+* **the 64 real self-play records** (iteration-156 network): 26 resolutions, no difference; `lines_lost` 402 -> 0,
+  events +402 (all exile moves).
+
+### 191.5 Digests, farm
+
+Behaviour digests unchanged (the view is read by nothing in play; the gates below). The release worker plays and
+records exactly as before (self-play runs with the log off, and nothing it plays reads the view); farm compat runs in the engine tier.
+
+### 191.6 The gates (on 1c036e03)
+
+* `suite`: GATE PASSED in 1,110 s - the full engine suite 2,703 passed (24 binaries); the sharded 2,000-game fuzz of
+  the default pool (2,000 games, 100 matches), the default pool with hidden decklists (2,000 games) and
+  `FUZZ_POOL=delver_dealt` (2,000 games, 100 matches + 100 post-sideboard), all clean.
+* `engine --tested-sha 1c036e03`: GATE PASSED WITH SKIPS (5 live-run-hazard tests fenced beside the paused live run) in
+  781 s - digests **unchanged**: full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, constructed e1177d609d6c1aee,
+  eoe 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993 (each = the
+  recorded files); `--test az` 54, `limits` 13, `hidden` 28; pytest 4 shards + the desktop part; the smoke; the
+  release worker built and farm compat identical (gate 2: 6 games, 2,484 rows; gate 3: 6 games, 2,556 rows).
+* **Again on the merge with main c106f7e8** (e8492cc8; zero-core pin 3161bd9; the section renumbered 189 -> 191):
+  `suite` GATE PASSED in 1,014 s (2,703 passed; the three 2,000-game fuzz pools clean); `engine --tested-sha e8492cc8`
+  GATE PASSED WITH SKIPS (4 live-run-hazard tests fenced) in 735 s - every digest unchanged (as above), `--test az` 54,
+  pytest, the smoke, farm compat identical (gate 2: 6 games, 2,484 rows).
 
 ## 192. A look at the opponent's library card that its owner doesn't know is remembered (Mishra's Bauble, Jace's +2; branch `fix/opp-look-memory`, 2026-11-17)
 

@@ -518,7 +518,7 @@ impl Describer<'_> {
             entering_warp: _, miracle_cast, entering_face: _, day, done_once, discarded, temp_triggers, gy_exile, copies,
             copy_objs, lki_copy: _, lki_damage: _, spell_lki: _, entering_copy: _, entering_times: _, enter_note: _, defer_enters: _,
             pile_moving: _, pile_shuffles: _, prepared, seen: _, initiative, dungeons, rules_srcs,
-            choosing_for: _, marks, known_pools, log: _, peeks,
+            choosing_for: _, marks, known_pools, log: _, log_mark: _, peeks,
             // (v6 engines: transient or derived - public_state.rs - or EoE-only, checked below)
             page, releasing, oracle: _, oracle_dead: _, leaving_to: _, leaving_choice: _, leaving_card: _, resolving_adventure: _,
             held, void_turn, next_turn_controller, turn_controller, lki_attached: _, lki_toughness: _, lki_power: _, loyalty: _,
