@@ -38700,3 +38700,7 @@ records exactly as before (self-play runs with the log off, and nothing it plays
   eoe 2efe956d589840ce, driver 6f7b863096e47dcd, metagame 8b2b74f436d338a0, dealt e802d9df793c9993 (each = the
   recorded files); `--test az` 54, `limits` 13, `hidden` 28; pytest 4 shards + the desktop part; the smoke; the
   release worker built and farm compat identical (gate 2: 6 games, 2,484 rows; gate 3: 6 games, 2,556 rows).
+* **Again on the merge with main c106f7e8** (e8492cc8; zero-core pin 3161bd9; the section renumbered 189 -> 191):
+  `suite` GATE PASSED in 1,014 s (2,703 passed; the three 2,000-game fuzz pools clean); `engine --tested-sha e8492cc8`
+  GATE PASSED WITH SKIPS (4 live-run-hazard tests fenced) in 735 s - every digest unchanged (as above), `--test az` 54,
+  pytest, the smoke, farm compat identical (gate 2: 6 games, 2,484 rows).
