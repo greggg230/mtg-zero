@@ -296,6 +296,8 @@ def test_a_farm_h2h_definition_holds_the_play_settings_only(tmp_path):
     play = FH.play_settings(str(d / 'mtgz-worker.exe'), bid, cfg, str(tmp_path / 'st'))
     reads = json.loads(subprocess.run([WORKER, 'check-config', str(tmp_path / 'st' / 'settings.json'), '--eval', '--json'],
                                       capture_output=True, text=True, check=True).stdout)['eval_reads']
+    # (the template carries the run's declared setting classes too: this worker announces them, ENGINE.md 196.1)
+    assert play.pop(FH.CLASSES_KEY) == FH.run_setting_classes(cfg)
     assert set(play) == set(reads) and len(play) < len(cfg) and 'resolver_init' not in play and 'spec' not in play
     FD.check_no_paths(play, 'settings')
     assert FE.seat_dicts(play, [{'net': 1}, {'net': 2}]) == FE.seat_dicts(cfg, [{'net': 1}, {'net': 2}])
