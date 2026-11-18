@@ -19,7 +19,7 @@ pub const VIEW_VERSION: u32 = 1;
 
 /// Each exported state carries the log's newest lines (`log`, ending at line `log_n`): every line the last
 /// decision's answer wrote (`Game::log_mark`, however many: a resolving Doomsday exiles a library in one step), and
-/// at least the newest `LOG_TAIL`. So consecutive states' tails cover the whole log without a gap (ENGINE.md 189;
+/// at least the newest `LOG_TAIL`. So consecutive states' tails cover the whole log without a gap (ENGINE.md 191;
 /// before, at most 40 lines a state, and a step that wrote more lost its oldest). A reader rebuilds the log as before:
 /// state k's new lines are the last `log_n[k] - log_n[k-1]` of its tail.
 const LOG_TAIL: usize = 40;

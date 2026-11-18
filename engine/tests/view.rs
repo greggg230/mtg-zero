@@ -46,7 +46,7 @@ fn play(spec: &MtgSpec, seed: u64, heuristic: bool, export: bool) -> (Vec<u16>, 
     }
     let end: Value = serde_json::from_str(&g.export_state()).unwrap();
     if export {
-        // the whole log, rebuilt from the states (ENGINE.md 189)
+        // the whole log, rebuilt from the states (ENGINE.md 191)
         views.push(end.clone());
         assert_eq!(rebuild(&views), g.g.log_lines(), "game {seed}");
     }
@@ -85,7 +85,7 @@ fn check(v: &Value, acts: &[u16], p: usize, log_n: &mut u64, log: bool) {
     if !log {
         assert_eq!(n, 0);
     }
-    // (ENGINE.md 189: the newest 40 lines, or every line since the previous state when there are more - each state
+    // (ENGINE.md 191: the newest 40 lines, or every line since the previous state when there are more - each state
     // here is one step after the last)
     assert_eq!(v["log"].as_array().unwrap().len() as u64, n.min(40).max(n - *log_n));
     *log_n = n;
@@ -147,7 +147,7 @@ fn rebuild(views: &[Value]) -> Vec<String> {
     out
 }
 
-/// ENGINE.md 189: a resolving Doomsday exiles the rest of a 50-card library in one step (~50 lines, more than the
+/// ENGINE.md 191: a resolving Doomsday exiles the rest of a 50-card library in one step (~50 lines, more than the
 /// 40-line minimum tail), and the next exported state still carries every one of them: the log rebuilt from the
 /// states equals the game's whole log.
 #[test]

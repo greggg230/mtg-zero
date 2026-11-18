@@ -240,7 +240,7 @@ impl Game {
         let d = self.pending.as_ref().ok_or_else(|| "no decision is pending".to_string())?;
         let choice = d.choice_of(action).ok_or_else(|| format!("illegal action {action} for {:?}", d.kind))?;
         self.pending = None;
-        // (where this answer's play-by-play starts, for the spectator view: ENGINE.md 189; nothing in play reads it)
+        // (where this answer's play-by-play starts, for the spectator view: ENGINE.md 191; nothing in play reads it)
         self.log_mark = self.log.as_ref().map_or(0, |l| l.len());
         if self.loop_open.is_some() {
             self.loop_answer(action);

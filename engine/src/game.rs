@@ -985,7 +985,7 @@ pub struct Game {
     /// sorted; set by the match. `None`: open decklists.
     pub(crate) known_pools: [Option<std::sync::Arc<[DefId]>>; 2],
     pub(crate) log: Option<Vec<String>>,
-    /// The log's length when the last `apply` began (ENGINE.md 189): the spectator view exports every line from
+    /// The log's length when the last `apply` began (ENGINE.md 191): the spectator view exports every line from
     /// there on, so consecutive exported states carry the whole play-by-play. Read only by the view.
     pub(crate) log_mark: usize,
 }
@@ -1583,7 +1583,7 @@ impl Game {
         self.log.as_deref().unwrap_or(&[])
     }
     /// The log's length when the last decision's answer began to run (`apply`; 0 before the first): the lines from
-    /// there on are what that answer wrote (ENGINE.md 189).
+    /// there on are what that answer wrote (ENGINE.md 191).
     pub fn log_mark(&self) -> usize {
         self.log_mark.min(self.log_lines().len())
     }

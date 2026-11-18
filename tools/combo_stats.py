@@ -438,7 +438,7 @@ def scan_row(E, meta, row):
         k = nxt['log_n'] - st['log_n']
         lines = nxt['log'][-k:] if k > 0 else []
         if k > len(nxt['log']):
-            # (never since the engine exports every line a step writes, ENGINE.md 189; a build before it kept a
+            # (never since the engine exports every line a step writes, ENGINE.md 191; a build before it kept a
             # state's newest 40 and a resolving Doomsday's oldest exile lines were lost: kept as a check)
             lines = ['(log lines lost)'] + lines
         R.step(st, d.get('kind'), text, lines, nxt)

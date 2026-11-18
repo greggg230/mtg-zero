@@ -198,7 +198,7 @@ pub fn fields() -> Vec<Field> {
         w6: Derived "EoE workstream W6's state: its fields are classified under W6State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",
         log: Derived "the human-readable log (tests and the viewer)",
-        log_mark: Derived "the log's length when the last answer began to run: the spectator view's start (ENGINE.md 189)",
+        log_mark: Derived "the log's length when the last answer began to run: the spectator view's start (ENGINE.md 191)",
     });
     {
         use crate::eoe_w3::W3State;
