@@ -40591,10 +40591,10 @@ alternates) take the new settings as unknown trainer-only keys (declared classes
 
 **End-to-end** (zero-core docs/az.md 65 "Measured": a test run with copies of legacy-meta3-r1 iteration 736 and its
 anchors, 8 games a match, on a test farm run limited to the owner's canary agents and Windows builds, paused
-afterwards): the calibration and 736 vs fork0 played by one farm PC (288 s and 696 s), 736 vs meta256 dropped at its
-deadline and played on the desktop (8 games, 134 s at 4 threads); spot checks equal; anchored Elo 1333 +- 200 against
-the Mac's 1346 +- 57; two farm games replayed on the desktop by the same build gave the same digests; the eval
-settings pass `check-config --eval --platform macos-arm64`. The live run, its worktrees and its farm run were not
+afterwards): the calibration and 736 vs fork0 one lease each on the farm (288 s and 696 s from the batch's PUT),
+736 vs meta256 dropped at its deadline and played on the desktop (8 games, 134 s at 4 threads); spot checks equal;
+anchored Elo 1333 +- 200 against the Mac's 1346 +- 57; two farm games replayed on the desktop by the same build gave
+the same digests; the eval settings pass `check-config --eval --platform macos-arm64`. The live run, its worktrees and its farm run were not
 touched (files copied, read only).
 
 **For legacy-meta3-r1** (the run's owner decides; nothing was changed on the run): restart it from a worktree of this
@@ -40603,3 +40603,23 @@ CUDA + macOS alternates, min_agent 0.2.11, priority 1, the fast graph; `eval_poo
 farm evaluation starts a new mirror from the run's Elo pool (the anchors fixed and calibrated already: no calibration
 games), then plays each evaluated iteration's two anchor matches as two 100-game batches, one after the other; the
 iterations the Mac had not evaluated when the run stopped are queued again at the restart.
+
+### 204.1 Gates of 1930691c
+
+On 1930691c (this section's commit before its docs follow-up), in its worktree, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`,
+`--offload local` (no Mac), `CARGO_BUILD_JOBS=8`, beside the live legacy-meta3-r1 (heavy steps throttled):
+
+* **optin-core**, `--baseline-root` <85495dc7, built>: **GATE PASSED WITH SKIPS optin-core 1930691ce7db in 1739s**
+  (checkpoint_compat byte identity: identical, 3,303 samples each for visits and cq; the digest formats and the dealt
+  digest equal to the recorded ones; farm compat gates 2 and 3 identical; core cargo tests 215 passed; core pytest 721
+  passed / 70 skipped, the skips the live-run fence: 17 core tests - and zero-core's tests/test_eval_pool.py, which
+  needs onnx / onnxscript / onnxruntime, absent from the gate's Python; the other 3 games built against this core).
+* **python**: **GATE PASSED WITH SKIPS python 1930691ce7db in 399s** (pytest 715 passed, 11 skipped, 7 live-run-hazard
+  tests fenced; the run-loop smoke 16 games, 0 unfinished).
+
+zero-core's tests/test_eval_pool.py (7 tests) passes with the zero-farm venv's Python (onnx 1.23.2, onnxruntime
+1.31.1), as do zero-core's RemoteEval, worker-settings, farm-report, game-records, farm_h2h and trace tests (105
+passed beside it; test_engine_id fails only while zero-core's `crates/` has uncommitted changes).
+
+zero-core `feat/farm-eval` also has f1e8ae1 after the pinned d3b1a8d: docs/az.md 65's measurement worded without
+machine-specific details; docs only, so the pin stays at d3b1a8d (no code differs).
