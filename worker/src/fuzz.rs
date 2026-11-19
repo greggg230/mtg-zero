@@ -189,6 +189,34 @@ impl FuzzGame for MtgFuzz {
     fn profile(&self) -> &'static str {
         PROFILE
     }
+
+    /// The loops whose seeds call the platform's libm (docs/ENGINE.md 197; zero-core docs/az.md 62: a worker off the
+    /// reference platform refuses them, so a farm failure always reproduces on the desktop): the sealed deck builder
+    /// (`FUZZ_POOL=sealed`: `f64::powf` / `exp`), the belief-weighted deals (`FUZZ_BELIEF`, and `FUZZ_CHANCE`'s chance
+    /// walks: weights `exp(tilt x z)`, `belief_weight`'s `powf`), the deck tilt (`FUZZ_DECK_TILT`, and every
+    /// checkpoint of a constructed best-of-three's matches: `tilt_decks`' `ln` / `exp`). The rest is integer and
+    /// exactly rounded arithmetic (`powi` is compiler-builtins' multiplications on every platform).
+    fn libm_dependence(&self, plan: &FuzzPlan, env: &[(String, String)]) -> Option<String> {
+        let get = |k: &str| env.iter().find(|(x, _)| x == k).map(|(_, v)| v.as_str());
+        let pool = get("FUZZ_POOL");
+        let mut why = Vec::new();
+        if pool == Some("sealed") {
+            why.push("FUZZ_POOL=sealed: the sealed deck builder (f64 powf / exp)".to_string());
+        }
+        for (k, what) in [
+            ("FUZZ_BELIEF", "the belief-weighted deals (exp of the random weights, belief_weight's powf)"),
+            ("FUZZ_CHANCE", "the chance walks' weighted deals (exp of the random weights)"),
+            ("FUZZ_DECK_TILT", "the deck tilt (tilt_decks' ln / exp, belief_weight's powf)"),
+        ] {
+            if get(k).is_some() {
+                why.push(format!("{k}: {what}"));
+            }
+        }
+        if plan.kind == "matches" && matches!(pool, Some("delver" | "delver_dealt" | "delver_dealt2" | "cross" | "meta")) && get("FUZZ_DECK_TILT").is_none() {
+            why.push(format!("FUZZ_POOL={}: a constructed best-of-three's matches check deck-tilted worlds (tilt_decks' ln / exp)", pool.unwrap_or("")));
+        }
+        (!why.is_empty()).then(|| why.join("; "))
+    }
 }
 
 /// The engine loop's hooks -> the chunk process's.

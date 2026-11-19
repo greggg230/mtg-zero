@@ -39626,6 +39626,212 @@ zero-farm venv; its first poll took origin/main 7bd1722d, already released: noth
 * **Agents and alternates.** The CUDA alternate is signed with min agent 0.2.11 (pb3's and meta3's); the CPU build
   keeps farm_build's 0.1.3. Runs still choose their own `pool_min_agent`.
 
+## 197. The farm worker on macOS (Apple silicon): the runtime pack, Mac builds, libm refusals, the Mac's farm gates, evaluator threads (branch `feat/macos-farm`, zero-core `feat/macos-worker`, docs/az.md 62; zero-farm PROTOCOL rev 17; 2026-11-18)
+
+Branch `feat/macos-farm` from main cafd9b10. Why: zero-farm rev 17 (its PROTOCOL section 11) lets Macs on Apple
+silicon take CPU work - their own agent (0.3.0), worker builds (`platform: "macos-arm64"`, `min_agent` 0.3.0) and runtime
+packs, and a run's **CPU alternate** `{build_id, runtime, when: {platform}}`. No rule, card, encoding, search or training
+change; behaviour digests untouched (the engine gains one method that answers a question, `MtgSpec::libm_replay`).
+
+### 197.1 The macOS runtime pack (`farm_build.py --runtime --pack macos-cpu`)
+
+* **Source.** ONNX Runtime **1.31.1** (the Windows CPU pack's, d531424b) for osx-arm64 from the NuGet package
+  Microsoft.ML.OnnxRuntime 1.31.1 (`runtimes/osx-arm64/native/libonnxruntime.dylib`): github.com/microsoft/onnxruntime
+  answers 404 from here (the repository, its releases and their tarballs), and NuGet is where the Windows ML pack comes
+  from already. The package is checked against nuget.org's catalog hash (SHA-512), its nuspec's version and license
+  file; its `LICENSE` and `ThirdPartyNotices.txt` are byte for byte the Windows pack's.
+* **Checks.** Here: a thin arm64 Mach-O dylib (minimum macOS **14.0**: ONNX Runtime 1.31's - PROTOCOL 11's "macOS 13 or
+  newer" does not hold for this pack: a macOS 13 Mac fails the load) linking only the system's frameworks. On the Mac:
+  `codesign --verify --strict`, Developer ID Application: Microsoft Corporation (team UBF8T346G9); loaded from the pack
+  by a macOS release worker (`info --runtime-dir`: the dylib's path in the pack, dyld's list, docs/az.md 62) and the CPU
+  self-test passes (`probe-providers --providers cpu`: max abs 3.0e-7). It has KleidiAI's arm64 kernels (SME2 on an M4:
+  `ArmKleidiAI::MlasGemmBatch`); turning them off (`mlas.disable_kleidiai=1`) halves the native worker's speed (197.5).
+* **Signed and published** `040b1882f2b4949bf73701db` (`ort-1.31.1-cpu-macos-arm64`: `libonnxruntime.dylib` 44,830,288
+  bytes, `LICENSE` 1,094, `ThirdPartyNotices.txt` 344,457, `runtime.json`; `--platform macos-arm64 --min-agent 0.3.0`).
+
+### 197.2 Mac worker builds (`farm_build.py --profile release|fuzz --platform macos-arm64`)
+
+Built on the Mac at exactly the clean checkout's commit (pushed to the Mac's mirrors as tools/mac.sh does; the Mac's
+one farm checkout `~/mtg-zero-wt/farm-build`, forced and clean, HEAD and the submodule checked there; its own target
+dir; **no RUSTFLAGS**: mac.sh's `-undefined dynamic_lookup` is for the PyO3 module, a farm executable must resolve every
+symbol at link time), copied back and checked here (a thin arm64 executable, minimum macOS 11, linking only
+`/usr/lib/libSystem.B.dylib`, ad-hoc signed by the linker) and there (`codesign --verify`, `info` says `macos-arm64`),
+signed here (`--platform macos-arm64 --entry mtgz-worker --min-agent 0.3.0`; the key never leaves the desktop), then
+the signed build is checked on the Mac (`info`: its build id; `fuzz-check`: commit and profile). Published at fbaeb09
+(the branch's Rust as at its end): release `2a12a0c17dc7d0bd6d9e9828` (requires 040b1882), fuzz
+`07af8e24142db2c02977c2ae`. No run or campaign lists them: the coordinator lane runs the end-to-end test.
+
+### 197.3 What a Mac must not play: the platform's libm (zero-core docs/az.md 62)
+
+What the engine alone decides replays exactly on any platform except where it calls the C runtime's transcendental
+functions, whose last bits differ between Windows' ucrt and Apple's libm. Every call reachable from game code:
+
+| Where | Function | What it decides | On a Mac |
+|---|---|---|---|
+| `az/sealed/builder.rs` (randomised build, best guess) | `powf`, `exp` | a sealed seat's deck from its pool and the seed | **refused**: the record's deck check (`record_setup`) would refuse the game |
+| `az/sealed/mod.rs` (deck choice by an evaluator, temperature) | `exp` | which candidate deck a seat plays | **refused** (only with a built seat: covered by the row above) |
+| `az/sealed/scorer.rs` (the deck evaluator's sigmoid) | `exp` | the candidates' scores | **refused** (as above) |
+| `az/hidden_decks.rs` `tilt_probs` / `tilt_decks` | `exp`, `ln` | the deck tilt's weights of the K cached decks | play only (the search's worlds); fuzz: refused (below) |
+| zero-core `game::belief_weight` | `powf` | a belief-weighted deal's weights | play only; fuzz: refused |
+| zero-core `noise.rs`, `tree.rs`, `driver.rs`, `driver/worker.rs` | `ln`, `exp`, `powf`, `tanh` | Dirichlet / Gumbel noise, the prior's softmax and floor, value-choice and temperature picks | play only (the moves a Mac chooses; records replay the moves) |
+| `az/encode.rs` `squash` (features above 128) | `f32::ln_1p` | a feature's value beyond `SQUASH_FROM` | play only: the trainer's rows are its own replay's. **Measured: not portable** - every non-negative f32 through both libms, 152 of 255 exponent buckets differ (all from 2^-23 up); behaviour digests' largest feature is 68.1, so real games rarely reach it |
+| `fuzz/games.rs` `random_weights` (FUZZ_BELIEF, FUZZ_CHANCE) | `exp` | the checks' weighted worlds | fuzz: refused |
+| `hidden_decks.rs` 523/562/1450, `fuzz/games.rs` 4194/5381 | `powi` | prior weights, random predictions | portable: compiler-builtins' multiplications on every target |
+
+`MtgSpec::libm_replay` (both `mtg` and `mtg_eoe`, through zero-core's `SearchGame::libm_replay`): a `"sealed"` spec
+with a seat built from a pool (generated or given) - so `mtg_eoe` and every sealed run; given decks played as they are
+pass. `MtgFuzz::libm_dependence` (zero-core's `FuzzGame`): `FUZZ_POOL=sealed`, `FUZZ_BELIEF`, `FUZZ_CHANCE`,
+`FUZZ_DECK_TILT`, and the matches loop of the constructed best-of-three pools (`delver`, `delver_dealt`,
+`delver_dealt2`, `cross`, `meta`: every checkpoint deals deck-tilted worlds). A macOS build refuses them in
+`check-config`, `fuzz-check` and every job; the desktop's build answers for a Mac with `--platform macos-arm64`
+(tests/test_worker_farm.py `test_libm_settings_are_refused_off_the_reference_platform`: eoe-smoke refused for
+self-play and eval, mtg-smoke and the metagame pass; `games`, `matches`, `delver-games` pass, `delver-matches`,
+`sealed-games`, `FUZZ_BELIEF`, `FUZZ_CHANCE` refused; no platform keys in the reference's own JSON). Of today's active
+campaigns `games`, `hidden-games` and `delver_dealt2-games` may get a Mac alternate, `delver_dealt2-matches` not; the
+legacy-meta3-r1 run passes.
+
+### 197.4 The Mac's farm gates (`farm_gates.py --mac`; off by default, needs the Mac)
+
+Repeatable: `python tools/farm_gates.py --mac --mac-worker <path on the Mac> --mac-runtime <pack there> --config
+<run config> --model <export> [--fuzz-worker <here> --mac-fuzz-worker <there>]` (module docs). On fbaeb09's signed
+build, the pack 040b1882 and legacy-meta3-r1's gen-398 export (CONTENDED: the run's self-play on the Mac):
+
+* **(a) farm parity on the Mac** (tools/farm_compat.py, worker and Python driver both on the Mac): PASSED - gate 2
+  identical (6 matches, 2,890 rows, 150 batches), gate 3 identical (6 matches, 2,556 rows, 6 decks compared), the
+  feature `rolling` announced.
+* **(b) records across platforms**: the Mac worker's 12 matches with the real network through the macOS pack (a switch
+  398 -> 399 after 3) - replayed on the Mac == its shards (724 rows, 20 arrays); copied here and replayed by this PC's
+  engine the farm pool's way: **0 refused** of 12 (header, replay, game seed), and the desktop's rows == the Mac's
+  shards, all 20 arrays bit for bit (724 rows: 243 value-only, 724 with auxiliary targets, nets 398: 180, 399: 544).
+* **(c) fuzz identity**: `games` seeds [0, 400) on this PC's fuzz build and the Mac's (07af8e24): every seed's outcome
+  (fingerprint, result, turns, decisions) identical, 0 failures.
+
+### 197.5 Throughput: the native worker against the Python remote self-play on the Mac
+
+**The baseline** (the run's own data, metrics.jsonl / evals.jsonl): the Mac's SSH self-play (3 procs: conc 768, threads
+12, groups 4, 4 inference threads x 3 torch threads each, float32 on the CPU) is held back by the run's queue, not its
+CPU: the best it did is ~13.5k leaves/s with ~1,000 games in flight (11-17, gens 42-135: 11,300 games/h, 739k rows/h);
+now ~7.2k leaves/s, ~6,900 games/h, ~390k rows/h with ~257 in flight; a Mac evaluation stops self-play (eval lock).
+Leaves/s is the like-for-like measure (games and rows per game shrink with the generations: 67 rows/game at gen 60, 56
+now).
+
+**First finding: one evaluator thread.** The native worker answered every batch on one thread; on the M4 one ONNX
+Runtime session uses its threads poorly (this ~1,000-node token graph: 1 thread 1,770 rows/s, 3 threads 2,530, 6
+threads 2,650; 12 intra-op threads in a job slower than 4), and the 64-row CPU pieces are not the problem (128-1,024 row
+pieces no faster: more padding). So `infer_workers` (zero-core docs/az.md 62): several sessions on evaluator threads of
+their own, answers in launch order - byte-identical shards to one thread's. Second: the CPU session had silently run on
+CoreML (ort's MaxEfficiency policy): fixed to the CPU EP.
+
+**Per-process A/B** (tools/worker_bench.py on the Mac, the run's Mac settings and gen-398 network, 5-minute windows,
+interleaved; CONTENDED: the live run's three procs at nice 5, ours at nice 15+, the load varying 40-130%, so only the
+ratios of neighbouring windows mean anything; the clean-window measurement is still to come):
+
+| Window (in order) | Side, evaluator | leaves/s | games/h | rows/h | rows/batch | ms/batch | load |
+|---|---|---|---|---|---|---|---|
+| 1 | native, 1 thread x 4 intra-op (cafd9b10's design) | 2,819 | 640 | 9,980 | 226 | 67.5 | 74% |
+| 2 | Python (4 inference threads x 3 torch threads) | 9,716 | 7,504 | 293,172 | 229 | 19.5 | 48% |
+| 3 | native signed 2a12a0c1, `infer_workers` 4 x 3 threads | 5,707 | 2,736 | 66,072 | 227 | 92.0 | 81% |
+| 4 | Python | 7,164 | 4,318 | 126,075 | 228 | 26.4 | 114% |
+| 5 | native, the agent's CPU default (threads 16 = 1 session of 16, rolling `inflight` "auto" = 32 in 4 groups) | 651 | 576 | 23,748 | 9.6 | 12.2 | 116% |
+| 6 | native, 4 x 3 | 5,820 | 2,879 | 70,920 | 227 | 88.0 | 85% |
+| 7 | Python | 7,731 | 4,930 | 152,633 | 228 | 24.5 | 85% |
+| 8 | native, 6 x 2 | 5,166 | 2,231 | 49,867 | 227 | 102.9 | 121% |
+
+(Windows 1-2 from the first interleaving, 6-minute windows, the unsigned branch build; 3-8 the signed build. games/h and
+rows/h over 5 minutes with 768 games in flight count mostly the games that started before the window's middle: leaves/s
+is the measure. Earlier unpaired windows: KleidiAI off 3,603 leaves/s at 148 ms/batch, 1 x 12 threads 1,927.)
+
+* **Per process, the native worker is at ~0.75-0.8x of the Python remote worker** with 4 evaluator threads (windows
+  3/4, 6/7: 5,707 / 7,164, 5,820 / 7,731), from 0.29x with one (1/2). Both make the same batches (~227 rows, conc 768 in
+  4 groups); the native evaluator threads are ~2.7 of 4 busy. (The Python side's "ms/batch" is its driver's wait in
+  `launch` + `result`: with 4 inference workers the batch is computed on the evaluator's own threads in between, so it is
+  not the compute time; 197.8 measures that.) **The gap is the zero-onnx/2 graph's arithmetic, not ONNX Runtime**
+  (197.8): the graph costs ~2.5x the remote worker's own forward per batch under any runtime - its attention is two
+  batched matmuls with masks where torch's forward calls a fused flash-attention kernel, and it has ~34,000 tiny
+  `select`s per batch. Profiled in ONNX Runtime (`ZERO_ORT_PROFILE`): no hot node - LayerNormalization 11.5%, Gemm
+  10.9%, MatMul 10.3%, FusedMatMul 8.7%, Transpose 8.0%, Add 6.9%, Gather 6.6%, Where 4.4% of the kernel time, over
+  ~1,000 nodes a run. ONNX Runtime 1.32.0 (NuGet) is no faster (2,518 vs 2,527 rows/s at 3 threads). Turning KleidiAI
+  off is 2x slower. CoreML is no way out: ONNX Runtime puts 531 of the graph's 2,111 nodes on it in 60 pieces, it fails
+  our empty `where` outputs, and its fp16 would fail the self-test. Not measured: a whole-Mac native process (the clean
+  window).
+* **The farm's own default is the bigger problem**: an agent sends a CPU job `threads` = its threads (16 on the Mac) and
+  a rolling run's `inflight` "auto" = 32 games in 4 groups (zero-farm PROTOCOL 10.6): 8-10-row batches, 651 leaves/s,
+  **0.09x** of one Python process. From 45c284b a macOS build splits a job's intra-op threads into sessions of 3 when the
+  job line names no `infer_workers` (16: 5 x 3); the games in flight are the agent's and the run's to choose. With the
+  run's `inflight` at its SSH procs' 768 and 4 x 3 evaluator threads the native worker reaches the numbers above.
+
+**What parity on the farm needs** (not in this branch): (1) the macOS agent's CPU plan - games in flight from the
+machine's memory (the measured cost here: 7.9 GB at 768 in flight with 4 sessions, against 64 GB) instead of 32, and
+`infer_workers` / `infer_threads` as job line tuning fields (the worker takes `infer_workers` from this branch on;
+PROTOCOL 5 lists the agent's tuning fields); (2) for the whole Mac, one native process against the three SSH processes'
+~1,000-2,300 games in flight - to be measured in a clean window (`worker_bench.py --python-procs 3` for the SSH side);
+(3) a cheaper graph (197.8: fused attention, fewer tiny nodes), or accepting ~0.8x per core.
+
+### 197.6 Release plumbing (`farm_release.py release --mac`; opt-in, nothing applied)
+
+`--mac` builds and signs the macOS release worker for the same commit (`--mac-fuzz`: the fuzz build too;
+`--mac-gates`: 197.4 on the reference), and `mac-plan` prints and saves (`releases/<sha12>/mac-plan.json`) what the runs
+and campaigns would need - never PUT. A dry run with the published builds (read-only GETs): legacy-meta3-r1 passes the
+libm check; its change is `pool_alternates` "c7fc2e5e...,2a12a0c1..." (the farm pool turns the macOS build into a CPU
+alternate itself, zero-core docs/az.md 62), the PUT's alternates the CUDA one as now plus `{"build_id": "2a12a0c1...",
+"runtime": "040b1882...", "when": {"platform": "macos-arm64"}}`, the definition's builds `[5307720f, c7fc2e5e,
+2a12a0c1]`. Campaigns (each with `"alternates": [{"build_id": <macOS fuzz build>, "when": {"platform":
+"macos-arm64"}}]` and the build in its definition's `builds`): `games`, `hidden-games`, `delver_dealt2-games` yes;
+`delver_dealt2-matches` refused (197.3). A campaign's macOS alternate should be its own commit's build.
+
+### 197.7 Gates
+
+zero-core: `cargo test` (212 + 3), `cargo test -p zero_worker` (Windows; on the Mac 36 + the darwin tests), pytest
+test_farm_def / test_farm_pool / test_farm_h2h / test_privacy (56 passed), `smoke_all.sh --with-this-core --build-only`
+GREEN (3 of 3 games). MTG Zero: tests/test_worker_farm.py (the new test and the setting-class tests), the Mac's farm
+gates (197.4), `infer_workers` 3 vs 1 byte-identical shards (Windows, gen-206 network); the merge into main and its gate: 201.
+
+### 197.8 Why not PyTorch on the Mac? A libtorch / MPS spike (scratch code, nothing integrated)
+
+The question (the user, 2026-11-18): run the network through PyTorch (libtorch from C++, or the Mac's GPU) instead of
+ONNX Runtime. Measured on the Mac (the gen-398 network, 400 real batches the native worker recorded - 229 rows on
+average -, the worker's 64-row pieces; CONTENDED as above, every comparison in neighbouring runs):
+
+* **TorchScript does not hold the contract.** `torch.jit.script` of the zero-onnx/2 module (zero-core's `ZeroOnnx2`,
+  the module the ONNX exporter exports) fails; `torch.jit.trace` fails on `torch._check` of export-time SymInts, and with
+  those neutralised it bakes the data-dependent token count (`n.max().item()`) as a constant: "index out of range" on
+  the next batch. The module is written for `torch.export`, which handles those shapes - so **AOTInductor** is libtorch's
+  route: `torch.export` (5.7 s) then `aoti_compile_and_package` (35 s, needs clang; a 21.6 MB `.pt2` with the weights and
+  compiled kernels, per checkpoint), loaded from a 68 KB C++ program (`AOTIModelPackageLoader`, libtorch of the venv's
+  torch 2.14.1: `libtorch_cpu.dylib` 386 MB + `libc10` 1.1 MB + `libomp` 0.9 MB + `libtorch` 35 KB, ~388 MB against the
+  ONNX Runtime pack's 45 MB). Its answers: the reference set within 3.4e-6 (eager torch 4.2e-6, ONNX Runtime 7.5e-6;
+  the self-test's bound 2e-5), 2.6e-5 from ONNX Runtime's raw outputs.
+* **Per batch (ms, one caller, threads 1 / 3 / 4 / 6):** the zero-onnx/2 graph in ONNX Runtime 1.31.1 (Python API)
+  68 / 59 / 54 / 56; the same module in eager torch 61 / 98 / 91 / 110; AOTInductor from C++ 56 / 57 / 57 / 57 (its
+  kernels ignore the intra-op threads); from Python 103 / 98 / 83 / 89. **The remote worker's own evaluator**
+  (`infer.NetEvaluator`: TokenNet's eager forward, its own packing and `scaled_dot_product_attention`) **24 / 27 / 25 /
+  30**. Side by side (batches/s, every caller its own session): ONNX Runtime 4 x 3 54, 6 x 2 71; AOTInductor (C++) 4 x 3
+  58, 6 x 2 70; the remote worker's evaluator (workers 4 x 3 threads, 4 in flight) 70-71. So libtorch running the same
+  graph is no faster than ONNX Runtime; the forward the remote worker runs is ~2.5x cheaper per batch.
+* **Where the graph's time goes** (torch.profiler, 1 thread, per batch): the zero-onnx/2 module 78 ms - `bmm` 24.7
+  (attention as Q K^T and A V with masks), `addmm` 7.1, `select` 6.0 (34,000 calls), `copy_` 4.5, `where` 4.2,
+  `gelu` 3.7, `softmax` 3.0 -; TokenNet's forward 24.7 ms - `scaled_dot_product_flash_attention_for_cpu` 5.7, `addmm`
+  5.6, `gelu` 3.9, `copy_` 2.2 -, the rest small. The export has no fused attention (opset 17), so every runtime pays the
+  unfused form.
+* **The Mac GPU (MPS)**, the remote worker's evaluator in Python (the zero-onnx/2 module does not run on MPS: it computes
+  in float64, which MPS lacks): 227 rows 24.2 ms (9.4k rows/s; the CPU on 3 threads 20.8 ms), 512 38.4 ms (13.3k; CPU
+  34.0), 1024 72.3 ms (14.2k; CPU 72.2), 2048 132 ms (15.5k; CPU 196); answers within 2.1e-6 of the CPU's. One thread
+  feeding it: 90 s stable, 39.9 batches/s of 227 rows. **Four threads feeding one MPS evaluator crashed it** (SIGSEGV
+  after seconds: `at::native::mps::MetalShaderLibrary::exec_unary_kernel` in a hash map of torch's shader library,
+  reached from a `.to(dtype)` copy - the shader cache is not thread-safe in torch 2.14.1, in libtorch as much as in
+  Python). Stopped there (as asked): the GPU-plus-full-CPU-search combination was not measured.
+
+**What it would take** (not started): the cheaper arithmetic is in the export, not the runtime - (a) the zero-onnx graph
+with fused attention (ONNX Runtime's `com.microsoft` `MultiHeadAttention` / opset 23's `Attention`, both with CPU kernels)
+and without the per-element `select`s, which would serve every platform and keep the runtime packs and the protocol; or
+(b) a libtorch backend: an AOTInductor package of TokenNet's own forward per checkpoint (compiled on the Mac: AOTInductor
+does not cross-compile from Windows), a ~390 MB runtime pack, a second signed model file per checkpoint in the
+definitions and leases (zero-farm PROTOCOL 7 / 10), a `zero_worker` evaluator over `AOTIModelPackageLoader`, and the
+self-test as today. If inference took TokenNet's time (~2.5x less per batch), the native worker's 4 evaluator threads
+would no longer limit it (they are ~2.7 of 4 busy now at 88-92 ms a batch): an estimate of 1.2-1.5x the Python worker per
+process, bounded by the search threads - to be measured. MPS adds GPU throughput only with one feeding thread (a queue in
+front of it) and only above ~1,000-row batches.
+
 ## 198. The cells' games on the MacBook: `cells_backend` 'mac' and a parallel watcher lane (branch `feat/cells-mac`, 2026-11-18)
 
 ### 198.1 Why
@@ -39887,3 +40093,309 @@ through tools/slotd.sh; the second ran with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` 
   calls: the matches of the same two networks in one driver and evaluator (a window's 6 measurements against gen0 are
   all iteration N against gen0; a driver holds one spec today, so this is a zero-core change), or a process's matches on
   CUDA streams of their own.
+
+## 200. The farm release's speed gate: each new worker build against the previous release, interleaved, on idle reference machines (`tools/farm_speed.py`; branch `feat/farm-speed-gate` from `feat/macos-farm` 17207901, 2026-11-18)
+
+Why: a farm worker build could ship with a large throughput regression and nobody would notice (197.5: the agent's
+default layout ran at 0.09x of one Python process on the Mac). The user (2026-11-18): every new farm worker build, and
+the network export it plays, is benchmarked against the previous release on the reference machines, and the release
+fails loudly when it got slower; benchmarks run only while the machine is not in use. No rule, card, encoding,
+search, worker or training change; behaviour digests untouched; no zero-core change (the pin stays 45c284b).
+
+### 200.1 What it compares
+
+Two sides, each a signed worker build with the runtime pack its manifest requires and a network export:
+
+* **new**: the release's build (`--new <build dir | id>`); **old**: `--baseline <id>`, else the previous published
+  release build in the farm builds index (mtgz.az.farm_builds, the index farm_release.py writes and
+  farm_release_watch.py reads): the newest published entry before the new build's first entry whose build differs
+  (reused entries share their origin's build and are skipped; unpublished entries are no release). The CUDA and
+  macOS sides come from the same entries' `cuda` / `mac.release` fields (or `--cuda-baseline` / `--mac-baseline`).
+  A baseline of another profile, platform or kind refuses (its manifest).
+* **one network**: `--model` (default `reference`: the release reference export, 196.2; `run:<run dir>`: the run's
+  newest complete pool export; or a path), recorded with its sha256, checkpoint, zero-onnx version and a **graph
+  digest** (`onnx_info`: a walk of the ModelProto's top level - the graph, opsets and IR version without the metadata,
+  producer and doc strings; no `onnx` package needed). The new side may play another export **of the same
+  checkpoint** (`--model-new`; checkpoint_iter and checkpoint_sha256 must agree, else it refuses): the release passes
+  the commit's own export of the reference checkpoint (the gates step writes it), so a change of the exporter is
+  measured with the build - what the farm gets after the release against before. The line says when the graphs
+  differ.
+
+### 200.2 How it measures
+
+Per machine, a block of windows in the order **new, old, old, new** (`--blocks`, default 1; every other block mirrored,
+old, new, new, old, so that over two blocks each side takes each position as often: 200.8), each window a rolling
+self-play job exactly as the farm sends one (`<worker> serve`, `rolling: true`, records output, `flush_s` 60, the
+machine's layout as the agent's tuning fields), for `--minutes` (3). A window's rate is the network **leaves per
+second** (the like-for-like metric; games and rows per game drift with the generations, 197.5) from the worker's own
+`status` events (every 10 s, wall clock) after `--warmup` seconds (30): the **upper quartile of the 10-second
+rates**. Other load on a shared machine only ever slows a window down, so the upper quartile estimates the window's
+uncontended speed and ignores a burst that covers up to three quarters of it (200.8: on the desktop the 10-second rates
+swing +-15% with its other work, and a 40-second burst of it cut a window's rate by a third); the median and the span's
+mean rate are recorded beside it. Every window also records the worker's games, rows, batches (rows per batch, ms p50 / p95), search and
+wait times, peak memory, and the machine's load every 10 s: CPU % (psutil's; on Windows also Task Manager's
+`% Processor Utility` through one `typeperf` per window: on the desktop psutil's CPU-time counters under-report, as
+53.6 found - 8 spinning threads read as 12% "Processor Time" against 66% utility, and a pure-Python loop's process
+time was a fifteenth of its wall time - so the load is context and only its bursts are used, 200.4), the worker's share, the others', available
+memory, python processes, idle seconds and AC. Before the windows each side's `info` must name its build id.
+
+| Machine | Builds, pack | Layout (release.json `speed.machines`, `--job MACHINE:key=JSON`) | Window |
+|---|---|---|---|
+| `cpu` (default) | the release build, its `requires_runtime` pack (the Windows CPU pack) | threads 8, infer_threads 4, conc 256, groups 4; below normal priority (shared with live training: only the ratio means anything, the interleaving is what makes it fair) | 3 min |
+| `mac` (with `--mac`) | the macOS builds in `~/mtgz-macfarm/builds/<id>/`, the macOS pack in `~/mtgz-macfarm/packs/<version>/` (copied from the builds directory when missing) | the agent's own macOS layout: threads 16 (the build's 5 sessions x 3 threads), 2,304 games in 12 groups; `nice 15` | 3 min |
+| `cuda` (`--speed-cuda`, off by default: the GPU trains live runs) | the CUDA alternates, the CUDA pack (on PATH) | threads 4, conc 128, groups 2, providers cuda | 1 min, warmup 15 s, one block |
+
+**The Mac**: this file (the `windows` command is self-contained: the standard library, psutil when present), the plan
+and the exports go to `~/mtgz-macfarm/speed/<stamp>/` (tools/farm_gates.py's ssh/scp helpers, `MTGZ_MAC`), the runner
+runs there (the venv tools/mac.sh uses, else `python3`), and its windows come back by scp. It needs no checkout.
+
+### 200.3 Only on an idle machine
+
+* **Before each window** the runner waits until the machine has had no user input for `--idle-min` seconds (180;
+  Windows: GetLastInputInfo through ctypes; macOS: IOHIDSystem's HIDIdleTime from `ioreg -c IOHIDSystem`) and is on AC
+  power (GetSystemPowerStatus; `pmset -g batt`), at most `--idle-wait-max` (4 h), then fails the machine as
+  **"machine in use"**. A machine that cannot tell its idle time fails too (never benchmarked blind).
+* **During and at the end of the window**: an idle time shorter than the window so far (input during it) or battery
+  power **discards** the window; it runs again after the next idle wait, at most `--idle-redo` times (3) per block,
+  then "machine in use" fails the gate (never a pass). Every check is recorded with its window (`idle.before`: idle
+  seconds, AC, how long it waited, checks; `idle.end`), discarded windows too (`discarded`, `why`).
+* **The Mac's quiet lock** (plan `quiet`, the maintainer's rule for a quiet Mac): before its first window the runner
+  holds `~/domz-remote/.eval.lock` (another remote's evaluation lock, which a run's Mac self-play workers back off
+  for: tools/mac_backoff.py, mtgz/az `locks`) with an `owner` "<pid> <unix time>" whose pid is a live `sleep` of its
+  own (a holder that dies leaves a stale lock and the workers resume: it fails safe), waits 60 s for the workers to
+  back off, and never starts a window while `~/mtgz-remote/.eval.lock` is held by a live owner (the run's own
+  evaluations); that lock taken during a window discards it. The lock is released (holder killed, owner removed,
+  directory removed - only its own) at the block's end, while it waits for an idle machine, and when the runner is
+  interrupted (SIGHUP / SIGTERM: the worker is killed too). A lock held by a live owner is waited for; a stale one is
+  taken over (zero-core's own rule). The run's processes are never signalled or reniced.
+* **The Mac's bench booking** (plan `bench_lock`, the maintainer's rule for agents benchmarking on the Mac): a sweep (one
+  block of windows, ~15 minutes) first makes `~/mtgz-macfarm/bench.lock` (atomically) with an `owner` "<purpose> <unix
+  time>" (`farm-speed-gate:mac:<new8>-vs-<old8>`), waits while another sweep holds it (retried every minute, never
+  taken over: it has no pid), and removes it when the sweep ends - before its idle wait, the quiet lock and its
+  windows; a retry block books again. Recorded with every window (`bench_lock`: purpose, acquired, waited, released).
+
+### 200.4 The pass rule
+
+Per machine: **mean(new windows' leaves/s) >= (1 - `--tolerance`) x mean(old windows')**, tolerance 5%. Any window
+that errors (the worker exits or sends `error`, no leaves, the wrong build in its `info`, no `end` after `quit`) fails
+the machine, as does a machine in use, and a machine that cannot start (no baseline, a missing build: recorded as a
+failed machine beside the others, never a silent pass).
+
+**Bursts of other load** (`--busy-margin`, release.json `speed.busy_margin_pct`, 20 points): the judge recomputes each
+window's rate without the 10-second intervals in which the others' share of the CPU (the machine's CPU % less the
+worker's, as psutil reports them: on the desktop both under-report, but a burst of other work shows as 30-100 against
+a quiet 0-8) rose more than the margin above the machine's baseline - the median of all its samples, so a constant
+background (the Mac's ~29% beside the agent's layout) is the baseline and nothing is left out there. A window with
+fewer than half (or fewer than 3) of its intervals clean is **contended**: left out of the means, and the machine is
+noisy; a side with no clean window left is "machine busy" (a failure the retry block may still turn around, not an
+error). `farm_speed.py judge <dir>` applies it to recorded windows.
+
+A failing machine is **noisy** when it had contended windows, the windows of one side spread by more than the
+tolerance, or the neighbouring pairs' ratios (new0/old1, new3/old2: two estimates of the same ratio) differ by more
+than it: it gets `--retry-blocks` (1) more blocks (the mirrored order) and is judged on all its windows; a clean failure
+is a regression and gets none. The gate passes iff every machine run passed. Recorded: each side's spread, the pairs
+and their spread, the others' baseline, the contended windows and intervals.
+
+### 200.5 Files and hardware-class hints
+
+`--out` (the release: `<builds>/releases/<sha12>/speed/`): `result.json` (verdict, line, per machine the ratio,
+rates, spreads, windows, discarded, layout, blocks run; the baseline and how it was found; the network),
+`<machine>/machine.json` (the plan without its settings, every window with its status series, load and idle samples,
+the judge, the host's hardware), `<machine>/w<i>-<side>/` (the worker's events and stderr) and **`hints.json`**: per
+machine its hardware (CPU, cores, memory, OS), the layout it ran (threads, infer_workers x infer_threads, groups,
+games in flight, providers) and what it got (leaves/s new and old, rows per batch, ms per batch, peak memory, the
+others' load) - seeds for the farm agent's autotuner (zero-farm `feat/autotune`), recorded only: no coordinator call.
+These files stay in the builds directory (machine details never reach the repository). Two runs into one directory
+combine (farm_release.py runs the desktop's machines under a slot, then the Mac). `farm_speed.py judge <dir>
+[--tolerance]` judges recorded windows again.
+
+### 200.6 In the release
+
+`farm_release.py release` step **8b `speed`** (its docstring): after the gates (and the macOS steps with `--mac`),
+before the mac plan and the publish. The desktop's part holds a tools/slotd.sh slot; the Mac's part runs after a
+passing desktop part. Flags: `--no-speed` (skipped, recorded), `--speed-baseline`, `--speed-mac-baseline` (else the
+index's previous macOS build, else release.json `speed.mac_baseline`), `--no-speed-mac`, `--speed-cuda`,
+`--speed-model`, `--speed-minutes`, `--speed-tolerance`, `--speed-blocks`; settings in release.json `speed` (merged
+over farm_speed's `SPEED_DEFAULTS`; `config` prints them). A failure stops the release: "farm_release: FAILED at
+speed: SPEED GATE FAILED: cpu 0.912x SLOWER (...)" (nothing published). The index entry gets `speed` (verdict, line,
+per machine ratio / rates / layout, the result's path), the final line and the watcher's log end with the speed line,
+`list` shows it, and **`releases/<sha12>/notes.txt`** (new: the release notes) holds one line per gate and the
+failure. A reused build (same Rust inputs) has nothing new to measure; with `--regate` the same build plays the
+commit's export against the reference export (an exporter change), skipped when the graphs are equal. Run alone:
+`python tools/farm_gates.py --speed --new <build> [--baseline <id>] [--machines cpu,mac]` (farm_gates.py hands it to
+farm_speed.py's `gate`). It costs a release ~15 minutes on the desktop (4 x 3 min + warmups, more while the machine is
+in use) and as much again on the Mac.
+
+### 200.7 Tests
+
+tests/test_farm_speed.py (22, no real worker, no Mac): the pass rule (equal, 4% slower passes, 6% slower fails,
+faster passes, spreads, pairs, disagreeing pairs are noisy), an error on either side and a machine in use fail,
+discarded windows do not count; the noisy retry (one more block for a noisy failure, in the mirrored order; none for a
+clean one, none after an error); bursts of other load (a burst over 5 of 8 intervals makes its window contended, left
+out and the machine noisy; over 2 of 8 those intervals are left out; a constant background is the baseline; every
+window of a side contended -> "machine busy", not an error); the steady rate (the upper quartile of the 10-second
+rates: blind to one slow interval and to a burst over half the window, which moves the median and the mean) and its
+fallback; the baseline lookup (a build outside the index, inside it, reused and unpublished entries, CUDA and macOS
+fields); `onnx_info` (metadata read, the graph digest blind to metadata); the idle wait (idle at once, input
+then idle, battery waits, never idle -> "machine in use", no idle clock fails, `pmset` parsing), an evaluation lock
+keeps a window waiting (live, stale and being-created owners); the quiet lock (held by a live sleep, released, a
+stale one taken over, a live one never removed); the runner with a fake worker (four windows measured at the fake's
+rates, the records and files; the quiet lock held while each window runs and released at the end, the run's
+evaluation lock taken mid-window discards it and the redo runs; a worker error and a wrong build id fail; input at a
+window's end discards it and the redo is clean; constant input -> "machine in use", a failure); the gate's files (the
+baseline found in an index, the plan's layout / priority / idle / settings, result.json, hints.json, machine.json, a
+slower build fails, `judge` with another tolerance; two runs combining into one result; a machine that cannot start -
+no macOS build, no predecessor, a fuzz-profile baseline - fails recorded beside the passing ones; a new export of
+another checkpoint refuses, of the same one with another graph is flagged); the Mac's plan (the quiet lock, the bench
+booking, the agent's layout, nice 15; a Mac-only run needs `--mac-new`); the bench booking in the runner (held while
+the windows run, removed after, its record on every window; another sweep's booking is waited for and then "machine
+busy", never removed); farm_release.py's step (the desktop part with a slot and
+the commit's export, then the Mac part without; a Mac run that wrote no result fails the step; a failure raises at
+`speed`; a reused build with an equal export graph skips, with another one measures; notes.txt); farm_gates.py's
+handover; the runner imports nothing of the repository. With tests/test_farm_release.py (6, unchanged) and
+tests/test_privacy.py: 33 passed.
+
+### 200.8 The desktop's sanity runs: the current release worker against itself
+
+`python tools/farm_gates.py --speed --new 5307720f7452344b30af3617 --baseline 5307720f7452344b30af3617 --machines cpu
+--minutes 2` (legacy-meta3-r1's release worker, the release reference export gen 206, the `cpu` layout, below normal
+priority through tools/slotd.sh, a live training run and other agents' work beside it), 2026-11-18. Rates as the final
+judge computes them from the recorded windows (`farm_speed.py judge`; the estimator changed during the day, the
+numbers it printed then are in brackets):
+
+| Run | new / old / old / new (leaves/s) | Ratio | What else ran |
+|---|---|---|---|
+| 1 (17:38) | 1,496 / 1,430 / 1,466 / 1,587 | 1.065, noisy (pairs 1.046 / 1.083) [1.084, span means] | this branch's tests during window 1 |
+| 2 (17:49) | 1,580 / 1,499 / 1,518 / 1,555 | 1.039 [1.178, medians, noisy] | a burst in window 2: Task Manager's utility 45% -> 140% for 40 s, the 10-second rate down a third (4 intervals left out) |
+| 3 (18:03) | 1,453 / contended / 1,465 / 1,519 | 1.014, noisy [1.115, upper quartiles] | other agents' work under windows 1-2 (utility ~145%; all four throttle slots busy): window 1 contended, 8 intervals left out |
+| 4 (18:20, two blocks: ABBA + BAAB) | new 1,391 / 1,377 / 1,320 / 1,531, old 1,511 / 1,381 / 1,378 / 1,449 | 0.983, noisy (pairs 0.92-1.06) | all four throttle slots busy with other agents' work; 5 intervals left out |
+
+Every run passed (an A/A must). What they show: on the shared desktop, with other agents' builds and gates coming and
+going, single windows range +-8% and the A/A ratio lands at 0.98-1.07 (four runs: 1.065, 1.039, 1.014, 0.983; the
+three single blocks' lean towards the outer windows did not repeat in the balanced run: noise, not position) - about
+the tolerance. So on a busy desktop a true 1.0 can fail a 5% gate now and then; the noisy retry (one more, mirrored
+block) is the first answer, and `speed.machines.cpu.blocks: 2` (~25 minutes) or a per-machine
+`speed.machines.cpu.tolerance` the maintainer's choice. Regressions of the size that started this (197.5: 0.09x,
+0.29x, 0.75x) fail by far. The Mac, quiet under its locks, measured 0.998x (200.9). A desktop window: ~75 rows per
+batch, ~41 ms per batch (p50), ~0.7 GB peak; the evaluator thread is busy all the time (200.10).
+
+### 200.9 The Mac's sanity run: the current macOS release worker against itself
+
+`python tools/farm_gates.py --speed --machines mac --mac-new 20807b12ed6acf7663aa56c5 --mac-baseline
+20807b12ed6acf7663aa56c5` (3-minute windows, the agent's layout: threads 16, 2,304 games in 12 groups, nice 15; the
+reference export gen 206), 2026-11-18 18:01-18:14, legacy-meta3-r1 paused, the bench booked, the quiet lock held by one
+`sleep` for the whole block (60 s settle), idle and AC checked before and after every window (idle for days, on AC):
+
+| Window | new | old | old | new |
+|---|---|---|---|---|
+| leaves/s (upper quartile) | 11,604 | 11,607 | 11,640 | 11,598 |
+| median / span mean | 11,168 / 11,258 | 11,067 / 11,256 | 11,031 / 11,284 | 11,095 / 11,275 |
+
+**0.998x** (spreads 0.04% / 0.28%, pairs 0.9997 / 0.9964), passed, no interval left out (the others' baseline 29%, a
+steady background: nothing burst above it). Each window's 10-second rate falls from ~12.7-13.3k to ~10.8k over its
+three minutes - all 2,304 games start together and the leaf rate falls as they grow - identically in every window (the
+same seed, the same games), which is why the windows compare; the median (~11.1k) agrees with the maintainer's clean
+measurement of this build and layout (~11.0k). 224 rows per batch, 77.5 ms per batch (p50), 9.8 GB peak.
+
+A first attempt at 17:59 ran without the quiet lock (the plan did not carry the machine's `quiet` setting; fixed, and a
+test checks the Mac plan) and was stopped by hand: killing the desktop side did not stop the runner on the Mac (its ssh
+session delivered no hangup), so the runner was sent SIGTERM, and its handler killed its worker on the way out.
+
+### 200.10 What it takes, open points
+
+* **In a release**: the desktop part runs by default (`farm_release.py release <commit>`, after the gates, holding a
+  slot). The Mac part needs `--mac` (release.json `mac_runtime`: the macOS pack 040b1882) and a macOS baseline:
+  `--speed-mac-baseline <id>` or release.json `speed.mac_baseline` (today 20807b12) until an index entry records a
+  macOS build (the `mac` field of a `--mac` release). `--speed-cuda` adds the GPU. The release watcher runs from a pinned
+  worktree of main: the gate reaches it only after this branch is merged and the watcher restarted; every new build
+  then costs ~15 more minutes on the desktop (more while it is in use or busy), the Mac as much again with `--mac`.
+* **The desktop's layout is evaluator-bound** (one ONNX Runtime session of 4 threads, busy the whole window): a slower
+  search shows less there than on the Mac (5 sessions). Builds with Windows `infer_workers` (zero-core 45c284b on)
+  could run 2 x 4 once the baseline has it too (`--job cpu:infer_workers=2`; an older build ignores the field and runs
+  one session - fair as the farm would see it, but then not like for like).
+* **Noise on the desktop** is about the tolerance (200.8); the Mac is quiet (0.998x).
+* **A desktop side that dies** leaves the Mac's runner running to the end of its block (~15 minutes; its locks released
+  then).
+* **The idle clock on Windows** is the interactive session's (GetLastInputInfo): a gate started from another session
+  (a service, a remote shell) would read that session's clock.
+* **The hints are recorded only** (hints.json in each release's speed directory); the farm agent's autotuner can read
+  them later.
+
+## 201. The macOS farm lane, the speed gate and the fast export on main: zero-core pin -> `feat/macos-fast-int` 6adccac (`feat/macos-worker` + `feat/fast-export` + the `hello` feature `infer_workers`), `feat/macos-farm` + `feat/farm-speed-gate` merged (branch `integrate/macos-farm`, 2026-11-18)
+
+Why: farm code lives on main and on main's zero-core pin, never on side branches (the user's rule, 2026-11-14:
+every build is farm-compatible by default). Today's farm work was on four branches: the worker on macOS (197,
+zero-core `feat/macos-worker`), the release's speed gate (200), and zero-core's fast zero-onnx/2 graph (zero-core
+`feat/fast-export`, docs/az.md 63). zero-farm's agent varies a job's inference sessions (its autotuner) only for a
+worker whose `hello` lists the feature `infer_workers`, which no build announced. No rule, card, encoding, search or
+training change; behaviour digests untouched; no run's settings changed.
+
+### 201.1 What moved
+
+* **The zero-core pin** 62f4ba5 (main) / 45c284b (`feat/macos-farm`) -> **6adccac**, branch `feat/macos-fast-int` on
+  GitHub: `feat/fast-export` f95de2b, which already contains all of `feat/macos-worker` (a155fe5: the merge needs no
+  merge commit), plus 6adccac. Over 45c284b that is `tools/worker_bench.py`'s native-side timings (a155fe5), the fast
+  graph (b2963dd + docs f95de2b) and the `hello` feature (below). zero-core's `main` (d499716, 2026-11-04) is not
+  moved: MTG Zero has pinned zero-core feature lines since then, each pushed to GitHub before its pin.
+* **The fast graph is available, not used.** `ZeroOnnx2Fast` and the graph variants `''` / `fast` / `fast-att23` /
+  `fast-matmul` (zero-core docs/az.md 63) are chosen by the run setting `pool_export`, trainer-only (the worker's
+  `run_settings.json`), default `''` = the old graph byte for byte. No run switches to it here: that is the user's
+  later call (a pool's new export is a new graph for every farm PC; the speed gate (200) measures an export against
+  the previous release's).
+* **`hello` and `info` announce `infer_workers`** (zero-core 6adccac, docs/az.md 62.1): `Worker::features()` of a
+  build with self-play is `["rolling", "setting_classes", "infer_workers"]` (a fuzz-only build: none), on every
+  platform: the job line's `infer_workers` has worked on Windows as on macOS since 45c284b. So the next Windows worker
+  built from this pin qualifies for the agent's session tuning as the Mac builds do; published builds before it do
+  not announce it (they ignore the field and run one session). Nothing else in the protocol changes. Tests: zero-core
+  `proto::tests::hello_announces_infer_workers_on_every_platform` and the updated `a_selfplay_build_announces_rolling`;
+  here `tests/test_worker_farm.py::test_hello_and_info_announce_infer_workers` (the real worker's `info` and its
+  `serve` hello, which exits at EOF before a job).
+* **The branches.** `feat/macos-farm` 17207901 (197) and `feat/farm-speed-gate` c84aa1ec (on top of it, 200) merged
+  with main 1c89f048 on `integrate/macos-farm` (161c5f2e). main had taken 198 (`feat/cells-mac`) and 199
+  (`feat/cells-local-parallel`) meanwhile; the speed gate's section, 199 on its branch, is 200 here (its subsections,
+  cross-references and the docstrings that cite it). The only conflict was ENGINE.md's tail.
+* **Behaviour.** The engine's additions are the libm questions only (`MtgSpec::libm_replay`, `MtgFuzz::
+  libm_dependence`, 197.3): nothing plays differently; the default export graph is byte-identical; the farm worker
+  plays and records as the Python run does (the gate's farm compat).
+
+### 201.2 Gates
+
+Tiers: `optin-core` (a zero-core opt-in feature with byte-identical defaults: the fast graph behind `pool_export ''`,
+the macOS-only worker paths, the libm refusals, the `hello` feature) and `python` (the tools and tests: farm_build,
+farm_gates, farm_release, farm_speed, test_worker_farm). Both on a7df5d90 in a warm worktree, desktop only
+(`--offload local`: the Mac was carrying legacy-meta3-r1's self-play and evaluations), each heavy step in a
+`tools/slotd.sh` slot, `CARGO_BUILD_JOBS` 8; two live supervisors on the desktop.
+
+* **`optin-core`** (`--baseline-root` = a checkout of main 1c89f048, its engine from the artifact cache): **GATE PASSED
+  WITH SKIPS optin-core a7df5d90e5f8 in 1682s** - privacy; builds (mtgz, the release worker, zero._engine, the test
+  binaries); core cargo test 215 passed; checkpoint_compat identical (visits 3,303 / cq 3,303 samples); digest formats
+  = the recorded files (constructed dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame
+  284d8312cc21c587) and dealt f78ada3d3d114826 (80 matches); farm compat identical (gate 2: 6 games, 2,890 rows, 150
+  batches; gate 3: 6 games, 2,556 rows, 6 decks); `--test az` 57, `--test hidden` 28; glassroad-zero, caverna-zero and
+  kingdombuilder-zero build against the core (3 of 3); core pytest 721 passed, 69 skipped, 17 live-run-hazard tests
+  fenced (the skip). Digests untouched.
+* **`python`**: **GATE PASSED WITH SKIPS python a7df5d90e5f8 in 388s** - privacy, builds (both from the artifact
+  cache), pytest 138 + 217 + 195 + 165 passed (11 skipped; 7 live-run-hazard tests fenced: the skip), the run-loop smoke
+  16 games, 0 unfinished. Its first run failed one test, `test_mac_remote.py::test_the_macs_selfplay_settings`: the
+  throttle (`tools/slotd.sh` sources `tools/local_env.sh`) exports `MTGZ_MAC_HOME`, and Git Bash rewrites that POSIX
+  path into a Windows one for the Python it starts - the same failure on main 1c89f048 run the same way, passing
+  without the throttle (168.5's known issue, not this merge's). The rerun carried the documented
+  `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`; the fix still belongs in zero-core's and this repo's
+  `tools/local_env.sh` together.
+* The gated worker's `info`: features `["rolling", "setting_classes", "infer_workers"]`, platform `windows-x64`;
+  `test_hello_and_info_announce_infer_workers` passed with it. zero-core 6adccac itself: `cargo test --release -p
+  zero_worker` (lib 36, evaljob 6, job 6, job_tail 4, rolling 7), its privacy check.
+* `tools/*.py` py_compile (70 files).
+
+### 201.3 Open points
+
+* **The release watcher** (196.4) runs from its own pinned worktree: it builds and publishes main's new head with
+  that checkout's tools, so the speed step (200.6) reaches releases only once it is restarted from a commit that has
+  `tools/farm_speed.py` (the maintainer's call). The first release of this head is a new Windows build (the Rust inputs
+  changed) - the first one that announces `infer_workers`; nothing attaches it to a run.
+* **The fast graph** waits for the user's decision per run (`pool_export`); the speed gate can measure an export of
+  either graph against the previous release.
+* **The Mac's farm gates** (197.4) were not re-run on this merge: the Mac was busy with the live run's self-play and
+  evaluations. They need a Mac build of this commit (`farm_build.py --platform macos-arm64`).
+* **zero-core `main`** stays at d499716: moving it to this line would want `smoke_all.sh --with-this-core` (the other
+  games' full smokes), not run here.

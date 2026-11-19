@@ -473,3 +473,60 @@ def test_an_eval_job_is_the_python_evaluation(tmp_path):
     # a network against the heuristic bot
     _, bot = job('bot', 2, 0, [{'net': 2}, {'bot': 'heuristic'}])
     assert json.loads(bot[1])['seats'] == [{'bot': 'heuristic'}, {'net': 2}]
+
+
+# ------------------------------------------------------------------ platforms (docs/ENGINE.md 197)
+
+def test_libm_settings_are_refused_off_the_reference_platform(tmp_path):
+    """zero-farm PROTOCOL.md 11.4, docs/ENGINE.md 197 (zero-core docs/az.md 62): `info` names the build's platform; a
+    worker judging settings for macos-arm64 (`check-config --platform`, what a macOS build does on its own) refuses a
+    sealed spec whose seats the deck builder builds (f64 powf / exp: its records would fail the desktop's replay) and
+    passes the constructed metagame and the smoke preset; for self-play and for an eval job (its eval_spec). The
+    reference platform's own check (no --platform) is unchanged: no platform keys in its JSON. Fuzz modes: the sealed
+    builder, the belief-weighted deals and a constructed best-of-three's matches (deck-tilted worlds) are refused for
+    macos-arm64, the plain loops are not."""
+    import mtgz.az as A
+    info = json.loads(subprocess.run([WORKER, 'info', '--ort-dll', 'none'], capture_output=True, text=True).stdout)
+    assert info['platform'] == ('windows-x64' if os.name == 'nt' else 'macos-arm64')
+    plain, _ = _smoke_cfg(tmp_path)
+    eoe, _ = _smoke_cfg(tmp_path, preset='eoe-smoke')
+    assert json.loads(eoe['spec'])['sealed'] and eoe['game'] == 'mtg_eoe'
+    for cfg, refused in ((plain, False), (eoe, True)):
+        p = tmp_path / 'c.json'
+        p.write_text(json.dumps(cfg), encoding='utf-8')
+        for extra in ([], ['--eval']):
+            r = subprocess.run([WORKER, 'check-config', str(p), '--json', '--platform', 'macos-arm64', *extra], capture_output=True,
+                               text=True, encoding='utf-8')
+            out = json.loads(r.stdout)
+            assert out['platform'] == 'macos-arm64'
+            assert bool(out['libm_refusals']) == refused, (cfg['game'], extra, out['libm_refusals'])
+            if refused:
+                assert r.returncode == 1 and 'sealed deck builder' in out['libm_refusals'][0]
+            r = subprocess.run([WORKER, 'check-config', str(p), '--json', '--platform', 'windows-x64', *extra], capture_output=True,
+                               text=True, encoding='utf-8')
+            assert json.loads(r.stdout)['libm_refusals'] == []
+        if os.name == 'nt':
+            r = subprocess.run([WORKER, 'check-config', str(p), '--json'], capture_output=True, text=True, encoding='utf-8')
+            assert 'platform' not in json.loads(r.stdout) and 'libm_refusals' not in json.loads(r.stdout)
+    for mode, env, refused in (('games', [], False), ('matches', [], False), ('delver-games', ['FUZZ_POOL=delver'], False),
+                               ('delver-matches', ['FUZZ_POOL=delver'], True), ('sealed-games', ['FUZZ_POOL=sealed'], True),
+                               ('belief-games', ['FUZZ_BELIEF=2'], True), ('chance-games', ['FUZZ_CHANCE=8'], True)):
+        args = [WORKER, 'fuzz-check', '--mode', mode, *sum((['--env', e] for e in env), []), '--platform', 'macos-arm64']
+        r = subprocess.run(args, capture_output=True, text=True, encoding='utf-8')
+        assert (r.returncode != 0) == refused, (mode, r.stdout, r.stderr)
+        if refused:
+            assert 'refused on macos-arm64' in r.stdout + r.stderr
+        assert subprocess.run(args[:-1] + ['windows-x64'], capture_output=True, text=True).returncode == 0, mode
+    assert A  # (the game package registered)
+
+
+def test_hello_and_info_announce_infer_workers(tmp_path):
+    """docs/ENGINE.md 201 (zero-core docs/az.md 62.1): the real worker's `info` and `serve` hello list the feature
+    `infer_workers` (zero-farm's autotuner varies a job's evaluator threads only for a worker that announces it), on
+    every platform, beside `rolling` and `setting_classes`. serve exits at EOF before a job: its only line is the hello."""
+    info = json.loads(subprocess.run([WORKER, 'info', '--ort-dll', 'none'], capture_output=True, text=True, check=True).stdout)
+    assert {'rolling', 'setting_classes', 'infer_workers'} <= set(info['features']), info['features']
+    p = subprocess.run([WORKER, 'serve'], input='', capture_output=True, text=True, encoding='utf-8', timeout=120, cwd=tmp_path)
+    assert p.returncode == 0, p.stderr
+    hello = [json.loads(line) for line in p.stdout.splitlines() if line.strip()][0]
+    assert hello['ev'] == 'hello' and hello['features'] == info['features'] and hello['build_id'] == info['build_id']

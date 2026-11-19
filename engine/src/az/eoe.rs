@@ -163,6 +163,10 @@ impl SearchGame for MtgEoeAz {
         self.0.record_setup()
     }
 
+    fn libm_replay(spec: &MtgSpec) -> Option<String> {
+        spec.libm_replay()
+    }
+
     fn bot_names() -> &'static [&'static str] {
         <MtgAz as SearchGame>::bot_names()
     }
