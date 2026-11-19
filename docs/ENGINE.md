@@ -40416,3 +40416,23 @@ the release reference (legacy-meta3-r1's config and its gen-206 export):
   of 12, and the desktop's rows == the Mac's shards, all 20 arrays bit for bit. (Its first attempt stopped on this
   side's Python - the gates' part (b) needs onnx and a built engine in the checkout: run with the zero-farm venv, as
   farm_release does.)
+
+## 202. The farm pool's export on main: zero-core pin 6adccac -> 3eb1a41 (`farm_h2h.export_cached` passed the stage label as the graph variant; branch `fix/pool-export-variant`, 2026-11-19)
+
+**Why.** zero-core 6adccac (section 201) added the export's graph variant to `zero.farm_h2h.export_cached` (run setting
+`pool_export`, zero-core docs/az.md 63) but reused its `graph` parameter for the stage label (`'template'` / `'swap'`)
+and passed that label to `swap_export`, which refuses it. Every farm pool export failed on 6adccac, so a run launched
+on main 4d622170 / 6a44afdb with a farm pool would never have published a generation to the farm (the pool logs the
+error and retries; local self-play goes on). Found by the Mac crew validation on the farm (zero-farm agent 0.3.1), not
+by a gate: the test that covers `export_cached` (zero-core tests/test_farm_export.py::test_reference_reuse) needs
+zero-core's toy engine built, which the gates' checkouts don't build. No run used 6adccac (legacy-meta3-r1 runs on its
+own older pin).
+
+**What.** zero-core `feat/macos-fast-int` 3eb1a41 = 6adccac + one commit: the stage gets its own name, `swap_export` gets
+the variant, and the result keeps `graph` = the stage (the pool's log line) and adds `variant`; the stub in
+test_refusal_on_mismatched_tensors takes the `attention` argument the fast export added. Python only: no Rust, engine,
+worker, encoding, search or default change.
+
+**Checks.** zero-core with its toy engine built: tests/test_farm_export.py + tests/test_onnx_fast.py 15 passed;
+test_reference_reuse fails on 6adccac (ValueError: graph 'template') and passes on 3eb1a41. The gates of this commit are
+below.
