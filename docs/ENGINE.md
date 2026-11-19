@@ -40914,7 +40914,13 @@ Checks:
   failures**, 1,710,023 hidden-decklist steps;
 * the engine suite (`cargo test --release -p engine --no-fail-fast`, desktop, throttled): every binary passed after the
   ten tests above were updated (rules_suite 452, cards_suite 1,391, misc_suite 206, rulings_suite 397, fuzz 14 ...);
-* the suite gate: below.
+* **the suite gate** on f8a5fe51 (this section's commit; `python tools/warm_pool.py run --sha f8a5fe51 -- python
+  tools/gate.py suite`, beside the live legacy-meta3-r1: its steps on the Mac, one throttled here): **GATE PASSED suite
+  f8a5fe51af24 in 414s** - privacy, the test build, the full engine suite (2,709 passed, 24 binaries), the sharded
+  2,000-game fuzz of the default pool (and 100 matches), of the default pool with hidden decklists and of
+  `delver_dealt` (and 100 matches + 100 post-sideboard), the checkout unchanged (`gates/f8a5fe51af24-suite.json`).
+  The commit after it adds these lines only (docs). Next: the engine tier with `--tested-sha f8a5fe51` and the new
+  digests (920109d474d9eadb, `DIGEST_ENCODING=0` d0411d5195e12cd6).
 
 **Relation to the other lanes.** Neither fix touches `determinize`: lane A's private-key check (games.rs:4402) and
 lane B's determinize-consistency sites (games.rs:2976, hidden.rs:1336) are other causes as far as this lane saw (not
