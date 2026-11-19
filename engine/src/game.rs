@@ -719,6 +719,10 @@ pub struct Game {
     pub(crate) observer: Option<PlayerId>,
     /// Chance keys of the current `apply`; always empty between calls.
     pub(crate) keys: Vec<u64>,
+    /// The public looks at a card of another player's hand the last `apply` made, by their keys' indices among its
+    /// keys (`hidden::HandLook`; a match's step carries them into the game it begins: `MtgAz::next_game`).
+    /// For the fuzz's private-key check (ENGINE.md 206); nothing in play reads it.
+    pub(crate) hand_looks: Vec<crate::hidden::HandLook>,
     /// Outcomes queued by `force_chance` (zero-core `chance_k`): every
     /// emitted key consumes one; a draw, a look at the top of a library and
     /// a random discard follow theirs when possible (ENGINE.md 10).
@@ -1411,6 +1415,7 @@ impl Game {
             log: if spec.log { Some(Vec::new()) } else { None },
             peeks: Vec::new(),
             log_mark: 0,
+            hand_looks: Vec::new(),
         }
     }
 
@@ -1592,6 +1597,10 @@ impl Game {
     /// there on are what that answer wrote (ENGINE.md 191).
     pub fn log_mark(&self) -> usize {
         self.log_mark.min(self.log_lines().len())
+    }
+    /// The public looks at a card of another player's hand the last `apply` made (`hidden::HandLook`, ENGINE.md 206).
+    pub fn hand_looks(&self) -> &[crate::hidden::HandLook] {
+        &self.hand_looks
     }
     pub fn def_of(&self, idx: CardIdx) -> &'static CardDef {
         self.db.def(self.objs[idx.i()].def)

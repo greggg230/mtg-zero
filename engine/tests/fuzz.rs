@@ -168,6 +168,58 @@ fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
+/// ENGINE.md 206: the fuzz steward's queue entries 19cb3e1c1ea2, 4df7ea8a5770 and d95b549fc7a5, each found under the
+/// `fuzz` profile and reproduced on main 4a84d570. In a world of the viewer one step resolves the other player's Urza's
+/// Bauble look at a card at random of the viewer's hand (keyed public by design, 141.2) while the same step changes the
+/// hand around the look, and the check - which guessed the hand the look saw from the hands before and after the step
+/// (173, 175) - failed "P{p}'s private key (kind 3) carries the card's identity":
+/// * `delver_dealt2` match 100,111,083: the viewer's Daze returned Volcanic Island to its hand (its alternative cost), the
+///   look saw it, and the turn limit ended the game in the same step (both seats dealt: the next game began);
+/// * default-pool game 100,037,121: the other player's Memory Jar exiled the viewer's hand and the viewer drew seven, the
+///   look saw a drawn Gemstone Caverns, and Memory Jar's delayed trigger discarded it at the end step the step ran into;
+/// * hidden-decklist game 100,098,483: the look saw the viewer's only card (Harvester of Misery), then the looker's
+///   Timetwister shuffled it into the library and the viewer drew it back (the looker's knowledge of it gone).
+/// The engine keyed nothing private: each card was the viewer's own. The check now recognises the look by the step's
+/// record of it (`Game::hand_looks`). Replayed at the `fuzz` profile's denominator (4) in every profile with every check;
+/// each must check its kind of look (positive evidence): a card that came into the hand in the step (the first two), one
+/// that changed zones after the look (the last two).
+#[test]
+fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
+    use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENTERED_HAND_LOOKS, PK_LEFT_HAND_LOOKS};
+    use std::sync::atomic::Ordering::Relaxed;
+    let counts = || (PK_ENTERED_HAND_LOOKS.load(Relaxed), PK_LEFT_HAND_LOOKS.load(Relaxed));
+    // (the run's own pool and modes, read before the overrides: another pool's seeds are other games)
+    let (match_part, game_part) = (!hidden_decks_mode(), pool_mode() == PoolMode::Default && !sealed_mode());
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        if match_part {
+            POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::DelverDealtPerSeat)));
+            let seed = 100_111_083u64;
+            let (e0, _) = counts();
+            let mut stats = HiddenStats::default();
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_spec(seed, &match_spec(seed), true, &mut stats)))
+                .unwrap_or_else(|e| panic!("delver_dealt2 match {seed} failed (rerun: FUZZ_POOL=delver_dealt2 FUZZ_FIRST={seed} FUZZ_MATCHES=1, fuzz profile): {e:?}"));
+            assert!(counts().0 > e0, "match {seed} checked no look at a card that came into the viewer's hand in its step");
+        }
+        if game_part {
+            POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+            let seed = 100_037_121u64;
+            let (e0, l0) = counts();
+            std::panic::catch_unwind(|| play(seed, true))
+                .unwrap_or_else(|e| panic!("default-pool seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+            assert!(counts().0 > e0 && counts().1 > l0, "seed {seed} checked no look at a card that came into the viewer's hand and left it in its step");
+            let seed = 100_098_483u64;
+            let (_, l0) = counts();
+            std::panic::catch_unwind(|| play_hidden(seed))
+                .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+            assert!(counts().1 > l0, "seed {seed} checked no look at a card that changed zones after the look in its step");
+        }
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 /// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
 /// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
 /// the checks over the whole run to this test), sums the shards' counters and runs this test with

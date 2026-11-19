@@ -56,6 +56,26 @@ pub const HIDDEN: u64 = 0xFFFF_FFFF;
 pub const MASKED_ACTION: u64 = 0xFFFF;
 const _: () = assert!(MASKED_ACTION as usize >= crate::decision::NUM_ACTIONS);
 
+/// A look at a card at random of another player's hand (`Ext::LookAtRandomHandCard`, Urza's Bauble), the one look
+/// keyed public (`KEY_LOOK` with the card for every observer: its owner sees which card was seen, ENGINE.md 141.2).
+/// `Game::hand_looks` holds the ones the last `apply` made, for the fuzz's private-key check (ENGINE.md 206): from
+/// outside a step only the hands before and after it are visible, and a step can change the hand around the look (a
+/// card drawn or returned to it, then looked at; looked at, then discarded or shuffled away; the game ended). Nothing
+/// in play reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandLook {
+    /// The look's key: its index among the keys that `apply` emitted.
+    pub key: u32,
+    /// The player who looked.
+    pub looker: PlayerId,
+    /// The hand's owner.
+    pub owner: PlayerId,
+    /// The card seen, its identity and its incarnation then (`Obj::inc`: a zone change later in the step moves it).
+    pub card: CardIdx,
+    pub def: DefId,
+    pub inc: u32,
+}
+
 /// The deals `determinize` draws at most for a face-down choice to be a legal
 /// one (ENGINE.md 123): each succeeds with a probability of at least one in
 /// the hidden cards and the hand's size (the real deal is one), so this many

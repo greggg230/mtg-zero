@@ -3413,7 +3413,7 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     println!("controlled decisions (CR 722.4, encoded in the controlled seat: ENGINE.md 100.5): {}", CONTROLLED.load(Ordering::Relaxed));
     println!("{}; seeds skipped (FUZZ_SKIP): {skips}", longest_turn_report());
     // (ENGINE.md 141; the match fuzz's counts run in parallel with this one: read them there)
-    println!("private keys of the other player masked in the game fuzz's worlds: {}", PK_GAME_KEYS.load(Ordering::Relaxed));
+    println!("private keys of the other player masked in the game fuzz's worlds: {}; {}", PK_GAME_KEYS.load(Ordering::Relaxed), hand_looks_report());
     if hidden_decks_mode() {
         let (w, x, st, lt) =
             (HD_WORLDS.load(Ordering::Relaxed), HD_OTHER_DECK.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed), HD_LONG_TURNS.load(Ordering::Relaxed));
@@ -4337,39 +4337,43 @@ static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAMES: AtomicU64 = AtomicU64::new(0);
 static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
 /// Of `PK_HAND_LOOKS`, the looks in a step that ended the game and began the next (both seats dealt, ENGINE.md 168.1,
-/// 173): checked against the viewer's hand before the step, the hand the look saw.
+/// 173): the card seen is the game's that ended.
 pub static PK_ENDED_GAME_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
-/// Of `PK_HAND_LOOKS`, the looks at a card that left the viewer's hand later in the same step (a hand discarded by
-/// Memory Jar's delayed trigger at the end step the step ran into, ...; ENGINE.md 175): checked against the viewer's
-/// hand before the step, the hand the look saw.
+/// Of `PK_HAND_LOOKS`, the looks at a card that changed zones later in the same step (a hand discarded by Memory Jar's
+/// delayed trigger at the end step the step ran into, ENGINE.md 175; a hand shuffled away by Timetwister and the card
+/// drawn back, 206).
 pub static PK_LEFT_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
+/// Of `PK_HAND_LOOKS`, the looks at a card that was not in the viewer's hand when the step began: it came into the hand
+/// in the step (drawn after Memory Jar exiled the hand, returned by Daze's alternative cost, ...; ENGINE.md 206).
+pub static PK_ENTERED_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
 /// The dealt seat's deal keys (`KEY_DEALT`, ENGINE.md 154.2) checked `HIDDEN` in the other player's worlds.
 static PK_DEALT_KEYS: AtomicU64 = AtomicU64::new(0);
 
-/// In a world determinized for `viewer`, the keys `keys` of one step (`after`: the world's game right after it;
-/// `before`: the viewer's hand before it, `viewer_hand` / `game_viewer_hand`): every draw of another player
-/// (`KEY_DRAW`) carries `HIDDEN`, and so does every look (`KEY_LOOK`) of another player (`Game::emit_private` masks
-/// them for the world's observer) - a key with the card's identity would split the viewer's tree by a card it cannot
-/// see (zero-core docs/search.md 3.16) - but the one look that is public by design: another player's look at a card at
-/// random of the viewer's own hand (`Ext::LookAtRandomHandCard`, Urza's Bauble: its owner sees which card was seen),
-/// recognised as a card of that identity in the hand the look saw. A dealt seat's deal (`KEY_DEALT`, ENGINE.md 154.2:
-/// its 60's counts, the dealt seat's private chance) carries `HIDDEN` for every other observer, with no exception. A
-/// told-apart card's key (`KEY_TOLD`, ENGINE.md 156: its card index, which every player sees) is public: not a private
-/// key, not checked here. Returns how many keys of the other player it checked.
+/// In a world determinized for `viewer`, the keys `keys` of one step (from its first key: the walks clear the vector
+/// before each step; `after`: the world's game right after it; `before`: the viewer's hand before it, `viewer_hand` /
+/// `game_viewer_hand`): every draw of another player (`KEY_DRAW`) carries `HIDDEN`, and so does every look (`KEY_LOOK`)
+/// of another player (`Game::emit_private` masks them for the world's observer) - a key with the card's identity would
+/// split the viewer's tree by a card it cannot see (zero-core docs/search.md 3.16) - but the one look that is public by
+/// design: another player's look at a card at random of the viewer's own hand (`Ext::LookAtRandomHandCard`, Urza's
+/// Bauble: its owner sees which card was seen). A dealt seat's deal (`KEY_DEALT`, ENGINE.md 154.2: its 60's counts,
+/// the dealt seat's private chance) carries `HIDDEN` for every other observer, with no exception. A told-apart card's
+/// key (`KEY_TOLD`, ENGINE.md 156: its card index, which every player sees) is public: not a private key, not checked
+/// here. Returns how many keys of the other player it checked.
 ///
-/// The hand the look saw: a step runs on to the next decision, so the hand after it may not be that hand.
-/// * A step that ends a game and begins the next (both seats dealt, ENGINE.md 168.1: the sideboarding has no decision)
-///   leaves `after` a new game; its keys up to the new game's `KEY_GAME` are the game that ended, where the look saw a
-///   card of `before` (ENGINE.md 173). Keys after that `KEY_GAME` are the new game's: `after`'s hand.
-/// * In a step that begins no game, the look saw a card still in the viewer's hand after the step, which the looker
-///   knows then, or a card of `before` that has left the hand since (ENGINE.md 175: Memory Jar's delayed trigger
-///   discarding the hand at the end step the step ran into). A card of `before` still in the hand is recognised only
-///   with the looker's knowledge, as before.
+/// The public look is recognised by the step's own record of it (`Game::hand_looks`, ENGINE.md 206): the key at its
+/// index is that player's look at a card of the viewer's hand with that identity, or the key is a leak. (Through 173 and
+/// 175 the check guessed the hand the look saw from the hands before and after the step; a step can change the hand
+/// around the look in more ways than those guesses - a card drawn or returned to the hand in the step and looked at,
+/// a card looked at and then shuffled away and drawn back - and every such guess failed on a key that was the viewer's
+/// own card: 173, 175, 206.) Where the card has not changed zones since the look (its incarnation is the look's) the
+/// state shows the rest: it is still in the viewer's hand, and the looker knows it - or the card of that identity in
+/// the hand it knew already (the look's twin rule). A step that ends a game and begins the next (both seats dealt,
+/// ENGINE.md 168.1) leaves `after` a new game; its keys before the new game's `KEY_GAME` and the looks among them are
+/// the game's that ended (ENGINE.md 173), whose cards are gone.
 fn check_private_keys_masked_since(keys: &[u64], viewer: u8, after: &Game, before: &[(crate::CardIdx, u64)], what: &dyn Fn() -> String) -> u64 {
     use crate::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DEALT, KEY_DRAW, KEY_GAME, KEY_LOOK};
     // (the step's keys before this index are of the game it ended; none when it began no game)
-    let new_game = keys.iter().rposition(|&k| key_kind(k) == KEY_GAME);
-    let new_game_at = new_game.unwrap_or(0);
+    let new_game_at = keys.iter().rposition(|&k| key_kind(k) == KEY_GAME).unwrap_or(0);
     let hand = &after.player(viewer).hand;
     let mut n = 0;
     for (i, &k) in keys.iter().enumerate() {
@@ -4386,26 +4390,30 @@ fn check_private_keys_masked_since(keys: &[u64], viewer: u8, after: &Game, befor
         if d == HIDDEN {
             continue;
         }
-        let ended_game = i < new_game_at;
-        let in_hand = || hand.iter().any(|&c| after.obj(c).def as u64 == d && after.knows(p, c));
-        let left_hand = || new_game.is_none() && before.iter().any(|&(c, x)| x == d && !hand.contains(&c));
-        let (hand_look, left) = if kind != KEY_LOOK {
-            (false, false)
-        } else if ended_game {
-            (before.iter().any(|&(_, x)| x == d), false)
-        } else if in_hand() {
-            (true, false)
-        } else {
-            let l = left_hand();
-            (l, l)
+        let look = (kind == KEY_LOOK).then(|| after.hand_looks().iter().find(|l| l.key as usize == i)).flatten();
+        let Some(look) = look.filter(|l| l.looker == p && l.owner == viewer && l.def as u64 == d) else {
+            panic!(
+                "{}: P{p}'s private key (kind {kind}) carries the card's identity ({d}) in a world of P{viewer}, and it is no look at a card of P{viewer}'s hand (ENGINE.md 141, 206)",
+                what()
+            );
         };
-        assert!(hand_look, "{}: P{p}'s private key (kind {kind}) carries the card's identity ({d}) in a world of P{viewer} (ENGINE.md 141)", what());
         PK_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
-        if ended_game {
-            PK_ENDED_GAME_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
+        if !before.iter().any(|&(c, _)| c == look.card) {
+            PK_ENTERED_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
         }
-        if left {
+        if i < new_game_at {
+            PK_ENDED_GAME_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
+        } else if after.obj(look.card).inc != look.inc {
             PK_LEFT_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
+        } else {
+            let known = hand.iter().any(|&c| after.obj(c).def == look.def && after.knows(p, c));
+            assert!(
+                hand.contains(&look.card) && known,
+                "{}: P{p}'s look at a card of P{viewer}'s hand ({d}, card {}): the card has not moved since, but it is {} (ENGINE.md 141, 206)",
+                what(),
+                look.card.get(),
+                if hand.contains(&look.card) { "a card of that identity the looker does not know in the hand" } else { "not in the hand" }
+            );
         }
     }
     n
@@ -4474,15 +4482,25 @@ fn check_world_private_keys(g: &crate::az::MtgAz, viewer: usize, seed: u64, step
 /// The private-key check's counts (ENGINE.md 141).
 fn private_keys_report() -> String {
     format!(
-        "private keys of the other player masked in every world: {} in the game fuzz's worlds, {} in the match fuzz's, {} of them in {} games a world started; {} looks at a card of the viewer's hand (public by design), {} of them in a step that began the next game (ENGINE.md 173), {} at a card that left the hand later in the step (ENGINE.md 175); {} deal keys of a dealt seat (ENGINE.md 154)",
+        "private keys of the other player masked in every world: {} in the game fuzz's worlds, {} in the match fuzz's, {} of them in {} games a world started; {}; {} deal keys of a dealt seat (ENGINE.md 154)",
         PK_GAME_KEYS.load(Ordering::Relaxed),
         PK_MATCH_KEYS.load(Ordering::Relaxed),
         PK_NEW_GAME_KEYS.load(Ordering::Relaxed),
         PK_NEW_GAMES.load(Ordering::Relaxed),
+        hand_looks_report(),
+        PK_DEALT_KEYS.load(Ordering::Relaxed)
+    )
+}
+
+/// The looks at a card of the viewer's hand the private-key check recognised (ENGINE.md 141.2, 206), of every walk
+/// (the game fuzz's and the match fuzz's share the counters when they run in one process).
+fn hand_looks_report() -> String {
+    format!(
+        "{} looks at a card of the viewer's hand (public by design), {} of them in a step that began the next game (ENGINE.md 173), {} at a card that changed zones later in the step (ENGINE.md 175, 206), {} at a card that came into the hand in the step (206)",
         PK_HAND_LOOKS.load(Ordering::Relaxed),
         PK_ENDED_GAME_HAND_LOOKS.load(Ordering::Relaxed),
         PK_LEFT_HAND_LOOKS.load(Ordering::Relaxed),
-        PK_DEALT_KEYS.load(Ordering::Relaxed)
+        PK_ENTERED_HAND_LOOKS.load(Ordering::Relaxed)
     )
 }
 

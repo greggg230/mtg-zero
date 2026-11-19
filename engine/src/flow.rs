@@ -242,6 +242,8 @@ impl Game {
         self.pending = None;
         // (where this answer's play-by-play starts, for the spectator view: ENGINE.md 191; nothing in play reads it)
         self.log_mark = self.log.as_ref().map_or(0, |l| l.len());
+        // (this answer's public looks at a hand, for the fuzz's private-key check: ENGINE.md 206; nothing in play reads them)
+        self.hand_looks.clear();
         if self.loop_open.is_some() {
             self.loop_answer(action);
         }

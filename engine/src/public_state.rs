@@ -200,6 +200,7 @@ pub fn fields() -> Vec<Field> {
         log: Derived "the human-readable log (tests and the viewer)",
         peeks: Hidden "which entries of a player's library cloud name a card its owner never saw (ENGINE.md 192): the viewer's own knowledge, redrawn in the owner's worlds",
         log_mark: Derived "the log's length when the last answer began to run: the spectator view's start (ENGINE.md 191)",
+        hand_looks: Derived "the public looks at a card of another player's hand the last apply made (ENGINE.md 206): for the fuzz's private-key check, nothing in play reads it",
     });
     {
         use crate::eoe_w3::W3State;

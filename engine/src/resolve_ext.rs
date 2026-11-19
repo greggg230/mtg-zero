@@ -1421,6 +1421,10 @@ impl Game {
                     // key private to the looker merged, in the owner's
                     // search, the worlds of different cards seen (the state's
                     // generator is the world's: ENGINE.md 71.1).
+                    // (Recorded, `Game::hand_looks`: the fuzz's private-key
+                    // check tells this key from a leak by it, ENGINE.md 206.)
+                    let look = crate::hidden::HandLook { key: self.keys.len() as u32, looker: p, owner: q, card: c, def: d, inc: self.objs[c.i()].inc };
+                    self.hand_looks.push(look);
                     self.emit_public(crate::hidden::KEY_LOOK, p, d as u64);
                 }
                 self.note(|_| format!("P{p} looks at a card at random in P{q}'s hand"));

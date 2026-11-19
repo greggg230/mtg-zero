@@ -776,6 +776,9 @@ impl super::MtgAz {
                 panic!("injected test panic [test fault MTGZ_TEST_PANIC={seed}:{turn}]: game seed {seed} at turn {} (ENGINE.md 172)", self.g.turn.number);
             }
         }
+        // (the step's public looks at a hand, `Game::hand_looks`, ENGINE.md 206: a step that runs no `apply` - a deck
+        // choice, a sideboarding - makes none)
+        self.g.hand_looks.clear();
         if self.m.choice.is_some() {
             return self.deck_choice_step(a, chance);
         }
@@ -1006,8 +1009,12 @@ impl super::MtgAz {
         // sideboarding too): the other player's opening hand, mulligans, draws and looks are keyed as hidden in
         // the viewer's tree, as in the game the world was dealt in (section 10). The live match has none.
         let observer = self.g.observer;
+        // (and the step's public looks at a hand: a step that ends a game and begins the next - both seats dealt,
+        // ENGINE.md 168.1 - keeps the looks of the game it ended for its keys, ENGINE.md 206)
+        let hand_looks = std::mem::take(&mut self.g.hand_looks);
         self.g = Game::with_sideboards(self.g.db(), gspec, [&decks[0], &decks[1]], [&sides[0], &sides[1]], seed)?;
         self.g.observer = observer;
+        self.g.hand_looks = hand_looks;
         self.set_known_pools();
         // The new game shows each deck's and sideboard's size, which the
         // (hidden) sideboarding decided: a public key, so worlds of a viewer
