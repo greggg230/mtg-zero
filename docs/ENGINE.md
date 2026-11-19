@@ -39871,6 +39871,12 @@ the split's results equal the sequential path's, its two records files equal the
 (dae09528e694272a); both matches at once in 40 s against 47 s one after the other (most of it each process's start
 and torch import).
 
+Gate: `python tools/gate.py python --offload local` on 2bdb277b (the code of this section; every step on the desktop:
+the Mac was reserved): **GATE PASSED WITH SKIPS python 2bdb277bdcbc in 622s** (skipped: 7 live-run-hazard tests
+fenced off; pytest 279 + 132 + 165 + 117 passed, the run-loop smoke). The first run failed only
+`test_mac_remote::test_the_macs_selfplay_settings`, 198.6's Git Bash conversion of the exported `MTGZ_MAC_HOME`
+through tools/slotd.sh; the second ran with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` in the gate's environment.
+
 ### 199.5 Open points
 
 * **The GPU's gain is not measured yet** (the GPU was busy with the live judge): the first window under the switch
