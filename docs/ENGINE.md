@@ -40395,7 +40395,24 @@ farm_gates, farm_release, farm_speed, test_worker_farm). Both on a7df5d90 in a w
   changed) - the first one that announces `infer_workers`; nothing attaches it to a run.
 * **The fast graph** waits for the user's decision per run (`pool_export`); the speed gate can measure an export of
   either graph against the previous release.
-* **The Mac's farm gates** (197.4) were not re-run on this merge: the Mac was busy with the live run's self-play and
-  evaluations. They need a Mac build of this commit (`farm_build.py --platform macos-arm64`).
+* **Fuzz identity on the Mac** (197.4 c) was not re-run (it needs fuzz-profile builds of this commit on both sides);
+  (a) and (b) passed on the merge commit (201.4).
 * **zero-core `main`** stays at d499716: moving it to this line would want `smoke_all.sh --with-this-core` (the other
   games' full smokes), not run here.
+
+### 201.4 The Mac's farm gates on the merge commit 4d622170 (`farm_gates.py --mac`, 197.4)
+
+Run after the merge, before legacy-meta3-r1's Mac self-play resumed (the Mac's load ~3; every Mac command at `nice -n
+15`; no speed was measured, so no bench booking). The macOS release worker of 4d622170 built on the Mac by `farm_build.py
+--profile release --platform macos-arm64 --runtime-id 040b1882` (Mach-O arm64, minimum macOS 11, links only libSystem),
+signed here, **not published**: build `be75a0c98a191bfc8793f5ce` (`~/mtgz-macfarm/builds/<id>` on the Mac; its `info`:
+platform `macos-arm64`, features `["rolling", "setting_classes", "infer_workers"]`). With the macOS pack 040b1882 and
+the release reference (legacy-meta3-r1's config and its gen-206 export):
+
+* **(a) farm parity on the Mac** (worker and Python driver both there): PASSED - gate 2 identical (6 games, 2,890 rows,
+  150 batches), gate 3 identical (6 games, 2,556 rows, 6 decks compared): the same counts as the desktop's farm compat.
+* **(b) records across platforms**: PASSED - the Mac worker's 12 matches through the macOS pack (nets 206: 328 rows, 207:
+  382), replayed on the Mac identical to its shards (710 rows, 20 arrays); replayed here the farm pool's way: 0 refused
+  of 12, and the desktop's rows == the Mac's shards, all 20 arrays bit for bit. (Its first attempt stopped on this
+  side's Python - the gates' part (b) needs onnx and a built engine in the checkout: run with the zero-farm venv, as
+  farm_release does.)
