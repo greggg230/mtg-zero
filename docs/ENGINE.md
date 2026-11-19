@@ -40767,6 +40767,13 @@ directory.
 * **GATE PASSED suite 83f40e305085 in 1442s** (206's code and this section but these lines; 2,707 passed in 24
   binaries; the sharded 2k fuzz of default, default + hidden decklists and delver_dealt). The commit after it records
   these lines (docs only).
+### 206.7 The merge
+
+**GATE PASSED WITH SKIPS engine 35727c3cf53a in 1508s** (`--tested-sha 83f40e305085`, its suite report; skipped: one
+live-run-hazard test, fenced by a live run on the desktop). Digests equal to main's (full 53eda75d63b2743b,
+`DIGEST_ENCODING=0` e65b965d025c800f, constructed, EoE, driver, metagame and dealt as recorded); farm compat identical;
+the Mac's full-suite recheck not needed (the tested sha differs in docs only). Main fast-forwarded 534d205a ->
+35727c3c. The fuzz steward's three entries stay in its queue until main's fuzz build is rebuilt with it.
 
 ## 208. The open-decklist walk's two queue entries of 2026-11-19: a surveilled Colossus waits at the bottom; a covering payment's lone `PASS` is asked and keyed (branch `fix/infoset-1119`, 2026-11-19)
 
@@ -40931,3 +40938,14 @@ decides the payments with nothing left for the pool to pay (no decision, in ever
 the pool pays something (`PASS` always offered, forced and keyed when alone); this section's own `vm` = 0 silent end
 is then reached only with delve's sources pending, and says the same as B's rule. Neither asks a decision its re-run
 (`refresh_pending`) would not ask again.
+### 208.6 The merge
+
+Rebased onto 206 (main 35727c3c): the two lanes' regression tests appended at the same place of `engine/tests/fuzz.rs`
+and their sections at the end of this file (kept both; no code conflict). 206 changes no play, so this section's
+digests stand. **GATE PASSED WITH SKIPS engine d13429166f3c in 1573s** (`--tested-sha f8a5fe51af24`, its suite report;
+skipped: one live-run-hazard test, fenced by a live run on the desktop): every digest equal to 208.5's (full
+920109d474d9eadb, `DIGEST_ENCODING=0` d0411d5195e12cd6, constructed 16441662701e233d, EoE c3a9c786030f42eb, driver
+6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8); farm compat identical; the Mac's full-suite
+recheck of the rebased sha (it differs from the tested one under `engine/`) 2,715 passed in 27 binaries. Main
+fast-forwarded 35727c3c -> d1342916. A live run keeps its pinned commit until it is re-pinned (208.3: the forced
+`PASS`'s key changes its search's tree reuse).
