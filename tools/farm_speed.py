@@ -1,4 +1,4 @@
-"""The farm release's speed gate (docs/ENGINE.md 199): a new farm worker build (and the network export it will play)
+"""The farm release's speed gate (docs/ENGINE.md 200): a new farm worker build (and the network export it will play)
 against the previous published release, in interleaved A/B windows on each reference machine; the release fails loudly
 when it got slower.
 

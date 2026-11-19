@@ -32,7 +32,7 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
    them, zero-core docs/az.md 61) - the refusal that once forced a rebuild shows here.
 8. **gates**: the commit's tools/farm_gates.py on the reference config and checkpoint with the signed worker and the
    CPU pack (gate 2: the worker vs the Python remote worker, gate 3: records replayed), CPU only.
-8b. **speed** (docs/ENGINE.md 199; after the macOS steps with `--mac`): this checkout's tools/farm_speed.py - the new
+8b. **speed** (docs/ENGINE.md 200; after the macOS steps with `--mac`): this checkout's tools/farm_speed.py - the new
    build against the previous published release build (`--speed-baseline`: another) in interleaved windows new, old,
    old, new of `--speed-minutes` (3) each, leaves/s, on the desktop's CPU (holding a slot; below normal priority), with
    `--mac` the Mac (its builds; the previous macOS build from the index or `--speed-mac-baseline`, `speed.mac_baseline`
@@ -413,7 +413,7 @@ class Release:
         return FB.add(e)
 
     def speed(self, new_dir, cuda_dir=None, mac=None, baseline=None, export_only=False):
-        """Step `speed` (module docs, 8b; docs/ENGINE.md 199): this checkout's tools/farm_speed.py - the desktop's
+        """Step `speed` (module docs, 8b; docs/ENGINE.md 200): this checkout's tools/farm_speed.py - the desktop's
         machines under a slot, then the Mac - into releases/<sha12>/speed/ -> the index's speed record; slower or an
         error -> Failed('speed')."""
         import farm_speed as FS

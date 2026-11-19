@@ -33,7 +33,7 @@ c. **Fuzz identity**: one fuzz job (mode, seeds) on this PC's fuzz build and on 
 
 Prints one JSON summary and "MAC FARM GATES PASSED|FAILED: ..."; exit 0 iff every part run passed.
 
-**`--speed`: the speed gate** (docs/ENGINE.md 199; tools/farm_speed.py's `gate`, whose docstring is the manual): a new
+**`--speed`: the speed gate** (docs/ENGINE.md 200; tools/farm_speed.py's `gate`, whose docstring is the manual): a new
 worker build against the previous published release build (or `--baseline`) in interleaved windows (new, old, old,
 new) of leaves/s on the reference machines (`--machines cpu,mac,cuda`), only while the machine is idle; fails when the
 new build is more than `--tolerance` (5%) slower on any machine or a side errors:

@@ -1,4 +1,4 @@
-"""The farm release's speed gate (tools/farm_speed.py, docs/ENGINE.md 199): the pass / fail rules, the noisy retry,
+"""The farm release's speed gate (tools/farm_speed.py, docs/ENGINE.md 200): the pass / fail rules, the noisy retry,
 the baseline lookup, the ONNX facts, the idle rules (waiting, discarding, "machine in use"), the quiet lock, the
 runner's windows with a fake worker, the result files and farm_release.py's speed step. No real worker, no Mac."""
 import json

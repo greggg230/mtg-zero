@@ -39784,7 +39784,7 @@ alternate itself, zero-core docs/az.md 62), the PUT's alternates the CUDA one as
 zero-core: `cargo test` (212 + 3), `cargo test -p zero_worker` (Windows; on the Mac 36 + the darwin tests), pytest
 test_farm_def / test_farm_pool / test_farm_h2h / test_privacy (56 passed), `smoke_all.sh --with-this-core --build-only`
 GREEN (3 of 3 games). MTG Zero: tests/test_worker_farm.py (the new test and the setting-class tests), the Mac's farm
-gates (197.4), `infer_workers` 3 vs 1 byte-identical shards (Windows, gen-206 network); tier below.
+gates (197.4), `infer_workers` 3 vs 1 byte-identical shards (Windows, gen-206 network); the merge into main and its gate: 201.
 
 ### 197.8 Why not PyTorch on the Mac? A libtorch / MPS spike (scratch code, nothing integrated)
 
@@ -39832,7 +39832,269 @@ would no longer limit it (they are ~2.7 of 4 busy now at 88-92 ms a batch): an e
 process, bounded by the search threads - to be measured. MPS adds GPU throughput only with one feeding thread (a queue in
 front of it) and only above ~1,000-row batches.
 
-## 199. The farm release's speed gate: each new worker build against the previous release, interleaved, on idle reference machines (`tools/farm_speed.py`; branch `feat/farm-speed-gate` from `feat/macos-farm` 17207901, 2026-11-18)
+## 198. The cells' games on the MacBook: `cells_backend` 'mac' and a parallel watcher lane (branch `feat/cells-mac`, 2026-11-18)
+
+### 198.1 Why
+
+`legacy-meta3-r1`'s 3x3 cells (186: the pool mode against gen0) played on the farm (`cells_backend` 'farm', 165) one
+measurement at a time, chooser 0 and then chooser 1: at most ~200 games in flight, a campaign's straggler tail at the
+end of each, ~100-200 games/h delivered against the ~1,800 games/h the 64-iteration cadence needed. In a day it
+produced one of the nine cells (the Delver mirror at iteration 32). The run moved to a 256-iteration cadence at its
+13:55 restart (`cells_every` 256, `from` 512, gen over gen off). Measuring every 256 iterations with gen over gen back
+on is, per checkpoint, 1,800 games against gen0 (6 pairs, 200 games a cell), 1,800 against the checkpoint 256 back
+and that checkpoint's 3 baselines (1,200: a new reference every time), 4,800 games per ~5.5 h window, ~870 games/h,
+on top of the farm's self-play. The Mac (16 cores) runs 3 of the run's self-play workers (~3 cores each) and its anchor
+evaluations; the user accepts judging taking about a third of it.
+
+### 198.2 What
+
+* **`cells_backend` 'mac'** (`mtgz/az/mac_judge.py`; explicit only: auto never picks it). A cells measurement's two
+  chooser matches are played at once on the Mac, each the `zero.h2h.match` call `play_pair_local` makes - the same
+  checkpoints (their bytes), spec, seed, games, sims, seat and unpaired seating (A in seat gid % 2) - so the rows,
+  results, statistics and baselines are the local backend's, and **the baseline cache keys are unchanged** (`base_key`
+  reads no backend): a baseline played on the farm or here is the Mac's too (the run's gen0 Delver/Doomsday baseline,
+  played on the farm, is reused as is). The search threads and driver groups are the Mac's own
+  (`cells_mac_threads` 4, `cells_mac_groups` 2: not part of the measurement's definition, as `bo1_threads` is not).
+  Net against net on another CPU's float arithmetic a game can take another line; the engine itself is bit-identical
+  (44).
+* **The code is the watcher's commit**: `mac_judge.remote()` refuses a checkout with uncommitted changes (and a Mac
+  home that is not a POSIX path: Git Bash turns an exported `MTGZ_MAC_HOME=/Users/...` into `C:/Program
+  Files/Git/Users/...` for a Windows process - a watcher started where `tools/local_env.sh` was sourced), and the Mac
+  plays in its checkout of that commit, `~/mtg-zero-wt/run-<sha12>` (`bash tools/mac.sh --eval-checkout` in the
+  watcher's checkout: the engine built and stamped there, mtgz/az/mac.py); each process there checks it first
+  (`mac.verify_checkout`) and refuses another commit.
+* **The files**: each checkpoint and its run's config.json (zero.h2h reads a side's seat keys - margin_w, redet,
+  eval_cache - from the config.json beside models/) go to `~/mtgz-judge/<h8>/<run>/models/<file>` (h8: the sha256 of
+  the desktop's run directory), keeping the run's name, so the records name the checkpoint as `gamerec.ckpt_id` does
+  here (`legacy-meta3-r1/iter_0512`). A file already there with the same sha256 is not sent; a copy travels through
+  ssh's stdin to a temporary name and is renamed once its sha256 is checked (`mac_judge have` / `put`).
+* **The processes**: `ssh $MTGZ_MAC 'cd <checkout> && OMP_NUM_THREADS=t MTGZ_REMOTE_COMMIT=<sha> exec nice -n N python
+  -m mtgz.az.mac_judge play'`, the job one JSON line on stdin, the result one JSON line on stdout, the match's stderr
+  in the measurement's console. Stdin stays open while the match runs; the Mac's process exits when it closes (the
+  watcher killed its child, the connection dropped), so a stopped measurement leaves no games running on the Mac.
+  `cells_mac_nice` 10 (the run's self-play workers are at 5), `cells_mac_torch_threads` 2 (torch and OMP).
+* **The game records** (189/190, docs/gamedb.md): with `game_records` on the Mac's process writes the match as one
+  records file (`MatchSink`: the measurement's kind, iteration, labels and meta - pair, chooser, `backend: mac` -,
+  `src` 'mac', its own build line) and sends it back; the child checks it (a build line, every game id once, each
+  record's result the row's) and writes it whole into `<run>/records/<kind>/iter_NNNN/` (`misc/` for a baseline) as
+  `mac-<pid>-<ms>-<n>-c<chooser>.jsonl.gz`. `gamedb.executor` maps `src` 'mac' to 'remote'; the build line's engine id
+  is the commit's (platform-independent), so `gamedb ingest` takes them as it takes the Mac's anchor records.
+* **The parallel lane**: the watcher's lane 'mac' runs `cells_mac_jobs // 2` measurements at once
+  (`yardsticks.lane_parallel`; `cells_mac_jobs` 4: 2 measurements, 4 processes on the Mac), each in its own thread
+  and child process, the oldest due first; `pending(busy=...)` skips the measurements under way, and a cell whose
+  baseline is under way waits (`item_ready`). Every other lane keeps one at a time, in the lane's thread, as before
+  (`lane_parallel` 1). The fit lane still waits for the measurements of its checkpoint (`after`).
+* **Settings** (`yardsticks`; all new, defaults keep everything as before): `cells_backend` 'mac' (with
+  `cells_device` 'cpu': the Mac has no CUDA - refused otherwise - and not with sequential cells, `cells_target_se`,
+  as for 'farm'), `cells_mac_jobs` (4, >= 2), `cells_mac_threads` (4), `cells_mac_groups` (2),
+  `cells_mac_torch_threads` (2), `cells_mac_nice` (10, 0-20). `mtgz.az.MAC_PYTHON` names the Mac's venv interpreter
+  (the remote spec uses it too).
+* **`--take-over` and a venv launcher** (from an uncommitted fix in the `fix/take-over-launcher` worktree, carried
+  here): on Windows a venv's python.exe is a launcher - the supervisor records the launcher's pid as the companion,
+  the lock holds its child's (the interpreter). The take-over now accepts the lock's owner when it is the companion's
+  pid or a descendant of it (`_is_or_child_of`) and kills the companion's whole tree from the launcher.
+
+### 198.3 Tests
+
+`tests/test_cells_mac.py` (12): the live run's switch setting accepted exactly, cells and gen-over-gen cells both in
+the lane 'mac', its parallelism, `pending(busy=...)`; the refusals (cuda, sequential, jobs < 2, nice, threads, an
+unknown backend); both chooser matches under way at once (a barrier) with every argument of the local backend's
+`h2h.match` call and the same results; the files on the Mac (the run's name and models/ kept, `ckpt_id` the same, the
+config beside them, nothing sent again, a rewritten file sent again, a baseline sending one file); `put` refusing a
+wrong sha256, `have` listing missing files and removing a stale config; the records written into the measurement's
+directory (kind, iteration, src, meta, A in seat gid % 2, the checkpoint's id and sha) and records that disagree with
+the results refused, nothing written; **a mirror cell on identical deals with different networks** (both chooser
+matches on the same seed, A the checkpoint and B the reference) scoring what its games say - 0.7 by construction, in
+both halves - on the Mac as here, never 0.5 by structure; the watcher's lane with `cells_mac_jobs` 4 running exactly
+two at once, every measurement once, each cell after its baseline, the oldest checkpoint first; the take-over of a
+launcher's child; the ssh command line (nice, OMP threads, the commit) and the job protocol (a fake Mac process: the
+result line, the stderr in the console, a failure raised with its trace); the Mac process ending when its stdin closes
+(exit 75); a dirty checkout refused. The Mac's side runs here (`play_job`, `have`, `put`) on a fake `zero.h2h.match`.
+
+The 104-iteration Mac A/B's mirrors (m1_cells.py, 2026-11-18) read exactly 0.5 in the Delver and Sneak mirrors in every
+half. Not reproduced through the yardstick's path: gen0 against iteration 496 of `legacy-meta3-r1` on the desktop
+(4 games each, 16 sims, the cells' seat and specs) were decisive (Delver mirror 11, 9, 10, 21 rounds; Sneak mirror 10,
+16, 9, 12), and the mac path's results equal the local path's in the test above. Two networks that never end a game do
+read 0.5 exactly: tiny random networks hit the 60-turn cap in every game of both mirrors (a draw, [0.5, 0.5]); that
+script's games are worth checking for `rounds` = 60.
+
+Gate: `python tools/gate.py python` on eb5189d6 (the code of this section): **GATE PASSED WITH SKIPS python eb5189d62dd9 in 503s** (skipped: one live-run-hazard test fenced off; pytest 222 + 121 + 123 + 121 on the Mac, 46 on the desktop, the mtg-smoke loop); `tests/test_cells_mac.py` also passed on the Mac by hand.
+
+### 198.4 Measured (2026-11-18, on a scratch copy of `legacy-meta3-r1`; the run itself untouched)
+
+The copy held the run's config.json, generation 0, iterations 256 and 512 and its gen0 Delver/Doomsday baseline (the
+farm's); a hand watcher `--once` with the switch's setting (198.5) at 40 and then 8 games a cell played everything
+due for iteration 512 on the Mac, beside the run's 3 self-play workers on the Mac.
+
+* **The cache key is the run's**: from a checkout of this branch with the run's engine module (the pinned worktree's
+  `_engine.pyd`, engine sha 99b96a587887), the switch's wanted items on the live run name the farm's gen0
+  Delver/Doomsday baseline 73cf0ded6e8c95e5 as done and the farm's in-flight Delver/Sneak one (743f52e3e373ecb1) by its
+  key: neither is played again.
+* **Games**: every baseline and cell measurement landed (rows `backend: mac`, `mac.commit`); the Delver mirror of
+  iteration 512 against gen0 read +89 +- 37 at 40 games (0.70 and 0.55 in its two halves: decisive games, 0 draws);
+  gen0's Delver/Doomsday baseline 1.000 / 0.000 at 40 games (the farm's: 0.99 / 0.0 at 200).
+* **Records**: 4 Mac files of 40 games each in `records/cells_base/misc/`; `tools/gamedb.py ingest` took them (kind
+  cells_base, executor remote, src mac, players gen0 / gen0, 160 games, mean 13.4 turns, 0 draws).
+* **A stopped measurement leaves nothing on the Mac**: the watcher's process tree killed twice mid-match (its 6 and 4
+  ssh processes); the Mac's judge processes were gone within 8 s each time.
+* **The first smoke's failure**: every match ended `exit 255` after printing its result - "Fatal Python error:
+  _enter_buffered_busy: could not acquire lock for <_io.BufferedReader name='<stdin>'> at interpreter shutdown,
+  possibly due to daemon threads": the stdin watcher's daemon thread sat in sys.stdin's buffered read when the
+  interpreter shut down. Fixed: raw reads of the descriptor and `os._exit` once the result is out (a test runs the Mac
+  side with stdin held open).
+* **Throughput** (CPU, 64 sims, the run's cells seat; small matches, so a match's last games run with idle threads):
+  each process ~1.1-1.3 cores at nice 10 (load 14-21 on 16 cores with the self-play); 40-game matches 994-1,172 s and
+  20-game mirror matches 610-650 s: **~115-145 games/h per process**, ~750-850 games/h with 6 processes (part of it
+  beside a gate's pytest on the Mac), ~500-600 with 4. The prior one-off Mac judge (adaptive-budget A/B, 8 processes at
+  ~1.6 cores, 200-game matches) did 3,000 games in 71 min (~320 per process-hour).
+* **Cost to the run's Mac self-play** ("running" leaves/s in the run log, the hours before: 7,100-8,800 mean per hour):
+  6 judges 3,200-4,400; 6 judges and a gate's pytest 1,800-2,900; 4 judges 2,550-2,700. The anchor evaluation of
+  iteration 560 took ~8 min instead of ~5. The Mac's self-play is ~7% of the run's self-play leaves, so judging costs
+  the run ~3-4% of its self-play while it runs.
+
+### 198.5 Switching `legacy-meta3-r1` (live) to the Mac
+
+From a pinned worktree of the merged commit (its `mtgz/_engine.pyd` copied from the run's pinned worktree, so the
+engine sha - and so every cached baseline's key - is the run's), its Mac checkout prepared (`bash tools/mac.sh
+--eval-checkout` there), with a shell where `MTGZ_MAC_HOME` is not exported:
+
+    python tools/launch_hidden.py E:/mtg-zero/runs/legacy-meta3-r1/yardsticks_console.txt \
+      python tools/run_yardsticks.py watch E:/mtg-zero/runs/legacy-meta3-r1 --take-over --yardsticks \
+      '{"bo1_games": 0, "blunders": false, "cells_mode": "pool", "cells_games": 200, "cells_refs": ["iter0"],
+        "cells_gen_games": 200, "cells_gen_every": 256, "cells_every": 256, "cells_device": "cpu",
+        "bo1_threads": 16, "bo1_groups": 4, "timeout_s": 14400, "cells_batch": 40, "from": 512,
+        "bo1_farm_share": 1.0, "cells_backend": "mac"}'
+
+(config.json's setting with the Mac backend and the gen-over-gen cells back on at the cells' cadence: iteration N
+against N - 256.) Per 256 iterations (~5.5 h): 1,800 games against gen0, 1,800 against the checkpoint 256 back and
+1,200 for that checkpoint's 3 baselines - 4,800 games, ~870 games/h; the first window also plays gen0's
+Doomsday/Sneak baseline and, unless the farm finishes it first, its Delver/Sneak one (800).
+
+### 198.6 Open points
+
+* **The Mac cannot carry 4,800 games per 256 iterations beside the run's self-play at a third of its cores.** At the
+  measured ~120-145 games per process-hour (small matches; the 200-game matches should do better), 4 processes give
+  ~500-600 games/h and halve the Mac's self-play; 870 games/h needs ~7 processes. Choices: fewer gen-over-gen games
+  (`cells_gen_games` 100: 3,300 games a window), gen over gen every 512, or more Mac (`cells_mac_jobs` 6-8) with the
+  self-play's cost above. Measured on the run's first window, it decides.
+* **The farm lane is still one measurement at a time.** `lane_parallel` is the hook: a farm setting (campaigns at once)
+  would let the farm backend's straggler tails overlap the same way; not turned on here (the bo1 farm measurements share
+  that lane).
+* **The gate beside a live run**: when 5 Mac steps push a new sha to the Mac's bare repo at once, some pushes fail
+  ("failed to update ref") and those steps fall back to the desktop, where `test_mac_remote::
+  test_the_macs_selfplay_settings` fails because Git Bash converts the exported `MTGZ_MAC_HOME` (main fails the same
+  way through tools/slotd.sh). Rerunning the gate (the sha already pushed) puts them on the Mac.
+
+## 199. The cells' local games in parallel: several measurements at once in the local lane, a measurement's two chooser matches at once (`cells_local_jobs`, `cells_local_split`; branch `feat/cells-local-parallel`, 2026-11-18)
+
+### 199.1 Why
+
+`legacy-meta3-r1` now judges its 3x3 cells on the desktop's GPU (198.6: the Mac could not carry a window beside its
+self-play): a hand watcher with `cells_backend` 'local', `cells_device` 'cuda', the pool mode, 200 games a cell against
+gen0 and 100 gen over gen every 256 iterations, `bo1_threads` 16, `bo1_groups` 1, 64 simulations. A sidecar pauses the
+run while a measurement is under way, so the judge has the GPU to itself. It delivered ~950 games/h - a window of
+~3,300 games (1,800 against gen0, 900 gen over gen, 600 for the previous checkpoint's 3 baselines) in ~3.5 h - at
+about a fifteenth of the self-play's leaves/s on the same GPU. The local lane plays one measurement at a time, and in
+it chooser 0's match, then chooser 1's: one `zero.h2h.match` of two networks and ~100-200 games, so a network call
+carries ~25-100 positions (self-play: 1,536 games in flight, ~400 rows a call).
+
+### 199.2 What
+
+* **`cells_local_jobs`** (1): the watcher's local cells lane - 'gpu' with `cells_device` 'cuda', else 'cpu_bo1'
+  (`yardsticks.cells_local_lane`) - runs that many measurements at once through the Mac lane's hook (198.2):
+  `lane_parallel`, each measurement in its own thread and `one` child process, the oldest due first,
+  `pending(busy=...)` skipping the measurements under way, a cell waiting while its baseline is under way
+  (`item_ready`), every measurement once; the fit lane still waits for its checkpoint's measurements (`after`). A local
+  best of one on the same device shares the lane and so runs beside them (independent measurements, a row each).
+  1: one at a time in the lane's own thread, as before.
+* **`cells_local_split`** (false): a local measurement plays its two chooser matches at once, each in a process of its
+  own (`mtgz/az/local_judge.py`: `python -m mtgz.az.local_judge play`, with the `one` child's interpreter, environment
+  and checkout; its below-normal priority inherited). Each is exactly the `zero.h2h.match` call `play_pair_local`
+  makes - the same checkpoint files (absolute paths), spec, seed, games, sims, seat (unpaired: A in seat gid % 2),
+  `bo1_threads`, `bo1_groups`, `cells_device` and sparse rows - and the results are put together as there (chooser 0
+  then 1: `select` is chooser 1's, `unfinished` summed), so the rows, statistics, baselines and **the baselines' cache
+  keys** (`base_key` reads neither setting) are the sequential path's: the live run's cached baselines are reused as
+  they are. A seat that does not survive JSON exactly is refused before anything plays. Processes, not threads: each
+  holds its own CUDA context, so no CUDA-graph capture is shared between threads of one process.
+* **The protocol** is the Mac's (`mac_judge.job_process`, factored out of `run_job`; `mac_judge.run_both`, out of
+  `play_pair_mac`: the two jobs at once, the first failure stopping the other's process tree - `kill_proc`, a venv
+  launcher's interpreter included - and raised): the job one JSON line on stdin, the result one JSON line on stdout,
+  the match's stderr in the measurement's console (`local c<chooser>: ...`). Stdin stays open while the match plays
+  and its end ends the process (exit 75): on POSIX by a raw read (198.4), on **Windows by peeking the pipe once a
+  second** (`local_judge._die_with_stdin`, `PeekNamedPipe`). A thread blocked in a synchronous read of the stdin pipe
+  blocks every other call on that handle, and a DLL's C runtime asks the standard handles' type as it starts: the first
+  smoke's match processes hung in numpy's import (the first thing `zero.h2h` loads) behind the reading thread - 20 MB,
+  no CPU, 10 minutes - until killed. The Mac's side keeps its raw read.
+* **The game records** (docs/gamedb.md): each match process writes its match as one records file straight into the
+  measurement's records directory, with the measurement's sink's kind, iteration, labels, src ('local'), meta (and the
+  pairing and the chooser, as `with_meta`) and the measurement's build line - the file the sequential match writes
+  there (`local-<pid>-<ms>-<n>.jsonl.gz`, the match process's pid) -, and the measurement's sink counts it. As before,
+  a measurement failing after one of its matches finished leaves that match's file (its retry plays both again).
+* **Refusals**: `cells_local_jobs` < 1; either setting off its default with `cells_backend` 'farm' or 'mac' (nothing is
+  played here: they would do nothing); `cells_local_split` with sequential cells (`cells_target_se`: both chooser
+  specs' batches in order, a stop rule after each).
+
+### 199.3 The settings for the desktop
+
+* **`cells_local_jobs` 4, `cells_local_split` true, `bo1_groups` 1, `bo1_threads` 4**: up to 8 match processes at
+  once. `bo1_groups` 1: the largest batch a network call (another process fills the GPU's gaps that a second group
+  filled inside one process, and every call costs its launch however few rows it has); `bo1_threads` 4: 8 processes x
+  4 search threads = the desktop's 32 logical CPUs (the search is cheap beside the networks: self-play's driver stays
+  under a core, zero-core docs/az.md 10.7). Neither is part of a measurement's definition (as `cells_mac_threads` is
+  not). `timeout_s` counts a measurement's wall time, which grows when it shares the GPU: keep it generous (14,400).
+* **GPU memory**: each match process holds a CUDA context, two small networks (128 x 8) and its graph pools; the live
+  judge's single process took at most ~2.7 GB (the GPU's whole use beside it, the desktop's own included), so 8 at
+  once fit while the run is paused. The sidecar pauses the run at the next iteration boundary, so a window's first
+  measurements share the GPU with the run's last iteration.
+* **The switch** (from a pinned worktree of the merged commit, its `mtgz/_engine.pyd` the run's - the engine sha is in
+  every baseline's key - as in 198.5): the live setting with `"cells_local_jobs": 4, "cells_local_split": true,
+  "bo1_threads": 4, "bo1_groups": 1`, through `run_yardsticks.py watch <run> --take-over --yardsticks '<json>'`.
+
+### 199.4 Tests and smoke
+
+`tests/test_cells_local_parallel.py` (10): the defaults change nothing (1 / false; every lane but the Mac's one at a
+time; the measurements wanted, their keys and their baselines' keys the same with the settings on) and the live run's
+switch accepted, its cells and gen-over-gen cells in the lane 'gpu' (4 at once), 'cpu_bo1' with `cells_device` 'cpu';
+the refusals (0 jobs, the types, 'farm' / 'mac', the split with sequential cells; auto and 'local' accepted); the
+watcher's local lane with `cells_local_jobs` 1 and 3 running exactly that many at once (1: in the lane's own thread,
+every cell of iteration 16 before any of 32), every measurement once, each cell after its baseline, the oldest
+checkpoint first; both chooser matches under way at once (a barrier) with every `h2h.match` argument of the sequential
+path (checkpoints, games, sims, seed, spec, seats, unpaired, rows, sparse, device, threads, groups) and the same
+results, unfinished count and select, for a cell, a mirror and a baseline; a seat that would not travel refused; the
+rows of a baseline, a cell and a mirror, the baseline's cache key and its cache file the same with the split, a cached
+baseline reused without a game; the records the same record for record (two files in the measurement's directory,
+counted by its sink); two real match processes playing at once (each waits for the other's start), writing their
+records files themselves (their own pids, the measurement's build line) - their fake match importing numpy after the
+stdin watcher started, the condition of the hang above (a blocking-read watcher hangs it, checked by hand) -; a failed
+match stopping the other (waiting 600 s otherwise) and raised with its traceback; a match process ending (75) when its
+stdin closes. `tests/test_cells_mac.py`: its lane test's race fixed (a baseline's end was taken after its cache file
+was written, so a cell could start in between and fail "after its baseline": once in seven runs here).
+
+Smoke (CPU, real checkpoints: copies of `legacy-meta3-r1`'s generation 0, iteration 512 and config.json in a scratch
+directory; the Delver / Doomsday pair, 4 games a spec, 4 simulations, `bo1_threads` 2, `bo1_groups` 1, records on):
+the split's results equal the sequential path's, its two records files equal the sequential path's record for record
+(actions, results, rounds, players, meta, the build line; the time field aside), the baseline key the same
+(dae09528e694272a); both matches at once in 40 s against 47 s one after the other (most of it each process's start
+and torch import).
+
+Gate: `python tools/gate.py python --offload local` on 2bdb277b (the code of this section; every step on the desktop:
+the Mac was reserved): **GATE PASSED WITH SKIPS python 2bdb277bdcbc in 622s** (skipped: 7 live-run-hazard tests
+fenced off; pytest 279 + 132 + 165 + 117 passed, the run-loop smoke). The first run failed only
+`test_mac_remote::test_the_macs_selfplay_settings`, 198.6's Git Bash conversion of the exported `MTGZ_MAC_HOME`
+through tools/slotd.sh; the second ran with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` in the gate's environment.
+
+### 199.5 Open points
+
+* **The GPU's gain is not measured yet** (the GPU was busy with the live judge): the first window under the switch
+  says it. A ceiling: kernels of different processes never run at once (separate CUDA contexts time-slice the GPU; no
+  MPS on Windows), so the processes can only fill the GPU's idle time in one measurement. Sampled during a live
+  measurement (`nvidia-smi dmon`, the run paused, one process): the GPU was busy 33-60% of the time (sm %), so the
+  processes can give roughly 1.7-3x at best - not the 5-10x a 20-40 min window needs. The rest needs bigger network
+  calls: the matches of the same two networks in one driver and evaluator (a window's 6 measurements against gen0 are
+  all iteration N against gen0; a driver holds one spec today, so this is a zero-core change), or a process's matches on
+  CUDA streams of their own.
+
+## 200. The farm release's speed gate: each new worker build against the previous release, interleaved, on idle reference machines (`tools/farm_speed.py`; branch `feat/farm-speed-gate` from `feat/macos-farm` 17207901, 2026-11-18)
 
 Why: a farm worker build could ship with a large throughput regression and nobody would notice (197.5: the agent's
 default layout ran at 0.09x of one Python process on the Mac). The user (2026-11-18): every new farm worker build, and
@@ -39840,7 +40102,7 @@ the network export it plays, is benchmarked against the previous release on the 
 fails loudly when it got slower; benchmarks run only while the machine is not in use. No rule, card, encoding,
 search, worker or training change; behaviour digests untouched; no zero-core change (the pin stays 45c284b).
 
-### 199.1 What it compares
+### 200.1 What it compares
 
 Two sides, each a signed worker build with the runtime pack its manifest requires and a network export:
 
@@ -39859,22 +40121,22 @@ Two sides, each a signed worker build with the runtime pack its manifest require
   measured with the build - what the farm gets after the release against before. The line says when the graphs
   differ.
 
-### 199.2 How it measures
+### 200.2 How it measures
 
 Per machine, a block of windows in the order **new, old, old, new** (`--blocks`, default 1; every other block mirrored,
-old, new, new, old, so that over two blocks each side takes each position as often: 199.8), each window a rolling
+old, new, new, old, so that over two blocks each side takes each position as often: 200.8), each window a rolling
 self-play job exactly as the farm sends one (`<worker> serve`, `rolling: true`, records output, `flush_s` 60, the
 machine's layout as the agent's tuning fields), for `--minutes` (3). A window's rate is the network **leaves per
 second** (the like-for-like metric; games and rows per game drift with the generations, 197.5) from the worker's own
 `status` events (every 10 s, wall clock) after `--warmup` seconds (30): the **upper quartile of the 10-second
 rates**. Other load on a shared machine only ever slows a window down, so the upper quartile estimates the window's
-uncontended speed and ignores a burst that covers up to three quarters of it (199.8: on the desktop the 10-second rates
+uncontended speed and ignores a burst that covers up to three quarters of it (200.8: on the desktop the 10-second rates
 swing +-15% with its other work, and a 40-second burst of it cut a window's rate by a third); the median and the span's
 mean rate are recorded beside it. Every window also records the worker's games, rows, batches (rows per batch, ms p50 / p95), search and
 wait times, peak memory, and the machine's load every 10 s: CPU % (psutil's; on Windows also Task Manager's
 `% Processor Utility` through one `typeperf` per window: on the desktop psutil's CPU-time counters under-report, as
 53.6 found - 8 spinning threads read as 12% "Processor Time" against 66% utility, and a pure-Python loop's process
-time was a fifteenth of its wall time - so the load is context and only its bursts are used, 199.4), the worker's share, the others', available
+time was a fifteenth of its wall time - so the load is context and only its bursts are used, 200.4), the worker's share, the others', available
 memory, python processes, idle seconds and AC. Before the windows each side's `info` must name its build id.
 
 | Machine | Builds, pack | Layout (release.json `speed.machines`, `--job MACHINE:key=JSON`) | Window |
@@ -39887,7 +40149,7 @@ memory, python processes, idle seconds and AC. Before the windows each side's `i
 and the exports go to `~/mtgz-macfarm/speed/<stamp>/` (tools/farm_gates.py's ssh/scp helpers, `MTGZ_MAC`), the runner
 runs there (the venv tools/mac.sh uses, else `python3`), and its windows come back by scp. It needs no checkout.
 
-### 199.3 Only on an idle machine
+### 200.3 Only on an idle machine
 
 * **Before each window** the runner waits until the machine has had no user input for `--idle-min` seconds (180;
   Windows: GetLastInputInfo through ctypes; macOS: IOHIDSystem's HIDIdleTime from `ioreg -c IOHIDSystem`) and is on AC
@@ -39912,7 +40174,7 @@ runs there (the venv tools/mac.sh uses, else `python3`), and its windows come ba
   taken over: it has no pid), and removes it when the sweep ends - before its idle wait, the quiet lock and its
   windows; a retry block books again. Recorded with every window (`bench_lock`: purpose, acquired, waited, released).
 
-### 199.4 The pass rule
+### 200.4 The pass rule
 
 Per machine: **mean(new windows' leaves/s) >= (1 - `--tolerance`) x mean(old windows')**, tolerance 5%. Any window
 that errors (the worker exits or sends `error`, no leaves, the wrong build in its `info`, no `end` after `quit`) fails
@@ -39934,7 +40196,7 @@ than it: it gets `--retry-blocks` (1) more blocks (the mirrored order) and is ju
 is a regression and gets none. The gate passes iff every machine run passed. Recorded: each side's spread, the pairs
 and their spread, the others' baseline, the contended windows and intervals.
 
-### 199.5 Files and hardware-class hints
+### 200.5 Files and hardware-class hints
 
 `--out` (the release: `<builds>/releases/<sha12>/speed/`): `result.json` (verdict, line, per machine the ratio,
 rates, spreads, windows, discarded, layout, blocks run; the baseline and how it was found; the network),
@@ -39947,7 +40209,7 @@ These files stay in the builds directory (machine details never reach the reposi
 combine (farm_release.py runs the desktop's machines under a slot, then the Mac). `farm_speed.py judge <dir>
 [--tolerance]` judges recorded windows again.
 
-### 199.6 In the release
+### 200.6 In the release
 
 `farm_release.py release` step **8b `speed`** (its docstring): after the gates (and the macOS steps with `--mac`),
 before the mac plan and the publish. The desktop's part holds a tools/slotd.sh slot; the Mac's part runs after a
@@ -39964,7 +40226,7 @@ commit's export against the reference export (an exporter change), skipped when 
 farm_speed.py's `gate`). It costs a release ~15 minutes on the desktop (4 x 3 min + warmups, more while the machine is
 in use) and as much again on the Mac.
 
-### 199.7 Tests
+### 200.7 Tests
 
 tests/test_farm_speed.py (22, no real worker, no Mac): the pass rule (equal, 4% slower passes, 6% slower fails,
 faster passes, spreads, pairs, disagreeing pairs are noisy), an error on either side and a machine in use fail,
@@ -39993,7 +40255,7 @@ the commit's export, then the Mac part without; a Mac run that wrote no result f
 handover; the runner imports nothing of the repository. With tests/test_farm_release.py (6, unchanged) and
 tests/test_privacy.py: 33 passed.
 
-### 199.8 The desktop's sanity runs: the current release worker against itself
+### 200.8 The desktop's sanity runs: the current release worker against itself
 
 `python tools/farm_gates.py --speed --new 5307720f7452344b30af3617 --baseline 5307720f7452344b30af3617 --machines cpu
 --minutes 2` (legacy-meta3-r1's release worker, the release reference export gen 206, the `cpu` layout, below normal
@@ -40014,10 +40276,10 @@ three single blocks' lean towards the outer windows did not repeat in the balanc
 the tolerance. So on a busy desktop a true 1.0 can fail a 5% gate now and then; the noisy retry (one more, mirrored
 block) is the first answer, and `speed.machines.cpu.blocks: 2` (~25 minutes) or a per-machine
 `speed.machines.cpu.tolerance` the maintainer's choice. Regressions of the size that started this (197.5: 0.09x,
-0.29x, 0.75x) fail by far. The Mac, quiet under its locks, measured 0.998x (199.9). A desktop window: ~75 rows per
-batch, ~41 ms per batch (p50), ~0.7 GB peak; the evaluator thread is busy all the time (199.10).
+0.29x, 0.75x) fail by far. The Mac, quiet under its locks, measured 0.998x (200.9). A desktop window: ~75 rows per
+batch, ~41 ms per batch (p50), ~0.7 GB peak; the evaluator thread is busy all the time (200.10).
 
-### 199.9 The Mac's sanity run: the current macOS release worker against itself
+### 200.9 The Mac's sanity run: the current macOS release worker against itself
 
 `python tools/farm_gates.py --speed --machines mac --mac-new 20807b12ed6acf7663aa56c5 --mac-baseline
 20807b12ed6acf7663aa56c5` (3-minute windows, the agent's layout: threads 16, 2,304 games in 12 groups, nice 15; the
@@ -40039,7 +40301,7 @@ A first attempt at 17:59 ran without the quiet lock (the plan did not carry the 
 test checks the Mac plan) and was stopped by hand: killing the desktop side did not stop the runner on the Mac (its ssh
 session delivered no hangup), so the runner was sent SIGTERM, and its handler killed its worker on the way out.
 
-### 199.10 What it takes, open points
+### 200.10 What it takes, open points
 
 * **In a release**: the desktop part runs by default (`farm_release.py release <commit>`, after the gates, holding a
   slot). The Mac part needs `--mac` (release.json `mac_runtime`: the macOS pack 040b1882) and a macOS baseline:
@@ -40051,7 +40313,7 @@ session delivered no hangup), so the runner was sent SIGTERM, and its handler ki
   search shows less there than on the Mac (5 sessions). Builds with Windows `infer_workers` (zero-core 45c284b on)
   could run 2 x 4 once the baseline has it too (`--job cpu:infer_workers=2`; an older build ignores the field and runs
   one session - fair as the farm would see it, but then not like for like).
-* **Noise on the desktop** is about the tolerance (199.8); the Mac is quiet (0.998x).
+* **Noise on the desktop** is about the tolerance (200.8); the Mac is quiet (0.998x).
 * **A desktop side that dies** leaves the Mac's runner running to the end of its block (~15 minutes; its locks released
   then).
 * **The idle clock on Windows** is the interactive session's (GetLastInputInfo): a gate started from another session
