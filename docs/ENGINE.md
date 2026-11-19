@@ -40434,5 +40434,11 @@ test_refusal_on_mismatched_tensors takes the `attention` argument the fast expor
 worker, encoding, search or default change.
 
 **Checks.** zero-core with its toy engine built: tests/test_farm_export.py + tests/test_onnx_fast.py 15 passed;
-test_reference_reuse fails on 6adccac (ValueError: graph 'template') and passes on 3eb1a41. The gates of this commit are
-below.
+test_reference_reuse fails on 6adccac (ValueError: graph 'template') and passes on 3eb1a41. Gates on 42fc92df (the
+re-pin commit), `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`:
+
+* **optin-core**, `--baseline-root` <4d622170, built>: **GATE PASSED WITH SKIPS optin-core 42fc92df309b in 1664s**
+  (core pytest 721 passed / 69 skipped, the skips the live-run fence only: 17 core tests; the other 3 games built against
+  this core).
+* **python**: **GATE PASSED WITH SKIPS python 42fc92df309b in 384s** (pytest 156 + ... passed, 7 live-run-hazard tests
+  fenced; the run-loop smoke 16 games, 0 unfinished).
