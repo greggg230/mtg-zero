@@ -40360,4 +40360,42 @@ training change; behaviour digests untouched; no run's settings changed.
 
 ### 201.2 Gates
 
-(Filled in by the gate commit after the gated sha.)
+Tiers: `optin-core` (a zero-core opt-in feature with byte-identical defaults: the fast graph behind `pool_export ''`,
+the macOS-only worker paths, the libm refusals, the `hello` feature) and `python` (the tools and tests: farm_build,
+farm_gates, farm_release, farm_speed, test_worker_farm). Both on a7df5d90 in a warm worktree, desktop only
+(`--offload local`: the Mac was carrying legacy-meta3-r1's self-play and evaluations), each heavy step in a
+`tools/slotd.sh` slot, `CARGO_BUILD_JOBS` 8; two live supervisors on the desktop.
+
+* **`optin-core`** (`--baseline-root` = a checkout of main 1c89f048, its engine from the artifact cache): **GATE PASSED
+  WITH SKIPS optin-core a7df5d90e5f8 in 1682s** - privacy; builds (mtgz, the release worker, zero._engine, the test
+  binaries); core cargo test 215 passed; checkpoint_compat identical (visits 3,303 / cq 3,303 samples); digest formats
+  = the recorded files (constructed dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame
+  284d8312cc21c587) and dealt f78ada3d3d114826 (80 matches); farm compat identical (gate 2: 6 games, 2,890 rows, 150
+  batches; gate 3: 6 games, 2,556 rows, 6 decks); `--test az` 57, `--test hidden` 28; glassroad-zero, caverna-zero and
+  kingdombuilder-zero build against the core (3 of 3); core pytest 721 passed, 69 skipped, 17 live-run-hazard tests
+  fenced (the skip). Digests untouched.
+* **`python`**: **GATE PASSED WITH SKIPS python a7df5d90e5f8 in 388s** - privacy, builds (both from the artifact
+  cache), pytest 138 + 217 + 195 + 165 passed (11 skipped; 7 live-run-hazard tests fenced: the skip), the run-loop smoke
+  16 games, 0 unfinished. Its first run failed one test, `test_mac_remote.py::test_the_macs_selfplay_settings`: the
+  throttle (`tools/slotd.sh` sources `tools/local_env.sh`) exports `MTGZ_MAC_HOME`, and Git Bash rewrites that POSIX
+  path into a Windows one for the Python it starts - the same failure on main 1c89f048 run the same way, passing
+  without the throttle (168.5's known issue, not this merge's). The rerun carried the documented
+  `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`; the fix still belongs in zero-core's and this repo's
+  `tools/local_env.sh` together.
+* The gated worker's `info`: features `["rolling", "setting_classes", "infer_workers"]`, platform `windows-x64`;
+  `test_hello_and_info_announce_infer_workers` passed with it. zero-core 6adccac itself: `cargo test --release -p
+  zero_worker` (lib 36, evaljob 6, job 6, job_tail 4, rolling 7), its privacy check.
+* `tools/*.py` py_compile (70 files).
+
+### 201.3 Open points
+
+* **The release watcher** (196.4) runs from its own pinned worktree: it builds and publishes main's new head with
+  that checkout's tools, so the speed step (200.6) reaches releases only once it is restarted from a commit that has
+  `tools/farm_speed.py` (the maintainer's call). The first release of this head is a new Windows build (the Rust inputs
+  changed) - the first one that announces `infer_workers`; nothing attaches it to a run.
+* **The fast graph** waits for the user's decision per run (`pool_export`); the speed gate can measure an export of
+  either graph against the previous release.
+* **The Mac's farm gates** (197.4) were not re-run on this merge: the Mac was busy with the live run's self-play and
+  evaluations. They need a Mac build of this commit (`farm_build.py --platform macos-arm64`).
+* **zero-core `main`** stays at d499716: moving it to this line would want `smoke_all.sh --with-this-core` (the other
+  games' full smokes), not run here.
