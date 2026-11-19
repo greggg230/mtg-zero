@@ -40767,3 +40767,41 @@ directory.
 * **GATE PASSED suite 83f40e305085 in 1442s** (206's code and this section but these lines; 2,707 passed in 24
   binaries; the sharded 2k fuzz of default, default + hidden decklists and delver_dealt). The commit after it records
   these lines (docs only).
+
+## 207. zero-core pin 894ee27 -> eaa624e: the fast graph on CUDA - running sums in blocks, its optional input `t_align`, the fused float32 attention (zero-core `feat/gpu-static`, docs/az.md 66; branch `feat/gpu-static`, 2026-11-19)
+
+**Why.** The farm's Windows GPU PCs played legacy-meta3-r1's self-play at about a third of what the trainer's own
+torch path gets on the same hardware (measured on a farm PC with an NVIDIA GPU: the farm's CUDA worker 10.8k leaves/s
+with one worker, 14.2k with three sharing the GPU; the torch path 32.7k with bf16 and its CUDA graphs, 20.0k in
+float32). A kernel profile of the fast graph at 1,024 rows: 48 ms of GPU time a call, 15.5 ms of it ONNX Runtime's CUDA
+CumSum over the batch's non-zeros (its cost grows faster than the axis's length), ~16 ms the attention through ONNX
+Runtime's unfused path.
+
+**What** (zero-core docs/az.md 66; only the fast graph, `pool_export` 'fast', and the worker's GPU sessions):
+
+* The fast graph's long running sums in two levels (blocks of 512, then their totals: the same integers), its policy
+  scatter's spare places without a running sum, and an optional input `t_align` (default 1: the graph as before when a
+  worker doesn't feed it; metadata `t_align` 16) that rounds the padded rows' token axis up to a multiple of it.
+* The worker feeds `t_align` 16 on a GPU provider (never on the CPU) and sets ONNX Runtime's
+  ORT_MIN_SEQ_LEN_EFFICIENT_ATTENTION_FP32 to 1, so its CUDA MultiHeadAttention takes the fused float32 kernel (which,
+  with an attention bias, needs a sequence of a multiple of 16).
+* The default graph's export is unchanged, byte for byte. On the CPU the new fast graph's answers are identical to the
+  old one's (max abs 0.0 on gen 769 through the CPU pack) and its time within noise. On CUDA the self-test passes as
+  before (max abs 7.6e-6 against 2e-5).
+
+**Measured** (the farm PC above, paused on the coordinator; gen 769; the farm's CUDA worker build of 85495dc7 with the
+attention variable set by hand and a measurement export whose `t_align` default was 16; 5-minute rolling windows):
+
+| | the fast graph of before | this pin's |
+|---|---|---|
+| a 1,024-row call (wall / GPU) | 62.9 / 48.0 ms | 41.3 / 23.4 ms |
+| one worker, 1,024 in flight, 1 group | 10.8k leaves/s (three runs: 10,842 / 10,838 / 10,845) | 12.0k |
+| three workers sharing the GPU (3 x 384, threads 2) | 14.2k | 16.9k |
+
+A single worker is now bound by ONNX Runtime's host side (the graph's ~1,400 nodes launched one by one, 17 device ->
+host syncs for its data-dependent shapes; the GPU ~35% busy), so it gains 10%; workers sharing the GPU gain 20%. The
+next steps (a fixed-shape GPU graph run as CUDA graphs, reduced precision for GPU sessions) are separate work.
+
+**Runs.** A run on this pin with `pool_export` 'fast' exports the new fast graph (a new weight-swap template: the
+fingerprint covers zero-core's Python). Its workers - this pin's builds, the CUDA alternate and the macOS one - play it
+as any zero-onnx/2 graph; older worker builds play it too (they never feed `t_align`).
