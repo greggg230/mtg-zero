@@ -336,6 +336,41 @@ fn the_murktide_trigger_is_asserted_over_enough_games() {
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
+/// ENGINE.md 210: the fuzz steward's queue entries 2076692a1ae6 (8dd5a36f4ce0 before a line moved) and 88c42634bd1f,
+/// found under the `fuzz` profile on main and replayed at its denominator (4) in every profile, every check of `play` /
+/// `play_hidden`. Default-pool games 100,024,301, 100,031,416, 100,066,908 and 100,089,619 and hidden-decklist games
+/// 100,021,777, 100,068,104, 100,124,410, 100,131,330 and 100,147,748: a spell of mana cost {0} (Mox Pearl, Mox Opal,
+/// Black Lotus, Lotus Petal, Zuran Orb, Mishra's Bauble, Walking Ballista with X 0) cast beside a source that could be
+/// activated for nothing; its payment asked "`PASS`, or that source instead" on its first run and finished when run
+/// again (`refresh_pending`): the decider's own world failed the fuzz profile's "determinize changed the viewer's
+/// decision", the other player's world ran past the decision (in release, its view check). Default-pool game
+/// 100,054,973: P1's Brainstorm, cast in its upkeep, drew Metamorphosis Fanatic first and revealed it for miracle,
+/// then put two other cards back, and P0 forgot the revealed card (`scramble`): P0's world dealt it anew as a card
+/// with no miracle, the trigger asked P1 nothing and the world ran past P1's "cast it?" ("determinize changed the
+/// view of P0 (mover P1)").
+#[test]
+fn determinize_keeps_the_viewers_decision_and_view_default_seeds() {
+    use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
+    if pool_mode() != PoolMode::Default || hidden_decks_mode() || sealed_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        for seed in [100_024_301u64, 100_031_416, 100_066_908, 100_089_619, 100_054_973] {
+            std::panic::catch_unwind(|| play(seed, true))
+                .unwrap_or_else(|e| panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+        }
+        for seed in [100_021_777u64, 100_068_104, 100_124_410, 100_131_330, 100_147_748] {
+            std::panic::catch_unwind(|| play_hidden(seed))
+                .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+        }
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 /// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
 /// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
 /// the checks over the whole run to this test), sums the shards' counters and runs this test with

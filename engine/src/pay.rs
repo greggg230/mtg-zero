@@ -715,6 +715,17 @@ impl PayMana {
         self.cost.total() as usize + self.marked.len()
     }
 
+    /// The picks pay everything and the virtual pool spends nothing (`vm`
+    /// 0): nothing is left to pay, so no source is offered "instead" of the
+    /// pool's mana (13.13: there is none) - unless delve's sources are still
+    /// to be activated (`forced`, ENGINE.md 49) or a production is being
+    /// chosen (`now`). A payment of no mana is one from the start (CR 601.2g:
+    /// "if the total cost includes a mana payment", the player has a chance
+    /// to activate mana abilities; ENGINE.md 210).
+    fn paid_by_picks(&self) -> bool {
+        self.vm == Some(0) && self.now.is_none() && self.forced.is_empty() && self.chosen.len() == self.need_total()
+    }
+
     /// The picks so far and the virtual pool pay the rest (ENGINE.md
     /// 100.4.3: then `PASS` = spend from the pool, and the sources whose
     /// pick leaves the payment payable are offered too; 13.13).
@@ -2526,11 +2537,8 @@ impl Game {
         // `PASS`, or a source to pay instead) is answered below; finished
         // here, its answer was left to the next task, the cost's choices
         // (ENGINE.md 152.3: EoE fuzz seed 100000075).)
-        if pm.vm == Some(0) && pm.now.is_none() && pm.forced.is_empty() && pm.chosen.len() == pm.need_total() && self.answer.is_none() {
-            // (The classes only for the several-mana picks' restrictions.)
-            let classes = if pm.multi.is_empty() { Vec::new() } else { self.payment_classes(&pm) };
-            let rem = self.pool_rems(&pm, &classes).swap_remove(0);
-            self.finish_payment(&pm, rem);
+        if pm.paid_by_picks() && self.answer.is_none() {
+            self.finish_paid(&pm);
             return;
         }
         let classes = self.payment_classes(&pm);
@@ -2659,6 +2667,18 @@ impl Game {
         // (Read from the state when a decision is asked: ENGINE.md 10.)
         if self.answer.is_none() && pm.which.is_none() {
             pm.vm = self.vm_now(&pm, &classes);
+            // Paid already, with `vm` read now: the early finish above, which
+            // read the `vm` stored with the task - none on the payment's first
+            // run, whose pool is read just above (`pooled`). A payment of no
+            // mana asked "PASS, or a source instead" on its first run and
+            // finished at once when run again: a decision `refresh_pending`
+            // (ENGINE.md 10) did not find again, so a world dealt for the
+            // other player ran past it (ENGINE.md 210). Now a payment never
+            // asks a decision its own re-run would not.
+            if pm.paid_by_picks() {
+                self.finish_paid(&pm);
+                return;
+            }
         }
         // The pool covers the rest: `PASS` spends it (unless Wizard's
         // Rockets must be picked for the colours: no pool left), and the
@@ -2912,14 +2932,11 @@ impl Game {
         }
         pm.card_slots = card_slots;
         if covers {
-            // Nothing left for the pool to pay (the picks pay it all, or the
-            // cost is no mana): no source can pay instead in any world, so
-            // there is no decision.
-            if opts.is_empty() && pm.vm == Some(0) {
-                let rems = self.pool_rems(&pm, &classes);
-                self.end_payment(pm, rems);
-                return;
-            }
+            // (Nothing left for the pool to pay - the picks pay it all, or the
+            // cost is no mana - finished above with no decision, whatever the
+            // sources: `paid_by_picks`, the `vm` just read. So here the pool
+            // pays something; ENGINE.md 210.)
+            debug_assert!(pm.vm != Some(0), "a payment the picks pay whole is finished before its sources are looked at: {pm:?}");
             // `PASS`, the pool pays the rest - asked even with no source to
             // pay instead: that decision then has one option, which the
             // engine answers and keys (`auto_single`, `KEY_AUTO`, ENGINE.md
@@ -3151,6 +3168,15 @@ impl Game {
         }
         pm.multi.push((src, prod));
         self.recount(pm, classes);
+    }
+
+    /// A payment paid by its picks alone (`PayMana::paid_by_picks`): done,
+    /// the pool left as it is.
+    fn finish_paid(&mut self, pm: &PayMana) {
+        // (The classes only for the several-mana picks' restrictions.)
+        let classes = if pm.multi.is_empty() { Vec::new() } else { self.payment_classes(pm) };
+        let rem = self.pool_rems(pm, &classes).swap_remove(0);
+        self.finish_payment(pm, rem);
     }
 
     /// The picks cover the cost: activate everything (CR 601.2g) in an

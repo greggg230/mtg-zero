@@ -2726,10 +2726,16 @@ fn the_v5_facts_encode_no_hidden_information() {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };
+            // (A change made by hand can leave the pending decision stale - "a
+            // creature attacked this turn" makes Broadside Bombardiers' boast
+            // activatable -; the decider's own worlds keep its decision, and a
+            // debug build checks it is the one its asker asks: asked again
+            // here, as a state at rest has it. ENGINE.md 210, the 2026-11-02
+            // todo's "determinize changed the viewer's decision".)
+            b.g.refresh_decision();
             applied += 1;
-            // (Worlds compared with each other: a change made by hand can
-            // leave the other player's pending decision stale, and every world
-            // for a viewer who doesn't decide recomputes it.)
+            // (Worlds compared with each other: a world for a viewer who
+            // doesn't decide recomputes the decider's decision.)
             for v in 0..2 {
                 let mut first = b.clone();
                 first.determinize(v, &mut zr);

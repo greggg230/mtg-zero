@@ -22,6 +22,8 @@ mod dealt_integrated;
 mod dealt_per_seat;
 #[path = "deck_posterior.rs"]
 mod deck_posterior;
+#[path = "determinize_consistency.rs"]
+mod determinize_consistency;
 #[path = "draft_deferred.rs"]
 mod draft_deferred;
 #[path = "draft_matches.rs"]

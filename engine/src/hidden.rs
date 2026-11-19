@@ -928,7 +928,16 @@ impl Game {
     /// owner does not (a look at the opponent's library, ENGINE.md 192) is
     /// listed too, as that player's private entry (`Game::peeks`): the
     /// owner's worlds draw it again (`deal_keeping_others`).
+    ///
+    /// A told-apart hand card (`told_apart`: a reference of the public state
+    /// names it, its card revealed - a miracle card until its trigger leaves
+    /// the stack, CR 702.94b; an ability's source from the hand while the
+    /// ability is on the stack, 602.2a) is not lost track of: every player
+    /// sees which card it is, in the hand or as it leaves (`move_card`), so
+    /// what each player knows of it stays (ENGINE.md 210; 156's rule, as
+    /// `canon_hand_knowledge` and `knowledge_leaves` keep it).
     pub(crate) fn scramble(&mut self, owner: PlayerId, slots: &[CardIdx], hand: bool, library: bool) {
+        let told: Vec<CardIdx> = if hand { self.players[owner as usize].hand.iter().copied().filter(|&c| self.told_apart(c)).collect() } else { Vec::new() };
         for q in 0..2u8 {
             if q == owner {
                 continue;
@@ -948,6 +957,9 @@ impl Game {
                 }
             }
             for c in domain {
+                if told.contains(&c) {
+                    continue;
+                }
                 let d = self.ident(c);
                 let o = &mut self.objs[c.i()];
                 if o.known & (1 << q) != 0 {
@@ -2052,5 +2064,20 @@ mod told_apart_tests {
         g.discard(twin);
         assert_eq!(g.objs[twin.i()].zone, Zone::Graveyard);
         assert!(g.knows(1, drawn), "P1 still knows the revealed card");
+    }
+
+    /// ENGINE.md 210 (the fuzz steward's 88c42634bd1f): the owner rearranging its hand privately
+    /// (Brainstorm's put-back, `scramble`) loses the other player track of the hand's other cards,
+    /// not of the revealed miracle card (CR 702.94b): P1's knowledge of it stays, and a card P1 knew
+    /// that is not told apart goes into the cloud (here the twin, made known to P1 by hand).
+    #[test]
+    fn a_private_rearrangement_of_the_hand_keeps_a_told_apart_cards_knowledge() {
+        let (mut g, twin, drawn) = miracle();
+        g.objs[twin.i()].known |= 1 << 1;
+        g.scramble(0, &[], true, false);
+        assert!(g.knows(1, drawn), "P1 still knows the revealed card");
+        assert!(!g.knows(1, twin), "P1 lost track of the card it knew that is not told apart");
+        let k = g.clouds.iter().find(|k| k.viewer == 1 && k.owner == 0 && k.hand).expect("a cloud over P0's hand");
+        assert_eq!(k.defs, vec![g.objs[twin.i()].def], "the cloud lists the card P1 lost track of, not the revealed one");
     }
 }

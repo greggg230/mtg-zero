@@ -397,12 +397,16 @@ pub struct Perturbation {
 
 impl Perturbation {
     /// `apply` and, when it changed the state (by hand, outside the rules), drop the sightings that no longer
-    /// describe it (`Game::lose_sightings`, ENGINE.md 140.9).
+    /// describe it (`Game::lose_sightings`, ENGINE.md 140.9). The chance keys a change by hand emitted belong to no
+    /// transition: the buffer is empty between transitions (`keys`, derived above), as `refresh_pending`'s check
+    /// "refreshing a decision revealed something" reads it (the turn controlled by hand, `sync_controller_view`'s
+    /// looks: ENGINE.md 210).
     pub fn run(&self, a: &mut MtgAz, r: &mut Rng) -> Option<String> {
         let out = (self.apply)(a, r);
         if out.is_some() {
             a.g.lose_sightings();
         }
+        a.g.keys.clear();
         out
     }
 }
