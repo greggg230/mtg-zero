@@ -42,7 +42,8 @@ watcher per run (<run>/yardsticks/lock.json: pid and process creation time).
 
 A lane runs one measurement at a time, except the Mac's ('mac': cells_backend 'mac', docs/ENGINE.md 198): there
 cells_mac_jobs // 2 at once (mtgz.az.yardsticks.lane_parallel; the oldest due first, a cell still waiting for its
-baseline under way skipped), each a child process of its own.
+baseline under way skipped), each a child process of its own; and the cells' local lane ('gpu' or 'cpu_bo1') with
+cells_local_jobs > 1 (docs/ENGINE.md 199): that many at once, the same way.
 
 `status`: what is measured, missing (an evaluated checkpoint without a result) and failing.
 """

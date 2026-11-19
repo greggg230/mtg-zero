@@ -87,6 +87,17 @@ other, against the reference piloting both on the same seeds (common random numb
                    measurements at once (cells_mac_jobs 4: 4 processes on the Mac), the two chooser matches of each
                    at once; the same games, seeds, seats and baselines (the same cache keys) as 'local', every game
                    recorded as a game record (src 'mac')
+  cells_local_jobs, cells_local_split
+                   the cells' local games (docs/ENGINE.md 199; off by default: one measurement at a time, its chooser
+                   matches one after the other): the watcher's local cells lane ('gpu' with cells_device 'cuda', else
+                   'cpu_bo1') runs cells_local_jobs measurements at once (1; the oldest due first, a cell after its
+                   baseline: lane_parallel - a local best of one in that lane is one of them), and with
+                   cells_local_split (false) each measurement plays its two chooser matches at once, each in a process
+                   of its own (mtgz.az.local_judge: play_pair_local's h2h.match exactly - the same games, results and
+                   baseline cache keys); up to 2 x cells_local_jobs match processes, each with bo1_threads search
+                   threads and bo1_groups driver groups (with several processes: bo1_groups 1, bo1_threads about the
+                   cores over the processes); refused with cells_backend 'farm' / 'mac' (nothing local), and
+                   cells_local_split with sequential cells
   cells_seed       the seeds' base (0: the same deals every generation)
   cells_format     'bo1' (the mains; 'bo3' cells: the extension point `_cell_spec`)
   cells_max_turns  the cell specs' max_turns (60, as decklists.mirror_spec)
@@ -176,7 +187,9 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             'cells_main_share': 0.75, 'cells_gen0_share': 0.1, 'cells_fit_boot': 200,
             # the cells' games on the MacBook (cells_backend 'mac', docs/ENGINE.md 198)
             'cells_mac_jobs': 4, 'cells_mac_threads': 4, 'cells_mac_groups': 2, 'cells_mac_torch_threads': 2,
-            'cells_mac_nice': 10}
+            'cells_mac_nice': 10,
+            # the cells' local games in parallel (docs/ENGINE.md 199)
+            'cells_local_jobs': 1, 'cells_local_split': False}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)
 DELVER_YARDSTICKS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter0'], 'blunders': True}
@@ -194,7 +207,7 @@ KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': 
         'cells_mode': str, 'cells_pool_active': int, 'cells_promote_every': int, 'cells_auto_promote': bool,
         'cells_main_share': _NUM, 'cells_gen0_share': _NUM, 'cells_fit_boot': int,
         'cells_mac_jobs': int, 'cells_mac_threads': int, 'cells_mac_groups': int, 'cells_mac_torch_threads': int,
-        'cells_mac_nice': int}
+        'cells_mac_nice': int, 'cells_local_jobs': int, 'cells_local_split': bool}
 # a kind's cadence setting (docs/ENGINE.md 182)
 EVERY = {'bo1': 'bo1_every', 'blunders': 'blunders_every', 'cells': 'cells_every', 'cells_gen': 'cells_gen_every'}
 SEQ_SEED = 7919                           # batch k's seed offset (zero.h2h.sequential's)
@@ -300,6 +313,9 @@ def _normalize_cost(out):
         if out['cells_backend'] in ('farm', 'mac'):
             raise ValueError(f"yardsticks: sequential cells (cells_target_se) play here: cells_backend "
                              f"{out['cells_backend']!r} is refused with it")
+        if out['cells_local_split']:
+            raise ValueError('yardsticks: sequential cells (cells_target_se) play their batches in order, both chooser '
+                             'specs a batch: cells_local_split is refused with it')
 
 
 def bo1_sequential(ys):
@@ -349,6 +365,12 @@ def _normalize_cells(out):
                          f"matches play at once)")
     if not 0 <= out['cells_mac_nice'] <= 20:
         raise ValueError(f"yardsticks: cells_mac_nice {out['cells_mac_nice']}: in [0, 20]")
+    if out['cells_local_jobs'] < 1:
+        raise ValueError(f"yardsticks: cells_local_jobs {out['cells_local_jobs']}: >= 1 (measurements at once in the "
+                         f"cells' local lane; 1: one at a time)")
+    if out['cells_backend'] in ('farm', 'mac') and (out['cells_local_jobs'] > 1 or out['cells_local_split']):
+        raise ValueError(f"yardsticks: cells_local_jobs / cells_local_split are the cells' local games: cells_backend "
+                         f"{out['cells_backend']!r} plays none here (refused: they would do nothing)")
     if out['cells_format'] not in CELLS_FORMATS:
         raise ValueError(f"yardsticks: cells_format {out['cells_format']!r}: {list(CELLS_FORMATS)} (best-of-three cells "
                          f"are not built yet: docs/ENGINE.md 177)")
@@ -1189,14 +1211,26 @@ def cells_lane(run, cfg, ys, ref):
     b = cells_backend(run, cfg, ys, ref)
     if b in ('farm', 'mac'):
         return b                                # (the Mac's lane: its own, measurements in parallel - lane_parallel)
+    return cells_local_lane(ys)
+
+
+def cells_local_lane(ys):
+    """The watcher lane of the cells' local games: 'gpu' (cells_device 'cuda') or 'cpu_bo1' (a local best of one on
+    the same device shares it)."""
     return 'gpu' if ys['cells_device'] == 'cuda' else 'cpu_bo1'
 
 
 def lane_parallel(ys, lane):
     """Measurements a watcher lane runs at once: the 'mac' lane cells_mac_jobs // 2 (each measurement's two chooser
-    matches at once on the Mac: cells_mac_jobs processes there; docs/ENGINE.md 198), every other lane one at a time."""
-    if lane == 'mac' and ys:
+    matches at once on the Mac: cells_mac_jobs processes there; docs/ENGINE.md 198), the cells' local lane
+    cells_local_jobs (1 by default; docs/ENGINE.md 199), every other lane one at a time."""
+    if not ys:
+        return 1
+    if lane == 'mac':
         return max(1, int(ys['cells_mac_jobs']) // 2)
+    n = int(ys.get('cells_local_jobs') or 1)
+    if n > 1 and lane == cells_local_lane(ys):
+        return n
     return 1
 
 
@@ -1550,11 +1584,15 @@ def play_pair_local(a, b, pair, games, ys, seat, log=print, stop=None):
     seat gid % 2), both sides at `seat` -> {'results': {'0': [A's result per game id], '1': ...}, 'unfinished',
     'select'}. Sequential cells (cells_target_se, docs/ENGINE.md 182): the specs in batches (batch k of each seeded
     its seed + 7919 k, game ids following on), `stop(results)` asked after each batch (None: every batch, a
-    baseline's) -> also 'batches', 'stop'."""
-    from zero import gamerec as GR, h2h
-    out = {'results': {}, 'unfinished': 0, 'select': None}
+    baseline's) -> also 'batches', 'stop'. cells_local_split (docs/ENGINE.md 199): the two matches at once, each this
+    same h2h.match call in a process of its own (mtgz.az.local_judge) -> the same dict."""
     if cells_sequential(ys):
         return _play_pair_batches(a, b, pair, games, ys, seat, log, stop)
+    if ys.get('cells_local_split'):
+        from . import local_judge as LJ
+        return LJ.play_pair_split(a, b, pair, games, ys, seat, log=log)
+    from zero import gamerec as GR, h2h
+    out = {'results': {}, 'unfinished': 0, 'select': None}
     sink = GR.active()
     for j in pair_jobs(pair, games, ys):
         t0 = time.time()
