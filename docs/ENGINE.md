@@ -40755,3 +40755,15 @@ directory.
 * **Digests EQUAL** (nothing re-recorded): full 53eda75d63b2743b, encoding-free e65b965d025c800f, constructed
   dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt f78ada3d3d114826,
   dealt per seat 776bf9c1b6db07bc.
+* **Fresh seeds under the `fuzz` profile** (`tools/fuzz_shards.py --first 206000000 --shards 8 --jobs 4 --exe` the
+  fuzz-profile test binary of ad4c74e7, the desktop, throttled): **all passed, 0 failures at the check** -
+  * `delver_dealt2`, 2,000 games + 2,000 matches + 2,000 post-sideboard matches (1,121 s): 1,152,599 private keys of the
+    other player checked in the game fuzz's worlds and 14,543,671 in the match fuzz's (2,683,230 of them in 116,659 games
+    a world started), 455,550 deal keys; 74,280 looks at a card of the viewer's hand recognised by the record - 157 in a
+    step that began the next game, 24 at a card that came into the hand in the step;
+  * the default pool, 2,000 games + 100 matches (357 s): 689,278 keys in the game fuzz's worlds, 313,210 in the match
+    fuzz's (106,481 in 5,812 games a world started); 771 looks;
+  * hidden decklists, 2,000 games (394 s): 444,588 hidden-decklist worlds, 757,884 keys in their walks; 1,105 looks.
+* **GATE PASSED suite 83f40e305085 in 1442s** (206's code and this section but these lines; 2,707 passed in 24
+  binaries; the sharded 2k fuzz of default, default + hidden decklists and delver_dealt). The commit after it records
+  these lines (docs only).
