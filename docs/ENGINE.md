@@ -40559,3 +40559,47 @@ On 7d64bef2 (this section's commit before its docs follow-up), in a warm worktre
   tests/test_dup_reduce.py::test_max_is_deterministic_on_cuda_and_matches_the_cpu (torch's CUDA eager repeats not bit
   for bit on synthetic rows; no Rust or worker code in it), fails alone as well; the gate runs without the GPU
   (CUDA_VISIBLE_DEVICES=-1), which skips it with the other CUDA tests.
+
+## 204. A run's evaluation on the farm: zero-core pin 035bf9e -> d3b1a8d (`eval_remote` = `pool:<farm run>`, zero-core docs/az.md 65; branch `feat/farm-eval`, 2026-11-19)
+
+**Why.** The owner's decision (2026-11-19): the Mac is no longer used over SSH. Its last SSH use is legacy-meta3-r1's
+anchor evaluation (`eval_remote` 'mac': 2 anchors x 100 paired games at eval_sims 32, every 16 iterations, ~6.5-8
+minutes on the Mac). zero-farm already plays eval batches and traced games (zero-farm PROTOCOL 5.2, 5.3), so the
+evaluation's games can go to the farm - friends' idle PCs and the owner's machines running the farm agent (the Mac's
+agent included, through the run's macOS alternate).
+
+**What.** zero-core `feat/farm-eval` d3b1a8d = 035bf9e + three commits (zero-core docs/az.md 65): a new
+`eval_remote` kind, `pool:<farm run>`. The run's side is RemoteEval's (a thread: the iteration never waits; the same
+mirror layout, on this machine; the result recorded by the same code: evals.jsonl with host `pool:<farm run>` plus
+`eval_pool`, the Elo pool's files, models/index.json, best.pt, the game records with src 'farm' or 'local' - so the
+dashboards, the delverai publisher and tools/gamedb.py read it unchanged). Every match the evaluation plays (anchors,
+calibration, Elo, a yardstick vs a built-in bot) is one eval batch of a farm run of its own (never the self-play
+pool's run): its networks registered as gens (an iteration's gen is its iteration, an anchor 900,000,000 + n), a
+signed definition whose eval template is the batch's job (the worker build's `check-config --eval` settings with
+`eval_trace` 1), then the batch. Every row is checked (digest, game id, seats, the record's seed and outcome) and a
+seeded 5% of the farm's games is replayed through the engine from seed + moves (a rules replay: valid across platforms
+and providers, unlike a re-search, whose network arithmetic differs on arm64 / CUDA). A batch's games the farm has not
+delivered after `eval_pool_deadline_s` (1800 s) are played on the desktop by the run's own `pool_worker` on the same
+graphs (the same games). The farm settings are the pool's (`pool_build`, `pool_runtime`, `pool_worker`,
+`pool_alternates`, `pool_min_agent`, `pool_priority`, `pool_export`); new: `eval_pool_deadline_s`,
+`eval_pool_threads`, `eval_pool_spot`, `eval_pool_games_per_lease`, `eval_pool_poll_s` (trainer-only). Off by default:
+every other `eval_remote` value behaves exactly as before (RemoteEval's steps unchanged). No engine, encoding, search
+or worker-behaviour change; zero-core's `crates/worker/src/run_settings.json` classifies the five new settings
+trainer-only, so a worker built from this commit differs from 035bf9e's only in that table (and the game records'
+engine id moves, as with any change under zero-core `crates/`). The worker builds in use (58631de7... and its
+alternates) take the new settings as unknown trainer-only keys (declared classes, docs/az.md 61): no new build needed.
+
+**End-to-end** (zero-core docs/az.md 65 "Measured": a test run with copies of legacy-meta3-r1 iteration 736 and its
+anchors, 8 games a match, on a test farm run limited to the owner's canary agents and Windows builds, paused
+afterwards): the calibration and 736 vs fork0 played by one farm PC (288 s and 696 s), 736 vs meta256 dropped at its
+deadline and played on the desktop (8 games, 134 s at 4 threads); spot checks equal; anchored Elo 1333 +- 200 against
+the Mac's 1346 +- 57; two farm games replayed on the desktop by the same build gave the same digests; the eval
+settings pass `check-config --eval --platform macos-arm64`. The live run, its worktrees and its farm run were not
+touched (files copied, read only).
+
+**For legacy-meta3-r1** (the run's owner decides; nothing was changed on the run): restart it from a worktree of this
+branch's commit with `--eval-remote pool:legacy-meta3-r1-eval` (its pool settings stay as they are: build 58631de7...,
+CUDA + macOS alternates, min_agent 0.2.11, priority 1, the fast graph; `eval_pool_*` at their defaults). The first
+farm evaluation starts a new mirror from the run's Elo pool (the anchors fixed and calibrated already: no calibration
+games), then plays each evaluated iteration's two anchor matches as two 100-game batches, one after the other; the
+iterations the Mac had not evaluated when the run stopped are queued again at the restart.
