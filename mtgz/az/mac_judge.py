@@ -163,11 +163,21 @@ def sync_files(rt, files, log=print):
 def run_job(rt, job, ys, log=print, procs=None):
     """One chooser match on the Mac (`python -m mtgz.az.mac_judge play` there) -> its result dict. `procs`: a list
     the ssh process is added to (the other match's failure stops it). RuntimeError on a failure."""
-    from mtgz import checkout
     env = {'OMP_NUM_THREADS': int(ys['cells_mac_torch_threads']), 'MTGZ_REMOTE_COMMIT': rt['commit']}
     cmd = _ssh(rt, _in_repo(rt, 'play', env=env, nice=ys['cells_mac_nice']))
+    return job_process(cmd, job, log, procs, tag='mac',
+                       fail=f"cells_backend mac: chooser {job['chooser']}'s match failed on the Mac")
+
+
+def job_process(cmd, job, log=print, procs=None, tag='mac', fail=None, **popen):
+    """A judge process's job protocol (the Mac's `mac_judge play` through ssh; mtgz.az.local_judge's `play` here,
+    docs/ENGINE.md 199): `cmd` started, the job one JSON line on its stdin - kept open while the match plays: the
+    process ends when it closes -, its stderr said line by line (`<tag> c<chooser>: ...`), its last JSON line on
+    stdout the result -> that dict. `procs`: a list the process is added to (the other match's failure stops it).
+    RuntimeError (`fail`, the exit code and the stderr's last lines) on a failure."""
+    from mtgz import checkout
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         creationflags=checkout.NO_WINDOW)
+                         creationflags=checkout.NO_WINDOW, **popen)
     if procs is not None:
         procs.append(p)
     err = []
@@ -177,11 +187,11 @@ def run_job(rt, job, ys, log=print, procs=None):
             s = line.decode('utf-8', 'replace').rstrip()
             err.append(s)
             if s:
-                log(f"mac c{job['chooser']}: {s}")
+                log(f"{tag} c{job['chooser']}: {s}")
     t = threading.Thread(target=errors, daemon=True)
     t.start()
     try:
-        # (stdin stays open while the match runs: the Mac's process ends when it closes - mac_judge play)
+        # (stdin stays open while the match runs: the judge process ends when it closes - mac_judge play)
         p.stdin.write(json.dumps(job, separators=(',', ':')).encode('utf-8') + b'\n')
         p.stdin.flush()
         out = p.stdout.read()
@@ -194,9 +204,52 @@ def run_job(rt, job, ys, log=print, procs=None):
         t.join(10)
     lines = [x for x in out.decode('utf-8', 'replace').splitlines() if x.strip().startswith('{')]
     if code or not lines:
-        raise RuntimeError(f"cells_backend mac: chooser {job['chooser']}'s match failed on the Mac (exit {code}): "
-                           + ' | '.join(err[-8:])[-1500:])
+        what = fail or f"{tag} judge: chooser {job['chooser']}'s match failed"
+        raise RuntimeError(f'{what} (exit {code}): ' + ' | '.join(err[-8:])[-1500:])
     return json.loads(lines[-1])
+
+
+def kill_proc(p):
+    """A judge process and its children (on Windows a venv's python.exe is a launcher: the interpreter is its child),
+    if it is still running."""
+    if p.poll() is not None:
+        return
+    try:
+        import psutil
+        kids = psutil.Process(p.pid).children(recursive=True)
+    except Exception:                          # noqa: BLE001 (gone, no psutil)
+        kids = []
+    for k in kids:
+        try:
+            k.kill()
+        except Exception:                      # noqa: BLE001
+            pass
+    try:
+        p.kill()
+    except OSError:
+        pass
+
+
+def run_both(jobs, play):
+    """The jobs (a measurement's two chooser matches) at once, a thread each: `play(job, procs)` -> its result ->
+    {chooser: result}. The first failure stops every process the others started (`procs`) and is raised."""
+    procs, outs, errs = [], {}, {}
+
+    def one(job):
+        try:
+            outs[job['chooser']] = play(job, procs)
+        except Exception as e:                 # noqa: BLE001 - raised below; the other match is stopped
+            errs[job['chooser']] = e
+            for p in list(procs):
+                kill_proc(p)
+    ts = [threading.Thread(target=one, args=(job,), daemon=True) for job in jobs]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    if errs:
+        raise next(iter(errs.values()))
+    return outs
 
 
 def _install_records(sink, out, job, rows):
@@ -259,26 +312,8 @@ def play_pair_mac(a, b, pair, games, ys, seat, log=print):
                      'games': j['games'], 'sims': ys['cells_sims'], 'seed': j['seed'], 'spec': j['spec'],
                      'seat': dict(seat), 'threads': ys['cells_mac_threads'], 'groups': ys['cells_mac_groups'],
                      'torch_threads': ys['cells_mac_torch_threads'], 'sparse': bool(ys['sparse']), 'records': rec})
-    procs, outs, errs = [], {}, {}
     t0 = time.time()
-
-    def one(job):
-        try:
-            outs[job['chooser']] = run_job(rt, job, ys, log, procs)
-        except Exception as e:                 # noqa: BLE001 - raised below; the other match is stopped
-            errs[job['chooser']] = e
-            for p in procs:
-                try:
-                    p.kill()
-                except OSError:
-                    pass
-    ts = [threading.Thread(target=one, args=(job,), daemon=True) for job in jobs]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    if errs:
-        raise next(iter(errs.values()))
+    outs = run_both(jobs, lambda job, procs: run_job(rt, job, ys, log, procs))
     out = {'results': {}, 'unfinished': 0, 'select': None, 'mac': {'commit': rt['commit'][:12]}}
     for job in jobs:
         m = outs[job['chooser']]

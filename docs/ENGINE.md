@@ -39778,3 +39778,106 @@ Doomsday/Sneak baseline and, unless the farm finishes it first, its Delver/Sneak
   ("failed to update ref") and those steps fall back to the desktop, where `test_mac_remote::
   test_the_macs_selfplay_settings` fails because Git Bash converts the exported `MTGZ_MAC_HOME` (main fails the same
   way through tools/slotd.sh). Rerunning the gate (the sha already pushed) puts them on the Mac.
+
+## 199. The cells' local games in parallel: several measurements at once in the local lane, a measurement's two chooser matches at once (`cells_local_jobs`, `cells_local_split`; branch `feat/cells-local-parallel`, 2026-11-18)
+
+### 199.1 Why
+
+`legacy-meta3-r1` now judges its 3x3 cells on the desktop's GPU (198.6: the Mac could not carry a window beside its
+self-play): a hand watcher with `cells_backend` 'local', `cells_device` 'cuda', the pool mode, 200 games a cell against
+gen0 and 100 gen over gen every 256 iterations, `bo1_threads` 16, `bo1_groups` 1, 64 simulations. A sidecar pauses the
+run while a measurement is under way, so the judge has the GPU to itself. It delivered ~950 games/h - a window of
+~3,300 games (1,800 against gen0, 900 gen over gen, 600 for the previous checkpoint's 3 baselines) in ~3.5 h - at
+about a fifteenth of the self-play's leaves/s on the same GPU. The local lane plays one measurement at a time, and in
+it chooser 0's match, then chooser 1's: one `zero.h2h.match` of two networks and ~100-200 games, so a network call
+carries ~25-100 positions (self-play: 1,536 games in flight, ~400 rows a call).
+
+### 199.2 What
+
+* **`cells_local_jobs`** (1): the watcher's local cells lane - 'gpu' with `cells_device` 'cuda', else 'cpu_bo1'
+  (`yardsticks.cells_local_lane`) - runs that many measurements at once through the Mac lane's hook (198.2):
+  `lane_parallel`, each measurement in its own thread and `one` child process, the oldest due first,
+  `pending(busy=...)` skipping the measurements under way, a cell waiting while its baseline is under way
+  (`item_ready`), every measurement once; the fit lane still waits for its checkpoint's measurements (`after`). A local
+  best of one on the same device shares the lane and so runs beside them (independent measurements, a row each).
+  1: one at a time in the lane's own thread, as before.
+* **`cells_local_split`** (false): a local measurement plays its two chooser matches at once, each in a process of its
+  own (`mtgz/az/local_judge.py`: `python -m mtgz.az.local_judge play`, with the `one` child's interpreter, environment
+  and checkout; its below-normal priority inherited). Each is exactly the `zero.h2h.match` call `play_pair_local`
+  makes - the same checkpoint files (absolute paths), spec, seed, games, sims, seat (unpaired: A in seat gid % 2),
+  `bo1_threads`, `bo1_groups`, `cells_device` and sparse rows - and the results are put together as there (chooser 0
+  then 1: `select` is chooser 1's, `unfinished` summed), so the rows, statistics, baselines and **the baselines' cache
+  keys** (`base_key` reads neither setting) are the sequential path's: the live run's cached baselines are reused as
+  they are. A seat that does not survive JSON exactly is refused before anything plays. Processes, not threads: each
+  holds its own CUDA context, so no CUDA-graph capture is shared between threads of one process.
+* **The protocol** is the Mac's (`mac_judge.job_process`, factored out of `run_job`; `mac_judge.run_both`, out of
+  `play_pair_mac`: the two jobs at once, the first failure stopping the other's process tree - `kill_proc`, a venv
+  launcher's interpreter included - and raised): the job one JSON line on stdin, the result one JSON line on stdout,
+  the match's stderr in the measurement's console (`local c<chooser>: ...`). Stdin stays open while the match plays
+  and its end ends the process (exit 75): on POSIX by a raw read (198.4), on **Windows by peeking the pipe once a
+  second** (`local_judge._die_with_stdin`, `PeekNamedPipe`). A thread blocked in a synchronous read of the stdin pipe
+  blocks every other call on that handle, and a DLL's C runtime asks the standard handles' type as it starts: the first
+  smoke's match processes hung in numpy's import (the first thing `zero.h2h` loads) behind the reading thread - 20 MB,
+  no CPU, 10 minutes - until killed. The Mac's side keeps its raw read.
+* **The game records** (docs/gamedb.md): each match process writes its match as one records file straight into the
+  measurement's records directory, with the measurement's sink's kind, iteration, labels, src ('local'), meta (and the
+  pairing and the chooser, as `with_meta`) and the measurement's build line - the file the sequential match writes
+  there (`local-<pid>-<ms>-<n>.jsonl.gz`, the match process's pid) -, and the measurement's sink counts it. As before,
+  a measurement failing after one of its matches finished leaves that match's file (its retry plays both again).
+* **Refusals**: `cells_local_jobs` < 1; either setting off its default with `cells_backend` 'farm' or 'mac' (nothing is
+  played here: they would do nothing); `cells_local_split` with sequential cells (`cells_target_se`: both chooser
+  specs' batches in order, a stop rule after each).
+
+### 199.3 The settings for the desktop
+
+* **`cells_local_jobs` 4, `cells_local_split` true, `bo1_groups` 1, `bo1_threads` 4**: up to 8 match processes at
+  once. `bo1_groups` 1: the largest batch a network call (another process fills the GPU's gaps that a second group
+  filled inside one process, and every call costs its launch however few rows it has); `bo1_threads` 4: 8 processes x
+  4 search threads = the desktop's 32 logical CPUs (the search is cheap beside the networks: self-play's driver stays
+  under a core, zero-core docs/az.md 10.7). Neither is part of a measurement's definition (as `cells_mac_threads` is
+  not). `timeout_s` counts a measurement's wall time, which grows when it shares the GPU: keep it generous (14,400).
+* **GPU memory**: each match process holds a CUDA context, two small networks (128 x 8) and its graph pools; the live
+  judge's single process took at most ~2.7 GB (the GPU's whole use beside it, the desktop's own included), so 8 at
+  once fit while the run is paused. The sidecar pauses the run at the next iteration boundary, so a window's first
+  measurements share the GPU with the run's last iteration.
+* **The switch** (from a pinned worktree of the merged commit, its `mtgz/_engine.pyd` the run's - the engine sha is in
+  every baseline's key - as in 198.5): the live setting with `"cells_local_jobs": 4, "cells_local_split": true,
+  "bo1_threads": 4, "bo1_groups": 1`, through `run_yardsticks.py watch <run> --take-over --yardsticks '<json>'`.
+
+### 199.4 Tests and smoke
+
+`tests/test_cells_local_parallel.py` (10): the defaults change nothing (1 / false; every lane but the Mac's one at a
+time; the measurements wanted, their keys and their baselines' keys the same with the settings on) and the live run's
+switch accepted, its cells and gen-over-gen cells in the lane 'gpu' (4 at once), 'cpu_bo1' with `cells_device` 'cpu';
+the refusals (0 jobs, the types, 'farm' / 'mac', the split with sequential cells; auto and 'local' accepted); the
+watcher's local lane with `cells_local_jobs` 1 and 3 running exactly that many at once (1: in the lane's own thread,
+every cell of iteration 16 before any of 32), every measurement once, each cell after its baseline, the oldest
+checkpoint first; both chooser matches under way at once (a barrier) with every `h2h.match` argument of the sequential
+path (checkpoints, games, sims, seed, spec, seats, unpaired, rows, sparse, device, threads, groups) and the same
+results, unfinished count and select, for a cell, a mirror and a baseline; a seat that would not travel refused; the
+rows of a baseline, a cell and a mirror, the baseline's cache key and its cache file the same with the split, a cached
+baseline reused without a game; the records the same record for record (two files in the measurement's directory,
+counted by its sink); two real match processes playing at once (each waits for the other's start), writing their
+records files themselves (their own pids, the measurement's build line) - their fake match importing numpy after the
+stdin watcher started, the condition of the hang above (a blocking-read watcher hangs it, checked by hand) -; a failed
+match stopping the other (waiting 600 s otherwise) and raised with its traceback; a match process ending (75) when its
+stdin closes. `tests/test_cells_mac.py`: its lane test's race fixed (a baseline's end was taken after its cache file
+was written, so a cell could start in between and fail "after its baseline": once in seven runs here).
+
+Smoke (CPU, real checkpoints: copies of `legacy-meta3-r1`'s generation 0, iteration 512 and config.json in a scratch
+directory; the Delver / Doomsday pair, 4 games a spec, 4 simulations, `bo1_threads` 2, `bo1_groups` 1, records on):
+the split's results equal the sequential path's, its two records files equal the sequential path's record for record
+(actions, results, rounds, players, meta, the build line; the time field aside), the baseline key the same
+(dae09528e694272a); both matches at once in 40 s against 47 s one after the other (most of it each process's start
+and torch import).
+
+### 199.5 Open points
+
+* **The GPU's gain is not measured yet** (the GPU was busy with the live judge): the first window under the switch
+  says it. A ceiling: kernels of different processes never run at once (separate CUDA contexts time-slice the GPU; no
+  MPS on Windows), so the processes can only fill the GPU's idle time in one measurement. Sampled during a live
+  measurement (`nvidia-smi dmon`, the run paused, one process): the GPU was busy 33-60% of the time (sm %), so the
+  processes can give roughly 1.7-3x at best - not the 5-10x a 20-40 min window needs. The rest needs bigger network
+  calls: the matches of the same two networks in one driver and evaluator (a window's 6 measurements against gen0 are
+  all iteration N against gen0; a driver holds one spec today, so this is a zero-core change), or a process's matches on
+  CUDA streams of their own.

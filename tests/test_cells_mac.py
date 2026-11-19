@@ -364,6 +364,7 @@ def test_the_mac_lane_runs_cells_mac_jobs_halved_at_once_each_cell_after_its_bas
             state['max'] = max(state['max'], state['now'])
         t0 = time.time()
         time.sleep(0.15)
+        end = time.time()                       # (a baseline's end: before its cache file is there for the cells)
         if item['kind'] == 'cells_base':
             os.makedirs(Y.cache_dir(run, ys_), exist_ok=True)
             with open(Y.base_file(Y.cache_dir(run, ys_), item['base']), 'w') as f:
@@ -377,7 +378,7 @@ def test_the_mac_lane_runs_cells_mac_jobs_halved_at_once_each_cell_after_its_bas
             Y.append_row(run, row)
         with lock:
             state['now'] -= 1
-            spans.append((item['kind'], item.get('iter'), tuple(item['pair']), t0, time.time()))
+            spans.append((item['kind'], item.get('iter'), tuple(item['pair']), t0, end))
         return row
     w.measure = measure
     assert w.main() == 0
