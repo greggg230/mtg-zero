@@ -164,3 +164,42 @@ def test_a_selfplay_repro_is_confirmed_only_on_exit_101(tmp_path):
     # a record of 167.6 (no repro): confirmed when it happened on the owner's machines, else unknown
     assert st.confirm({'kind': 'selfplay', 'target': 'r', 'sources': ['local'], 'repro': None})[0] is True
     assert st.confirm({'kind': 'selfplay', 'target': 'r', 'sources': ['pool'], 'repro': None})[0] is None
+
+
+def test_a_chunk_failure_is_replayed_over_its_whole_chunk(tmp_path, monkeypatch):
+    """docs/ENGINE.md 209: a failure of a chunk's own checks after its last seed (the rules checks' verdict, what the mode
+    must have exercised) is reported at the chunk's first seed with "(the chunk: FUZZ_GAMES=n)"; the steward replayed that
+    one seed, which passes (13f02539e054, e940641803b8). The replay is the whole chunk, cut as one chunk of its seeds."""
+    import json
+    import subprocess
+    import types
+    assert S.chunk_count('(at 6a44afdbf1ef) FUZZ_FIRST=100042326 FUZZ_GAMES=1 FUZZ_LOG=1 cargo test --profile fuzz -p engine '
+                         '--test fuzz fuzz_random_games -- --exact --nocapture (the chunk: FUZZ_GAMES=1000)') == 1000
+    assert S.chunk_count('FUZZ_POOL=delver_dealt2 FUZZ_FIRST=1 FUZZ_GAMES=1 cargo test (the chunk: FUZZ_GAMES=239)') == 239
+    assert S.chunk_count('DRAFT_FUZZ_FIRST=5 DRAFT_FUZZ=1 cargo test (the chunk: DRAFT_FUZZ=50)') == 50
+    assert S.chunk_count('FUZZ_FIRST=100061919 FUZZ_GAMES=1 FUZZ_LOG=1 cargo test') == 1
+    assert S.chunk_count(None) == 1
+    a = types.SimpleNamespace(state=str(tmp_path / 'st'), quiet=True, dry_run=True, once=True, status_file=None,
+                              runs_glob=str(tmp_path / 'runs' / '*' / 'supervisor_state.json'))
+    st = S.Steward(a)
+    mode = dict(S.MAIN_MODES[0])
+    st.state['targets']['main'] = {'build_id': 'b1', 'exe': str(tmp_path / 'mtgz-worker.exe'), 'modes': [mode]}
+    seen = []
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        f = {'seed': 100042326, 'mode': 'games', 'site': 'engine/src/fuzz/games.rs:360', 'panic': 'x', 'repro': 'r'}
+        return types.SimpleNamespace(returncode=0, stdout='FUZZ_LOCAL_FAILURE ' + json.dumps(f) + '\n', stderr='')
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    e = {'kind': 'fuzz', 'id': 'x1', 'target': 'main', 'build': 'b1', 'mode': 'games', 'seed': 100042326,
+         'site': 'engine/src/fuzz/games.rs:360', 'repro': 'FUZZ_FIRST=100042326 FUZZ_GAMES=1 cargo test (the chunk: FUZZ_GAMES=1000)'}
+    ok, note = st.confirm(e)
+    assert ok is True and 'the chunk of 1000 seeds from 100042326' in note, note
+    argv = seen[-1]
+    val = lambda k: argv[argv.index(k) + 1]  # noqa: E731
+    assert (val('--first'), val('--count'), val('--chunk'), val('--threads')) == ('100042326', '1000', '1000', '1')
+    # a seed's own failure: that seed alone
+    st.confirm(dict(e, repro='FUZZ_FIRST=100042326 FUZZ_GAMES=1 cargo test', site='engine/src/hidden.rs:1336'))
+    argv = seen[-1]
+    assert (val('--count'), val('--chunk')) == ('1', '1')

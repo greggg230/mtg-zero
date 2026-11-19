@@ -206,6 +206,15 @@ pub(crate) const ENTER_BIG: u32 = 1 << 16;
 /// task finish below `u32::MAX` (a hard assert, the backstop).
 pub(crate) const OBJECT_LIMIT: usize = u32::MAX as usize - 1024;
 
+/// The permanents a game holds before it ends aborted (ENGINE.md 209): no
+/// row of layout v7 can show more (each permanent is one of its tokens: a
+/// head slot or a tail token, and the head has more slots than the two
+/// permanent segments' head slots), so past it zero-core's driver aborts the
+/// game at its next row (`MAX_ROW_TOKENS`, the user's decision D4). Token
+/// creation checks it (`token_count`), the only way a board grows past the
+/// game's cards: an exponential run of copies is ended at once, not made.
+pub(crate) const PERMANENT_LIMIT: usize = crate::az::tail_encode::MAX_ROW_TOKENS;
+
 impl Game {
     /// The times an additional cost was paid and the X a permanent entered
     /// with, from its `Enters` event's note `amount` (bits 1-8 and 9-14, or
@@ -2190,6 +2199,12 @@ impl Game {
     /// 100.4.8), exact. Past the objects the engine can hold (`OBJECT_LIMIT`,
     /// where `add_card` aborts the game, ENGINE.md 100.7) the game ends
     /// aborted now, and none are created: creating them would abort it there.
+    /// So it does past the permanents a row can show (`PERMANENT_LIMIT`,
+    /// ENGINE.md 209): the network could see no such board, and zero-core's
+    /// driver aborts the game at its next row (D4) - the engine ends it here
+    /// instead of first making the tokens (an exponential run of copies,
+    /// Ocelot Pride's "for each token ... a copy of it" doubling the board
+    /// once per Ocelot Pride, would make billions).
     pub(crate) fn token_count(&mut self, controller: PlayerId, n: u32) -> u32 {
         let mut n = n as crate::num::Wide;
         for c in self.permanents_of(controller) {
@@ -2202,6 +2217,12 @@ impl Game {
         let room = OBJECT_LIMIT.saturating_sub(self.objs.len()) as crate::num::Wide;
         if n > room {
             self.abort(|| format!("{n} tokens: past the {OBJECT_LIMIT} objects the engine holds"));
+            return 0;
+        }
+        let board = PERMANENT_LIMIT.saturating_sub(self.battlefield.len()) as crate::num::Wide;
+        if n > board {
+            let on = self.battlefield.len();
+            self.abort(|| format!("{n} tokens onto {on} permanents: past the {PERMANENT_LIMIT} permanents a row can show"));
             return 0;
         }
         n as u32

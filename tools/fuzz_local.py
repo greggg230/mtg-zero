@@ -5,7 +5,7 @@ desktop (the build's signed fuzz worker) and on the Mac (the commit's `mtgz-work
 the steward ships this file's text, so it must stay standard library only and not import anything of the checkout).
 
     python tools/fuzz_local.py --worker EXE --mode M [--env K=V ...] --first F --count N [--threads 2]
-           [--work DIR] [--stop-file PATH] [--max-s SECONDS] [--idle]
+           [--chunk C] [--work DIR] [--stop-file PATH] [--max-s SECONDS] [--idle]
 
 Output (stdout, one line each, flushed as they happen):
     FUZZ_LOCAL_HELLO {"build_id", "kinds", ...}                    the worker's hello
@@ -16,7 +16,9 @@ Output (stdout, one line each, flushed as they happen):
 failing ones included. `--stop-file` / `--max-s` / SIGTERM / SIGINT: the job is asked to `finish` (each chunk ends
 the seed it is playing; the summary lists what is unfinished), and killed 60 s later if it has not ended. `--idle`:
 the worker (and its chunk processes, which inherit it) at the lowest CPU priority (Windows IDLE_PRIORITY_CLASS,
-POSIX nice 19), no console window.
+POSIX nice 19), no console window. `--chunk C`: the job's chunks of exactly C seeds (the job's `chunk`; default the
+worker's own cut, at least the loop's least chunk) - the steward's replay of a failure of a chunk's own checks is that
+chunk, cut as the farm cut it (docs/ENGINE.md 209).
 Exit: 0 the job ended (failures are results, not errors), 2 the worker refused the job or broke.
 """
 import argparse
@@ -67,6 +69,7 @@ def main(argv=None):
     ap.add_argument('--first', type=int, required=True)
     ap.add_argument('--count', type=int, required=True)
     ap.add_argument('--threads', type=int, default=2)
+    ap.add_argument('--chunk', type=int, default=None, help="chunks of exactly this many seeds (default: the worker's cut)")
     ap.add_argument('--work', default=None, help='the job\'s working directory (default: a new temp dir)')
     ap.add_argument('--stop-file', default=None)
     ap.add_argument('--max-s', type=float, default=None)
@@ -134,6 +137,8 @@ def main(argv=None):
                 else:
                     job = {'op': 'job', 'lease_id': f'local-{a.first}', 'kind': 'fuzz', 'mode': a.mode, 'env': env,
                            'first': a.first, 'count': a.count, 'threads': max(1, a.threads), 'out_dir': 'out'}
+                    if a.chunk:
+                        job['chunk'] = a.chunk
                     send(job)
                     job_sent = True
             elif kind == 'failure':

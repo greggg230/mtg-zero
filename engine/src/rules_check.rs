@@ -88,6 +88,10 @@ pub struct Stats {
     /// Cards a forced chance outcome may have dealt another identity
     /// (`RulesCheck::forced_chance`: 108.1 not applied to them).
     pub forced_identities: u64,
+    /// Stack objects that left from under one that stayed in a step that
+    /// ended the game: a resolution the game's end cut short (104.1, ENGINE.md
+    /// 209), not checked against 608.1.
+    pub ended_departures: u64,
 }
 
 impl Stats {
@@ -106,6 +110,7 @@ impl Stats {
         self.pools += o.pools;
         self.token_moves += o.token_moves;
         self.forced_identities += o.forced_identities;
+        self.ended_departures += o.ended_departures;
     }
 }
 
@@ -113,7 +118,7 @@ impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} states, {} at priority (704/117.5), stack {} steps / {} objects compared (405.2, 608.1, 601.2), {} new turns (500.7), options: {} attack (508.1a), {} block (509.1), {} damage assignments (510.1c, 702.19b; {} in digits not compared), declarations: {} attacks (508.1), {} blocks (509.1), {} steps begun with empty pools (500.5), {} token moves (111.8), {} identities a forced chance outcome changed (108.1 not applied)",
+            "{} states, {} at priority (704/117.5), stack {} steps / {} objects compared (405.2, 608.1, 601.2), {} new turns (500.7), options: {} attack (508.1a), {} block (509.1), {} damage assignments (510.1c, 702.19b; {} in digits not compared), declarations: {} attacks (508.1), {} blocks (509.1), {} steps begun with empty pools (500.5), {} token moves (111.8), {} identities a forced chance outcome changed (108.1 not applied), {} objects left from under one a game's end left on the stack (104.1)",
             self.states,
             self.priority,
             self.stack_steps,
@@ -127,7 +132,8 @@ impl std::fmt::Display for Stats {
             self.blocks,
             self.pools,
             self.token_moves,
-            self.forced_identities
+            self.forced_identities,
+            self.ended_departures
         )
     }
 }
@@ -1184,7 +1190,17 @@ impl RulesCheck {
         // too).
         // (A resolving object is still on the stack: its effects may have
         // been done in part.)
+        // (104.1: a game that ended in this step ended at once, perhaps in the
+        // middle of a resolution - Remand's or Reprieve's "draw a card" with
+        // Jace, Wielder of Mysteries out wins it after the spell went back to
+        // its owner's hand. The engine drops the agenda when a game ends
+        // (`advance`), so the object that was resolving stays on the stack
+        // with no `FinishResolve` left to show it. It is the topmost of the
+        // objects that stayed (or one put on the stack since), above every
+        // object below it that left: such a step's departures are all
+        // excused. ENGINE.md 209.)
         let came_and_went = !new_items_stayed(p, g);
+        let ended = g.is_over();
         let resolving_now = |id: u32| g.agenda.iter().any(|t| matches!(t, Task::FinishResolve { id: x } if *x == id));
         let new_resolving = g.stack.iter().any(|s| s.id >= p.next_stack_id && resolving_now(s.id));
         for (i, it) in p.stack.iter().enumerate() {
@@ -1194,6 +1210,10 @@ impl RulesCheck {
             if let Some(j) = (i + 1..p.stack.len()).find(|&j| here(p.stack[j].id).is_some()) {
                 let above_acted = (j + 1..p.stack.len()).any(|k| here(p.stack[k].id).is_none()) || (j..p.stack.len()).any(|k| resolving_now(p.stack[k].id));
                 if !above_acted && !came_and_went && !new_resolving {
+                    if ended {
+                        self.stats.ended_departures += 1;
+                        continue;
+                    }
                     return fail("608.1, 405.5", format!("{} left the stack while {} above it stayed, and nothing above that resolved", item_name(g, &it.kind), item_name(g, &p.stack[j].kind)));
                 }
             }
@@ -2094,6 +2114,42 @@ mod tests {
         let (mut g, mut rc, ..) = base();
         g.stack.swap(0, 1);
         assert_eq!(rule(rc.step(&g)), "405.2");
+    }
+
+    /// ENGINE.md 209 (the fuzz steward's 13f02539e054): a game ends at once (CR 104.1), in the middle of a resolution
+    /// too - Remand's "draw a card" with Jace, Wielder of Mysteries out wins it after the spell went back to its owner's
+    /// hand - and the engine drops the agenda then, so the object that was resolving stays on the stack with no
+    /// `FinishResolve` to show it. An object below it that left (Remand's target) is no violation of 608.1 when the step
+    /// ended the game; the same departure in a game that goes on still is.
+    #[test]
+    fn cr_104_1_a_game_that_ends_in_a_resolution_leaves_its_object_on_the_stack() {
+        let v = vanilla();
+        let base = |n: usize| {
+            let mut g = at_priority(Scenario::new(db()).battlefield(0, &[v]));
+            let c = bf(&g, 0, v);
+            let ids: Vec<u32> = (0..n).map(|_| push_item(&mut g, c)).collect();
+            let mut rc = RulesCheck::new(&g);
+            rc.step(&g).unwrap();
+            (g, rc, ids)
+        };
+        // Remand (the top) countered its target (the bottom), then its draw won the game.
+        let (mut g, mut rc, ids) = base(2);
+        g.stack.retain(|s| s.id != ids[0]);
+        g.end_game(Some(0), crate::game::EndReason::Effect);
+        rc.step(&g).unwrap();
+        assert_eq!(rc.stats.ended_departures, 1);
+        // Brain Freeze, its storm trigger, Remand on Brain Freeze: the spell left from under the trigger.
+        let (mut g, mut rc, ids) = base(3);
+        g.stack.retain(|s| s.id != ids[0]);
+        g.end_game(Some(0), crate::game::EndReason::Effect);
+        rc.step(&g).unwrap();
+        assert_eq!(rc.stats.ended_departures, 1);
+        // The same departures in a game that goes on: nothing above resolved.
+        for n in [2, 3] {
+            let (mut g, mut rc, ids) = base(n);
+            g.stack.retain(|s| s.id != ids[0]);
+            assert_eq!(rule(rc.step(&g)), "608.1, 405.5");
+        }
     }
 
     #[test]

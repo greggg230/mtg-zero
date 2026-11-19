@@ -458,3 +458,41 @@ fn cr_106_4_gaeas_cradle_past_255_creatures_ends_the_game_aborted() {
     assert_aborted(&g, "a 256th creature with the Cradle tapped");
     assert_eq!(g.battlefield().iter().filter(|&&c| g.name(c) == "Llanowar Elves").count(), 256);
 }
+
+/// ENGINE.md 209 (the fuzz steward's hang 9a40cd0d7010, default-pool game 100061919): CR 111.2 has no maximum, but past
+/// `MAX_ROW_TOKENS` permanents no row of layout v7 can show the board (each permanent is one of its tokens), and zero-core's
+/// driver aborts such a game at its next row (the user's decision D4). Ocelot Pride's end-step trigger with the city's
+/// blessing ("create a 1/1 white Cat ... Then ... for each token you control that entered this turn, create a token that's a
+/// copy of it", CR 702.131) doubles the tokens that entered this turn: after k triggers 2^(k+1) - 2 of them. The engine made
+/// them one at a time - the fuzz's game had ~30 Ocelot Prides, so billions, quadratic in the copies (`copy_fx` scans them) -
+/// and hung. Token creation now ends the game aborted at once when it would take the battlefield past the limit, creating
+/// none. Ten Ocelot Prides and a lifelinker (eleven permanents: the blessing) make 2,046 tokens and play on; eleven reach the
+/// limit in the eleventh trigger (4,094 tokens onto twelve permanents) and end aborted there, a board no row can show.
+#[test]
+fn cr_111_2_tokens_past_the_permanents_a_row_can_show_end_the_game_aborted() {
+    use engine::az::tail_encode::{Row, MAX_ROW_TOKENS};
+    for (ocelots, aborted) in [(10usize, false), (11, true)] {
+        let mut names = vec!["Ocelot Pride"; ocelots];
+        names.push("Test Lifelinker");
+        let mut g = scen().battlefield(0, &names).at(Step::DeclareAttackers, 0).start();
+        let l = bf(&g, 0, "Test Lifelinker");
+        attack_unblocked(&mut g, l);
+        assert!(g.player(0).life_gained > 0, "lifelink");
+        assert!(g.player(0).city_blessing, "{} permanents", ocelots + 1);
+        let t0 = g.turn().number;
+        quiet_until(&mut g, |g| g.is_over() || g.turn().step == Step::Cleanup || g.turn().number > t0);
+        let tokens = g.battlefield().iter().filter(|&&c| g.is_token(c)).count();
+        if aborted {
+            assert_aborted(&g, "eleven Ocelot Prides");
+            assert_eq!(g.battlefield().len(), MAX_ROW_TOKENS, "tokens up to the limit, none past it");
+            assert!(g.log_lines().iter().any(|x| x.contains("permanents a row can show")), "{:?}", g.log_lines().last());
+            for viewer in 0..2 {
+                assert!(Row::of(&g, viewer).capacity() > MAX_ROW_TOKENS, "P{viewer}'s row shows the board: the driver would not abort it");
+            }
+        } else {
+            assert!(!g.is_over(), "{:?}", g.outcome());
+            assert_eq!(tokens, (1 << (ocelots + 1)) - 2, "2^(k+1) - 2 tokens after k triggers");
+            assert_eq!(g.battlefield().len(), ocelots + 1 + tokens);
+        }
+    }
+}

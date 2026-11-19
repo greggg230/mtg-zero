@@ -50,7 +50,8 @@ queue `<state>/queue.jsonl`: one JSON line per failure site (tools/fuzz_farm.py'
 message's first line, digits masked - the id tools/farm_fuzz_pull.py gives the same panic), with kind, site, message,
 mode, the first seeds, repro command, build, engine commit, target, first / last seen, count, sources and whether it
 was confirmed. A new site is replayed here (a fuzz seed: the build's worker over that one seed, which must fail at the
-same site; a self-play failure: its record's `repro` command in the run's own checkout - docs/ENGINE.md 172's replay, which exits
+same site - a failure of a chunk's own checks after its last seed, reported at the chunk's first seed with "(the chunk:
+FUZZ_GAMES=n)", over that whole chunk, docs/ENGINE.md 209; a self-play failure: its record's `repro` command in the run's own checkout - docs/ENGINE.md 172's replay, which exits
 101 when it reproduces the panic) and,
 once confirmed, the owner gets ONE short message through the game-alerts relay on the Mac (`relay.py --notify-b64`;
 no machine details). A self-play panic that has no `repro` (records before docs/ENGINE.md 171's) counts as confirmed
@@ -245,6 +246,14 @@ def failure_id(site, message_lines):
     from fuzz_farm import failure_key
     key = failure_key(site or 'unknown', list(message_lines or []))
     return hashlib.sha1(key.encode()).hexdigest()[:12], key
+
+
+def chunk_count(repro):
+    """The seeds a fuzz failure's replay needs: a failure of a chunk's own checks after its last seed is reported at the
+    chunk's first seed with zero-core's suffix "(the chunk: FUZZ_GAMES=n)" (tools/fuzz_farm.py's too) - the whole chunk
+    replays it (docs/ENGINE.md 209); any other failure is its seed's alone."""
+    m = re.search(r'\(the chunk: [A-Z_]+=(\d+)\)', repro or '')
+    return int(m.group(1)) if m else 1
 
 
 def campaign_name(target, commit, alias):
@@ -803,20 +812,26 @@ class Steward:
             if not exe or m is None or e.get('seed') is None:
                 return None, 'no local build or mode to replay it with'
             work = os.path.join(self.dir, 'jobs', f'confirm-{e["id"]}')
+            # a failure of the chunk's own checks after its last seed (the rules checks' verdict, what the mode must
+            # have exercised: docs/ENGINE.md 209) is the whole chunk's, reported at its first seed: the replay is that
+            # chunk, one chunk of exactly its seeds as the farm cut it
+            count = chunk_count(e.get('repro'))
+            what = f'seed {e["seed"]}' if count == 1 else f'the chunk of {count} seeds from {e["seed"]}'
             argv = [self.py(), os.path.join(HERE, 'fuzz_local.py'), '--worker', exe, '--mode', m['mode'],
-                    '--first', str(e['seed']), '--count', '1', '--threads', '1', '--work', work, '--idle']
+                    '--first', str(e['seed']), '--count', str(count), '--chunk', str(count), '--threads', '1',
+                    '--work', work, '--idle']
             for k, v in m['env'].items():
                 argv += ['--env', f'{k}={v}']
             try:
-                p = subprocess.run(argv, capture_output=True, text=True, timeout=1800, creationflags=NO_WINDOW)
+                p = subprocess.run(argv, capture_output=True, text=True, timeout=max(1800, 3 * count), creationflags=NO_WINDOW)
             except subprocess.TimeoutExpired:
                 return None, 'the replay timed out'
             fails = [json.loads(x.split(' ', 1)[1]) for x in p.stdout.splitlines() if x.startswith('FUZZ_LOCAL_FAILURE ')]
             if any(f.get('site') == e.get('site') for f in fails):
-                return True, f'replayed here: seed {e["seed"]} fails at the same site'
+                return True, f'replayed here: {what} fails at the same site'
             if fails:
-                return True, f'replayed here: seed {e["seed"]} fails, at {fails[0].get("site")}'
-            return False, f'replayed here: seed {e["seed"]} passes (exit {p.returncode})'
+                return True, f'replayed here: {what} fails, at {fails[0].get("site")}'
+            return False, f'replayed here: {what} passes (exit {p.returncode})'
         repro = e.get('repro')
         if not repro:
             src = set(e.get('sources') or [])

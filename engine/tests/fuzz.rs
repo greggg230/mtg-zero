@@ -249,6 +249,93 @@ fn info_set_walk_default_seeds_of_208() {
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
+/// ENGINE.md 209: the fuzz steward's queue entry 13f02539e054 (site games.rs:360, "rules checks violated: CR 608.1, 405.5",
+/// 12 farm chunks of `games` and `hidden-games` on three main builds; the steward's replay of each chunk's first seed
+/// passed). The violations were in five seeds of those chunks - 100,042,696 (open decklists) and 100,101,433, 100,134,291,
+/// 100,148,738, 100,159,224 (hidden decklists), in worlds played on and in one game itself: Remand or Reprieve returns its
+/// target spell to its owner's hand, then its "draw a card" with Jace, Wielder of Mysteries out and an empty library wins
+/// the game (CR 104.1: at once), Remand still on the stack and the agenda dropped. The rules check now passes a departure in
+/// a step that ended the game. Replayed at the `fuzz` profile's denominator (4) in every profile, every check of `play` /
+/// `play_hidden`: no violation, and at least one departure the game's end excused (positive evidence).
+#[test]
+fn a_game_won_in_the_middle_of_a_resolution_leaves_its_spell_on_the_stack() {
+    use engine::fuzz::games::{rules_stats, take_rules_violations, CHECKPOINT_EVERY_OVERRIDE};
+    if pool_mode() != PoolMode::Default || sealed_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        let _ = take_rules_violations();
+        let ended0 = rules_stats().ended_departures;
+        play(100_042_696, true);
+        for seed in [100_101_433u64, 100_134_291, 100_148_738, 100_159_224] {
+            play_hidden(seed);
+        }
+        let v = take_rules_violations();
+        assert!(v.is_empty(), "rules checks violated: {v:?}");
+        assert!(rules_stats().ended_departures > ended0, "no departure in a step that ended the game was checked");
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
+/// ENGINE.md 209: the fuzz steward's hang 9a40cd0d7010 (default-pool game 100,061,919, "no exit after 300 s", on three main
+/// builds). At step 421 P1 orders ~30 Ocelot Pride end-step triggers (copies of Ocelot Pride from Reflection of
+/// Kiki-Jiki); with the city's blessing each creates a Cat and a copy of every token that entered this turn, doubling them
+/// - billions of tokens, made one at a time at a cost growing with the copies (the completion check's paths through the
+/// ordering never ended). Token creation now ends the game aborted at the permanents a row can show
+/// (`rules_numbers::cr_111_2_tokens_past_the_permanents_a_row_can_show_end_the_game_aborted`): the game plays to its end with
+/// every check, at the `fuzz` profile's denominator (4) in every profile.
+#[test]
+fn an_exponential_run_of_ocelot_pride_copies_ends_default_seed_100061919() {
+    use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
+    if pool_mode() != PoolMode::Default || sealed_mode() || hidden_decks_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| play(100_061_919, true));
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    let p = r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+    assert!(p.turns >= 37, "the game reached the end step of turn 37: {} turns", p.turns);
+}
+
+/// ENGINE.md 209: the fuzz steward's queue entry e940641803b8 (`FUZZ_POOL=delver_dealt2` games, site games.rs:3750): farm
+/// chunks of 239, 319 and 325 games - the rest of a 1,000-seed chunk after a failing seed - failed their end-of-run check
+/// "the legacy cards weren't played: 165 0 234" (Murktide Regents cast, their leave-the-graveyard triggers seen on the
+/// stack, Prismari Charms cast). The trigger is seen in about one game in 80, and the check asked for it over any 200
+/// games; now over `DELVER_TRIGGER_GAMES` (2,000), the casts still over 200. The 325-game chunk's counters pass; the same
+/// counters over 2,000 games, or a run with no Regent or no Charm cast, still fail. Not with hidden decklists (the
+/// counters below are the open-decklist walks').
+#[test]
+fn the_murktide_trigger_is_asserted_over_enough_games() {
+    use engine::fuzz::Totals;
+    if hidden_decks_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::DelverDealtPerSeat)));
+    let totals = |m: u64, tr: u64, c: u64| {
+        let mut t = Totals::default();
+        for (k, v) in [("delver_murktides", m), ("delver_murk_triggers", tr), ("delver_charms", c), ("gy_lists", 500), ("is_walks", 4800), ("is_steps", 14000)] {
+            t.set(k, v);
+        }
+        t
+    };
+    let fails = |n: u64, t: Totals| std::panic::catch_unwind(move || games::check_games(n, &t)).is_err();
+    let r = std::panic::catch_unwind(|| {
+        assert!(!fails(325, totals(165, 0, 234)), "the farm's 325-game chunk");
+        assert!(!fails(1999, totals(1000, 0, 1500)), "under 2,000 games the trigger is not asserted");
+        assert!(fails(games::DELVER_TRIGGER_GAMES, totals(1000, 0, 1500)), "over 2,000 games it is");
+        assert!(!fails(games::DELVER_TRIGGER_GAMES, totals(1000, 1, 1500)));
+        assert!(fails(325, totals(0, 0, 234)) && fails(325, totals(165, 0, 0)), "the casts over 200 games");
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 /// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
 /// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
 /// the checks over the whole run to this test), sums the shards' counters and runs this test with

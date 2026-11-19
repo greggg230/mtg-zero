@@ -59,8 +59,10 @@
 //! players the pinned 60 (`az::constructed`, no sideboard) with the card
 //! table of constructed play (`CardDb::constructed`: Murktide Regent and
 //! Prismari Charm with the cube's cards); every check of the default mode,
-//! and with 200 games or more Murktide Regent must have been cast and its
-//! leave-the-graveyard trigger resolved. Its matches (ENGINE.md 120) are constructed
+//! and with 200 games or more Murktide Regent and Prismari Charm must have been cast, with
+//! `DELVER_TRIGGER_GAMES` (2,000) or more Murktide's leave-the-graveyard trigger put on the stack
+//! (ENGINE.md 209: rare, so a run or a farm chunk of fewer games may miss it by chance). Its
+//! matches (ENGINE.md 120) are constructed
 //! best-of-three: both seats the pinned main and the sideboard cards of the 75 this checkout
 //! supports (one match in four P1 another 75 of supported cards), one match in four with 12-turn
 //! games; every check of the default matches but the
@@ -314,6 +316,17 @@ thread_local! {
     /// the test plays on and fails at its end (`rules_verdict`), so one run counts every
     /// violation of its seeds.
     static RULES_FAILS: std::cell::RefCell<Vec<(&'static str, String, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The rules checks' violations recorded on this thread and not yet reported, each "rule: where and what", taken
+/// (tests that play a seed with `play` / `play_hidden`, whose violations wait for the run's verdict: ENGINE.md 209).
+pub fn take_rules_violations() -> Vec<String> {
+    RULES_FAILS.with(|f| std::mem::take(&mut *f.borrow_mut())).into_iter().map(|(r, w, _)| format!("{r}: {w}")).collect()
+}
+
+/// The rules checks' counts added on this thread so far (`rules_add`).
+pub fn rules_stats() -> crate::rules_check::Stats {
+    RULES.with(|r| *r.borrow())
 }
 
 fn rules_fail(e: crate::rules_check::Violation, what: String, log: String) {
@@ -2210,8 +2223,10 @@ fn count_doomsday(g: &Game, s: &mut DoomsdaySeen) {
     }
 }
 
-/// `FUZZ_POOL=delver`: Murktide Regents that resolved, and leave-the-graveyard
-/// triggers of theirs that resolved (counted from the game logs' counters).
+/// `FUZZ_POOL=delver` (and `delver_dealt`, `delver_dealt2`): Murktide Regents and Prismari Charms cast, and
+/// leave-the-graveyard triggers of the Regents put on the stack - each seen on the stack after a step
+/// (`count_delver`; one that comes and goes inside one step, every priority in it answered by the engine,
+/// `auto_single`, is not seen).
 static DELVER_MURKTIDES: AtomicU64 = AtomicU64::new(0);
 static DELVER_CHARMS: AtomicU64 = AtomicU64::new(0);
 static DELVER_MURK_TRIGGERS: AtomicU64 = AtomicU64::new(0);
@@ -3686,6 +3701,14 @@ fn totals_vec(t: &Totals, name: &str, len: usize) -> Vec<u64> {
     (0..len).map(|i| t.get(&format!("{name}_{i}"))).collect()
 }
 
+/// The least games over which a Delver pool's run must have seen Murktide Regent's leave-the-graveyard trigger on the
+/// stack (ENGINE.md 209). The games of `delver`, `delver_dealt` and `delver_dealt2` are the same (the pinned 60s; the
+/// dealt decks are their matches'): over seeds 0..16,000 a Regent cast 7,794 times and a Charm 11,697 (at least 98 and 159
+/// in every run of 250 games), the trigger seen 280 times, clustered, and in 3 of the 64 runs of 250 not at all - about
+/// one game in 80 has one. Farm chunks of 239, 319 and 325 games missed it by chance and failed. Over 2,000 games a miss
+/// has a probability of about e^-24 (under 1e-7 even at the 95% bound of 3 in 64).
+pub const DELVER_TRIGGER_GAMES: u64 = 2000;
+
 /// The games' end-of-run checks over `n` seeds' counters `t` (one chunk's, or a sharded run's merged totals: ENGINE.md
 /// 165): what the mode must have exercised, each over its own least number of games (200 for most).
 pub fn check_games(n: u64, t: &Totals) {
@@ -3747,7 +3770,10 @@ pub fn check_games(n: u64, t: &Totals) {
     }
     if delver_mode() && n >= 200 {
         let (m, tr, c) = (g("delver_murktides"), g("delver_murk_triggers"), g("delver_charms"));
-        assert!(m > 0 && tr > 0 && c > 0, "the legacy cards weren't played: {m} {tr} {c}");
+        assert!(m > 0 && c > 0, "the legacy cards weren't played: {m} {tr} {c}");
+        if n >= DELVER_TRIGGER_GAMES {
+            assert!(tr > 0, "Murktide Regent's leave-the-graveyard trigger never seen on the stack in {n} games ({m} Regents cast)");
+        }
     }
     if dd_a_mode() && n >= 200 {
         let casts = totals_vec(t, "dd_a_cast", DD_A_CASTS.len());
