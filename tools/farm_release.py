@@ -2,6 +2,7 @@
 self-test, the farm gates on a reference run, publish, and the index launchers look builds up in.
 
     python tools/farm_release.py release <commit | worktree> [--force] [--regate] [--no-publish] [--no-slot]
+        [--speed-baseline <build id>] [--speed-minutes 3] [--speed-tolerance 0.05] [--speed-cuda] [--no-speed]
     python tools/farm_release.py lookup <commit> [--json | --pool-args]
     python tools/farm_release.py list [N]
     python tools/farm_release.py reference --config <run>/config.json --checkpoint <run>/models/iter_N.pt
@@ -31,11 +32,26 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
    them, zero-core docs/az.md 61) - the refusal that once forced a rebuild shows here.
 8. **gates**: the commit's tools/farm_gates.py on the reference config and checkpoint with the signed worker and the
    CPU pack (gate 2: the worker vs the Python remote worker, gate 3: records replayed), CPU only.
+8b. **speed** (docs/ENGINE.md 199; after the macOS steps with `--mac`): this checkout's tools/farm_speed.py - the new
+   build against the previous published release build (`--speed-baseline`: another) in interleaved windows new, old,
+   old, new of `--speed-minutes` (3) each, leaves/s, on the desktop's CPU (holding a slot; below normal priority), with
+   `--mac` the Mac (its builds; the previous macOS build from the index or `--speed-mac-baseline`, `speed.mac_baseline`
+   in release.json), with `--speed-cuda` the GPU (tiny). Each side plays the reference checkpoint: the old side the
+   reference export, the new side the commit's own export of it (gates' model.onnx; release.json `speed.export`
+   "same": the reference export too), so an export change counts with the build. Only on an idle machine: before each
+   window no user input for 3 minutes and AC power, input during a window discards it (redone at most 3 times, then
+   "machine in use" fails the step). Fails when the new side is more than `--speed-tolerance` (5%) slower on any
+   machine, or either side errors. Results in `releases/<sha12>/speed/` (result.json, hints.json: the layouts and
+   rates per machine for the farm agent's autotuner, every window with its load and idle samples); its line in the
+   index entry (`speed`), notes.txt and the final line. `--no-speed` skips it (recorded); a reused build has no new
+   build to measure (`--regate`: the same build with the commit's export against the reference export, skipped when
+   the export's graph is the reference's).
 9. **publish**: both build directories (`farm_build.py --publish-dir`), then copied to `<builds>/<build_id>/` (the
    desktop's copies of registered builds: what `pool_worker` names).
 10. **index**: the entry appended to `<builds>/index.json` (mtgz.az.farm_builds): commit, rust_key, build and CUDA
-   ids, runtimes, workers, the gate lines, each step's seconds. The full result also in
-   `<builds>/releases/<sha12>.json` (a failure too, with its step).
+   ids, runtimes, workers, the gate lines, the speed gate's record, each step's seconds. The full result also in
+   `<builds>/releases/<sha12>/result.json` (a failure too, with its step) and the release notes - one line per gate -
+   in `<builds>/releases/<sha12>/notes.txt`.
 
 **`--mac`** (opt-in; zero-farm PROTOCOL.md 11, docs/ENGINE.md 197; needs the Mac, `MTGZ_MAC`): after the gates,
 11. **mac-build**: `farm_build.py --root <release worktree> --profile release --platform macos-arm64 --runtime-id
@@ -60,7 +76,9 @@ machine (`<builds>/.release.lock`).
 
 Settings: `<builds>/release.json` (machine-local, untracked; `config` prints what is in force): cpu_runtime,
 cuda_runtime, cuda_min_agent, python (the gates' interpreter: torch + onnx + onnxruntime; default this one), url,
-reference {config, checkpoint, export} (default `<builds>/reference/`, written by `reference`). A runtime pack's
+reference {config, checkpoint, export} (default `<builds>/reference/`, written by `reference`), speed (the speed gate:
+tolerance, minutes, warmup_s, blocks, retry_blocks, idle_min_s, idle_wait_max_s, idle_redo, model, export,
+mac_baseline, machines {cpu, mac, cuda: job layout, priority / nice, ...}; tools/farm_speed.py SPEED_DEFAULTS). A runtime pack's
 directory is `<builds>/<runtime id>/`. `<builds>` = mtgz.az.farm_builds.builds_dir() ($MTGZ_FARM_BUILDS, else
 $ZERO_BIG_DISK/zero-farm-builds).
 
@@ -129,6 +147,8 @@ def settings():
                       'checkpoint': ref.get('checkpoint') or os.path.join(rd, 'checkpoint.pt'),
                       'export': ref.get('export') or os.path.join(rd, 'export')}
     s['python'] = s.get('python') or sys.executable
+    import farm_speed
+    s['speed'] = farm_speed.deep_merge(farm_speed.SPEED_DEFAULTS, s.get('speed') or {})
     return s
 
 
@@ -175,8 +195,8 @@ class Release:
     def say(self, m):
         print(f'[farm_release {time.strftime("%H:%M:%S")}] {m}', flush=True)
 
-    def run(self, step, cmd, cwd=ROOT, env=None, slot=False, log=None, timeout=None):
-        """A step's command; its output to <log dir>/<log>.log; non-zero -> Failed(step) with the tail."""
+    def run(self, step, cmd, cwd=ROOT, env=None, slot=False, log=None, timeout=None, check=True):
+        """A step's command; its output to <log dir>/<log>.log; non-zero -> Failed(step) with the tail (`check`)."""
         if slot and not self.a.no_slot:
             cmd = ['bash', os.path.join(TOOLS, 'slotd.sh')] + list(cmd)
             env = dict(env or os.environ, MTGZ_SLOT_WAIT_MAX=str(SLOT_WAIT))
@@ -186,7 +206,7 @@ class Release:
             p = subprocess.run(cmd, cwd=cwd, env=env, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                timeout=timeout)
         out = open(path, encoding='utf-8', errors='replace').read()
-        if p.returncode:
+        if p.returncode and check:
             raise Failed(step, f'exit {p.returncode}; the end of {path}:\n{out[-3000:]}')
         return out
 
@@ -334,6 +354,8 @@ class Release:
                 self.timed('modules', self.modules)
                 e['template'] = self.timed('template', self.template, e['worker'], e['build_id'])
                 e['gates'] = self.timed('gates', self.gates, e['worker'])
+                if not self.a.no_speed:
+                    e['speed'] = self.timed('speed', self.speed, os.path.dirname(e['worker']), None, None, e['build_id'], True)
                 e['seconds'] = r['seconds']
             return FB.add(e)
         preflight(self.s, cuda=not self.a.no_cuda)
@@ -353,6 +375,7 @@ class Release:
             cuda = {'build_id': cid, 'runtime': self.s['cuda_runtime'], 'min_agent': self.s['cuda_min_agent'], 'selftest': st}
         tpl = self.timed('template', self.template, exe, bid)
         gates = self.timed('gates', self.gates, exe)
+        r['steps']['gates'] = gates
         mac = None
         if self.a.mac:
             mac = {'release': self.timed('mac-build', self.mac_build, 'release')}
@@ -362,11 +385,19 @@ class Release:
                 mac['fuzz'] = fz
             if self.a.mac_gates:
                 mac['gates'] = self.timed('mac-gates', self.mac_gates, mac['release'], fz)
+        if self.a.no_speed:
+            speed = {'skipped': '--no-speed', 'line': 'SPEED GATE SKIPPED (--no-speed)'}
+            self.say('speed: SKIPPED (--no-speed)')
+        else:
+            speed = self.timed('speed', self.speed, bdir, (r['steps'].get('cuda') or {}).get('dir'),
+                               (mac or {}).get('release'), self.a.speed_baseline)
+        r['steps']['speed'] = speed
+        if self.a.mac:
             mac['plan'] = self.timed('mac-plan', self.mac_plan, exe, mac['release'], fz, cuda)
             mac['runtime'] = self.s['mac_runtime']
         if self.a.no_publish:
             self.say('--no-publish: signed and checked, not published (no index entry)')
-            return dict(r, build_id=bid, runtime=rt, cuda=cuda, mac=mac, template=tpl, gates=gates, published=False)
+            return dict(r, build_id=bid, runtime=rt, cuda=cuda, mac=mac, template=tpl, gates=gates, speed=speed, published=False)
         worker = self.timed('publish', self.publish, bdir)
         if cuda:
             cuda['worker'] = slash(os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe'))
@@ -377,9 +408,64 @@ class Release:
         e = {'commit': sha, 'built_at': sha, 'rust_key': key, 'core_commit': r['core_commit'], 'build_id': bid,
              'version': os.path.basename(os.path.normpath(bdir)), 'runtime': rt, 'worker': slash(os.path.join(worker, 'mtgz-worker.exe')),
              'cuda': cuda, 'mac': mac, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
-             'gates': gates, 'reference': {k: local_config.portable_path(v) for k, v in self.s['reference'].items()},
+             'gates': gates, 'speed': speed, 'reference': {k: local_config.portable_path(v) for k, v in self.s['reference'].items()},
              'url': self.s['url'], 'published': True, 'created': now(), 'seconds': r['seconds']}
         return FB.add(e)
+
+    def speed(self, new_dir, cuda_dir=None, mac=None, baseline=None, export_only=False):
+        """Step `speed` (module docs, 8b; docs/ENGINE.md 199): this checkout's tools/farm_speed.py - the desktop's
+        machines under a slot, then the Mac - into releases/<sha12>/speed/ -> the index's speed record; slower or an
+        error -> Failed('speed')."""
+        import farm_speed as FS
+        sp = self.s['speed']
+        out = os.path.join(self.log_dir, 'speed')
+        shutil.rmtree(out, ignore_errors=True)
+        os.makedirs(out)
+        model = self.a.speed_model or sp.get('model') or 'reference'
+        ref_model = os.path.join(self.s['reference']['export'], 'model.onnx')
+        own = os.path.join(self.log_dir, 'gates', 'model.onnx')       # (the commit's export of the reference checkpoint)
+        model_new = own if model == 'reference' and sp.get('export', 'commit') == 'commit' and os.path.exists(own) else None
+        if export_only:
+            if not model_new:
+                return {'skipped': 'the same build and no export of this commit', 'line': 'SPEED GATE SKIPPED (a reused build)'}
+            if FS.onnx_info(model_new)['graph_sha256'] == FS.onnx_info(ref_model)['graph_sha256']:
+                self.say('speed: a reused build and the reference export\'s graph: nothing to measure')
+                return {'skipped': 'a reused build, the same export graph',
+                        'line': 'SPEED GATE SKIPPED (a reused build, the same export graph)'}
+        common = ['--out', out, '--new', new_dir, '--model', model]
+        common += ['--model-new', model_new] if model_new else []
+        common += ['--baseline', baseline] if baseline else []
+        for flag, v in (('--minutes', self.a.speed_minutes), ('--tolerance', self.a.speed_tolerance), ('--blocks', self.a.speed_blocks)):
+            if v is not None:
+                common += [flag, str(v)]
+        tool = [self.s['python'], os.path.join(TOOLS, 'farm_speed.py'), 'gate']
+        local = ['cpu'] + (['cuda'] if self.a.speed_cuda and cuda_dir else [])
+        cmd = tool + ['--machines', ','.join(local)] + common + (['--cuda-new', cuda_dir] if 'cuda' in local else [])
+        self.run('speed', cmd, cwd=ROOT, slot=True, check=False)
+        res_path = os.path.join(out, 'result.json')
+        res = load_json(res_path)
+        want = list(local)
+        if res and res.get('passed') and mac and not self.a.no_speed_mac:
+            mb = self.a.speed_mac_baseline or (None if export_only else sp.get('mac_baseline'))
+            cmd = tool + ['--machines', 'mac', '--mac-new', mac['dir']] + common
+            if export_only:
+                cmd += ['--mac-baseline', mac['build_id']]
+            elif mb:
+                cmd += ['--mac-baseline', mb]
+            self.run('speed', cmd, cwd=ROOT, check=False, log='speed-mac')
+            want.append('mac')
+            res = load_json(res_path)
+        if not res or set(want) - set(res.get('machines') or {}):
+            # (a machine with no result - its run died before writing one - fails: never the others' pass)
+            log = ''.join(open(os.path.join(self.log_dir, f'{n}.log'), encoding='utf-8', errors='replace').read()
+                          for n in ('speed', 'speed-mac') if os.path.exists(os.path.join(self.log_dir, f'{n}.log')))
+            raise Failed('speed', f'{res_path}: not every machine of {want} has a result; the end of the logs:\n{log[-2500:]}')
+        rec = FS.summary(res, slash(res_path))
+        self.result['steps']['speed'] = rec
+        self.say(res['line'])
+        if not res['passed']:
+            raise Failed('speed', res['line'])
+        return rec
 
     def target_root(self):
         return release_worktree()[1]
@@ -513,6 +599,35 @@ def slash(p):
     return p.replace('\\', '/')
 
 
+def load_json(p):
+    try:
+        with open(p, encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def write_notes(R, e=None):
+    """<builds>/releases/<sha12>/notes.txt: the release notes, one line per gate (and the failure)."""
+    if not R.log_dir:
+        return
+    r = R.result
+    e = e or {}
+    steps = r.get('steps') or {}
+    lines = [f'farm release of {r.get("commit")} ({r.get("finished") or now()})']
+    if e.get('build_id'):
+        lines.append(f'build {e["build_id"]}' + (f' (reused from {e["reused_from"][:12]})' if e.get('reused_from') else '')
+                     + (f', CUDA alternate {(e.get("cuda") or {}).get("build_id")}' if (e.get('cuda') or {}).get('build_id') else ''))
+    for k in ('gates', 'speed'):
+        rec = e.get(k) or steps.get(k)
+        if isinstance(rec, dict) and rec.get('line'):
+            lines.append(rec['line'])
+    if r.get('failed'):
+        lines.append(f'FAILED at {r["failed"]}: {str(r.get("error", ""))[:600]}')
+    with open(os.path.join(R.log_dir, 'notes.txt'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
 def preflight(s, cuda=True):
     """What the checking steps need, before anything is built: the reference files, the gates' interpreter."""
     for k in ('config', 'checkpoint') + (('export',) if cuda else ()):
@@ -536,6 +651,7 @@ def cmd_release(a):
     except Failed as x:
         R.result.update(failed=x.step, error=str(x), finished=now())
         save_result(R)
+        write_notes(R)
         print(f'farm_release: FAILED at {x.step}: {x}', file=sys.stderr, flush=True)
         return 1
     except Exception as x:          # (anything else is a failure too: loud, recorded)
@@ -545,10 +661,13 @@ def cmd_release(a):
         raise
     R.result.update(entry=e, finished=now(), total_s=round(time.time() - t0, 1))
     save_result(R)
+    if not e.get('already'):
+        write_notes(R, e)
     print(json.dumps({k: e.get(k) for k in ('commit', 'build_id', 'runtime', 'worker', 'cuda', 'reused_from', 'already',
                                             'published', 'seconds')}))
     g = (e.get('gates') or {}).get('line')
-    print(f'farm_release: {fb().describe(dict(e, exact=True))}' + (f'; {g}' if g else ''), flush=True)
+    sl = (e.get('speed') or {}).get('line')
+    print(f'farm_release: {fb().describe(dict(e, exact=True))}' + (f'; {g}' if g else '') + (f'; {sl}' if sl else ''), flush=True)
     return 0
 
 
@@ -577,8 +696,10 @@ def cmd_lookup(a):
 def cmd_list(a):
     for e in fb().load()['builds'][-a.n:]:
         g = (e.get('gates') or {}).get('line', '')
+        sl = (e.get('speed') or {}).get('line', '')
         print(f"{e['created'][:16]} {e['commit'][:12]} build {e['build_id']} cuda {(e.get('cuda') or {}).get('build_id', '-')}"
-              + (f" (reused from {e['reused_from'][:12]})" if e.get('reused_from') else '') + (f'  {g}' if g else ''))
+              + (f" (reused from {e['reused_from'][:12]})" if e.get('reused_from') else '') + (f'  {g}' if g else '')
+              + (f'  {sl}' if sl else ''))
     return 0
 
 
@@ -613,6 +734,16 @@ def main(argv=None):
     r.add_argument('--mac-campaign', action='append', default=[], help='with --mac-fuzz: a campaign whose alternate the plan prints')
     r.add_argument('--mac-publish', action='store_true', help='with --mac: publish the macOS builds too (a coordinator with '
                    'platforms only)')
+    r.add_argument('--no-speed', action='store_true', help='skip the speed gate (step 8b; recorded as skipped)')
+    r.add_argument('--speed-baseline', help='the speed gate\'s old build (default: the previous published release build)')
+    r.add_argument('--speed-mac-baseline', help='with --mac: the old macOS build (default: the index\'s previous, else '
+                   'release.json speed.mac_baseline)')
+    r.add_argument('--no-speed-mac', action='store_true', help='with --mac: the speed gate on the desktop only')
+    r.add_argument('--speed-cuda', action='store_true', help='the speed gate on the desktop\'s GPU too (tiny windows)')
+    r.add_argument('--speed-model', help='reference (default) | run:<run dir> | <model.onnx>: the network the sides play')
+    r.add_argument('--speed-minutes', type=float, help='minutes per window (default 3; release.json speed.minutes)')
+    r.add_argument('--speed-tolerance', type=float, help='how much slower fails (default 0.05)')
+    r.add_argument('--speed-blocks', type=int, help='blocks of new, old, old, new windows (default 1)')
     r.add_argument('--normal-priority', action='store_true')
     r.add_argument('--lock-wait', type=float, default=6 * 3600)
     lk = sub.add_parser('lookup')

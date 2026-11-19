@@ -33,6 +33,13 @@ c. **Fuzz identity**: one fuzz job (mode, seeds) on this PC's fuzz build and on 
 
 Prints one JSON summary and "MAC FARM GATES PASSED|FAILED: ..."; exit 0 iff every part run passed.
 
+**`--speed`: the speed gate** (docs/ENGINE.md 199; tools/farm_speed.py's `gate`, whose docstring is the manual): a new
+worker build against the previous published release build (or `--baseline`) in interleaved windows (new, old, old,
+new) of leaves/s on the reference machines (`--machines cpu,mac,cuda`), only while the machine is idle; fails when the
+new build is more than `--tolerance` (5%) slower on any machine or a side errors:
+
+    python tools/farm_gates.py --speed --new <build dir | id> [--baseline <id>] [--machines cpu] [--minutes 3] [--out DIR]
+
 The checkpoint is exported to zero-onnx/1 here unless `--model` is given (it must be of this build's encoding: a run's
 own checkpoint, or a fork's). Prints one JSON summary; exit 0 iff both gates pass. Reads the config and the checkpoint
 only (nothing of the run is written).
@@ -289,6 +296,9 @@ def mac_main(a):
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
+    if '--speed' in argv:
+        import farm_speed
+        return farm_speed.main(['gate'] + [x for x in argv if x != '--speed'])
     if '--mac' in argv:
         ap = argparse.ArgumentParser(description='farm_gates.py --mac (module docs)')
         ap.add_argument('--mac', action='store_true')
