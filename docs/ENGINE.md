@@ -40639,4 +40639,6 @@ remotes are pools (a record without any host information stays "remote", as befo
 worker, encoding, search or default change. zero-core docs/az.md 44.3, 65.
 
 **Checks.** zero-core test_eval_pool.py (new test) + test_farm_report.py (extended): 26 passed; both new checks fail on
-the old code. Gates of this commit below.
+the old code. Gates on ee397c44, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`:
+**GATE PASSED WITH SKIPS optin-core ee397c44a8a3 in 2184s** (`--baseline-root` <85495dc7, built>; the live-run fence
+only: 17 core tests) and **GATE PASSED WITH SKIPS python ee397c44a8a3 in 572s** (7 live-run-hazard tests fenced).
