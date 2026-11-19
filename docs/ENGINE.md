@@ -40453,7 +40453,7 @@ Python remote workers were thought to need ~2.7 MB a game. Memory, not the cores
 Mac (1,024 MB + 14-16 MB a game, "measured here"), which forced small layouts; the agent's Windows plan for CPU jobs
 assumes 600 MB + 45 MB a game.
 
-**Where the memory went.** A diagnostic build (not committed: zero-core branch `diag/worker-memory-3`) summed what
+**Where the memory went.** A diagnostic build (zero-core's local branch `diag/worker-memory-3`, not for merge) summed what
 every slot of the driver holds (records, trees, evaluation cache, traces, ...) and wrote it beside the worker's footprint
 every 10 s; ORT session options were switched by environment. Runs: the worker's `selfplay` CLI as a rolling job,
 records output, gen 619 of legacy-meta3-r1 (the default graph) with the run's farm settings (sims 64 / 16 / 4, p_full
@@ -40495,3 +40495,67 @@ output both) with the worker of 4a7e5f5c, of this commit, and of this commit wit
 file and the shard byte for byte (1,335 rows, 3,503 searched decisions). gen 619's self-test with both builds: the same
 max abs on the CPU (6.806e-6) and the CUDA pack (6.258e-6). The desktop's side-by-side runs with and without the
 patterns played the same games (83 finished, 4,460 searched decisions each).
+
+### 203.1 Measured: memory per game in flight and leaves/s, before and after (2026-11-19)
+
+**The Mac** (M4 Max, on AC, idle, under the bench lock, nice 15; one worker at the farm crew's layout: threads 12, 4
+sessions x 3 threads, 882 games in flight in 4 groups, a rolling job of records, gen 619's default graph, the CPU pack
+1.31.1; footprint = the worker's own `rss_mb`, the physical footprint the agent's cap reads):
+
+| build | footprint at 3 / 6 / 9 / 12 min (GB) | MB a game at 12 min | leaves/s over 12 min |
+|---|---|---|---|
+| the release build of 4d622170 (before) | 6.91 / 9.50 / 10.80 / 11.57, still +0.3 GB a minute | 13.1 | 6,466 |
+| records held sparse only (memory patterns on; diagnostic on) | 2.59 / 3.30 / 4.17 / 4.49, still +0.15 GB a minute | 5.1 | 6,236 |
+| this fix (no diagnostic) | 1.46 / 1.77 / 2.10 / 2.21, +30 MB a minute at 12 and slowing | 2.5 (1.5 over its 0.88 GB at the start) | 6,346 |
+| this fix, diagnostic on | 1.47 / 1.86 / 2.12 / 2.23 | 2.5 | 6,404 |
+
+What the fix's worker holds at 12 minutes (the diagnostic run; ~1,000 games finished, so the games in flight span
+their whole length): the search trees 0.57 GB (each seat's tree and the spare trees, 0.64 MB a game), the evaluation
+caches 0.31 GB (0.35 MB a game), the records 0.09 GB (0.10 MB a game: ~34 a game, ~2.6 KB each), the rest 1.26 GB (the
+four sessions, the engine, the games' own states and the allocator; 0.66 GB at 20 s).
+
+*Leaves/s, the same build recipe* (both workers built by tools/mac.sh on the Mac, main 4a7e5f5c and this commit; 7-minute
+windows interleaved, the same seed - so the same games): base 6,668 / fix 6,697 / base 6,458 / fix 6,174 (its last two
+minutes slowed: 6,469 -> 6,214 while nothing of ours changed), footprints at 7 minutes 9.7 / 1.86 / 9.5 / 1.83 GB. Within
+the Mac's run-to-run spread (the fix's own two 12-minute runs differ by 3% in their first minutes, the diagnostic one
+faster); per batch the same (p50 91.8-93.2 ms either way). No speed change is claimed either way. The planned check at
+2,304 games in flight (one worker, the agent's layout) was not run: legacy-meta3-r1 resumed and its SSH self-play
+took the Mac.
+
+**The desktop's CUDA pack** (ONNX Runtime 1.24.4, the RTX 5090, one session; 512 games in flight in one group, 12
+minutes, 1,814 games finished; the diagnostic build of this fix): private bytes 3.39 GB at 20 s, 4.27 at 9 minutes,
+4.33 at 12 (flat since 9: ~1.9 MB a game), working set 2.18 GB, 10.0k leaves/s; the trees 0.44 GB, the caches 0.27 GB,
+the records 0.07 GB. Before, the same pack with memory patterns on grew ~3 GB a minute of private bytes (2,304 games).
+
+**What the farm agent's memory plan should assume** (zero-farm `agent/src/rolling.rs`; not changed here):
+
+* *macOS CPU* (`MACOS_CPU_COST`, today 1,024 MB + 14 MB a game): 1,024 MB + 3 MB a game - ~1.7 MB a game over the start
+  measured at 12 minutes, with room for the trees and caches still filling. A 64 GB Mac's default cap (32 GB) then
+  holds far more games than a worker wants: memory stops deciding the Mac's layout.
+* *Windows CPU* (`CPU_COST`, today 600 MB + 45 MB a game): 600 MB + 4 MB a game (private bytes; the per-game parts are
+  the driver's, the same on every platform, ~2 MB a game at steady state).
+* *GPU* (`GPU_COST`, today 1,800 MB + 45 MB a game): the runtime's base as measured on the PC (zero-farm's soak: 1.75 GB on
+  a farm PC; 3.4 GB on the desktop's RTX 5090) + 4 MB a game.
+* *The learned numbers must be dropped with the old worker.* `Learned` keys a run's measured MB a game by run and
+  device only, `raise` never lowers it, and `plan` takes the larger of it and the default: on the Mac legacy-meta3-r1 is
+  remembered at 13-16 MB a game, so a worker with this fix would still be planned at the old cost. Key it by the worker
+  build (or start a new build's measurement from the default) when the agent moves to this commit's worker.
+
+### 203.2 Gates (2026-11-19)
+
+On 7d64bef2 (this section's commit before its docs follow-up), in a warm worktree (`tools/warm_pool.py`),
+`MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`, `--baseline-root` <4d622170, built>
+(legacy-meta3-r1 resumed during the gate: its steps throttled):
+
+* **search-core: GATE PASSED WITH SKIPS search-core 7d64bef20592 in 2812s** (the skips the live-run fence only: 7 tests
+  of this repo's pytest, 17 of the core's). zero-core cargo test 215 passed; this repo's pytest 257 + 121 + 214 + 123
+  passed; farm compat on delver-mirror-bo3-dealt identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 6 games,
+  2,556 rows); check_checkpoint_compat goldens identical (visits 3,303 samples, cq 3,303); digest formats = the recorded
+  files (constructed dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt
+  f78ada3d3d114826); the 4-config smoke 0/4 failed; the run-loop smoke 16 games, 0 unfinished; core pytest 721 passed.
+* zero-core alone (its worktree, toy engine built): `cargo test` 212 + 3 passed, `cargo test -p zero_worker` passed;
+  `tools/smoke_all.sh --with-this-core --build-only` GREEN, games 3 of 3; its full pytest 760 passed, 4 failed, of which
+  3 pass when rerun alone (the rolling-quota and cotrain timing tests, a 3e-8 graph tolerance) and one,
+  tests/test_dup_reduce.py::test_max_is_deterministic_on_cuda_and_matches_the_cpu (torch's CUDA eager repeats not bit
+  for bit on synthetic rows; no Rust or worker code in it), fails alone as well; the gate runs without the GPU
+  (CUDA_VISIBLE_DEVICES=-1), which skips it with the other CUDA tests.
