@@ -175,6 +175,9 @@ fn cr_601_2h_which_restricted_mana_pays_is_the_players_choice() {
     kinds.sort();
     assert_eq!(kinds, vec![(C, SPEND_ARTIFACT, 1), (C, ELDRAZI, 1)]);
     g.choose(Choice::Cast(relics[1]));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{:?}", g.options_desc());
     assert_eq!(opts(&g).len(), 2, "keep the artifact-only {{C}} or the Eldrazi {{C}}");
     let second = opts(&g)[1];

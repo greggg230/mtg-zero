@@ -187,6 +187,9 @@ fn cr_601_2h_restricted_or_plain_colorless_for_an_artifact() {
     let mut g = scen().pool(0, [0, 0, 0, 0, 0, 1], 0).pool_restricted(0, mana::C, SPEND_ARTIFACT, 1).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
     let sr = g.card(0, "Sol Ring", Zone::Hand);
     g.choose(Choice::Cast(sr));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{}", log(&g));
     let mut left: Vec<u8> = each_item(&g).iter().map(|h| h.player(0).pool.art).collect();
     left.sort();
@@ -202,6 +205,9 @@ fn cr_601_2h_haste_red_may_pay_a_noncreature_spell() {
     let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
     g.choose(Choice::Cast(bolt));
     g.choose(Choice::Target(engine::Target::Player(1)));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{}", log(&g));
     let mut left: Vec<u8> = each_item(&g).iter().map(|h| h.player(0).pool.haste).collect();
     left.sort();
@@ -216,6 +222,9 @@ fn cr_601_2h_every_pool_left_is_offered() {
     let mut g = scen().pool(0, [3, 3, 3, 3, 3, 3], 0).hand(0, &["Coveted Jewel"]).at(Step::Main1, 0).start();
     let w = g.card(0, "Coveted Jewel", Zone::Hand);
     g.choose(Choice::Cast(w));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{}", log(&g));
     let mut left: Vec<[u8; 6]> = each_item(&g).iter().map(|h| h.player(0).pool.amt).collect();
     let n = left.len();
@@ -366,6 +375,48 @@ fn cr_601_2g_a_land_pays_while_the_pool_keeps_its_mana() {
     g.choose(act(island, 0));
     finish(&mut g, |_| None);
     assert_eq!((g.player(0).pool.amt, g.obj(island).tapped), ([0, 0, 0, 1, 0, 0], true), "the Island paid: {}", log(&g));
+}
+
+/// CR 601.2g-h, ENGINE.md 10, 208 (the fuzz steward's queue entry 7a779fdfd7e6: default game 100080416 under the
+/// `fuzz` profile): when the pool covers the rest of a payment, `PASS` (the pool pays it) is asked even with no source
+/// to pay instead - a decision of one option, which the engine answers and keys (`KEY_AUTO`, its payload `PayMana`'s
+/// `PASS`). The payment ended silently there: in two worlds of the other player's, one dealing the payer a Simian Spirit
+/// Guide (a source in hand), the keys were equal while the payment was over in one (and the game: Ancient Tomb's
+/// damage, the state-based actions as the payer received priority) and still asking in the other.
+#[test]
+fn cr_601_2h_the_pool_paying_the_rest_with_no_source_to_pay_instead_is_keyed() {
+    use engine::decision::act::PASS;
+    use engine::hidden::{key_kind, key_payload, key_player, KEY_AUTO};
+    let start = |auto: bool, hand: &[&str]| {
+        scen().spec(|s| s.auto_single = auto).pool(0, [0, 0, 0, 1, 0, 0], 0).hand(0, hand).at(Step::Main1, 0).start()
+    };
+    let pass_keys = |k: &[u64]| k.iter().filter(|&&x| key_kind(x) == KEY_AUTO && key_player(x) == 0 && key_payload(x) == ((DecisionKind::PayMana as u64) << 16 | PASS as u64)).count();
+    // The pool's {R} pays Sol Ring, nothing else could: answered by the engine, keyed.
+    let mut g = start(true, &["Sol Ring"]);
+    let sr = g.card(0, "Sol Ring", Zone::Hand);
+    let keys = g.choose(Choice::Cast(sr));
+    assert_eq!(pass_keys(&keys), 1, "{keys:?}\n{}", log(&g));
+    assert!(g.obj(sr).zone != Zone::Hand && g.player(0).pool.amt == [0; 6], "cast, the {{R}} spent: {}", log(&g));
+    // Asked where single options are (`auto_single` off): `PASS` alone.
+    let mut g = start(false, &["Sol Ring"]);
+    let sr = g.card(0, "Sol Ring", Zone::Hand);
+    g.choose(Choice::Cast(sr));
+    assert_eq!((g.kind(), options(&g)), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", log(&g));
+    g.choose(Choice::Pass);
+    assert_eq!((g.obj(sr).zone, g.player(0).pool.amt), (Zone::Stack, [0; 6]), "{}", log(&g));
+    // A Simian Spirit Guide in hand may pay instead: the payer is asked, nothing keyed.
+    let mut g = start(true, &["Sol Ring", "Simian Spirit Guide"]);
+    let sr = g.card(0, "Sol Ring", Zone::Hand);
+    let ssg = g.card(0, "Simian Spirit Guide", Zone::Hand);
+    let keys = g.choose(Choice::Cast(sr));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
+    let o = options(&g);
+    assert!(o.len() == 2 && o.contains(&Choice::Pass) && o.iter().any(|c| matches!(c, Choice::Ability(x, _) if *x == ssg)), "{o:?}");
+    assert_eq!(pass_keys(&keys), 0, "{keys:?}");
+    // Its `PASS` chosen: no key (an answer of the payer's own).
+    let keys = g.choose(Choice::Pass);
+    assert_eq!(pass_keys(&keys), 0, "{keys:?}");
+    assert_ne!(g.obj(sr).zone, Zone::Hand, "cast: {}", log(&g));
 }
 
 /// CR 601.2g (13.14): Wizard's Rockets is a source like any other: with a

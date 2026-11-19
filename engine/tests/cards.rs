@@ -177,6 +177,9 @@ fn dark_ritual_pays_for_hymn_to_tourach_random_discard() {
     let hymn = g.card(0, "Hymn to Tourach", Zone::Hand);
     g.choose(Choice::Cast(hymn));
     g.choose(Choice::Target(Target::Player(1)));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.player(0).pool.amt[engine::mana::B], 1);
     let keys = settle(&mut g);
     assert_eq!(g.player(1).hand.len(), 1);
