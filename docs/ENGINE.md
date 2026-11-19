@@ -40320,3 +40320,44 @@ session delivered no hangup), so the runner was sent SIGTERM, and its handler ki
   (a service, a remote shell) would read that session's clock.
 * **The hints are recorded only** (hints.json in each release's speed directory); the farm agent's autotuner can read
   them later.
+
+## 201. The macOS farm lane, the speed gate and the fast export on main: zero-core pin -> `feat/macos-fast-int` 6adccac (`feat/macos-worker` + `feat/fast-export` + the `hello` feature `infer_workers`), `feat/macos-farm` + `feat/farm-speed-gate` merged (branch `integrate/macos-farm`, 2026-11-18)
+
+Why: farm code lives on main and on main's zero-core pin, never on side branches (the user's rule, 2026-11-14:
+every build is farm-compatible by default). Today's farm work was on four branches: the worker on macOS (197,
+zero-core `feat/macos-worker`), the release's speed gate (200), and zero-core's fast zero-onnx/2 graph (zero-core
+`feat/fast-export`, docs/az.md 63). zero-farm's agent varies a job's inference sessions (its autotuner) only for a
+worker whose `hello` lists the feature `infer_workers`, which no build announced. No rule, card, encoding, search or
+training change; behaviour digests untouched; no run's settings changed.
+
+### 201.1 What moved
+
+* **The zero-core pin** 62f4ba5 (main) / 45c284b (`feat/macos-farm`) -> **6adccac**, branch `feat/macos-fast-int` on
+  GitHub: `feat/fast-export` f95de2b, which already contains all of `feat/macos-worker` (a155fe5: the merge needs no
+  merge commit), plus 6adccac. Over 45c284b that is `tools/worker_bench.py`'s native-side timings (a155fe5), the fast
+  graph (b2963dd + docs f95de2b) and the `hello` feature (below). zero-core's `main` (d499716, 2026-11-04) is not
+  moved: MTG Zero has pinned zero-core feature lines since then, each pushed to GitHub before its pin.
+* **The fast graph is available, not used.** `ZeroOnnx2Fast` and the graph variants `''` / `fast` / `fast-att23` /
+  `fast-matmul` (zero-core docs/az.md 63) are chosen by the run setting `pool_export`, trainer-only (the worker's
+  `run_settings.json`), default `''` = the old graph byte for byte. No run switches to it here: that is the user's
+  later call (a pool's new export is a new graph for every farm PC; the speed gate (200) measures an export against
+  the previous release's).
+* **`hello` and `info` announce `infer_workers`** (zero-core 6adccac, docs/az.md 62.1): `Worker::features()` of a
+  build with self-play is `["rolling", "setting_classes", "infer_workers"]` (a fuzz-only build: none), on every
+  platform: the job line's `infer_workers` has worked on Windows as on macOS since 45c284b. So the next Windows worker
+  built from this pin qualifies for the agent's session tuning as the Mac builds do; published builds before it do
+  not announce it (they ignore the field and run one session). Nothing else in the protocol changes. Tests: zero-core
+  `proto::tests::hello_announces_infer_workers_on_every_platform` and the updated `a_selfplay_build_announces_rolling`;
+  here `tests/test_worker_farm.py::test_hello_and_info_announce_infer_workers` (the real worker's `info` and its
+  `serve` hello, which exits at EOF before a job).
+* **The branches.** `feat/macos-farm` 17207901 (197) and `feat/farm-speed-gate` c84aa1ec (on top of it, 200) merged
+  with main 1c89f048 on `integrate/macos-farm` (161c5f2e). main had taken 198 (`feat/cells-mac`) and 199
+  (`feat/cells-local-parallel`) meanwhile; the speed gate's section, 199 on its branch, is 200 here (its subsections,
+  cross-references and the docstrings that cite it). The only conflict was ENGINE.md's tail.
+* **Behaviour.** The engine's additions are the libm questions only (`MtgSpec::libm_replay`, `MtgFuzz::
+  libm_dependence`, 197.3): nothing plays differently; the default export graph is byte-identical; the farm worker
+  plays and records as the Python run does (the gate's farm compat).
+
+### 201.2 Gates
+
+(Filled in by the gate commit after the gated sha.)

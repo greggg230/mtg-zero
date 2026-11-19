@@ -518,3 +518,15 @@ def test_libm_settings_are_refused_off_the_reference_platform(tmp_path):
             assert 'refused on macos-arm64' in r.stdout + r.stderr
         assert subprocess.run(args[:-1] + ['windows-x64'], capture_output=True, text=True).returncode == 0, mode
     assert A  # (the game package registered)
+
+
+def test_hello_and_info_announce_infer_workers(tmp_path):
+    """docs/ENGINE.md 201 (zero-core docs/az.md 62.1): the real worker's `info` and `serve` hello list the feature
+    `infer_workers` (zero-farm's autotuner varies a job's evaluator threads only for a worker that announces it), on
+    every platform, beside `rolling` and `setting_classes`. serve exits at EOF before a job: its only line is the hello."""
+    info = json.loads(subprocess.run([WORKER, 'info', '--ort-dll', 'none'], capture_output=True, text=True, check=True).stdout)
+    assert {'rolling', 'setting_classes', 'infer_workers'} <= set(info['features']), info['features']
+    p = subprocess.run([WORKER, 'serve'], input='', capture_output=True, text=True, encoding='utf-8', timeout=120, cwd=tmp_path)
+    assert p.returncode == 0, p.stderr
+    hello = [json.loads(line) for line in p.stdout.splitlines() if line.strip()][0]
+    assert hello['ev'] == 'hello' and hello['features'] == info['features'] and hello['build_id'] == info['build_id']
