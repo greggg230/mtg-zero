@@ -40623,3 +40623,20 @@ passed beside it; test_engine_id fails only while zero-core's `crates/` has unco
 
 zero-core `feat/farm-eval` also has f1e8ae1 after the pinned d3b1a8d: docs/az.md 65's measurement worded without
 machine-specific details; docs only, so the pin stays at d3b1a8d (no code differs).
+
+## 205. zero-core pin d3b1a8d -> 894ee27: the farm evaluation's thread survives a SystemExit refusal; farm_report counts a pools-only remote as the farm's (branch `fix/eval-thread-report`, 2026-11-19)
+
+**Why.** (1) zero.eval_pool and zero.farm_def (section 204) refuse settings with `SystemExit`, which RemoteEval's
+evaluation thread (`except Exception`) didn't catch: a refusal ended the thread silently while training went on, so a
+run's evaluations would just stop with no log line (flagged by the run owner's prep agent). (2) Once a run's last SSH
+self-play host is removed (legacy-meta3-r1, 2026-11-19: only `pool:<run>` left), zero.remoteplay records `host: []`
+with the farm under `pools`; zero.farm_report turned that into an own source named "remote" carrying the farm's
+games, so the admin page and the Discord board counted the farm's games twice.
+
+**What.** zero-core `fix/eval-thread-report` 894ee27 = d3b1a8d's line + one commit: the thread logs
+`REFUSED (SystemExit): ...` and retries after `RETRY_S`; `remote_records` gives no own source for a record whose only
+remotes are pools (a record without any host information stays "remote", as before). Python only: no Rust, engine,
+worker, encoding, search or default change. zero-core docs/az.md 44.3, 65.
+
+**Checks.** zero-core test_eval_pool.py (new test) + test_farm_report.py (extended): 26 passed; both new checks fail on
+the old code. Gates of this commit below.
