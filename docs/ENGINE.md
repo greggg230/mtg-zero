@@ -40767,3 +40767,161 @@ directory.
 * **GATE PASSED suite 83f40e305085 in 1442s** (206's code and this section but these lines; 2,707 passed in 24
   binaries; the sharded 2k fuzz of default, default + hidden decklists and delver_dealt). The commit after it records
   these lines (docs only).
+
+## 208. The open-decklist walk's two queue entries of 2026-11-19: a surveilled Colossus waits at the bottom; a covering payment's lone `PASS` is asked and keyed (branch `fix/infoset-1119`, 2026-11-19)
+
+Branch from main 4a84d570 (zero-core d3b1a8d, unchanged).
+
+### 208.1 The findings
+
+Two confirmed entries of the fuzz steward's queue (171), mode `games` (the default pool), both in the open-decklist
+information-set walk (`check_information_set`, 148.2) of the player who is not deciding at the checkpoint; both
+reproduce under the `fuzz` profile on main 4a84d570 (`FUZZ_FIRST=<seed> FUZZ_GAMES=1 FUZZ_LOG=1 cargo test --profile
+fuzz -p engine --test fuzz fuzz_random_games -- --exact --nocapture`):
+
+* **971a41eb6fe1**, games.rs:3265, seed 100056684 step 23: "same keys, different views (first at 1131 of 1142 /
+  1142: Some(14) / Some(13)); the checkpoint's decider P1, the walk's viewer P0"; P1 asked `PutInGraveyard` in both.
+* **7a779fdfd7e6**, games.rs:3245, seed 100080416 step 1: "same keys, the game over in one world only
+  (Some(Outcome { winner: Some(1), reason: Sba }) / None); the checkpoint's decider P0, the walk's viewer P1"; P0
+  asked `PayMana` [`PASS`, a hand card's ability] in the second world.
+
+### 208.2 971a41eb6fe1: the revealed Colossus showed its depth in the looked-at pile
+
+An instrumented copy of the walk (reverted) printed both worlds. P1 resolved Kaito, Bane of Nightmares' 0 (surveil
+2) in P0's two worlds of P1's library: the looked-at top two were Blightsteel Colossus (top) and Inspiring Vantage in
+one, Skyclave Apparition (top) and Blightsteel Colossus in the other (P0's worlds deal P1's library; the look is P1's
+private key). P1 put the Colossus into the graveyard (`LIBRARY` + 0 in both: the pile sorted by definition). Its
+replacement (CR 614.1a: "reveal it and shuffle it into its owner's library instead") revealed it (`KEY_REVEAL`, the
+same key in both worlds) and kept it in the library until the pile is placed (51.4: the pile's placement is one
+action, CR 701.25a) - **at its slot**: the 15th of 15 cards in one world, the 14th in the other. `view_of(P0)` lists
+the library cards P0 knows by position: view float 1131 is that position (14 / 13). The layout v7 row encodes known
+library cards by depth too (the top three, `library_known`).
+
+**The rule.** Which looked-at card is where is the surveilling player's alone: `look_top` scrambles the pile for the
+other player (ENGINE.md 10), and the cards still to be placed go where their player puts them. Where the Colossus
+waits for the shuffle is no place the rules give it (the placement is one action). Left at its slot, the revealed
+card told the other player its depth in the pile - the order of the cards still to be placed - in the real game too
+(P0's view and row at P1's remaining pile decisions). The search merged the two worlds correctly (P0 can't tell them
+apart); what P0 was shown differed.
+
+**The fix** (`resolve.rs` `put_from_pile`): a looked-at pile's card that a replacement keeps in its library until the
+pile is placed (dest graveyard, still in the library after the move) waits at the **bottom** of the library, a place
+that doesn't depend on the pile's order; the shuffle after the pile (51.4) is unchanged. A mill keeps the card where
+it is (its cards' places are public).
+
+**Who it reached.** Only games with a card that a replacement shuffles into its library from a looked-at pile put into
+the graveyard: Blightsteel Colossus (the only `gy_to_library` card) surveilled, or put from a looked-at pile into the
+graveyard. None of the three Legacy 75s (legacy-meta3-r1) nor the Delver presets' 75 has it: **no live run is
+affected**; cube games only (2 of the cube digest's 2,500 games, 208.5).
+
+### 208.3 7a779fdfd7e6: a covering payment ended silently when no source could pay instead
+
+The worlds' logs: P0 activated Celestial Colonnade's {3}{W}{U} ability, the mana of Gaea's Cradle floated before,
+Underground Sea and Ancient Tomb picked; the walk's action, Concealed Courtyard's ability, left the picks and the
+virtual pool covering the rest (`PayMana::pool_covers`). Then `pay_mana` offers `PASS` (the pool pays the rest) and
+every source that may pay instead (100.4.3, 13.13) - and with no such source it ended the payment silently. P1's
+worlds differ in P0's hidden hand (a payment pins the payer's real hand sources, 100.4.3; a world may deal others,
+160): one dealt P0 a Simian Spirit Guide, so P0 was asked `PASS` or the Guide; in the other the payment ended, the
+mana abilities were activated, Ancient Tomb dealt P0 2 damage, P0 received priority and the state-based actions
+(CR 704.5a) ended the game. **Equal keys**: the silent end had none.
+
+**The rule broken was the engine's** (ENGINE.md 10, 148.2): a decision with one option is answered by the engine and
+keyed (`KEY_AUTO`), because that the player had no alternative may depend on hidden cards. Here the one-option
+decision (`PASS` alone) was skipped unkeyed - 147.8's `ActivateMana` end again, in a payment.
+
+**The fix** (`pay.rs` `pay_mana`): when the pool covers the rest **and pays something** (`vm` > 0), `PASS` is offered
+whatever else is; alone, it is answered by the engine and keyed (`KEY_AUTO`, payload `PayMana << 16 | PASS`), and
+asked where single options are asked (`auto_single` off: tests). In an observer's worlds the key is as it is (161.1:
+"any other answer" - the end of a payment is public, unlike 160's `ActivateMana` mode). Nothing left for the pool to
+pay (`vm` = 0: a cost of no mana, the picks paying it all) still ends without a decision: no source can pay instead
+of nothing in any world (else every Mishra's Bauble, Lotus Petal and Force of Will's alternative cost would carry a
+new key). A chosen `PASS` among several has no key, as before.
+
+**What it changes** (every format): one more chance key in the transitions where a covering payment's `PASS` is
+forced - in random play of 400 games each, 1.2% of the decisions of the Doomsday, Sneak and Show and cross pools (in
+84-90% of the games), 1.4% of the Delver pool's, 2.0% of the default pool's (random play floats mana with priority
+more than self-play does; the self-play rate is not measured). Nothing else of the game: with that key left out of
+the hash, the cube digest of the payment fix alone equals main's (208.5). For the search:
+
+* **Node signatures** carry the key, consistently: the payer's own tree (its worlds share its hand) splits nothing
+  new; in the other player's tree, worlds where the payer could pay instead were apart already (the payer's
+  `PayMana` node there against the payment's end: another decider or class), so no node splits or merges change.
+* **Tree reuse** (149, zero-core's observable answers, `MtgAz::ANSWERS`): another seat's `KEY_AUTO` other than a pass
+  of priority is `Opaque` (`key_obs`), so the other player's tree is no longer reused across the payer's forced
+  `PASS`. Before, the reuse ran through the silent end and kept only the worlds where the payer had nothing to pay
+  with - the biased subset 149 removed for priority passes. A chosen `PASS` out of `PayMana` already ended the reuse
+  (`answer_obs` none), so the forced and the chosen pass are now alike. zero-core's driver digest (the Delver
+  best-of-three spec at 16 simulations) is **unchanged**.
+* **Left open** (a search change of its own, with a 149-style reuse measurement): the payment's `PASS` is observed
+  alike forced or chosen, so it could be an observable answer like the pass of priority (`answer_obs` for
+  `PayMana`'s `PASS`, `key_obs` `Answer` for its key): the other player's tree would then be reused across it, forced
+  or chosen.
+
+**Who it reaches**: every run's self-play from the commit it moves to - legacy-meta3-r1 (Dark Ritual, Lion's Eye
+Diamond, Ancient Tomb, City of Traitors, Lotus Petal and Spirit Guides make covering payments) and the Delver
+best-of-three presets alike - by the key and the reuse above; no encoding, layout or network input changes.
+
+### 208.4 Tests
+
+* `rules_farm.rs` `cr_701_25a_a_surveiled_blightsteel_colossus_waits_where_the_pile_s_order_does_not_show`: P0's
+  library with the Colossus and Screaming Nemesis on top in either order; Kaito's surveil, the Colossus into the
+  graveyard: it is revealed and at the bottom, the Nemesis on top and P0's alone, and P1's view and whole row are the
+  same in both games; then the library is shuffled after the pile.
+* `rules_payment_b.rs` `cr_601_2h_the_pool_paying_the_rest_with_no_source_to_pay_instead_is_keyed`: the pool's {R} for
+  Sol Ring with nothing else to pay: one `KEY_AUTO` `PayMana`/`PASS`; with `auto_single` off, `PASS` asked alone; with
+  a Simian Spirit Guide in hand, `PASS` or the Guide asked, no key, and the chosen `PASS` has none either.
+* `fuzz.rs` `info_set_walk_default_seeds_of_208`: games 100056684 and 100080416 of the default pool with every check
+  of `play`, at the `fuzz` profile's denominator (`CHECKPOINT_EVERY_OVERRIDE` 4, 173.2) in every profile.
+* All three fail on main's engine code (A/B: this branch's tests with `pay.rs` and `resolve.rs` of 4a84d570, release):
+  the seed test at seed 100056684 (games.rs:3265), the payment test at its key count (0 for 1), the surveil test at
+  the Colossus' place.
+* Ten tests with `auto_single` off answer the pool's `PASS` now asked (each a pool paying a cost with no source to
+  pay instead): `rules_payment.rs` (4: `cr_106_4_the_player_chooses_which_pool_mana_pays` twice in it,
+  `cr_601_2h_a_sources_mana_and_the_pools_together`, `cr_601_2h_converge_counts_the_pool_mana_chosen`,
+  `cr_106_4_which_red_pays_a_creature_spell`), `rules_payment_b.rs` (3), `rules_priority.rs`
+  `cr_500_4_mana_empties_between_steps`, `cards_eoe_w2.rs` `cr_601_2h_which_restricted_mana_pays_is_the_players_choice`,
+  `cards.rs` `dark_ritual_pays_for_hymn_to_tourach_random_discard`.
+
+### 208.5 Digests and checks
+
+Digests re-recorded with `DIGEST_WRITE=1` (old = main 4a84d570, computed in a warm worktree; new = this branch):
+
+| digest | old (4a84d570) | new | lines differing |
+|---|---|---|---|
+| full (`digests.txt`) | 53eda75d63b2743b | **920109d474d9eadb** | 2,347 of 2,500 |
+| `DIGEST_ENCODING=0` | e65b965d025c800f | **d0411d5195e12cd6** | |
+| constructed (`digests_constructed.txt`) | dab59f1ff2a6d02e | **16441662701e233d** | 505 of 570 |
+| constructed, `DIGEST_ENCODING=0` | 7c4bcab5bfe4e9b0 | 7ef0ac60859b4739 | |
+| EoE (`digests_eoe.txt`) | 2efe956d589840ce | **c3a9c786030f42eb** | 138 of 160 |
+| EoE, `DIGEST_ENCODING=0` | 06241533e391a2b3 | 734841d8ae3dc2e4 | |
+| metagame (`digests_metagame.txt`) | 284d8312cc21c587 | **56ff52ffef1b1913** | 251 of 288 |
+| metagame, `DIGEST_ENCODING=0` | a093109344c68222 | 72a8f90dd0e6b4f7 | |
+| driver (`digests_driver.txt`) | 6a03572828250b86 | 6a03572828250b86 (**equal**) | 0 |
+| dealt (`digests_dealt.txt`) | f78ada3d3d114826 | **a890c27da3c7d1a8** | 74 of 80 |
+| dealt per seat (`digests_dealt_per_seat.txt`) | 776bf9c1b6db07bc | **5fa30432bf8cd63f** | 60 of 60 |
+
+**What moved them** (a branch-local check, reverted): the cube digest with the new key left out of its hash
+(`hash_keys` dropping `KEY_AUTO` `PayMana`/`PASS`) against main's recorded `digests.txt`: with both fixes 2 of 2,500
+games differ (random game 53, heuristic game 355); with the payment fix alone (`resolve.rs` of 4a84d570) **0** -
+53eda75d63b2743b, main's own. So the payment fix adds the key and nothing else (actions, legal actions, encodings,
+worlds), and the Colossus fix changes two cube games.
+
+Checks:
+* the two seeds under the `fuzz` profile (the queue's repro): both pass;
+* a fresh-seed `fuzz`-profile run on the Mac, at this branch's first commit: the default pool's games
+  4,200,000,000..4,200,002,999 (six shards of 500) - **0 failures**, 662,748 open-decklist walks, 3,640,376 states
+  compared; hidden decklists (`FUZZ_HIDDEN_DECKS=1`) games 4,300,000,000..4,300,001,999 (four shards of 500) - **0
+  failures**, 1,710,023 hidden-decklist steps;
+* the engine suite (`cargo test --release -p engine --no-fail-fast`, desktop, throttled): every binary passed after the
+  ten tests above were updated (rules_suite 452, cards_suite 1,391, misc_suite 206, rulings_suite 397, fuzz 14 ...);
+* the suite gate: below.
+
+**Relation to the other lanes.** Neither fix touches `determinize`: lane A's private-key check (games.rs:4402) and
+lane B's determinize-consistency sites (games.rs:2976, hidden.rs:1336) are other causes as far as this lane saw (not
+reproduced here). Lane B (207, in progress) also changes when `pay_mana` asks and when it finishes: a payment paid by
+its picks alone (`vm` 0, no production or delve source pending: `PayMana::paid_by_picks`) finishes as soon as `vm` is
+read, so a payment of no mana never asks "`PASS`, or a source instead" on its first run only. The two compose: B
+decides the payments with nothing left for the pool to pay (no decision, in every world), this section those where
+the pool pays something (`PASS` always offered, forced and keyed when alone); this section's own `vm` = 0 silent end
+is then reached only with delve's sources pending, and says the same as B's rule. Neither asks a decision its re-run
+(`refresh_pending`) would not ask again.
