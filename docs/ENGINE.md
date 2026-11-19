@@ -40642,3 +40642,116 @@ worker, encoding, search or default change. zero-core docs/az.md 44.3, 65.
 the old code. Gates on ee397c44, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`:
 **GATE PASSED WITH SKIPS optin-core ee397c44a8a3 in 2184s** (`--baseline-root` <85495dc7, built>; the live-run fence
 only: 17 core tests) and **GATE PASSED WITH SKIPS python ee397c44a8a3 in 572s** (7 live-run-hazard tests fenced).
+
+## 206. The fuzz steward's private-key findings of 2026-11-17 to 19 were the check's again: the check recognises the public hand look by the step's record of it, not by hands guessed around the step (branch `fix/privkey-1119`, 2026-11-19)
+
+Branch `fix/privkey-1119` from main 534d205a (205; zero-core 894ee27, unchanged). The third time the 141.2 check
+(`check_private_keys_masked_since`) failed on Urza's Bauble's public look at the viewer's own card (173, 175): this
+section ends its guessing instead of adding a third guess.
+
+### 206.1 The findings
+
+Three confirmed queue entries at `engine/src/fuzz/games.rs:4402`, each reproduced here under the `fuzz` profile on
+main's build (4a84d570, the same engine as 534d205a):
+
+| entry | mode | seed | message (abridged) | first found |
+|---|---|---|---|---|
+| 19cb3e1c1ea2 | `delver_dealt2` matches | 100,111,083 | "match ... step 81 game 2: a world of P1 (in the game it started): P0's private key (kind 3) carries the card's identity (517)" | 2026-11-19, engine 6a44afdb |
+| 4df7ea8a5770 | games, default pool | 100,037,121 | "a world determinized for P0: P1's private key (kind 3) carries the card's identity (176)" | 2026-11-17, engine 9476f53c (re-found on 2 later builds) |
+| d95b549fc7a5 | hidden-decklist games | 100,098,483 | "a hidden-decklist world for P1 (mover P1): P0's private key (kind 3) carries the card's identity (202)" | 2026-11-17, engine 9476f53c (re-found on 2 later builds) |
+
+### 206.2 What the failing worlds were
+
+An instrumented copy (branch-local, reverted) printed each failing step's keys, the viewer's hand before and after the
+step and the step's game log (for the match, the log of the game the step ended):
+
+* **19cb3e1c1ea2** - match 100,111,083 of `delver_dealt2` (both seats dealt, 168.1; this seed's `max_turns` is 12), a
+  world of P1 at game 2, turn 12: P1's Daze is cast for its alternative cost - Volcanic Island returns from the
+  battlefield to P1's hand - and counters P0's Brainstorm; P0's Urza's Bauble ability resolves, "P0 looks at a card at
+  random in P1's hand": the Volcanic Island. Nobody has a decision left, so the step runs to the end of turn 12, the
+  match's turn limit: game 2 ends drawn and game 3 begins in the same step (`KEY_DEALT` x 8, `KEY_GAME`). 173's rule
+  checks a look among the ended game's keys against the hand before the step: Ponder and Rough // Tumble.
+* **4df7ea8a5770** - game 100,037,121, a world of P0 played on (`check_determinize`), turn 23: P1 activates Memory Jar -
+  each player exiles its hand face down and draws seven; P1's Urza's Bauble look at a card of P0's hand sees a Gemstone
+  Caverns P0 just drew; the step runs into the end step, where the Jar's delayed trigger discards both hands (the
+  Caverns to the graveyard) and returns the exiled cards. P0's hand after the step is the hand before it; the Caverns
+  is in neither, so 175's rule (a card of the hand before that left it) does not apply.
+* **d95b549fc7a5** - hidden-decklist game 100,098,483, a world of P1, turn 29: P0 casts Timetwister and, with it on the
+  stack, activates Urza's Bauble targeting P1; the look sees P1's only card, Harvester of Misery; Timetwister resolves -
+  each player shuffles its hand and graveyard into its library and draws seven - and P1 draws that Harvester back. After
+  the step the card is in P1's hand, but P0 no longer knows it (it went through the shuffle): 175's in-hand rule wants
+  the looker's knowledge, its left-hand rule a card no longer in the hand.
+
+**No leak, in any of them.** The flagged key is the Bauble's look, which `resolve_ext` keys public on purpose (the
+owner sees which of its cards was seen, 141.2), and its identity is a card of the viewer's own hand at the moment of the
+look - returned there from the battlefield (public), drawn by the viewer (its own draw, keyed with the card in its own
+worlds), held since the step began. The worlds' observer was set and every other private key of the other player in
+those steps was `HIDDEN`.
+
+### 206.3 Why not a third guess
+
+173 and 175 each corrected how the check reads "the hand the look saw" from the two hands it sees, before and after
+the step. A step runs every automatic answer to the next real decision, and a cost, a resolving spell, a delayed
+trigger or the game's end can change the hand before the look and after it within one step; from outside, only the two
+ends are visible, so no rule over them is exact. Accepting 4df7ea8a5770's look means accepting an identity found in
+neither hand, which such a rule can do only by accepting any card of the viewer's that moved in the step (a milled
+library card as well) - a loosening. The engine knows which card the look saw, and where; the step now says so.
+
+### 206.4 The fix
+
+**The engine records its public hand looks** (nothing in play reads the record; no behaviour changes, 206.6's digests):
+
+| where | change |
+|---|---|
+| `hidden.rs` | `HandLook`: the look's key (its index among the keys of the `apply` that made it), the looker, the hand's owner, the card, its identity and its incarnation (`Obj::inc`) at the look |
+| `game.rs` | `Game::hand_looks` (crate-private) and `Game::hand_looks()`: the public hand looks of the last `apply` |
+| `flow.rs` | `apply` clears them before it runs |
+| `resolve_ext.rs` | `Ext::LookAtRandomHandCard` records its look where it keys it public (another player's hand) |
+| `az/matches.rs` | `match_step` clears them first (a deck choice or a sideboarding runs no `apply`: no looks); `next_game` carries them into the game it begins, as it carries the observer (141.1) - the step that ends a game and begins the next keeps the ended game's looks for its keys |
+| `public_state.rs`, `az/build.rs` | the field classified Derived; the exhaustive destructuring |
+
+**The check** (`engine/src/fuzz/games.rs`): another player's `KEY_LOOK` with an identity in the viewer's world is
+accepted only when the step's record has a look at that key's index by that player, at a card of the viewer's hand,
+of that identity; anything else is a leak ("... carries the card's identity (d) in a world of P{v}, and it is no look
+at a card of P{v}'s hand (ENGINE.md 141, 206)"). `KEY_DRAW` and `KEY_DEALT` are unchanged (no exception). Where the
+card has not changed zones since the look (its incarnation is the record's) the state must still show it: in the
+viewer's hand, and the looker knowing it or the card of that identity there it already knew (the look's twin rule) -
+the part of 175's in-hand rule that is exact. 173's positional split stays for the counts and the state check (the keys
+before the step's last `KEY_GAME`, and their looks, are the ended game's, whose cards are gone). 173's and 175's
+guesses are removed. Counters: `PK_ENTERED_HAND_LOOKS` (new: the card was not in the viewer's hand when the step
+began), `PK_LEFT_HAND_LOOKS` (now any zone change after the look: discarded, shuffled away and drawn back, ...),
+`PK_ENDED_GAME_HAND_LOOKS`; the game fuzz prints them too (`hand_looks_report`).
+
+**Regression test** (`engine/tests/fuzz.rs::a_look_at_the_viewers_hand_that_its_step_changes_around_the_look`): the
+three seeds at the `fuzz` profile's denominator (`CHECKPOINT_EVERY_OVERRIDE` 4) in every profile, every check - the
+match with `play_match_spec` (`delver_dealt2`), the game with `play`, the hidden-decklist game with `play_hidden` -
+each with positive evidence (a look at a card that came into the hand in its step: the first two; one that changed
+zones after the look: the last two). With 173 / 175's guess put back beside the record (branch-local): counting, it
+rejects exactly the three queue looks, and enforced, the test fails in release with the queue's message (match
+100,111,083). 173's and 175's tests pass unchanged.
+
+### 206.5 Who it affects
+
+**No self-play decision of any run saw leaked information from this**: the keys were right (206.2). The situation
+itself happens in real play - Urza's Bauble and Daze are in the Delver 60 of the Delver best-of-three dealt presets and
+of legacy-meta3-r1's metagame - but only the check misread it. Nothing to re-pin, fork or change on the farm for play;
+the engine's record changes no play (digests EQUAL), so a run moving onto a main with this commit plays as before.
+Frequency under the fuzz: the steward's main builds since 2026-11-17 (about 1.9 million seeds over its four modes) gave
+these three seeds, each re-found on later builds (the campaigns restart their seed ranges per build) - about one seed
+in 10^5 of a mode. The steward keeps reporting them (known false positives) until main's fuzz build has this commit;
+the farm worker's fuzz jobs carry the new check from that build on.
+
+### 206.6 Checks and gates
+
+The desktop beside the live run legacy-meta3-r1; every heavy command through `tools/slotd.sh`, this branch's own target
+directory.
+
+* **The queue's three repros**, `fuzz` profile: fail on main's build (4a84d570) with the queue's messages; pass on
+  ad4c74e7, each checking its look (match 100,111,083: 1 look in a step that began the next game, at a card that came
+  into the hand; game 100,037,121: 1 at a card that came into the hand and changed zones after; hidden-decklist game
+  100,098,483: 1 that changed zones after the look).
+* **The regression test** in release: fails with the old guess enforced, passes with the record (206.4). The `fuzz`
+  and `az` binaries in release: 14 and 57 passed (the public-state classification included).
+* **Digests EQUAL** (nothing re-recorded): full 53eda75d63b2743b, encoding-free e65b965d025c800f, constructed
+  dab59f1ff2a6d02e, eoe 2efe956d589840ce, driver 6a03572828250b86, metagame 284d8312cc21c587, dealt f78ada3d3d114826,
+  dealt per seat 776bf9c1b6db07bc.
