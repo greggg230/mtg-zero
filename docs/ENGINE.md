@@ -40442,3 +40442,56 @@ re-pin commit), `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`, `-
   this core).
 * **python**: **GATE PASSED WITH SKIPS python 42fc92df309b in 384s** (pytest 156 + ... passed, 7 live-run-hazard tests
   fenced; the run-loop smoke 16 games, 0 unfinished).
+
+## 203. The farm worker's memory: ~13 MB a game in flight -> a few, and no growth with time: zero-core pin 3eb1a41 -> 035bf9e (a game's records held sparse, its evaluation cache in one buffer, no ONNX Runtime memory patterns; branch `fix/worker-memory`, 2026-11-19)
+
+**Why.** On the Mac the native farm worker (`mtgz-worker`: zero-core's `zero_worker` + `zero_search` + this engine +
+ONNX Runtime 1.31.1 on the CPU) needed ~16 MB of memory per game in flight at legacy-meta3-r1's settings, and its
+footprint kept rising for as long as it ran (one worker at 2,304 games in flight: 12.8 GB at 3 minutes, 19.0 at 5, 22.2
+at 7, 25.2 at 9, 27.0 at 11, 29.1 at 15; a crew worker reached 16 MB a game at ~27 minutes), and the SSH setup's
+Python remote workers were thought to need ~2.7 MB a game. Memory, not the cores, capped the games in flight the farm agent gives the
+Mac (1,024 MB + 14-16 MB a game, "measured here"), which forced small layouts; the agent's Windows plan for CPU jobs
+assumes 600 MB + 45 MB a game.
+
+**Where the memory went.** A diagnostic build (not committed: zero-core branch `diag/worker-memory-3`) summed what
+every slot of the driver holds (records, trees, evaluation cache, traces, ...) and wrote it beside the worker's footprint
+every 10 s; ORT session options were switched by environment. Runs: the worker's `selfplay` CLI as a rolling job,
+records output, gen 619 of legacy-meta3-r1 (the default graph) with the run's farm settings (sims 64 / 16 / 4, p_full
+0.25, selfplay_view_samples 0.5, eval_cache 8,192, auxiliary targets); the desktop at below-normal priority, the Mac
+under the bench lock at nice 15.
+
+* *The records of the games in flight* (`Slot::records`): each recorded decision's feature row was dense - layout v7's
+  56,384 floats, 220 KB, of which ~200 are non-zero - and its auxiliary targets too (2,048 floats, 8 KB, ~30 non-zero).
+  At legacy's ~32 records a game in flight (full searches with p_full 0.25, plus the value-only view samples) that is
+  ~7 MB a game, and it grows with a game's age. With the uniform evaluator on the desktop (256 games, short games):
+  9.0 GB of rows + 0.35 GB of auxiliary targets of the process's 11.9 GB. With gen 619 on the desktop's CPU after 10
+  minutes (768 games): 3.9 GB of rows of 7.2 GB. The Python remote worker runs the same driver and held the same rows:
+  the Mac's worker_bench results (`~/mtgz-macfarm/ab/*/result.json`: 5-minute windows, conc 768) show each Python
+  process peaking at 8.1-8.6 GB resident (~11 MB a game), and one Python process matching a native worker at the same
+  leaves/s (s4-py-a 6.3 GB, s4-none-a 6.2 GB after 4 minutes): the ~2.7 MB a game is not in those results. What the
+  native worker had on top was the growth with time (next point), which a 5-minute window hardly shows.
+* *ONNX Runtime's memory patterns* (its default): one buffer plan per distinct set of input shapes, never dropped; the
+  sparse batches' `x_idx` / `x_val` are each batch's non-zero count long, so nearly every batch is a new shape and a new
+  plan. That is the growth with time: ~0.15 GB a minute on the Mac with 4 sessions (~29 batches a second), +340 MB in
+  10 minutes on the desktop's CPU pack with 2 sessions, and on the desktop's CUDA pack ~2.5 GB a minute of committed
+  memory with one session.
+* *The evaluation cache* (`eval_cache` 8,192): a `HashMap<(u16, u32, u128), Cached>` at 112 bytes a bucket plus a heap
+  block per answer: 1.58 MB a game once full (the uniform evaluator's games), ~0.6 MB a game on average on the Mac.
+* *The search trees* (each seat's tree and the spare trees kept for reuse, their arrays' capacity): ~0.6 MB a game on
+  the Mac at steady state - left as it is (the nodes' `[f64; MAX_SEATS]` vectors; a change to the tree's layout is
+  search-hot code, not taken here).
+* ONNX Runtime's CPU arena: ~100 MB a session up front, no growth beyond (its peak); left on (off was slower).
+
+**What.** zero-core `fix/worker-memory` 035bf9e = 3eb1a41 + three commits + docs (zero-core docs/search.md 2.21,
+docs/az.md 64): (1) the driver holds a game's records sparse (`Held`: the row and the auxiliary targets as the positions
+and values of their non-zero floats, by bits; unpacked bit for bit when the game hands them out), (2) the evaluation
+cache in one float buffer per game (`EvalCache`: 24-byte keys, each answer's priors and the game's n seats' value and
+margin), (3) no ONNX Runtime memory patterns on any provider (`session::builder`; ZERO_ORT_MEM_PATTERN=1 turns them back
+on, a diagnostic). No setting, no engine, encoding or worker-protocol change; the Python module and the remote workers
+get (1) and (2) too (the same driver).
+
+**Same games.** The same classic self-play job (24 games of the legacy settings, seed 777, conc 24, the CPU pack,
+output both) with the worker of 4a7e5f5c, of this commit, and of this commit with ZERO_ORT_MEM_PATTERN=1: the records
+file and the shard byte for byte (1,335 rows, 3,503 searched decisions). gen 619's self-test with both builds: the same
+max abs on the CPU (6.806e-6) and the CUDA pack (6.258e-6). The desktop's side-by-side runs with and without the
+patterns played the same games (83 finished, 4,460 searched decisions each).
