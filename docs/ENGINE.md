@@ -41441,3 +41441,22 @@ hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built aga
 skipped: 17 live-run-hazard tests (fenced: a live run on this machine).
 
 Main fast-forwarded 31efcf62 -> this commit (main had not moved since the branch: the gate stands as run).
+
+## 212. zero-core pin 158bfb1 -> 03686a1: the farm pool never runs a macOS alternate's executable on Windows (zero-core `fix/pool-foreign-platform`, docs/az.md 54; branch `fix/pool-foreign-platform`, 2026-11-20)
+
+**The bug.** A farm release with `--mac-publish` (211's c8e40f5a release; 207's 69b7e144 release) keeps the macOS
+worker build's executable in the builds directory (`<builds>/<build id>/mtgz-worker`, a Mach-O file). The farm pool's
+rolling check (`farm_pool.Pool._check_rolling`) runs every alternate's executable it finds there for its features, so
+on the desktop it ran the macOS one: "OSError: [WinError 193] %1 is not a valid Win32 application" every poll, no gen
+registered. legacy-meta3-r1 got no farm self-play after its relaunches on those releases (11-19 17:37 on 69b7e144;
+11-20 06:20 on c8e40f5a) until the file was renamed by hand (06:33: gens 817 and 818 published at once).
+
+**The fix** (zero-core 03686a1): the check reads the alternate's manifest `platform` first (absent: windows-x64) and
+logs a build of another platform than this machine's (`farm_def.host_platform()`) as unchecked, never running it - as
+an alternate whose executable is not here. A same-platform alternate present here is still run and checked. Python only:
+no Rust input changes, so the farm release of this commit reuses c8e40f5a's builds (f1fa951d, CUDA 87b568a3, macOS
+b96e45a0).
+
+**Tests.** zero-core `test_rolling_check_never_runs_another_platforms_executable` (another platform's executable
+present is never run, this platform's alternate still checked; it fails without the fix with the OSError); the pool's
+rolling, alternates and variants tests pass.
