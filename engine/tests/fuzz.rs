@@ -220,6 +220,35 @@ fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
+/// ENGINE.md 208: the fuzz steward's queue entries 971a41eb6fe1 and 7a779fdfd7e6 (default games found under the `fuzz`
+/// profile on main, both in the open-decklist information-set walk of the player not deciding). 100056684: Kaito's
+/// surveil in P0's worlds of P1's library, a Blightsteel Colossus put into the graveyard first - revealed and kept in
+/// the library until the pile is placed, at its slot among the looked-at cards, so P0 saw its depth in the pile (the
+/// 15th or the 14th card in the two worlds: "same keys, different views"); it now waits at the bottom. 100080416: P0
+/// paying Celestial Colonnade's ability, the pool covering the rest - in one of P1's worlds no source could pay instead
+/// and the payment ended silently (then the game: Ancient Tomb's damage), in the other P0 held a Simian Spirit Guide
+/// and was asked ("same keys, the game over in one world only"); the one-option `PASS` is now asked and keyed.
+/// Replayed at the `fuzz` profile's denominator (4) in every profile, every check of `play`.
+#[test]
+fn info_set_walk_default_seeds_of_208() {
+    use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
+    if pool_mode() != PoolMode::Default || sealed_mode() || hidden_decks_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        for seed in [100_056_684u64, 100_080_416] {
+            let p = std::panic::catch_unwind(|| play(seed, true))
+                .unwrap_or_else(|e| panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1, fuzz profile): {e:?}"));
+            assert!(!p.actions.is_empty(), "seed {seed}");
+        }
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 /// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
 /// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
 /// the checks over the whole run to this test), sums the shards' counters and runs this test with

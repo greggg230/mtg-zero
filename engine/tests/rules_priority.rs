@@ -218,9 +218,11 @@ fn cr_500_4_mana_empties_between_steps() {
     g.pass();
     g.pass();
     assert_eq!(g.player(0).pool.amt[engine::mana::B], 3);
-    // The pool pays first: no mana source decision.
+    // The pool pays first: no mana source to choose, only its `PASS` (ENGINE.md 208: the decision's one option).
     let dt = g.card(0, "Test Deathtouch", Zone::Hand);
     g.choose(Choice::Cast(dt));
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::Priority));
     assert_eq!(g.player(0).pool.amt[engine::mana::B], 2);
     g.pass();

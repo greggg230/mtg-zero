@@ -2912,11 +2912,23 @@ impl Game {
         }
         pm.card_slots = card_slots;
         if covers {
-            if opts.is_empty() {
+            // Nothing left for the pool to pay (the picks pay it all, or the
+            // cost is no mana): no source can pay instead in any world, so
+            // there is no decision.
+            if opts.is_empty() && pm.vm == Some(0) {
                 let rems = self.pool_rems(&pm, &classes);
                 self.end_payment(pm, rems);
                 return;
             }
+            // `PASS`, the pool pays the rest - asked even with no source to
+            // pay instead: that decision then has one option, which the
+            // engine answers and keys (`auto_single`, `KEY_AUTO`, ENGINE.md
+            // 10). Ending the payment silently instead left unkeyed whether
+            // the payer had a source to pay with, which may be a hidden card
+            // (a Spirit Guide in hand): two worlds of the other player's with
+            // equal keys, the payment over in one (and the game, by the
+            // state-based actions the payer's priority brought: Ancient
+            // Tomb's damage) and still asking in the other (ENGINE.md 208).
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
         assert!(

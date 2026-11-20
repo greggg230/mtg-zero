@@ -1288,6 +1288,21 @@ impl Game {
                 self.put_onto_battlefield(c, p)
             }
         };
+        // A card a replacement shuffles into its library instead (Blightsteel
+        // Colossus, CR 614.1a) stays there, revealed, until the pile is placed
+        // and the library shuffled (`Game::pile_shuffles`, ENGINE.md 51.4) -
+        // at the bottom: where it waits is no place the rules give it (the
+        // pile's placement is one action, CR 701.25a), and its slot among the
+        // looked-at cards is their order, which only the player placing them
+        // knows (`look_top` scrambles it for the others). Left there, every
+        // player would see the revealed card at its depth in the pile: the
+        // order of the cards still to be placed (ENGINE.md 208).
+        if dest == PileDest::Graveyard && self.objs[c.i()].zone == Zone::Library {
+            let lib = &mut self.players[self.objs[c.i()].owner as usize].library;
+            let i = lib.iter().position(|&x| x == c).expect("a library card is in its owner's library");
+            lib.remove(i);
+            lib.insert(0, c);
+        }
         // (Not a card a replacement shuffled into the library instead:
         // Blightsteel Colossus.)
         let shuffled = dest == PileDest::Graveyard;

@@ -11,7 +11,8 @@
 //! * 51.3 a payment search that never ended (Gaea's Cradle's mana against
 //!   its own waterbend tap: a matching kept in eight bits);
 //! * 51.4 a world that changed its decider's encoding (Blightsteel Colossus
-//!   surveiled into the graveyard shuffled the pile still to be placed);
+//!   surveiled into the graveyard shuffled the pile still to be placed;
+//!   ENGINE.md 208: where it waits for that shuffle);
 //! * 51.5 "a card with another face" (passes on ab02574: fixed by its
 //!   ENGINE.md 49.6; this test is the farm's case, a split card);
 //! * 51.6 `PayMana: no way to pay {3}{U}{U}` (delve exiled the graveyard
@@ -402,6 +403,51 @@ fn cr_701_25a_a_surveiled_blightsteel_colossus_shuffles_after_the_pile_is_placed
         }
         g.check_knowledge().unwrap();
     }
+}
+
+/// CR 701.25a, 614.1a, ENGINE.md 208 (the fuzz steward's queue entry 971a41eb6fe1: default game 100056684 under the
+/// `fuzz` profile, Kaito's surveil in a world of the other player's): the surveilled Colossus that waits in its
+/// library until the pile is placed (51.4) waits at the bottom, not at its slot among the looked-at cards. Their order
+/// is the surveilling player's alone (`look_top` scrambles it for the other player); left at its slot, the revealed
+/// Colossus showed P1 its depth in the pile, so two libraries that differ only by the order of the two looked-at cards
+/// - games P1 cannot tell apart - showed P1 different views and rows (the Colossus 7th or 6th of 8).
+#[test]
+fn cr_701_25a_a_surveiled_blightsteel_colossus_waits_where_the_pile_s_order_does_not_show() {
+    let mut seen: Vec<(Vec<u64>, Vec<f32>)> = Vec::new();
+    for top in [["Blightsteel Colossus", "Screaming Nemesis"], ["Screaming Nemesis", "Blightsteel Colossus"]] {
+        let mut g = scen()
+            .battlefield(0, &["Kaito, Bane of Nightmares"])
+            .library(0, &[top[0], top[1], "Island", "Island", "Island", "Island", "Island", "Island"])
+            .library(1, &["Island"; 8])
+            .at(Step::Main1, 0)
+            .start();
+        let kaito = bf(&g, 0, "Kaito, Bane of Nightmares");
+        let bs = g.card(0, "Blightsteel Colossus", Zone::Library);
+        let nemesis = g.card(0, "Screaming Nemesis", Zone::Library);
+        // Kaito's 0: surveil 2; the Colossus into the graveyard first.
+        g.choose(act(kaito, 1));
+        finish(&mut g, |_| None);
+        g.pass();
+        g.pass();
+        assert_eq!(g.kind(), Some(DecisionKind::PutInGraveyard), "{}", log(&g));
+        g.choose(Choice::Card(bs));
+        assert_eq!(g.kind(), Some(DecisionKind::PutInGraveyard), "{}", log(&g));
+        assert!(options(&g).contains(&Choice::Card(nemesis)));
+        // Revealed, waiting at the bottom; the Nemesis, still to be placed, on top and known to P0 only.
+        assert!(g.knows(1, bs), "the Colossus is revealed");
+        assert_eq!(g.player(0).library.first(), Some(&bs), "the Colossus waits at the bottom: {:?}", g.player(0).library);
+        assert_eq!(g.player(0).library.last(), Some(&nemesis));
+        assert!(g.knows(0, nemesis) && !g.knows(1, nemesis));
+        seen.push((g.view_of(1), encoding(&g, 1)));
+        // The Nemesis on top; the library is shuffled after, the Colossus in it.
+        g.choose(Choice::Pass);
+        resolve_with(&mut g, |_| None);
+        assert_eq!((g.obj(bs).zone, g.obj(nemesis).zone), (Zone::Library, Zone::Library), "{}", log(&g));
+        assert!(!g.knows(0, nemesis), "shuffled: nobody knows where it is");
+        g.check_knowledge().unwrap();
+    }
+    assert_eq!(seen[0].1, seen[1].1, "P1's row: the order of P0's looked-at cards shows");
+    assert_eq!(seen[0].0, seen[1].0, "P1's view: the order of P0's looked-at cards shows");
 }
 
 // ---- 51.5: a split card cast from Shelldock Isle -------------------------------

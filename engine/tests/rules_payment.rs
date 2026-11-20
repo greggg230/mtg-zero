@@ -94,14 +94,19 @@ fn cr_106_4_the_player_chooses_which_pool_mana_pays() {
     let mut g = scen().pool(0, [0, 1, 0, 1, 0, 0], 0).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
     let sr = g.card(0, "Sol Ring", Zone::Hand);
     g.choose(Choice::Cast(sr));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{}", log(&g));
     let mut left: Vec<[u8; 6]> = each_option(&g).iter().map(|h| h.player(0).pool.amt).collect();
     left.sort();
     assert_eq!(left, vec![[0, 0, 0, 1, 0, 0], [0, 1, 0, 0, 0, 0]]);
-    // Two of a kind are one choice: {R}{R} in the pool, no question.
+    // Two of a kind are one choice: {R}{R} in the pool, no question of which (the pool's `PASS` alone, ENGINE.md 208).
     let mut g = scen().pool(0, [0, 0, 0, 2, 0, 0], 0).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
     let sr = g.card(0, "Sol Ring", Zone::Hand);
     g.choose(Choice::Cast(sr));
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", log(&g));
+    g.choose(Choice::Pass);
     assert!(at_priority(&g), "{:?}", g.kind());
     assert_eq!(g.player(0).pool.amt, [0, 0, 0, 1, 0, 0]);
 }
@@ -122,6 +127,9 @@ fn cr_601_2h_a_sources_mana_and_the_pools_together() {
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
     let sol = bf(&g, 0, "Sol Ring");
     g.choose(act(sol, 0));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{}", log(&g));
     let mut left: Vec<[u8; 6]> = each_option(&g).iter().map(|h| h.player(0).pool.amt).collect();
     left.sort();
@@ -149,6 +157,9 @@ fn cr_601_2h_converge_counts_the_pool_mana_chosen() {
     }
     assert_eq!(g.kind(), Some(DecisionKind::Target), "{}", log(&g));
     g.choose(g.tgt(bear));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{}", log(&g));
     let outcomes: Vec<(bool, [u8; 6])> = each_option(&g)
         .into_iter()
@@ -171,6 +182,9 @@ fn cr_106_4_which_red_pays_a_creature_spell() {
     let mut g = scen().pool(0, [0, 0, 0, 3, 0, 0], 1).hand(0, &["Test Dwarf"]).at(Step::Main1, 0).start();
     let d = g.card(0, "Test Dwarf", Zone::Hand);
     g.choose(Choice::Cast(d));
+    // The pool pays the rest: `PASS`, its decision's one option (ENGINE.md 208).
+    assert_eq!((g.kind(), g.offered()), (Some(DecisionKind::PayMana), vec![Choice::Pass]), "{}", g.log_lines().join("\n"));
+    g.choose(Choice::Pass);
     assert_eq!(g.kind(), Some(DecisionKind::PayPool), "{}", log(&g));
     let mut out: Vec<(bool, u8)> = each_option(&g)
         .into_iter()
