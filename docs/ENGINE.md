@@ -41151,3 +41151,202 @@ the three chunks on the desktop: all pass, their reports the farm's to the game 
   2 aborted, every chunk past u32::MAX power.
 * **Tests**: the five above (rules_check, rules_numbers, three in tests/fuzz.rs) and the steward's
   (tests/test_fuzz_steward.py: 15 passed); `python tools/privacy_check.py`: 0 findings.
+
+## 210. Determinize keeps the viewer's decision and view: a payment of no mana asks nothing; the owner's private rearrangement of its hand keeps what the other player knows of a told-apart card (branch `fix/determinize-1119`, 2026-11-19)
+
+Branch from main 4a84d570, rebased onto main 192819f2 (206, 207, 208 and 209 under it; zero-core eaa624e, unchanged
+here). Numbered 207 while it was written; main took 207 first.
+
+### 210.1 The findings
+
+Two confirmed entries of the fuzz steward's queue (171), both "determinize must not change what the viewer sees or the
+viewer's pending decision", reproduced under the `fuzz` profile on main 4a84d570:
+
+* **2076692a1ae6** (17 hits; the same finding as **8dd5a36f4ce0**, 10 hits, queued at hidden.rs:1299 before the line
+  moved), hidden.rs:1336, modes `hidden-games` and `games`: "determinize changed the viewer's decision" - the check at
+  the end of `after_deal`: the decider's own world keeps its decision (its options never name a resampled card), and a
+  debug build asks it again (`refresh_pending`) and compares. Seeds: default pool 100,024,301, 100,031,416,
+  100,066,908, 100,089,619; hidden decklists 100,021,777, 100,068,104, 100,124,410, 100,131,330, 100,147,748.
+* **88c42634bd1f** (3 hits), games.rs:2976, mode `games`: "seed 100054973: determinize changed the view of P0 (mover
+  P1)" (`check_determinize`: a world of the player not deciding refreshes the decider's decision and must show that
+  player what the game shows it).
+
+Two causes, one in each layer: a payment asker that did not ask again what it had asked (210.2), and knowledge lost by
+the owner's private rearrangement of its hand (210.3).
+
+### 210.2 2076692a1ae6: a payment of no mana asked a decision its own re-run did not ask
+
+An instrumented replay (reverted) printed the pending decision before the deal and its refresh, the same in all nine
+seeds: the decider was paying for a spell of **mana cost {0}**, the agenda `[.., CastDone, PayMana]` with nothing left
+to pay, the decision `PayMana` [`PASS`, a source]; asked again, the payment finished, the spell was cast and its
+caster held `Priority`. The spells and the source offered:
+
+| seed | spell | source offered |
+|---|---|---|
+| 100,021,777 (hidden) | Lotus Petal | Wizard's Rockets |
+| 100,024,301, 100,089,619; 100,124,410 (hidden) | Mox Pearl | Wizard's Rockets |
+| 100,031,416 | Mox Opal | Wizard's Rockets |
+| 100,068,104 (hidden) | Walking Ballista, X = 0 | Wizard's Rockets |
+| 100,147,748 (hidden) | Mishra's Bauble (two mana floating) | Wizard's Rockets |
+| 100,066,908 | Black Lotus | Arena of Glory's {R}, {T}, exert: {R}{R} |
+| 100,131,330 (hidden) | Zuran Orb | Sunken Ruins' {U/B}, {T}: two mana |
+
+**The mechanism** (`pay.rs` `pay_mana`). The payment finishes at once when its picks pay everything and the virtual
+pool spends nothing ("paid by single-mana sources alone", 152.3: `vm == Some(0)`, the picks as many as the needs, no
+production being chosen, no delve source pending). That check read the `vm` stored with the task, and on a payment's
+first run there is none: the pool is read just after (`pooled`, `recount`), giving 0. So the first run went on to the
+options: the pool "covers" the rest (it pays nothing of nothing), and 13.13 offers `PASS` and every source whose pick
+leaves the payment payable - none of the single-mana ones (a pick past the needs), but a source whose activation adds
+nothing net: Wizard's Rockets with X = 0, a mana ability with a mana cost whose mana pays that cost. Run again, the
+stored `vm` was 0 and the early finish fired. A world `determinize` deals for the other player refreshes the decider's
+decision: there the payment ended, Mox Pearl was cast and the decider was at `Priority` - a public state the real game
+was not in (the view and the encoding of the other player differ; in a release build the fuzz's view check fails, in
+the `fuzz` profile the decider's own world fails first).
+
+**Class: an engine state the asker did not keep** - `pay_mana` was not re-entrant: the decision it asked depended on
+whether it had run before. No hidden information is read, and the check is right.
+
+**The rules.** CR 601.2g: "If the total cost includes a mana payment, the player then has a chance to activate mana
+abilities." A total cost of no mana leaves nothing to pay, and 13.13's question is "the pool pays the rest, or a source
+pays instead of the pool's mana": with the pool spending nothing there is nothing to pay instead of. The engine
+already finished such a payment when it was run again, never offered a single-mana source there, and finished a
+payment its picks had paid whole without the question. A player who wants Wizard's Rockets' card for X = 0 activates
+it with priority (`ActivateMana`, 100.4.3).
+
+**The fix** (`pay.rs`): `PayMana::paid_by_picks` names the early finish's condition and `Game::finish_paid` its
+action; the condition is checked again where the decision would be asked, right after `vm` is read from the state
+(`vm_now`). A decision the payment asks is now one its own re-run asks: the `vm` stored with an asked decision is the
+one just read, and it fails the condition. The top check stays (the fast path: no sources looked at).
+
+**With 208** (lane C's change of the same place, under this branch). 208 asks `PASS` whenever the pool covers the
+rest, keyed when it is the only option (a payment that ended silently left unkeyed whether the payer had a source in
+its hidden hand), and ends silently only with `vm` 0. With 210 a covering payment with `vm` 0 has already finished
+before its sources are looked at (`paid_by_picks`: the `vm` just read, no production pending - taken just above - and
+no delve source pending - each is activated and the payment returns before this point), so 208's silent end was
+unreachable; it is a debug assertion now (`pm.vm != Some(0)` where `PASS` is pushed), which the fuzz runs below hold.
+Together: a payment with nothing left for the pool to pay asks nothing, in every world; one whose pool pays something
+asks `PASS` (and the sources that may pay instead), keyed when alone. They agree in meaning.
+
+**Who it reached.** The bug itself: worlds dealt for a player who is not deciding (`refresh_pending`); no live search
+deals for a non-decider (71.8), so self-play and the farm never met it. The fix changes real play where a {0} payment
+had such a source: cube games only - none of the three Legacy 75s (legacy-meta3-r1) nor the Delver presets' 75 holds
+Wizard's Rockets, Arena of Glory or a filter land (the metagame, constructed and dealt digests are equal, 210.6). In the
+cube digest's 2,500 games the old question came up once, in the determinized clone of game r 1051 (a world of P1's:
+P1 casting Mana Crypt beside Arena of Glory), never in the games themselves.
+
+### 210.3 88c42634bd1f: the owner's Brainstorm made the other player forget the revealed miracle card
+
+The real game, turn 37, P1's upkeep (no card drawn yet this turn): P1 casts Brainstorm; its first draw is Metamorphosis
+Fanatic, which P1 reveals for miracle (CR 702.94a: the trigger waits); P1 puts Chaos Defiler and Goblin Welder back
+(`Op::PutFromHandOnTop`); P1 casts The Wandering Emperor (flash) over the miracle trigger and it resolves; the trigger
+resolves and asks P1 "cast it for its miracle cost?" (`YesNo`). A trace of the Fanatic's knowledge bits (an
+instrumented replay, reverted): known to both after the reveal, **to P1 alone after the first put-back** (step 398).
+`PutFromHandOnTop` calls `scramble(p, &[], hand)` before the move - which card goes back is private, so the other
+player loses track of the hand - and `scramble` took every known card's bit, the revealed one's too. P0's world then
+dealt that card anew (here Faerie Mastermind); at the refresh of P1's decision `Ext::MiracleCast` found no miracle
+card, the trigger resolved without a question and P1 held priority: the views differ at the priority holder.
+
+**The rules.** CR 702.94b: "If a player chooses to reveal a card using its miracle ability, they play with that card
+revealed until that card leaves their hand, that ability resolves, or that ability otherwise leaves the stack." Every
+player sees whether the revealed card is among those put back. In the engine's terms the card is **told apart** (156:
+the waiting trigger names it, `Game::told_apart`), and 156 kept a told-apart card's knowledge in `canon_hand_knowledge`
+and `knowledge_leaves`; `scramble` was not changed then.
+
+**Class: an engine state a private move did not keep** - what the other player knows. No leak: P0 knew less than it
+saw. In the search it was wrong all the same: P0's worlds held a miracle trigger with no miracle card in some of them,
+and P0's row showed no identity for the trigger's source (156.3 part 4 reads the viewer's knowledge).
+
+**The fix** (`hidden.rs` `scramble`): a told-apart hand card keeps its knowledge bits and is not put into the cloud;
+every other card the other player knew goes into it as before. If the revealed card is the one put back, the other
+player saw it go and still knows it, now on top of the library under the next card (`move_card` keeps the bits of a
+hidden-to-hidden move). A told-apart card the other player does not know would stay in the cloud's domain (a world
+could deal it a scrambled identity, although that player tells it from the scrambled cards); the references the pool
+makes to hand cards come with a reveal (602.2a, 702.49b, 702.94b, the delve promise), so it does not arise: an
+instrumented run of 1,200 games (400 each of the default, delver and cross pools, the `fuzz` profile) met 52 scrambles
+over a told-apart card, every one a revealed Fanatic known to the other player, and none unknown.
+
+**Who it reached.** A player's searches while the other player's revealed card is told apart and that player
+rearranges its hand privately: in the pool, a miracle card revealed by Brainstorm (or another put-back) in the upkeep -
+Metamorphosis Fanatic is the cube's only miracle card - or a ninjutsu card revealed while its ability is on the
+stack and its owner answers with a put-back. The Legacy 75s and the Delver 75 hold no miracle card: **no live run is affected**. No
+digest game changed with this part alone (on 4a84d570 the cube digest stayed 53eda75d63b2743b with only it).
+
+**Lane C's sites.** 208's two seeds (100,056,684 and 100,080,416, games.rs:3265 and 3245) fail on 4a84d570 with this
+branch's fixes alone: 210 does not explain them, nor 208 these; the two meet only in `pay_mana` (210.2).
+
+### 210.4 The debug-build failure of `the_v5_facts_encode_no_hidden_information` (reported 2026-11-02)
+
+The public-state gate's hidden-information test (`tests/az.rs`, 58) under debug assertions (the `fuzz` profile) failed
+on 4a84d570, first with "refreshing a decision revealed something" and, past that, with "determinize changed the
+viewer's decision". **Neither is 210.2's or 210.3's cause; both are the test's hand-made states**:
+
+1. The perturbation "the active player is controlled this turn" calls `sync_controller_view` (CR 722.3: the controller
+   sees the controlled player's hand), whose `KEY_LOOK`s stayed in `Game::keys` - the transition's buffer, empty
+   between transitions (`public_state.rs` classifies it so) - and `refresh_pending` checks that a refresh adds no key.
+   **Fix**: `Perturbation::run` clears the buffer after the change.
+2. "a creature attacked this turn" (P1's Broadside Bombardiers) made Bombardiers' boast activatable, and P1's stored
+   `Priority` (Pass, Yes) lacked it: the decider's world keeps its decision, the debug check asked it again and found
+   the ability. The 2026-11-02 report's case (Cast options before and not after, on 3abb2e3) is most likely the same
+   mechanism - a decision left stale by the change, not a world reading hidden cards; on 4a84d570 the first stale
+   decision the test meets is Bombardiers'. **Fix**: the test asks the decision again after the
+   change (`refresh_decision`), as a state at rest has it.
+
+Now the test passes under debug assertions (13,257 perturbed positions, 53,028 worlds compared, 6,366 deck-tilted),
+and the whole `az` binary in the `fuzz` profile: 57 passed, 1 ignored.
+
+### 210.5 Tests
+
+* `engine/tests/determinize_consistency.rs` (misc suite), each checking at every decision that the asker asks the
+  decision again and that 24 worlds of either player show it what the game shows it:
+  `cr_601_2g_a_payment_of_no_mana_asks_nothing` (Mox Pearl beside Wizard's Rockets: no `PayMana`, the spell on the
+  stack), `cr_601_2g_a_phyrexian_cost_paid_with_life_asks_nothing_more` (Gitaxian Probe's {U/P} paid with 2 life),
+  `cr_702_94b_a_revealed_miracle_card_stays_known_while_its_owner_puts_cards_back` (Brainstorm in the upkeep draws
+  the Fanatic first; two other cards go back; P1 still knows it in 40 worlds, and the miracle question is asked in every
+  world), `cr_702_94b_a_revealed_miracle_card_put_back_is_known_in_the_library`. All four fail without this branch's
+  engine changes (checked on 4a84d570's engine; 208 changes neither path).
+* `hidden.rs` `told_apart_tests::a_private_rearrangement_of_the_hand_keeps_a_told_apart_cards_knowledge` (156's
+  miracle setup: the revealed card keeps P1's bit, the twin P1 knew goes into the cloud; fails before).
+* `tests/fuzz.rs` `determinize_keeps_the_viewers_decision_and_view_default_seeds`: the ten seeds at the `fuzz`
+  profile's denominator (4) in every profile, every check of `play` / `play_hidden` (fails before: in the `fuzz`
+  profile at the first seed, "determinize changed the viewer's decision").
+* `tests/az.rs` `the_v5_facts_encode_no_hidden_information` (210.4).
+
+### 210.6 Digests
+
+Against main's (192819f2: 208's re-recording, unchanged by 207 and 209):
+
+| digest | before (192819f2) | after |
+|---|---|---|
+| cube (`digests.txt`), full | 920109d474d9eadb | **44372545881ef768** (1 of 2,500 games: r 1051) |
+| cube, `DIGEST_ENCODING=0` | d0411d5195e12cd6 | **a965c3fc8d3bba8a** (the same game) |
+| constructed | 16441662701e233d | 16441662701e233d **EQUAL** |
+| EoE | c3a9c786030f42eb | c3a9c786030f42eb **EQUAL** |
+| metagame (the Legacy decks) | 56ff52ffef1b1913 | 56ff52ffef1b1913 **EQUAL** |
+| dealt | a890c27da3c7d1a8 | a890c27da3c7d1a8 **EQUAL** |
+| dealt per seat | 5fa30432bf8cd63f | 5fa30432bf8cd63f **EQUAL** |
+| driver | 6a03572828250b86 | 6a03572828250b86 **EQUAL** |
+
+Re-recorded on purpose: game r 1051's determinized clone (every 20th decision the digest deals a world for the decider
+and plays five random actions in it) reached P1 casting Mana Crypt beside Arena of Glory, which asked the old
+question; the games themselves never met such a payment, so the moved hashes come from the worlds the digest plays
+in. Bisected on 4a84d570: without the `pay.rs` part the cube digest was main's (53eda75d63b2743b), with it the same one
+game differs.
+
+### 210.7 Checks
+
+On the desktop beside the live run, every heavy command through the throttle (`tools/slotd.sh`):
+
+* **The seeds.** All ten replay clean under `--profile fuzz` (`FUZZ_FIRST=<seed> FUZZ_GAMES=1`, `FUZZ_HIDDEN_DECKS=1`
+  for the hidden-decklist ones), on 4a84d570 + 210 and on d1342916 + 210; each failed at its queued site on 4a84d570.
+  206's and 208's seed tests pass with 210 (`fuzz.rs`, the `fuzz` profile: 5 passed).
+* **Fresh-seed fuzz, the `fuzz` profile** (`tools/fuzz_shards.py --exe <the fuzz-profile test binary>`, 4 shards; 0
+  failures, none at hidden.rs's or games.rs:2976's checks, nor at the new debug assertion): on d1342916 + 210, the
+  default pool's 2,000 games + 100 matches from seed 7,500,000 (380 s) and 2,000 hidden-decklist games from 7,500,000
+  (492 s); before the rebase (4a84d570 + 210) the same from seed 7,400,000 (391 s, 486 s), and the measurement's
+  400 games + 20 matches each of the default, delver and cross pools from 7,300,000 (210.3).
+* **The tests** (210.5), the `fuzz` profile: the four scenarios, the in-crate tests (`told_apart_tests`, `pay::`: 13
+  passed), `rules_payment` and `rules_farm` (99 passed, 208's included), the whole `az` binary (57 passed, 1 ignored).
+* **On the final base** (192819f2 + 210, release): every digest of 210.6 as tabled; the seed tests of 206, 208, 209
+  and 210 (`fuzz.rs`: 7 passed) and the four scenarios pass. Without 210's engine changes (on 12858d1f) the 210 seed
+  test fails in release too, at the view check (games.rs:2991, "determinize changed the view").
+* **Digests**: 210.6.
