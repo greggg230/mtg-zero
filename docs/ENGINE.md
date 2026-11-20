@@ -40777,6 +40777,58 @@ live-run-hazard test, fenced by a live run on the desktop). Digests equal to mai
 the Mac's full-suite recheck not needed (the tested sha differs in docs only). Main fast-forwarded 534d205a ->
 35727c3c. The fuzz steward's three entries stay in its queue until main's fuzz build is rebuilt with it.
 
+## 207. zero-core pin 894ee27 -> eaa624e: the fast graph on CUDA - running sums in blocks, its optional input `t_align`, the fused float32 attention (zero-core `feat/gpu-static`, docs/az.md 66; branch `feat/gpu-static`, 2026-11-19)
+
+**Why.** The farm's Windows GPU PCs played legacy-meta3-r1's self-play at about a third of what the trainer's own
+torch path gets on the same hardware (measured on a farm PC with an NVIDIA GPU: the farm's CUDA worker 10.8k leaves/s
+with one worker, 14.2k with three sharing the GPU; the torch path 32.7k with bf16 and its CUDA graphs, 20.0k in
+float32). A kernel profile of the fast graph at 1,024 rows: 48 ms of GPU time a call, 15.5 ms of it ONNX Runtime's CUDA
+CumSum over the batch's non-zeros (its cost grows faster than the axis's length), ~16 ms the attention through ONNX
+Runtime's unfused path.
+
+**What** (zero-core docs/az.md 66; only the fast graph, `pool_export` 'fast', and the worker's GPU sessions):
+
+* The fast graph's long running sums in two levels (blocks of 512, then their totals: the same integers), its policy
+  scatter's spare places without a running sum, and an optional input `t_align` (default 1: the graph as before when a
+  worker doesn't feed it; metadata `t_align` 16) that rounds the padded rows' token axis up to a multiple of it.
+* The worker feeds `t_align` 16 on a GPU provider (never on the CPU) and sets ONNX Runtime's
+  ORT_MIN_SEQ_LEN_EFFICIENT_ATTENTION_FP32 to 1, so its CUDA MultiHeadAttention takes the fused float32 kernel (which,
+  with an attention bias, needs a sequence of a multiple of 16).
+* The default graph's export is unchanged, byte for byte. On the CPU the new fast graph's answers are identical to the
+  old one's (max abs 0.0 on gen 769 through the CPU pack) and its time within noise. On CUDA the self-test passes as
+  before (max abs 7.6e-6 against 2e-5).
+
+**Measured** (the farm PC above, paused on the coordinator; gen 769; the farm's CUDA worker build of 85495dc7 with the
+attention variable set by hand and a measurement export whose `t_align` default was 16; 5-minute rolling windows):
+
+| | the fast graph of before | this pin's |
+|---|---|---|
+| a 1,024-row call (wall / GPU) | 62.9 / 48.0 ms | 41.3 / 23.4 ms |
+| one worker, 1,024 in flight, 1 group | 10.8k leaves/s (three runs: 10,842 / 10,838 / 10,845) | 12.0k |
+| three workers sharing the GPU (3 x 384, threads 2) | 14.2k | 16.9k |
+
+A single worker is now bound by ONNX Runtime's host side (the graph's ~1,400 nodes launched one by one, 17 device ->
+host syncs for its data-dependent shapes; the GPU ~35% busy), so it gains 10%; workers sharing the GPU gain 20%. The
+next steps (a fixed-shape GPU graph run as CUDA graphs, reduced precision for GPU sessions) are separate work.
+
+**Runs.** A run on this pin with `pool_export` 'fast' exports the new fast graph (a new weight-swap template: the
+fingerprint covers zero-core's Python). Its workers - this pin's builds, the CUDA alternate and the macOS one - play it
+as any zero-onnx/2 graph; older worker builds play it too (they never feed `t_align`).
+
+### 207.1 The gates of 69b7e144 and the merge
+
+On 69b7e144 (this section's commit), from a warm worktree, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`,
+`--offload local`, `--baseline-root` <85495dc7, built>: **GATE PASSED WITH SKIPS AND FLAKY RETRIES optin-core 69b7e144ade9
+in 2839s** - core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,303 samples each); the digests as
+recorded (constructed, EoE, driver, metagame, dealt); farm compat identical (gate 2: 6 games, 2,890 rows; gate 3);
+cargo test --test az 57 and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built against
+this core; core pytest 720 passed - skipped: 17 live-run-hazard tests (fenced: a live run on this machine); flaky:
+`tests/test_remoteplay.py::test_cotrain_the_local_driver_is_never_starved` failed in the full run and passed on retry
+alone (AGENTS.md: it times real threads on a loaded machine).
+
+Merged with main at d4a2814a (206.7, 208: engine rules and their digests): no file in common but this one, so the
+gate stands for the merge (the tiered rule: overlapping files only).
+
 ## 208. The open-decklist walk's two queue entries of 2026-11-19: a surveilled Colossus waits at the bottom; a covering payment's lone `PASS` is asked and keyed (branch `fix/infoset-1119`, 2026-11-19)
 
 Branch from main 4a84d570 (zero-core d3b1a8d, unchanged).
