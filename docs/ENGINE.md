@@ -41476,3 +41476,33 @@ subprocess passed its 300 s timeout in the throttled gate beside the live run (T
 passed); every other step passed. The rerun above is the gate of record.
 
 Main fast-forwarded c8e40f5a -> this commit (main had not moved since the branch: the gate stands as run).
+
+## 213. zero-core pin 03686a1 -> bd681b7: AMD GPUs through DirectML - the worker runs the fast-matmul graph there, the DirectML pack and alternate (zero-core `feat/amd-dml`, docs/az.md 46.10; zero-farm PROTOCOL rev 22; branch `feat/amd-dml`, 2026-11-20)
+
+**Why.** The owner's decision of 2026-11-20: the farm's AMD GPUs play self-play through DirectML (never AMD's own Windows
+ML providers, which can't run our graphs and are the ones a diagnostic probe crashed a farm PC with on 11-13). Measured
+first (an NVIDIA GPU of a farm PC, legacy-meta3-r1 gen 769): DirectML on the fast graph's MatMul form in float16 plays at
+0.48x CUDA on the same graph (0.43x the fused one), several times the CPU of any farm PC.
+
+**The pin** (zero-core docs/az.md 46.10): the worker allows DirectML on the fast-matmul zero-onnx/2 graph only (the
+lifting test: 300 runs on override batches, two GPUs, every one right; the default graph as a control answered overrides
+wrongly in 11 of 12 DirectML sessions that passed their self-test), and the farm pool's variant form 'matmul-fp16' with
+`pool_variants` 'name=form[@vendor]'. No Rust change outside the worker's provider refusal (zero-core 03686a1..bd681b7:
+`crates/worker/src/session.rs` only): play, encoding and the CPU and CUDA workers' answers are unchanged.
+
+**Tools.**
+* `tools/farm_build.py --runtime --pack dml [--gpu-vendor amd]`: the Windows ML package's ONNX Runtime and DirectML.dll
+  with its license files, WITHOUT Microsoft.Windows.AI.MachineLearning.dll (no execution-provider catalog: no vendor
+  provider can be registered through it), its manifest requiring a GPU of `--gpu-vendor` (default amd; zero-farm PROTOCOL
+  9.2 `gpu`: providers ["dml"], min_agent at least 0.2.10). Checked: the pack loads from itself, DirectML is compiled in,
+  the CPU passes its self-test through it, the probe reports no catalog. Another vendor (a test on an NVIDIA PC) makes a
+  separate pack (`-<vendor>` version suffix).
+* `tools/farm_release.py`: step 6b **dml** / **dml-selftest** when release.json sets `dml_runtime` (`dml_min_agent`,
+  default 0.3.11): the release executable re-signed for the DirectML pack, the reference checkpoint exported as the
+  fast-matmul float16 graph and run through the pack (`probe-providers --providers dml,cpu`: both pass); published, the
+  index entry's `dml`, and `farm_builds.pool_settings` lists it after the CUDA alternate (`--no-dml`: none). A run's AMD
+  PCs play it on the GPU only with `pool_variants` naming 'matmul-fp16@amd' (else the gen's default graph, which
+  DirectML refuses, runs there on the CPU).
+
+**Tests.** tests/test_farm_release.py (6 passed: `pool_settings` with the DirectML alternate, `describe`); zero-core's
+own (docs/az.md 46.10).

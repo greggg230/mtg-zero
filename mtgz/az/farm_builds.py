@@ -194,11 +194,13 @@ def lookup(rev='HEAD', root=None, path=None, runtime=None):
 
 def pool_settings(e, alternates=True):
     """A build entry -> the farm pool's run settings (zero-core docs/az.md 45): pool_build, pool_runtime, pool_worker
-    (the desktop's copy of the signed executable) and, with `alternates`, pool_alternates (the CUDA alternate; '' when
-    there is none)."""
+    (the desktop's copy of the signed executable) and, with `alternates`, pool_alternates (the CUDA alternate, then the
+    DirectML one for AMD GPUs - zero-farm PROTOCOL rev 22; '' when there is none). An AMD PC plays the DirectML
+    alternate on the GPU only with the run's `pool_variants` naming a 'matmul-fp16@amd' variant (zero-core docs/az.md
+    46.10); without it the gen's default graph, which DirectML refuses, runs there on the CPU."""
     out = {'pool_build': e['build_id'], 'pool_runtime': e['runtime'], 'pool_worker': e['worker']}
     if alternates:
-        out['pool_alternates'] = (e.get('cuda') or {}).get('build_id') or ''
+        out['pool_alternates'] = ','.join(b for b in ((e.get('cuda') or {}).get('build_id'), (e.get('dml') or {}).get('build_id')) if b)
     return out
 
 
@@ -206,6 +208,7 @@ def describe(e):
     c = e.get('cuda') or {}
     return (f"commit {e.get('asked', e['commit'])[:12]}: build {e['build_id']} (runtime {e['runtime']}"
             + (f", CUDA alternate {c['build_id']} for {c['runtime']}" if c.get('build_id') else ', no CUDA alternate')
+            + (f", DirectML alternate {(e.get('dml') or {})['build_id']}" if (e.get('dml') or {}).get('build_id') else '')
             + (')' if e.get('exact', True) else f"; released for {e['commit'][:12]}, the same Rust inputs)"))
 
 

@@ -27,6 +27,12 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
 6. **cuda-selftest**: the CUDA alternate's `probe-providers --runtime-dir <CUDA pack> --model/--reference <the
    reference export> --providers cuda,cpu --reps 2`: both providers must pass their self-test (seconds of GPU; the
    CUDA provider's max_abs ~1e-6 on real exports). `--no-cuda` skips 5-6 (no alternate).
+6b. **dml** (when release.json sets `dml_runtime`, the DirectML pack of `farm_build.py --runtime --pack dml`: AMD GPUs,
+   zero-farm PROTOCOL rev 22): `farm_build.py --resign <that build> --runtime-id <DirectML pack> --min-agent
+   <dml_min_agent>` (the DirectML alternate) and **dml-selftest**: the reference checkpoint exported as the graph
+   DirectML runs ('fast-matmul', float16: zero-core docs/az.md 46.10; the run's `pool_variants` 'dml=matmul-fp16@amd'),
+   then `probe-providers --runtime-dir <DirectML pack> --providers dml,cpu --reps 2` on it: both must pass (this PC's
+   GPU through DirectML, whatever its vendor). `--no-dml` skips it.
 7. **template**: zero.farm_pool.play_settings with the signed worker on the reference config (the farm pool's own path
    to a self-play template: the worker's check-config, with the declared setting classes when the build announces
    them, zero-core docs/az.md 61) - the refusal that once forced a rebuild shows here.
@@ -108,6 +114,8 @@ DEFAULTS = {
     'cuda_runtime': '855d21629a0246f0f91e6790',    # cuda-12.8-cudnn-9.28-ort-1.24.4 (farm-cuda, PROTOCOL 9)
     'cuda_min_agent': '0.2.11',
     'mac_runtime': None,                           # the macOS CPU pack (farm_build.py --runtime --pack macos-cpu)
+    'dml_runtime': None,                           # the DirectML pack for AMD GPUs (farm_build.py --runtime --pack dml)
+    'dml_min_agent': '0.3.11',                     # agents that use AMD GPUs through DirectML (PROTOCOL rev 22)
     'mac_min_agent': '0.3.0',                      # agents that know platforms (PROTOCOL 11)
     'python': None,
     'url': 'https://farm.greggg230.com',
@@ -286,6 +294,38 @@ class Release:
         out['gpu'] = (res['cuda'].get('gpu') or {}).get('vendor')
         return out
 
+    def dml_selftest(self, dml_dir):
+        """Step 6b: the reference checkpoint as the DirectML variant's graph ('fast-matmul' + float16, exported by the
+        release worktree's zero-core) through the DirectML pack: dml and cpu must pass their self-test."""
+        ref = self.s['reference']
+        rt = self.runtime_dir(self.s['dml_runtime'], 'dml-selftest')
+        out = os.path.join(self.log_dir, 'dml-export')
+        os.makedirs(out, exist_ok=True)
+        m32, m16 = os.path.join(out, 'model_fm.onnx'), os.path.join(out, 'model_fm16.onnx')
+        code = ('import sys; sys.path.insert(0, "."); import mtgz.az; from zero import onnx_export as OX\n'
+                'OX.export_checkpoint(sys.argv[1], sys.argv[2], attention="matmul", fast=True)\n'
+                'OX.to_float16(sys.argv[2], sys.argv[3])\n')
+        self.run('dml-selftest', [self.s['python'], '-c', code, ref['checkpoint'], m32, m16], cwd=self.wt)
+        exe = os.path.join(dml_dir, 'mtgz-worker.exe')
+        cmd = [exe, 'probe-providers', '--runtime-dir', rt, '--model', m16, '--reference',
+               os.path.join(ref['export'], 'reference.npz'), '--providers', 'dml,cpu', '--reps', '2']
+        self.say(f'dml-selftest: {subprocess.list2cmdline(cmd)}')
+        p = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=900)
+        with open(os.path.join(self.log_dir, 'dml-selftest.log'), 'w', encoding='utf-8') as f:
+            f.write(p.stdout + '\n' + p.stderr)
+        try:
+            probe = json.loads(p.stdout)
+        except ValueError:
+            raise Failed('dml-selftest', f'exit {p.returncode}: {p.stderr[-1500:]}') from None
+        res = {r['provider']: r for r in probe.get('results') or [] if r.get('ok') or r['provider'] not in
+               {x['provider'] for x in probe.get('results') or [] if x.get('ok')}}
+        if p.returncode or probe.get('providers') != ['dml', 'cpu'] or not all(res.get(x, {}).get('ok') for x in ('dml', 'cpu')):
+            raise Failed('dml-selftest', f'providers {probe.get("providers")} (want dml and cpu passing): '
+                         f'{ {k: (v.get("ok"), v.get("why")) for k, v in res.items()} } {p.stderr[-800:]}')
+        out = {x: {'max_abs': res[x]['selftest']['max_abs'], 'rows_per_s': res[x].get('rows_per_s')} for x in ('dml', 'cpu')}
+        out['gpu'] = (res['dml'].get('gpu') or {}).get('vendor')
+        return out
+
     def template(self, exe, bid):
         """zero.farm_pool.play_settings with the signed worker on the reference config (step 7)."""
         out = os.path.join(self.log_dir, 'template')
@@ -343,8 +383,10 @@ class Release:
             self.say(f'{sha[:12]} is released already: {FB.describe(have)}')
             return dict(have, already=True)
         same = FB.find(ix, key=key, runtime=rt)
+        want_dml = bool(self.s.get('dml_runtime')) and not self.a.no_dml
         if same and not self.a.force and (same.get('cuda') or {}).get('runtime') in (None, self.s['cuda_runtime']) \
-                and bool(same.get('cuda')) != self.a.no_cuda:
+                and bool(same.get('cuda')) != self.a.no_cuda \
+                and bool(same.get('dml')) == want_dml and (same.get('dml') or {}).get('runtime') in (None, self.s.get('dml_runtime')):
             self.say(f'{sha[:12]} changed no Rust input since {same["commit"][:12]}: its build {same["build_id"]} is this commit\'s')
             e = {k: v for k, v in same.items() if k not in ('exact', 'asked')}
             e.update(commit=sha, reused_from=same.get('reused_from') or same['commit'], created=now(), seconds={})
@@ -373,6 +415,13 @@ class Release:
             r['steps']['cuda'] = {'build_id': cid, 'dir': cdir}
             st = self.timed('cuda-selftest', self.cuda_selftest, cdir)
             cuda = {'build_id': cid, 'runtime': self.s['cuda_runtime'], 'min_agent': self.s['cuda_min_agent'], 'selftest': st}
+        dml = None
+        if want_dml:
+            did, ddir = self.timed('dml', self.farm_build, 'dml', '--resign', bdir, '--runtime-id', self.s['dml_runtime'],
+                                   '--min-agent', self.s['dml_min_agent'])
+            r['steps']['dml'] = {'build_id': did, 'dir': ddir}
+            st = self.timed('dml-selftest', self.dml_selftest, ddir)
+            dml = {'build_id': did, 'runtime': self.s['dml_runtime'], 'min_agent': self.s['dml_min_agent'], 'selftest': st}
         tpl = self.timed('template', self.template, exe, bid)
         gates = self.timed('gates', self.gates, exe)
         r['steps']['gates'] = gates
@@ -397,17 +446,20 @@ class Release:
             mac['runtime'] = self.s['mac_runtime']
         if self.a.no_publish:
             self.say('--no-publish: signed and checked, not published (no index entry)')
-            return dict(r, build_id=bid, runtime=rt, cuda=cuda, mac=mac, template=tpl, gates=gates, speed=speed, published=False)
+            return dict(r, build_id=bid, runtime=rt, cuda=cuda, dml=dml, mac=mac, template=tpl, gates=gates, speed=speed,
+                        published=False)
         worker = self.timed('publish', self.publish, bdir)
         if cuda:
             cuda['worker'] = slash(os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe'))
+        if dml:
+            dml['worker'] = slash(os.path.join(self.timed('publish-dml', self.publish, r['steps']['dml']['dir']), 'mtgz-worker.exe'))
         if mac and self.a.mac_publish:
             for k in ('release', 'fuzz'):
                 if k in mac:
                     mac[k]['published'] = slash(self.timed(f'publish-mac-{k}', self.publish, mac[k]['dir']))
         e = {'commit': sha, 'built_at': sha, 'rust_key': key, 'core_commit': r['core_commit'], 'build_id': bid,
              'version': os.path.basename(os.path.normpath(bdir)), 'runtime': rt, 'worker': slash(os.path.join(worker, 'mtgz-worker.exe')),
-             'cuda': cuda, 'mac': mac, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
+             'cuda': cuda, 'dml': dml, 'mac': mac, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
              'gates': gates, 'speed': speed, 'reference': {k: local_config.portable_path(v) for k, v in self.s['reference'].items()},
              'url': self.s['url'], 'published': True, 'created': now(), 'seconds': r['seconds']}
         return FB.add(e)
@@ -726,6 +778,7 @@ def main(argv=None):
     r.add_argument('--regate', action='store_true', help='a reused build: run the template check and the farm gates on this commit')
     r.add_argument('--no-publish', action='store_true', help='sign and check only (no publish, no index entry)')
     r.add_argument('--no-cuda', action='store_true', help='no CUDA alternate (and no GPU self-test)')
+    r.add_argument('--no-dml', action='store_true', help='no DirectML alternate (AMD GPUs) even when dml_runtime is set')
     r.add_argument('--no-slot', action='store_true', help='heavy steps without tools/slotd.sh')
     r.add_argument('--mac', action='store_true', help='also the macOS worker, signed (module docs: mac-build, mac-plan)')
     r.add_argument('--mac-fuzz', action='store_true', help='with --mac: the macOS fuzz build too (campaign alternates)')

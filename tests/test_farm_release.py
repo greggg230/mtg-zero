@@ -84,6 +84,10 @@ def test_rust_key_lookup_and_pool_settings(tmp_path, fbx):
                                    '/mtgz-worker.exe', 'pool_alternates': 'c' * 24}
     FB.add(dict(_entry(c3, k3, bid='b' * 24, cuda=None)))
     assert FB.pool_settings(FB.lookup(c3, root))['pool_alternates'] == ''
+    # the DirectML alternate (AMD GPUs, zero-farm PROTOCOL rev 22) after the CUDA one; alone when there is no CUDA one
+    assert FB.pool_settings(dict(e, dml={'build_id': 'm' * 24}))['pool_alternates'] == 'c' * 24 + ',' + 'm' * 24
+    assert FB.pool_settings(dict(e, cuda=None, dml={'build_id': 'm' * 24}))['pool_alternates'] == 'm' * 24
+    assert 'DirectML alternate ' + 'm' * 24 in FB.describe(dict(e, dml={'build_id': 'm' * 24}))
     assert FB.find(FB.load(), commit=c1, runtime='z' * 24) is None
     FB.add(dict(_entry(c2, k2, bid='d' * 24), published=False))
     assert FB.lookup(c2, root)['build_id'] == 'a' * 24, 'an unpublished entry is never looked up'

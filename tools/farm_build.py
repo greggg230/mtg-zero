@@ -5,6 +5,7 @@
     python tools/farm_build.py --runtime --pack macos-cpu [--ort-version V] [--check-worker MAC_PATH] [--publish]
     python tools/farm_build.py --runtime [--ort-dll PATH] [--msvc-dir DIR] [--publish] [--url URL]
     python tools/farm_build.py --runtime --pack winml [--winml-version V | --winml-nupkg F] [--publish] [--url URL]
+    python tools/farm_build.py --runtime --pack dml [--gpu-vendor amd] [--winml-version V | --winml-nupkg F] [--publish] [--url URL]
     python tools/farm_build.py --runtime --pack cuda --msvc-dir DIR [--check-net EXPORT_DIR] [--publish] [--url URL]
     python tools/farm_build.py --resign BUILD_DIR --runtime-id ID [--min-agent V] [--publish] [--url URL]
     python tools/farm_build.py --publish-dir BUILD_DIR [--url URL]
@@ -55,6 +56,15 @@ DirectML providers. With them, unmodified, the package's own license files (WINM
 Microsoft Software License Terms of the Windows ML runtime - DirectML ships in the same package -, and
 `ThirdPartyNotices.txt`; zero-farm README "Third-party components"). Checked through a release build (`info`: every DLL from the pack; `probe-providers --providers
 cpu` on this PC: the CPU passes its self-test) before it is signed.
+
+The DirectML pack (`--runtime --pack dml`; zero-farm PROTOCOL rev 22, AMD GPUs through DirectML only): the same package's
+ONNX Runtime and DirectML.dll with its license files, WITHOUT Microsoft.Windows.AI.MachineLearning.dll - no
+execution-provider catalog, so no vendor provider (AMD's `amdgpu` / `migraphx` among them) can be registered through
+it: CPU and DirectML only. Its manifest requires a GPU of `--gpu-vendor` (default `amd`; PROTOCOL 9.2 `gpu`:
+`{"vendor", "providers": ["dml"]}`, min_agent at least 0.2.10), so the coordinator leases it only to PCs with such an
+adapter and run alternates take their `when.vendor` from it; another vendor (a test on an NVIDIA PC) makes a separate
+pack. Version `dml-<package version>-ort-<ONNX Runtime>` (+ `-<vendor>` for a vendor other than amd). Checked as the
+Windows ML pack, plus: the worker's probe through it reports no catalog.
 
 macOS on Apple silicon (zero-farm PROTOCOL.md 11, docs/ENGINE.md 197), on the maintainer's Mac (`MTGZ_MAC` in
 ~/.config/zero/local.env, as tools/mac.sh): `--platform macos-arm64` builds `mtgz-worker` there at exactly the clean
@@ -108,6 +118,7 @@ MSVC = ('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'msvcp140_1.dl
 WINML_PACKAGE = 'microsoft.windows.ai.machinelearning'
 WINML_VERSION = '2.5.96'
 WINML_FILES = ('onnxruntime.dll', 'DirectML.dll', 'Microsoft.Windows.AI.MachineLearning.dll')
+WINML_CATALOG_DLL = 'Microsoft.Windows.AI.MachineLearning.dll'    # (the provider catalog: left out of the DirectML pack)
 # ... and its license files, shipped in the pack byte for byte (the package's root; the nuspec's <license file>)
 WINML_LICENSE_FILES = ('license.txt', 'ThirdPartyNotices.txt')
 # The CUDA runtime pack (zero-farm PROTOCOL.md 9, rev 11): official redistributables from PyPI, pinned. ONNX Runtime
@@ -523,8 +534,16 @@ def build_runtime(a):
     return bid, d
 
 
-def build_winml(a):
-    """The Windows ML runtime pack (module docs) -> (build_id, directory)."""
+def build_dml(a):
+    """The DirectML runtime pack (module docs: the Windows ML pack without its provider catalog) -> (build_id,
+    directory)."""
+    return build_winml(a, catalog=False)
+
+
+def build_winml(a, catalog=True):
+    """The Windows ML runtime pack (module docs) -> (build_id, directory); `catalog` False: the DirectML pack (no
+    Microsoft.Windows.AI.MachineLearning.dll)."""
+    files = WINML_FILES if catalog else tuple(n for n in WINML_FILES if n != WINML_CATALOG_DLL)
     import io
     import urllib.request
     import zipfile
@@ -550,12 +569,14 @@ def build_winml(a):
         readme = z.read('README.md').decode('utf-8', 'replace') if 'README.md' in z.namelist() else ''
         # "This package includes **ONNX Runtime 1.28.3**."
         ort_version = readme.split('ONNX Runtime ', 1)[1].split('*', 1)[0].strip(' .') if 'includes **ONNX Runtime ' in readme else None
-        pack = f'winml-{version}-ort-{ort_version or "unknown"}'
+        pack = f'{"winml" if catalog else "dml"}-{version}-ort-{ort_version or "unknown"}'
+        if not catalog and (a.gpu_vendor or 'amd') != 'amd':
+            pack += f'-{a.gpu_vendor}'
         d = os.path.join(a.out or os.path.join(tdir, 'dist'), pack)
         if os.path.exists(d):
             shutil.rmtree(d)
         os.makedirs(d)
-        for n in WINML_FILES:
+        for n in files:
             with open(os.path.join(d, n), 'wb') as f:
                 f.write(z.read(f'runtimes/win-x64/native/{n}'))
         if '<license type="file">license.txt</license>' not in spec:
@@ -573,7 +594,7 @@ def build_winml(a):
             if hashlib.sha256(f.read()).hexdigest() != x['sha256']:
                 die(f"{n}: not the package's bytes")
     desc = {}
-    for n in WINML_FILES:
+    for n in files:
         src = os.path.join(d, n)
         st, subj = sig_of(src)
         if st != 'Valid' or 'O=Microsoft Corporation' not in subj:
@@ -584,8 +605,9 @@ def build_winml(a):
         with open(src, 'rb') as f:
             data = f.read()
         desc[n] = {'version': file_version(src), 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'signature': st, 'signer': subj}
-    rj = {'runtime': pack, 'onnxruntime': ort_version or desc['onnxruntime.dll']['version'], 'provider': 'cpu+dml+winml',
-          'providers': ['cpu', 'dml', 'tensorrt_rtx', 'amdgpu', 'migraphx', 'openvino'],
+    rj = {'runtime': pack, 'onnxruntime': ort_version or desc['onnxruntime.dll']['version'],
+          'provider': 'cpu+dml+winml' if catalog else 'cpu+dml',
+          'providers': ['cpu', 'dml', 'tensorrt_rtx', 'amdgpu', 'migraphx', 'openvino'] if catalog else ['cpu', 'dml'],
           'winml': {'package': WINML_PACKAGE, 'version': version, 'source': source, 'sha256': hashlib.sha256(nupkg).hexdigest()},
           'files': desc, 'licenses': licenses}
     worker = a.check_worker or cargo_build('release')
@@ -600,12 +622,23 @@ def build_winml(a):
     probe = json.loads(pr.stdout) if pr.returncode == 0 and pr.stdout.strip().startswith('{') else None
     if not probe or probe.get('providers') != ['cpu']:
         die(f'probe-providers --providers cpu through the pack: {pr.stdout[-500:]} {pr.stderr[-500:]}')
+    if not catalog and (probe.get('catalog') or {}).get('present'):
+        die(f'the DirectML pack reports a provider catalog: {probe.get("catalog")}')
     rj['ort_build_info'] = ort['version']
     rj['check'] = {'available': ort.get('available'), 'cpu_selftest_max_abs': next(r['selftest']['max_abs'] for r in probe['results'] if r['provider'] == 'cpu')}
     with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8') as f:
         json.dump(rj, f, indent=1)
     print(f'runtime pack {pack}: ONNX Runtime {rj["onnxruntime"]} ({", ".join(ort.get("available", []))}), every DLL from the pack')
-    bid = sign_publish(a, d, ['--kind', 'runtime', '--version', pack, '--min-agent', a.min_agent])
+    extra = []
+    min_agent = a.min_agent
+    if not catalog:
+        # (PROTOCOL 9.2: a pack with `gpu` needs agents from 0.2.10)
+        rj['gpu'] = {'vendor': a.gpu_vendor or 'amd', 'providers': ['dml']}
+        with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8') as f:
+            json.dump(rj, f, indent=1)
+        min_agent = max(min_agent, '0.2.10', key=lambda v: tuple(int(x) for x in v.split('.')))
+        extra = ['--gpu-vendor', a.gpu_vendor or 'amd', '--gpu-providers', 'dml']
+    bid = sign_publish(a, d, ['--kind', 'runtime', '--version', pack, '--min-agent', min_agent] + extra)
     return bid, d
 
 
@@ -1115,7 +1148,7 @@ def main():
     g.add_argument('--publish-dir', metavar='BUILD_DIR', help='publish a signed build directory (verified first)')
     ap.add_argument('--root', help='the checkout to build (default: this one): a clean worktree at the commit to release')
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')
-    ap.add_argument('--pack', choices=('cpu', 'winml', 'cuda', 'macos-cpu'), default='cpu',
+    ap.add_argument('--pack', choices=('cpu', 'winml', 'dml', 'cuda', 'macos-cpu'), default='cpu',
                     help='--runtime: the CPU pack (default), the Windows ML GPU pack, the CUDA pack (NVIDIA, PROTOCOL 9) or the '
                          'macOS CPU pack (Apple silicon, PROTOCOL 11)')
     ap.add_argument('--platform', choices=('windows-x64', 'macos-arm64'), default='windows-x64',
@@ -1126,6 +1159,7 @@ def main():
     ap.add_argument('--no-gpu-check', action='store_true', help='--pack cuda: sign even if the CUDA provider fails on this PC')
     ap.add_argument('--check-net', help='--pack cuda: a directory with a real export (model.onnx + reference.npz) for the CUDA '
                     'self-test (the built-in probe graph fails CUDA)')
+    ap.add_argument('--gpu-vendor', choices=('amd', 'nvidia', 'intel'), help='--pack dml: the GPU vendor its manifest requires (default amd)')
     ap.add_argument('--winml-version', help=f'--pack winml: the Microsoft.Windows.AI.MachineLearning version (default {WINML_VERSION})')
     ap.add_argument('--winml-nupkg', help='--pack winml: a local .nupkg instead of nuget.org')
     ap.add_argument('--ort-dll')
@@ -1157,7 +1191,7 @@ def main():
     if a.resign:
         bid, d = resign_worker(a)
     elif a.runtime:
-        bid, d = {'winml': build_winml, 'cuda': build_cuda, 'macos-cpu': build_mac_runtime}.get(a.pack, build_runtime)(a)
+        bid, d = {'winml': build_winml, 'dml': build_dml, 'cuda': build_cuda, 'macos-cpu': build_mac_runtime}.get(a.pack, build_runtime)(a)
     elif a.platform == 'macos-arm64':
         bid, d = build_worker_mac(a)
     else:
