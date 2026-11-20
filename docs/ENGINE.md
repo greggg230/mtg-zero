@@ -41506,3 +41506,16 @@ wrongly in 11 of 12 DirectML sessions that passed their self-test), and the farm
 
 **Tests.** tests/test_farm_release.py (6 passed: `pool_settings` with the DirectML alternate, `describe`); zero-core's
 own (docs/az.md 46.10).
+
+### 213.1 The gate of 376fb96f and the merge
+
+On 376fb96f (213), in the warm worktree warm-1, `--offload local`, `--baseline-root` warm-2 at 31ca5a49 (main before
+the change; held by `warm_pool.py acquire`): **GATE PASSED WITH SKIPS AND FLAKY RETRIES optin-core 376fb96f82bc in
+1421s** - core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each); the digests as
+recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913,
+dealt a890c27da3c7d1a8); farm compat identical (gate 2: 6 games, 2,890 rows, 150 batches); cargo test --test az 57
+and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest
+722 passed - skipped: 17 live-run-hazard tests (fenced); one flaky test passed on retry alone
+(`tests/test_remoteplay.py::test_cotrain_the_local_driver_is_never_starved`, not touched by the pin).
+
+Main fast-forwarded 31ca5a49 -> 376fb96f (main had not moved since the branch: the gate stands as run).
