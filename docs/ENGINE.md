@@ -41460,3 +41460,19 @@ b96e45a0).
 **Tests.** zero-core `test_rolling_check_never_runs_another_platforms_executable` (another platform's executable
 present is never run, this platform's alternate still checked; it fails without the fix with the OSError); the pool's
 rolling, alternates and variants tests pass.
+
+### 212.1 The gate of 85c9fb11 and the merge
+
+On 85c9fb11 (this section's parent: the pin and 212), in the warm worktree warm-1, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;
+MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`, `--baseline-root` warm-2 at 591144af (main's engine and pin 158bfb1, built;
+held through the gate by `warm_pool.py acquire`, 167.11): **GATE PASSED WITH SKIPS optin-core 85c9fb114563 in 1632s** -
+core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each); the digests as recorded
+(constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt
+a890c27da3c7d1a8); farm compat identical (gate 2: 6 games, 2,890 rows, 150 batches); cargo test --test az 57 and
+--test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 723
+passed - skipped: 17 live-run-hazard tests (fenced: a live run on this machine). The gate's first run on the same
+commit failed one test, `tests/test_select_scale.py::test_runs_unset_equal_and_selection_only`: a toy run's
+subprocess passed its 300 s timeout in the throttled gate beside the live run (TimeoutExpired; the test alone: 8.8 s,
+passed); every other step passed. The rerun above is the gate of record.
+
+Main fast-forwarded c8e40f5a -> this commit (main had not moved since the branch: the gate stands as run).
