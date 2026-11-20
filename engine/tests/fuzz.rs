@@ -282,7 +282,7 @@ fn a_game_won_in_the_middle_of_a_resolution_leaves_its_spell_on_the_stack() {
 }
 
 /// ENGINE.md 209: the fuzz steward's hang 9a40cd0d7010 (default-pool game 100,061,919, "no exit after 300 s", on three main
-/// builds). At step 421 P1 orders ~30 Ocelot Pride end-step triggers (copies of Ocelot Pride from Reflection of
+/// builds). At step 421 P1 orders 28 Ocelot Pride end-step triggers (copies of Ocelot Pride from Reflection of
 /// Kiki-Jiki); with the city's blessing each creates a Cat and a copy of every token that entered this turn, doubling them
 /// - billions of tokens, made one at a time at a cost growing with the copies (the completion check's paths through the
 /// ordering never ended). Token creation now ends the game aborted at the permanents a row can show

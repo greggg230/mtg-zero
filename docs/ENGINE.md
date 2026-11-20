@@ -36412,7 +36412,9 @@ panic): id, kind (fuzz | selfplay), site, message, key, mode, seed, repro, build
 last_seen, count, seeds (up to 20, with their source), sources, confirmed, confirm_note, alerted_at.
 
 A new site is replayed here before anyone is told: a fuzz seed through the build's own worker over that one seed
-(`fuzz_local.py --first S --count 1`, idle priority; confirmed when it fails at the same site), a self-play failure by
+(`fuzz_local.py --first S --count 1`, idle priority; confirmed when it fails at the same site; section 209: a failure
+of a chunk's own checks, reported at the chunk's first seed with "(the chunk: FUZZ_GAMES=n)", over that whole chunk,
+`--count n --chunk n`), a self-play failure by
 its record's `repro` in the run's own checkout (section 172's `python -m mtgz.az.game_failure replay`: confirmed on exit 101,
 not on 0 - the moves replay without the panic -, unknown on 2 - cannot replay; a record without one counts as confirmed
 when it happened on the owner's own machines). A confirmed new site sends ONE short message through the game-alerts
@@ -40949,3 +40951,151 @@ skipped: one live-run-hazard test, fenced by a live run on the desktop): every d
 recheck of the rebased sha (it differs from the tested one under `engine/`) 2,715 passed in 27 binaries. Main
 fast-forwarded 35727c3c -> d1342916. A live run keeps its pinned commit until it is re-pinned (208.3: the forced
 `PASS`'s key changes its search's tree reuse).
+
+## 209. The fuzz steward's hang and two entries it could not confirm: tokens past the permanents a row can show end the game aborted; a game won in the middle of a resolution; the Delver trigger check over 2,000 games; a chunk's failure replayed over its chunk (branch `fix/fuzz-hang-1119`, 2026-11-19)
+
+Branch from main 4a84d570 (the engine of 6a44afdb, the steward's main build), rebased onto main d4a2814a (206, 208;
+zero-core 894ee27, unchanged here). Three
+entries of the steward's queue (171.5), all from farm PCs on main's fuzz builds 9476f53c, 5fb7e51b and 6a44afdb:
+
+| Entry | Mode, site | Class | Fix |
+|---|---|---|---|
+| 9a40cd0d7010 | `games`, HANG (300 s of CPU), seed 100,061,919, confirmed | an engine limit that could not be reached: a legal, exponential board, made one token at a time | 209.1: token creation ends the game aborted past `MAX_ROW_TOKENS` permanents |
+| 13f02539e054 | `games` / `hidden-games`, games.rs:360 "rules checks violated: CR 608.1, 405.5", 12 chunks, not confirmed | a rules-check false positive (CR 104.1), and a farm-vs-local replay mismatch | 209.2: the check; 209.4: the steward replays the chunk |
+| e940641803b8 | `delver_dealt2-games`, games.rs:3750 "the legacy cards weren't played: 98 0 160", 4 chunks, not confirmed | an end-of-run check too sensitive for a short chunk, and the same replay mismatch | 209.3: the trigger over 2,000 games; 209.4 |
+
+No nondeterminism: each farm failure replays here bit for bit (209.4), the rules violations at the same seed and objects
+on three builds and three different chunk boundaries.
+
+### 209.1 The hang: Ocelot Pride's copies doubling the board (`engine/src/game.rs`)
+
+Default-pool game 100,061,919 under the `fuzz` profile, located with branch-local timing probes and a debugger's stack
+samples (cdb attached to the hung test). At step 421, the end step of turn 37, P1 orders its triggers: 28
+**Ocelot Pride** end-step triggers (most of the Prides token copies: Reflection of Kiki-Jiki's, and copies Ocelot made
+at turn 35's end step). Each, with life gained this turn and the city's blessing, "create[s] a 1/1 white Cat creature
+token. Then ... for each token you control that entered the battlefield this turn, create[s] a token that's a copy of
+it" (CR 702.131): after k triggers 2^(k+1) - 2 tokens (from none), so ~2^29 here. Legal play, finite (no loop of CR
+732: nothing repeats, no one chooses to go on), and not something the engine can hold:
+
+* the completion check (`check_options_complete`) followed each ordering option to the next priority; the resolution
+  created the copies one `create_token_copies(.., 1)` at a time, each entry scanning every copy effect (`copy_fx`, a
+  linear search of `Game::copies`, several times per entering object; `copies_on_move`'s `retain`): ~49,000 objects
+  after 120 s, quadratic from there;
+* the only bound was `OBJECT_LIMIT` (u32::MAX - 1,024, 100.7: "memory runs out long before") - ~400 GB of objects.
+
+The fix: **`PERMANENT_LIMIT` = `MAX_ROW_TOKENS` (4,096)**, checked by `token_count` (every token creation goes through
+it: `create_tokens`, `create_token_copies`, W6's copies): tokens that would take the battlefield past it end the game
+aborted at once (100.7's terminal: no result, self-play drops it) and none are created, as `token_count` already did
+past `OBJECT_LIMIT`. The number is not a new cap: every permanent is one token of a layout v7 row (a head slot or a
+tail token), the head has 106 more tokens than the two permanent segments' head slots, so past 4,096 permanents (in fact past 3,990) **no row can show the board**, and zero-core's driver aborts such a game
+at its next row (`max_row_tokens`, the user's decision D4). The engine now ends it where the tokens would be made
+instead of making billions first. Tokens are the only way a board grows past the game's cards. `OBJECT_LIMIT` stays
+(the slots of a long game, tokens that died included). docs/shortcuts.md 24.7.4 and 26.11.6 say so.
+
+The game itself: in the fuzz the main path's order made no explosion (P1 won at turn 37); the completion check's paths
+now end aborted at 4,096 permanents, and the seed takes 13.7 s under the `fuzz` profile.
+
+**Who it affects.** Any game whose board can double: the cube (the default pool: Ocelot Pride, Reflection of
+Kiki-Jiki, token doublers). Release self-play of such a game would have hung its worker (self-play has no per-game
+CPU limit); now the game is dropped, as D4 drops it. legacy-meta3-r1 (Delver, Doomsday, Sneak and Show) has no card
+that makes tokens past a handful: unaffected. Behaviour changes only past 4,096 permanents: every digest unchanged.
+
+**Tests.** `rules_numbers::cr_111_2_tokens_past_the_permanents_a_row_can_show_end_the_game_aborted`: ten Ocelot
+Prides and a lifelinker make 2,046 tokens and play on; eleven reach the limit in the eleventh trigger (4,094 tokens
+onto twelve permanents): aborted, exactly 4,096 permanents, the log naming the limit, and both players' rows past
+`MAX_ROW_TOKENS` (the driver would abort it too). `fuzz::an_exponential_run_of_ocelot_pride_copies_ends_default_seed_100061919`:
+the game with every check at the `fuzz` profile's denominator (4) in every profile.
+
+### 209.2 A game won in the middle of a resolution (`engine/src/rules_check.rs`)
+
+The violations, read from the farm's failure records (the chunk's report names the seed of each) and replayed alone
+here: seed 100,042,696 (`games`, in worlds determinized for P0 and P1 and played on) and 100,101,433, 100,134,291,
+100,148,738 (also the game itself, step 412), 100,159,224 (`hidden-games`). All the same: **Remand** or **Reprieve**
+returns its target spell to its owner's hand, then its "draw a card" with Jace, Wielder of Mysteries out and an empty
+library wins the game ("P1 would draw from an empty library: wins the game"). CR 104.1: the game ends at once - Remand
+never finishes resolving and stays on the stack; the engine drops the agenda when a game ends (`advance`), so no
+`FinishResolve` is left to show that it was resolving. The 608.1/405.5 check saw an object (Remand's target, or Brain
+Freeze under its own storm trigger) leave from under one that stayed with nothing above resolving. The engine is right
+(Jace's replacement, CR 104.1); the check was wrong.
+
+The fix: in a step that ended the game, such a departure is excused (the resolving object is the topmost of those that
+stayed, above every object below it that left; with the agenda gone nothing tells it from any other removal) and
+counted, `Stats::ended_departures` (printed in the rules report: "objects left from under one a game's end left on the
+stack (104.1)"). The same departure in a game that goes on still fails.
+
+**Tests.** `rules_check::tests::cr_104_1_a_game_that_ends_in_a_resolution_leaves_its_object_on_the_stack` (two and
+three objects, the game ended or not); `fuzz::a_game_won_in_the_middle_of_a_resolution_leaves_its_spell_on_the_stack`:
+the five seeds, `play` / `play_hidden` with every check at denominator 4, no violation and at least one excused
+departure; with the exemption switched off (branch-local) it fails listing the queue's violations ("Bloodbraid
+Challenger#68 left the stack while Reprieve#78 above it stayed ..."). `fuzz::games::take_rules_violations` /
+`rules_stats` read the thread's violations and counts for such tests.
+
+Who it affects: nobody's play - the rules checks run in the fuzz only. The farm's `games` and `hidden-games` campaigns
+lose a recurring false failure (five games among the two campaigns' first ~160,000 seeds, met again by every new build's campaign).
+
+### 209.3 Murktide Regent's trigger over 2,000 games (`engine/src/fuzz/games.rs`)
+
+`check_games`' Delver check asked, over any run of 200 games or more, for a Murktide Regent cast, a Prismari Charm cast
+and a Regent's leave-the-graveyard trigger seen on the stack. The failing chunks: 239 games ("98 0 160"), 319 ("151 0
+246"), 325 ("165 0 234") and one on build 7ffe91cf - each the rest of a 1,000-seed chunk after a failing seed
+(zero-core's worker plays the rest of a chunk in a new process, as its own chunk, end-of-run checks included). The
+games of `delver`, `delver_dealt` and `delver_dealt2` are the same (the pinned 60s; the dealt decks are the matches'):
+over seeds 0..16,000 (64 runs of 250 games, release, the Mac) a Regent cast 7,794 times and a Charm 11,697 (at least 98
+and 159 in every run), the trigger seen 280 times, clustered: **in 3 of the 64 runs not at all**, about one game in 80
+with one. (`count_delver` sees the stack after each step; a trigger that comes and goes inside one step, every priority
+answered by the engine, is not seen - the counter's doc says so now.) A run of 200-325 games misses it about one time
+in 20.
+
+The fix: the casts stay over 200 games; the trigger over `DELVER_TRIGGER_GAMES` = 2,000 (as doomsday's Edge of Autumn
+and Street Wraith casts, 124.4): a miss there has a probability of about e^-24 (under 1e-7 at the 95% bound of 3 in 64),
+for any chunk of 2,000 seeds or more; a shorter chunk checks the casts only. The gate's sharded 2,000 games from seed 0
+(delver_dealt, merged totals) check it: 34 triggers there. Test `fuzz::the_murktide_trigger_is_asserted_over_enough_games`:
+the 325-game chunk's counters pass, the same over 2,000 games (or a run with no Regent or no Charm) fail.
+
+Who it affects: nobody's play; the farm's `delver_dealt2-games` campaigns lose a chance failure (about one chunk in 20
+of those shortened by a failing seed).
+
+Not changed, the same class seen once on the way: with `--matches 20` (not a gate or farm setting) `check_post`'s
+post-sideboard counts over exactly 20 `delver_dealt` matches failed on main (games.rs:3849 of 4a84d570); the farm's
+`delver_dealt2-matches` chunks are 50 matches, their rests after a failing match can be fewer. A follow-up if the queue
+ever shows it.
+
+### 209.4 The farm-vs-local replay mismatch (`tools/fuzz_steward.py`, `tools/fuzz_local.py`)
+
+zero-core's chunk process reports a panic outside the loop's per-seed catch with no seed in play - the chunk's own
+checks after its last seed: the rules checks' verdict (`rules_verdict`: a violation is recorded and the game plays on,
+150), `check_games` - as the chunk's failure at its **first seed**, with the suffix "(the chunk: FUZZ_GAMES=n)"
+(`chunk_fail`). The steward's confirm replayed that one seed (`fuzz_local.py --count 1`), which passes: neither entry
+could be confirmed. Now `chunk_count(repro)` reads the suffix and the replay is the whole chunk, cut as one chunk of
+exactly its seeds (`fuzz_local.py --count n --chunk n`; `--chunk` is the job's `chunk`, zero-core's worker takes it
+as the chunk size); the timeout is 3 s a seed (at least 30 minutes). A seed's own failure replays that seed alone, as
+before. Test `tests/test_fuzz_steward.py::test_a_chunk_failure_is_replayed_over_its_whole_chunk`.
+
+Replayed here with the build's own signed fuzz worker (6a44afdb's, `fuzz_local.py` as the steward runs it, idle
+priority): chunk [100,042,326, +1,000) of `games` -> games.rs:360 "CR 608.1, 405.5 x3" (741 s), and chunk
+[100,115,732, +325) of `delver_dealt2-games` -> games.rs:3750 "the legacy cards weren't played: 165 0 234" (106 s) -
+exactly the farm's. With this branch, the same three chunks, `fuzz_local.py --chunk` with this branch's worker
+(f39f8a90, built on the Mac as the steward's Mac lane builds it, `cargo build --profile fuzz -p mtgz_worker`): the
+`delver_dealt2-games` chunk passes (64 s; the same games: 165 Regents, no trigger, 234 Charms, the trigger no longer
+asked of 325 games), the `games` chunk passes (305 s) and the `hidden-games` chunk [100,147,827, +1,000) - the farm's
+"CR 608.1, 405.5 x4" - passes (294 s): no failure. The fuzz test binary (`fuzz` profile, the same library loop) over
+the three chunks on the desktop: all pass, their reports the farm's to the game (`games`: wins [483, 513], 4 draws;
+`hidden-games`: [509, 488], 3 draws), and 3 and 4 departures excused by a game's end - the farm's x3 and x4.
+
+### 209.5 Verification
+
+* **Digests: unchanged** (on the Mac, against the recorded files): on the branch's first base (f39f8a90 against
+  4a84d570's) the cube's best of one 53eda75d63b2743b, driver 6a03572828250b86, metagame 284d8312cc21c587, constructed
+  dab59f1ff2a6d02e, EoE 2efe956d589840ce; rebased (4a8d063b against main d4a2814a's, 208's re-recording) 920109d474d9eadb,
+  driver 6a03572828250b86, metagame 56ff52ffef1b1913, constructed 16441662701e233d, EoE c3a9c786030f42eb. The
+  encodings, the search and the worker are untouched; the farm worker's fuzz jobs carry the fixes from its next build.
+  The regression tests pass rebased too (with 206's and 208's).
+* **Fresh seeds, `fuzz` profile, as farm chunks** (one process per chunk, every end-of-run check of the chunk, the Mac,
+  seeds from 5,000,000,000): default `games` 4,000 (16 chunks of 250), `hidden-games` 2,000 (8 of 250),
+  `delver_dealt2-games` 4,000 (16 of 250) and one chunk of 2,000: every chunk passed, no rules check violated, no seed
+  near the hang limit (the longest game 1,979 actions). One 250-game `delver_dealt2` chunk saw no Murktide trigger
+  (209.3: it passes now, it failed before); the 2,000-game chunk saw 46. No step that ended a game excused a
+  departure in these 12,000 games (rare: 209.2). The exponential pool, 400 games (release, 4 chunks of 100): passed,
+  2 aborted, every chunk past u32::MAX power.
+* **Tests**: the five above (rules_check, rules_numbers, three in tests/fuzz.rs) and the steward's
+  (tests/test_fuzz_steward.py: 15 passed); `python tools/privacy_check.py`: 0 findings.

@@ -464,7 +464,7 @@ fn cr_106_4_gaeas_cradle_past_255_creatures_ends_the_game_aborted() {
 /// driver aborts such a game at its next row (the user's decision D4). Ocelot Pride's end-step trigger with the city's
 /// blessing ("create a 1/1 white Cat ... Then ... for each token you control that entered this turn, create a token that's a
 /// copy of it", CR 702.131) doubles the tokens that entered this turn: after k triggers 2^(k+1) - 2 of them. The engine made
-/// them one at a time - the fuzz's game had ~30 Ocelot Prides, so billions, quadratic in the copies (`copy_fx` scans them) -
+/// them one at a time - the fuzz's game had 28 Ocelot Prides, so ~2^29, quadratic in the copies (`copy_fx` scans them) -
 /// and hung. Token creation now ends the game aborted at once when it would take the battlefield past the limit, creating
 /// none. Ten Ocelot Prides and a lifelinker (eleven permanents: the blessing) make 2,046 tokens and play on; eleven reach the
 /// limit in the eleventh trigger (4,094 tokens onto twelve permanents) and end aborted there, a board no row can show.
