@@ -40813,6 +40813,20 @@ next steps (a fixed-shape GPU graph run as CUDA graphs, reduced precision for GP
 fingerprint covers zero-core's Python). Its workers - this pin's builds, the CUDA alternate and the macOS one - play it
 as any zero-onnx/2 graph; older worker builds play it too (they never feed `t_align`).
 
+### 207.1 The gates of 69b7e144 and the merge
+
+On 69b7e144 (this section's commit), from a warm worktree, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`,
+`--offload local`, `--baseline-root` <85495dc7, built>: **GATE PASSED WITH SKIPS AND FLAKY RETRIES optin-core 69b7e144ade9
+in 2839s** - core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,303 samples each); the digests as
+recorded (constructed, EoE, driver, metagame, dealt); farm compat identical (gate 2: 6 games, 2,890 rows; gate 3);
+cargo test --test az 57 and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built against
+this core; core pytest 720 passed - skipped: 17 live-run-hazard tests (fenced: a live run on this machine); flaky:
+`tests/test_remoteplay.py::test_cotrain_the_local_driver_is_never_starved` failed in the full run and passed on retry
+alone (AGENTS.md: it times real threads on a loaded machine).
+
+Merged with main at d4a2814a (206.7, 208: engine rules and their digests): no file in common but this one, so the
+gate stands for the merge (the tiered rule: overlapping files only).
+
 ## 208. The open-decklist walk's two queue entries of 2026-11-19: a surveilled Colossus waits at the bottom; a covering payment's lone `PASS` is asked and keyed (branch `fix/infoset-1119`, 2026-11-19)
 
 Branch from main 4a84d570 (zero-core d3b1a8d, unchanged).
