@@ -41151,6 +41151,14 @@ the three chunks on the desktop: all pass, their reports the farm's to the game 
   2 aborted, every chunk past u32::MAX power.
 * **Tests**: the five above (rules_check, rules_numbers, three in tests/fuzz.rs) and the steward's
   (tests/test_fuzz_steward.py: 15 passed); `python tools/privacy_check.py`: 0 findings.
+### 209.6 The merge
+
+**GATE PASSED WITH SKIPS engine 12858d1fbb59 in 967s** (`--tested-sha` this commit, its suite report; skipped: one
+live-run-hazard test, fenced by a live run on the desktop). Digests equal to main's (full 920109d474d9eadb,
+`DIGEST_ENCODING=0` d0411d5195e12cd6, constructed, EoE, driver, metagame and dealt as recorded); farm compat identical.
+Main fast-forwarded d4a2814a -> 12858d1f, then merged with origin's bcae40eb (207: the zero-core pin; disjoint files,
+this file's end the only conflict) as 192819f2. The fuzz steward was restarted on it (STOP, its logon task) so that a
+chunk's failure is replayed over the chunk (209.4).
 
 ## 210. Determinize keeps the viewer's decision and view: a payment of no mana asks nothing; the owner's private rearrangement of its hand keeps what the other player knows of a told-apart card (branch `fix/determinize-1119`, 2026-11-19)
 
@@ -41350,3 +41358,10 @@ On the desktop beside the live run, every heavy command through the throttle (`t
   and 210 (`fuzz.rs`: 7 passed) and the four scenarios pass. Without 210's engine changes (on 12858d1f) the 210 seed
   test fails in release too, at the view check (games.rs:2991, "determinize changed the view").
 * **Digests**: 210.6.
+### 210.8 The merge
+
+**GATE PASSED WITH SKIPS engine d416aad4ab89 in 856s** (`--tested-sha` this commit, its suite report; skipped: one
+live-run-hazard test, fenced by a live run on the desktop): full 44372545881ef768 and `DIGEST_ENCODING=0`
+a965c3fc8d3bba8a (= 210.6), constructed, EoE, driver, metagame and dealt unchanged; farm compat identical. Main
+fast-forwarded 192819f2 -> d416aad4. With 206, 208, 209 and 210 the steward's queue of 2026-11-16 to 19 has a fix on
+main for every site it held on main's engine; its next build of main fuzzes them.
