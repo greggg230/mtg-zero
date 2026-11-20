@@ -35425,6 +35425,7 @@ whose pid Windows reused for another process, is taken over), checks the commit 
 files removed, ignored build products kept; the zero-core submodule at the pin, clean; refused unless HEAD is the
 commit and nothing tracked differs), runs the command there with `CARGO_TARGET_DIR` = the slot's dir, and releases the
 lease however the command ends. `acquire` / `release` / `status` / `init`; `--slot K` for one slot (a measurement).
+`acquire`'s lease is kept by a detached holder until `release` or its `--ttl` (167.11).
 
 The same path and the same target dir every time, so the one-target-dir-per-checkout rule holds (a warm worktree's dir
 is never another checkout's: `target_guard` passes) and cargo rebuilds only what the commit changed (git rewrites only
@@ -35727,6 +35728,33 @@ pb2: nothing of the live run was touched (its files, processes, the Mac's run ch
   the cache (seconds, no cold build in the new pinned worktree); an engine change builds ~3x faster.
 * Gates take far less of the desktop beside it: the fuzz work per suite tier fell from ~78 min single-threaded to ~3.5
   min of shard time, and every heavy step queues for a slot of the throttle instead of piling up.
+
+### 167.11 `acquire`'s lease outlives the caller: a detached holder (branch `fix/warm-pool-holder`, 2026-11-20)
+
+**Why.** `warm_pool.py acquire` wrote the lease for `os.getppid()`, meant as the shell that would use and release the
+worktree. Under Git Bash every external command runs from a forked bash that exits once the command returns, so the
+lease named a dead process at once: `status` showed it `[stale]` and the next `run` or `acquire` took the slot over,
+force-checking another commit out under the holder. Found 2026-11-19 setting up an optin-core gate baseline: the gate's
+own `run` took the held warm-1 and refused (`--baseline-root ... is this checkout`). An agent's shell has the same
+problem with no way round it: each tool call is a new shell.
+
+**What.** `acquire` holds the lease itself through the checkout, then hands it to a small detached process
+(`warm_pool.py _hold <lease> --ttl S --from-pid P`; Windows: no console, its own Ctrl+C group, out of the caller's job
+object when the job allows it; POSIX: its own session). The holder takes the lease over only if it still names `P`
+(the file replaced in one step, `held_for` = P, `expires`), then looks at it every 2 s and exits once it is gone or
+someone else's (`release` removes it), or releases it itself at `--ttl` (default 4 h). `acquire` returns only after the
+holder took over, and adds `holder_pid` and `expires` to its JSON. `status` shows `until HH:MM`. `run` is unchanged (its
+own process holds its lease). A lease the caller forgets now lasts until its ttl, not until its shell exits: that was
+the safety net the old way meant to give, and under Git Bash it freed every lease at once. `try_lease` retries a
+holder's replace in progress when reading a lease, and a lease released between its exclusive create and its read is
+created again, not reported as held.
+
+**Tests.** tests/test_artifact_cache.py: a lease handed over from a short-lived process that then exits is still held
+(live, `held_for` = that process, another `try_lease` refused) and its holder exits once it is released; a ttl of 1 s
+releases the lease and ends the holder; a holder refuses a lease that names another process. End to end under Git Bash
+(throwaway repo with a submodule, one slot): `out=$(python tools/warm_pool.py acquire ...)` in one shell, then from a
+new shell: the old code's lease read `[stale]` and a second `run` took the slot ("second job got the slot"); with the
+fix, `held by pid ... until HH:MM`, the second `run` waited and timed out, and `release` ended the holder within 3 s.
 
 ## 168. pb3: wide 60 variety (dealt decks per seat), the in-run matchup model and sideboarding by its choice table (branch `feat/pb3-varied`, zero-core `feat/pb3-teacher`, 2026-11-15)
 

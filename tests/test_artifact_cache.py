@@ -1,7 +1,9 @@
 """tools/zcache.py and tools/warm_pool.py (docs/ENGINE.md 167). The cache: the key changes with every Rust input and
 with nothing else, a checkout with uncommitted Rust inputs has no key, entries are immutable and served only to their
 own key (a tampered file is refused), and eviction is least recently used. The pool: a lease is exclusive, a dead
-holder's (or a reused pid's) lease is taken over. A throwaway git repo stands in for a checkout; nothing is built."""
+holder's (or a reused pid's) lease is taken over, and acquire's lease outlives the process that asked (its detached
+holder keeps it until it is released or its ttl ends). A throwaway git repo stands in for a checkout; nothing is
+built."""
 import json
 import os
 import subprocess
@@ -175,6 +177,58 @@ def test_a_lease_is_exclusive_and_a_dead_holders_is_taken_over(pool):
     assert W.try_lease(3, 'reused', 'x', holder={'pid': os.getpid(), 'started': 12345.0})
     assert W.try_lease(3, 'next', 'x')
     W.release(3)
+
+
+def hand_over(ttl):
+    """A short-lived process takes slot 1's lease and hands it to a holder, as `acquire` does, then exits (a Git Bash
+    command's forked shell, an agent's tool call) -> its pid."""
+    code = ('import sys; sys.path.insert(0, sys.argv[1]); import warm_pool as W; '
+            'assert W.try_lease(1, "gate", "abc"); W.spawn_holder(W.lease_path(1), float(sys.argv[2]))')
+    p = subprocess.Popen([sys.executable, '-c', code, os.path.join(ROOT, 'tools'), str(ttl)],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _, err = p.communicate(timeout=60)
+    assert p.returncode == 0, err
+    return p.pid
+
+
+def gone_within(pid, seconds):
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        if W.proc_started(pid) is None:
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def test_an_acquired_lease_outlives_the_process_that_asked(pool):
+    asker = hand_over(ttl=600)
+    try:
+        info = W.read_lease(W.lease_path(1))
+        assert info['held_for'] == asker and info['pid'] != asker and info['label'] == 'gate'
+        assert W.lease_live(info)
+        assert not W.try_lease(1, 'next', 'x')                        # the asker is gone; its holder keeps the slot
+    finally:
+        W.release(1)
+    assert gone_within(info['pid'], 15)                               # released: the holder leaves
+    assert W.try_lease(1, 'next', 'x')
+    W.release(1)
+
+
+def test_a_held_lease_ends_at_its_ttl(pool):
+    hand_over(ttl=1)
+    info = W.read_lease(W.lease_path(1))
+    try:
+        assert gone_within(info['pid'], 15)
+        assert W.read_lease(W.lease_path(1)) is None                  # released by its holder
+    finally:
+        W.release(1)
+
+
+def test_a_holder_takes_only_the_lease_it_was_handed(pool):
+    assert W.try_lease(1, 'mine', 'x')
+    assert W.hold(W.lease_path(1), 60, from_pid=os.getpid() + 1) == 1   # another process's lease: nothing taken
+    assert W.read_lease(W.lease_path(1))['pid'] == os.getpid()
+    W.release(1)
 
 
 def test_each_slot_has_its_own_target_dir(pool, monkeypatch):

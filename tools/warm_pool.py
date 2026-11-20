@@ -5,7 +5,7 @@ one-target-dir-per-checkout rule (AGENTS.md Pitfalls: cargo's dep-info paths are
 worktree's target dir is never another checkout's.
 
     python tools/warm_pool.py run --sha <rev> [--for <label>] -- python tools/gate.py python
-    python tools/warm_pool.py acquire --sha <rev> [--for <label>]     # -> JSON {"path", "target_dir", "slot", "sha"}
+    python tools/warm_pool.py acquire --sha <rev> [--for <label>] [--ttl 14400]   # -> JSON {"path", "target_dir", "slot", "sha", ...}
     python tools/warm_pool.py release <slot or path>
     python tools/warm_pool.py status
     python tools/warm_pool.py init [--slots 4]                          # create the worktrees (at main), nothing else
@@ -16,6 +16,12 @@ submodule at the pin, clean), runs the command in it with CARGO_TARGET_DIR set t
 however the command ends. A warm worktree holds nobody's work: never edit in one. A lease is a file
 <pool>/.leases/<slot>.json created exclusively (pid, the process's creation time, label, sha); a lease whose process is
 gone (or whose pid now names another process: Windows reuses pids) is taken over.
+
+`acquire` hands its lease to a small detached process (`_hold`) that keeps it until `release` removes it or --ttl
+seconds (default 4 h) pass, then exits: the caller's shell can't hold it - under Git Bash every command runs in a
+forked bash that is gone once the command returns (the lease used to name it, so it read stale at once and the next
+`run` took the slot over), and an agent's shell ends with each tool call. A lease the caller forgets lasts until its
+--ttl; `status` shows when, and `release` frees it now.
 
 Pool: worktrees <pool>/warm-1 .. warm-N, <pool> = $MTGZ_WARM_ROOT, else the main checkout's sibling mtg-zero-wt/;
 target dirs $MTGZ_WARM_TARGETS/warm-K, else $ZERO_BIG_DISK/cargo-target/mtg-zero/warm-K on Windows when the machine
@@ -104,15 +110,13 @@ def try_lease(k, label, sha, holder=None):
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            try:
-                with open(path, encoding='utf-8') as f:
-                    info = json.load(f)
-            except (OSError, ValueError):
-                info = {}
+            info = read_lease(path)                   # (retries a holder's replace in progress)
             if info and lease_live(info):
                 return False
             try:
                 os.remove(path)                       # its holder is gone: take it over
+            except FileNotFoundError:
+                pass                                  # (released meanwhile: create it again)
             except OSError:
                 return False
             continue
@@ -129,6 +133,86 @@ def release(k, path=None):
         os.remove(path or lease_path(k))
     except FileNotFoundError:
         pass
+
+
+HOLD_TTL = 4 * 3600.0      # acquire's default --ttl (seconds)
+HOLD_POLL = 2.0            # how often a holder looks at its lease
+
+
+def read_lease(path):
+    """The lease at `path` -> dict, or None when there is none; a moment's sharing violation (Windows: a replace in
+    progress) is retried."""
+    for _ in range(20):
+        try:
+            with open(path, encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+        except (PermissionError, ValueError):
+            time.sleep(0.05)
+    return None
+
+
+def write_lease(path, info):
+    """Replace the lease at `path` in one step (a reader sees the old file or the new one; the path never disappears,
+    so no `try_lease` can create it meanwhile)."""
+    tmp = f'{path}.{os.getpid()}.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(info, f)
+    for _ in range(100):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:      # (Windows: a reader has the lease open for a moment)
+            time.sleep(0.05)
+    os.remove(tmp)
+    raise RuntimeError(f'could not replace {path}')
+
+
+def hold(path, ttl, from_pid, poll=HOLD_POLL):
+    """`_hold`: take over the lease at `path` from process `from_pid` (acquire, about to exit) and keep it - the lease
+    names this process - until it is released (the file gone or someone else's) or `ttl` seconds pass (then released
+    here) -> exit code (1: the lease wasn't `from_pid`'s, nothing taken)."""
+    info = read_lease(path)
+    if not info or info.get('pid') != from_pid:
+        return 1
+    mine = {**info, **me(), 'held_for': from_pid, 'expires': time.time() + ttl}
+    write_lease(path, mine)
+    while True:
+        time.sleep(poll)
+        cur = read_lease(path)
+        if not cur or cur.get('pid') != mine['pid']:
+            return 0
+        if time.time() >= mine['expires']:
+            release(None, path)
+            return 0
+
+
+def spawn_holder(path, ttl, wait=30.0):
+    """Start the detached `_hold` process for the lease at `path` (this process's) and wait until it holds it -> the
+    lease as the holder wrote it. Raises when it doesn't take over (the lease stays this process's: release it)."""
+    cmd = [sys.executable, os.path.abspath(__file__), '_hold', path, '--ttl', str(ttl), '--from-pid', str(os.getpid())]
+    kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+              cwd=os.path.dirname(path))
+    if WIN:
+        # (no console window, out of the caller's Ctrl+C group, and out of its job object when the job allows it -
+        # a shell or agent that kills its job on exit would otherwise take the holder with it)
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+        try:
+            p = subprocess.Popen(cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **kw)
+        except OSError:
+            p = subprocess.Popen(cmd, creationflags=flags, **kw)
+    else:
+        p = subprocess.Popen(cmd, start_new_session=True, **kw)
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        info = read_lease(path)
+        if info and info.get('held_for') == os.getpid() and info.get('pid') != os.getpid():
+            return info
+        if p.poll() is not None:
+            break
+        time.sleep(0.1)
+    raise RuntimeError(f'the lease holder for {path} did not take over (exit {p.poll()})')
 
 
 def checkout(k, sha):
@@ -190,22 +274,29 @@ def main(argv=None):
         s.add_argument('--slot', default=None, help='this slot only (warm-K or K), e.g. for a cold-vs-warm measurement')
         if name == 'run':
             s.add_argument('command', nargs=argparse.REMAINDER)
+        else:
+            s.add_argument('--ttl', type=float, default=HOLD_TTL,
+                           help='seconds the lease lasts unless released first (default 4 h)')
     s = sub.add_parser('release')
     s.add_argument('slot')
     sub.add_parser('status')
     sub.add_parser('init')
+    s = sub.add_parser('_hold', help="(internal) the detached process that keeps acquire's lease")
+    s.add_argument('lease')
+    s.add_argument('--ttl', type=float, required=True)
+    s.add_argument('--from-pid', type=int, required=True)
     a = ap.parse_args(argv)
     slots = n_slots(a.slots)
     if a.cmd == 'status':
         for k in range(1, slots + 1):
             p = slot_path(k)
             head = git(['rev-parse', '--short=12', 'HEAD'], p, check=False) if os.path.exists(p) else '(not created)'
-            try:
-                with open(lease_path(k), encoding='utf-8') as f:
-                    info = json.load(f)
+            info = read_lease(lease_path(k))
+            if info:
+                until = f', until {time.strftime("%H:%M", time.localtime(info["expires"]))}' if info.get('expires') else ''
                 held = f'held by pid {info.get("pid")} ({info.get("label") or "-"}, since ' \
-                       f'{time.strftime("%H:%M", time.localtime(info.get("since", 0)))})' + ('' if lease_live(info) else ' [stale]')
-            except (OSError, ValueError):
+                       f'{time.strftime("%H:%M", time.localtime(info.get("since", 0)))}{until})' + ('' if lease_live(info) else ' [stale]')
+            else:
                 held = 'free'
             print(f'warm-{k}: {p} @ {head}, target {target_of(k)}: {held}')
         return 0
@@ -223,11 +314,18 @@ def main(argv=None):
     if a.cmd == 'release':
         release(slot_k(a.slot))
         return 0
+    if a.cmd == '_hold':
+        return hold(a.lease, a.ttl, a.from_pid)
     if a.cmd == 'acquire':
-        # (the lease names the caller's parent - the shell that will use the worktree and release it - not this
-        # short-lived process)
-        holder = {'pid': os.getppid(), 'started': proc_started(os.getppid())}
-        print(json.dumps(acquire(a.sha, a.label, a.wait, slots, holder, a.slot and slot_k(a.slot))))
+        # (this process holds the lease through the checkout, then hands it to a detached holder that outlives it:
+        # never the caller's parent, which under Git Bash is a fork gone as soon as this returns)
+        lease = acquire(a.sha, a.label, a.wait, slots, None, a.slot and slot_k(a.slot))
+        try:
+            held = spawn_holder(lease['lease'], a.ttl)
+        except Exception:
+            release(lease['k'], lease['lease'])
+            raise
+        print(json.dumps({**lease, 'holder_pid': held['pid'], 'expires': held['expires']}))
         return 0
     cmd = a.command[1:] if a.command[:1] == ['--'] else a.command
     if not cmd:
