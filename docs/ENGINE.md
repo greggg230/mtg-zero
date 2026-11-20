@@ -41365,3 +41365,38 @@ live-run-hazard test, fenced by a live run on the desktop): full 44372545881ef76
 a965c3fc8d3bba8a (= 210.6), constructed, EoE, driver, metagame and dealt unchanged; farm compat identical. Main
 fast-forwarded 192819f2 -> d416aad4. With 206, 208, 209 and 210 the steward's queue of 2026-11-16 to 19 has a fix on
 main for every site it held on main's engine; its next build of main fuzzes them.
+
+## 211. zero-core pin eaa624e -> 158bfb1: float16 GPU variants per generation (`pool_variants`), the static zero-onnx/2 graph, the worker's float16 self-test (zero-core `feat/gpu-fp16`, docs/az.md 67; branch `feat/gpu-fp16`, 2026-11-20)
+
+**Why.** After 207 a farm GPU PC's single worker is bound by ONNX Runtime's host side, and the farm's Windows GPU path
+still played well under the trainer's own torch path on the same hardware (207: ~16k leaves/s from one worker against
+~32k). The user's decisions of 2026-11-19: a GPU-only graph per generation (zero-farm PROTOCOL rev 20's checkpoint
+variants) and reduced precision on GPU sessions with a looser self-test.
+
+**What** (zero-core docs/az.md 67; every piece off by default or unused by a run that doesn't name it):
+
+* The run setting `pool_variants` ('' by default: the pool's requests as before): 'name=form,...', forms 'fp16'. Per
+  gen the pool makes a float16 copy of the exported graph (`to_float16`: float32 inputs and outputs, the nodes re-sorted
+  depth first so ONNX Runtime 1.24.4's CUDA buffer plan holds), uploads it beside the default graph, signs it in the
+  definition (`checkpoints[gen].variants`) and registers it with the gen; the run's GPU alternates (a `when.vendor`)
+  name it, every other machine gets the default graph. It raises the run's `min_agent` to 0.3.5.
+* The worker: a graph with metadata `precision` 'fp16' self-tests at max 5e-2 and mean 3e-3 (every other graph at 2e-5
+  as before; determinism required either way); it takes either graph at each checkpoint.
+* The static zero-onnx/2 graph (`export(..., fast='static')`, its `t_cap` input, the worker's `StaticTokens` feed):
+  measured slower than the fast graph on CUDA (every row padded to the batch's longest), kept with its tests, used by
+  nothing.
+
+**Measured on the farm** (2026-11-20 UTC; a canary farm run publishing legacy-meta3-r1's gen 812 through this pin's
+pool on the test branch `test/gpu-fp16` (8775a488: 69b7e144 with zero-core a6d799f) with `pool_variants` 'gpu=fp16' and
+`pool_export` 'fast'; a farm PC with an NVIDIA GPU on agent 0.3.6): the PC leased it on the CUDA alternate, downloaded the
+variant and self-tested it on CUDA (max abs 9.4e-3 over 256 rows); the agent's crew of 3 workers x 575 games in flight
+played 20.8k games/h over 15 minutes (~24k leaves/s at ~4,240 leaves a game). The same PC: 10.5k leaves/s before 207 with
+one worker, 16.1k with 207's float32 graph and one worker at 2,048 in flight; the trainer's torch path ~32k (bf16 and CUDA
+graphs), 20.0k in float32. The float16 graph's share against the crew layout's is not separated (the agent's tuner
+doesn't yet measure a running crew in place).
+
+**Runs.** Nothing changes for a run that doesn't set `pool_variants`: the default graph's export, the pool's requests and
+the worker's float32 self-test are as before (the gates below: checkpoint compat byte identity, the digests, farm
+compat). A run turns it on with `pool_variants` 'gpu=fp16' (with `pool_export` 'fast' and a CUDA alternate); every
+machine it leases to needs agent 0.3.5 or later (stable carries 0.3.6 since 2026-11-20). Turning it on for a live run is
+its owner's call.
