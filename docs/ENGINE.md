@@ -41400,3 +41400,16 @@ the worker's float32 self-test are as before (the gates below: checkpoint compat
 compat). A run turns it on with `pool_variants` 'gpu=fp16' (with `pool_export` 'fast' and a CUDA alternate); every
 machine it leases to needs agent 0.3.5 or later (stable carries 0.3.6 since 2026-11-20). Turning it on for a live run is
 its owner's call.
+
+### 211.1 The gate of 591144af and the merge
+
+On 591144af (this section's parent: the pin and 211), in the warm worktree warm-2, `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;
+MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`, `--baseline-root` warm-1 at d416aad4 (main's engine and pin eaa624e;
+main's 31efcf62 is docs only on top), built: **GATE PASSED WITH SKIPS optin-core 591144af141b in 1524s** - core tests 215
+passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each); the digests as recorded (constructed
+16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8); farm
+compat identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 2,556 rows); cargo test --test az 57 and --test
+hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 722 passed -
+skipped: 17 live-run-hazard tests (fenced: a live run on this machine).
+
+Main fast-forwarded 31efcf62 -> this commit (main had not moved since the branch: the gate stands as run).
