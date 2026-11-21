@@ -14,6 +14,7 @@ unordered pairing with at least one candidate, mirrors included), the shares, th
                 "archive": "copy"},
      "code": {"worktree": null, "sha": null, "python": null, "farm": {...}, "farm_gates": true},
      "yield_runs": [{"run": "<run dir>", "farm_runs": ["<farm run>", ...]}],
+     "beside_runs": ["<run dir>", ...],                  # live runs it may run beside, never touched (a CPU stew)
      "notes": "..."}
 
 Kept light: json, os, re only (the decklists module for the deck checks).
@@ -204,7 +205,7 @@ def normalize(cfg, check_lists=True):
     """stew.json -> the config with every default filled in (a new dict). ConfigError naming what is wrong."""
     if not isinstance(cfg, dict):
         raise ConfigError('stew.json: a JSON object')
-    known = {'name', 'decks', 'candidates', 'source', 'seeds', 'recipe', 'code', 'yield_runs', 'notes'}
+    known = {'name', 'decks', 'candidates', 'source', 'seeds', 'recipe', 'code', 'yield_runs', 'beside_runs', 'notes'}
     bad = sorted(set(cfg) - known)
     if bad:
         raise ConfigError(f'stew.json: unknown keys {bad} ({sorted(known)})')
@@ -331,6 +332,10 @@ def normalize(cfg, check_lists=True):
             if not isinstance(f, str) or not SLUG_RE.match(f):
                 raise ConfigError(f'yield_runs: farm run {f!r} is not a slug')
         out['yield_runs'].append({'run': str(y['run']), 'farm_runs': fr})
+    br = cfg.get('beside_runs') or []
+    if not isinstance(br, list) or not all(isinstance(x, str) and x for x in br):
+        raise ConfigError('beside_runs: [DIR, ...] (live runs the stew runs beside without touching them)')
+    out['beside_runs'] = list(br)
     out['notes'] = cfg.get('notes', '')
     for a, b in pairs:                          # (the farm runs' names: checked now, not at the first turn)
         farm_run(out['name'], decks, a, b)

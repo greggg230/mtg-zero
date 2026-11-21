@@ -319,7 +319,8 @@ class Stew:
         return out
 
     def check_supervisors(self):
-        allowed = self.own_runs() | {_norm(y['run']) for y in self.cfg['yield_runs']}
+        allowed = (self.own_runs() | {_norm(y['run']) for y in self.cfg['yield_runs']}
+                   | {_norm(r) for r in self.cfg.get('beside_runs') or []})
         bad = []
         for s in self.ops.live_supervisors():
             r = s.get('run') or ''
@@ -329,8 +330,8 @@ class Stew:
                 bad.append(f"{s.get('run')!r} (pid {s.get('pid')})")
         if bad:
             raise Refused(f'live supervisors that are neither the stew\'s specialists nor its yield_runs: '
-                          f'{", ".join(sorted(set(bad)))} - the stew uses this machine\'s GPU; stop them or list '
-                          f'them in yield_runs')
+                          f'{", ".join(sorted(set(bad)))} - the stew uses this machine\'s GPU; stop them, list '
+                          f'them in yield_runs, or (a stew off the GPU) in beside_runs')
 
     def yield_machine(self):
         """Pause the yield runs at their boundary and their farm runs, once per run of the stew (recorded: only what

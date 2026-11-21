@@ -443,9 +443,12 @@ def test_refuses_a_live_supervisor_it_does_not_own(stew, tmp_path):
     stew.ops.live = [{'pid': 1, 'run': 'E:/elsewhere/runs/x'}]
     with pytest.raises(Refused, match='elsewhere'):
         stew.run()
+    stew.cfg['beside_runs'] = ['E:/elsewhere/runs/x']
     stew.ops.live = [{'pid': 1, 'run': os.path.join(str(tmp_path), 'meta3')},
-                     {'pid': 2, 'run': 'runs/' + C.spec_dir(DEL, DD), 'cwd': stew.dir}]
+                     {'pid': 2, 'run': 'runs/' + C.spec_dir(DEL, DD), 'cwd': stew.dir},
+                     {'pid': 3, 'run': 'E:/elsewhere/runs/x'}]
     assert stew.run(max_phases=1) == 'done'
+    assert not [c for c in stew.ops.calls if c[0] in ('pause', 'resume') and 'elsewhere' in c[1]]
 
 
 def test_a_yield_run_paused_before_the_stew_stays_paused(stew, tmp_path):
