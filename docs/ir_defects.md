@@ -1384,6 +1384,14 @@ the tables counts abilities or makes one trigger an additional time). Dark Matte
 `SelfMill(3)`; Moonshadow's menace. The roto pool's Knight of the Reliquary and Elvish Reclaimer gain the new field at
 its default (their IR is unchanged).
 
+**The three lanes merged (ENGINE.md 220.4).** No new defect: the integrated export (the merged parser over the union
+of the lanes' records) gives each legacy card exactly its lane's IR, the cube's and EoE's printings main's but the
+schema hash; no lane's recognizer shadows another's (lane A's casting-keyword line and literals and lane C's land
+creature, counter and trigger grammars sit in the creature builder's chain before `legacy_creatures`, lane B's
+free-cast condition in `spell_builder`). Lane C's Dryad Arbor rulings added a second `triage.tsv` row for 0dfaac8c, a
+ruling text Pact of Negation's row already had (one row per distinct text; `tools/rulings_doc.py` let the later win):
+folded into the one row, both cards named.
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."
