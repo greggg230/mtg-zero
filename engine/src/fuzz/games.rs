@@ -1590,9 +1590,10 @@ fn hogaak_decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
 /// resolved (each stack item once; resolved: on top of the stack at a priority pass, gone after it).
 static HOGAAK_SEEN: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 const HOGAAK_KINDS: [&str; 3] = ["Hogaak cast from a graveyard by convoke and delve", "Stitcher's Supplier triggers", "Stitcher's Supplier triggers resolved"];
-/// `FUZZ_POOL=hogaak`'s matches (ENGINE.md 220.4): Massacre spells resolved (the sideboard card; as
-/// `hogaak_b_massacre_on_top`), in the main matches and in the post-sideboard ones.
-static HOGAAK_MASSACRE_MATCHES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+/// `FUZZ_POOL=hogaak`'s matches (ENGINE.md 220.4): Massacre spells (the sideboard card) resolved (as
+/// `hogaak_b_massacre_on_top`) and cast (each stack item of each game once), in the main matches (0, 2) and in the
+/// post-sideboard ones (1, 3).
+static HOGAAK_MASSACRE_MATCHES: [AtomicU64; 4] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 
 /// The stack id of a Stitcher's Supplier trigger on top of the stack that action `a` (a priority pass) may resolve
 /// (`FUZZ_POOL=hogaak`).
@@ -5268,6 +5269,8 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     // (ENGINE.md 168.3: a choice table seat's target of the sideboarding in progress, checked when the game begins)
     let mut table_target: [Option<std::sync::Arc<[u8]>>; 2] = [None, None];
     let mut table_decisions = 0u32;
+    // (`FUZZ_POOL=hogaak`'s Massacre spells counted: game, stack id; ENGINE.md 220.4)
+    let mut massacres_seen: Vec<(u8, u32)> = Vec::new();
     // The rules checks of each game (ENGINE.md 150), after every step.
     let mut mc = MatchCheck::new();
     if checks {
@@ -5406,6 +5409,16 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
         if let Some((id, game)) = massacre_top {
             if g.m.game_no == game && g.sideboarding().is_none() && !g.g.stack().iter().any(|s| s.id == id) {
                 HOGAAK_MASSACRE_MATCHES[usize::from(sp.start_game == 2)].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        if hogaak_mode() && g.sideboarding().is_none() {
+            for it in g.g.stack() {
+                if let crate::game::StackKind::Spell { card } = it.kind {
+                    if g.g.name(card) == "Massacre" && !massacres_seen.contains(&(g.m.game_no, it.id)) {
+                        massacres_seen.push((g.m.game_no, it.id));
+                        HOGAAK_MASSACRE_MATCHES[2 + usize::from(sp.start_game == 2)].fetch_add(1, Ordering::Relaxed);
+                    }
+                }
             }
         }
         all_keys.append(&mut keys);
@@ -5588,7 +5601,8 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         println!("FUZZ_POOL={} matches: {} by seed % {}; the 75s: {}", if hogaak_mode() { "hogaak" } else { "cross" }, pairs.join(", "), ps.len(), cross_75_report());
     }
     if hogaak_mode() {
-        println!("FUZZ_POOL=hogaak matches: Massacre resolved {}", HOGAAK_MASSACRE_MATCHES[0].load(Ordering::Relaxed));
+        let l = |k: usize| HOGAAK_MASSACRE_MATCHES[k].load(Ordering::Relaxed);
+        println!("FUZZ_POOL=hogaak matches: Massacre cast {}, resolved {}", l(2), l(0));
     }
     if constructed_bo3_mode() {
         // Constructed best-of-three (ENGINE.md 120): no first picks; the later games' decks hidden.
@@ -5705,6 +5719,10 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     rules_verdict("fuzz_post_sideboard_matches");
     // (ENGINE.md 141: every game 2 and 3 of these matches starts after a sideboarding, the worlds' too)
     println!("{} (cumulative)", private_keys_report());
+    if hogaak_mode() {
+        let l = |k: usize| HOGAAK_MASSACRE_MATCHES[k].load(Ordering::Relaxed);
+        println!("FUZZ_POOL=hogaak post-sideboard matches: Massacre cast {}, resolved {}", l(3), l(1));
+    }
     let mut t = Totals::default();
     for (k, v) in [
         ("dealt_matches", dealt_matches),
