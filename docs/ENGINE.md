@@ -42070,3 +42070,43 @@ through it (refused first start, warned resume, a reason). `tests/test_ab.py` (+
 own farm runs, an override kept, an override naming the source's farm refused, a forked arm's config.json), the
 farm-pause guard (the source's farm run refused with nothing PUT, the CLI's `FARM PAUSE REFUSED`, its own paused, one
 another arm or another run's selfplay_remotes file names refused); the yardsticks' note. zero-core's own: docs/az.md 70.
+
+### 218.1 The gate of d5a9d0f0; the pin 1694d97 -> d32f6f8 (docs only)
+
+On d5a9d0f0 (218 with the pin 1694d97), in the warm worktree warm-4, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the automatic
+placement (5 steps on the Mac, 8 on the desktop throttled: two live supervisors here), `--baseline-root` warm-1 at main
+1e7416c5 (built; held through the gate by `warm_pool.py acquire`): **GATE PASSED WITH SKIPS optin-core d5a9d0f00028 in
+2506s** - privacy 0 findings; core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each);
+the digests as recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame
+56ff52ffef1b1913, dealt a890c27da3c7d1a8 over 80 matches); farm compat identical (gate 2: 6 games, 2,890 rows, 150
+batches; gate 3: 6 games, 2,556 rows, 6 decks compared); cargo test --test az 57 and --test hidden 28 passed;
+glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 750 passed, 71 skipped -
+skipped: 17 live-run-hazard tests (fenced: a live run on this machine). An earlier gate run on 7755db6f (the pin
+f93ec16) was stopped after its builds, superseded by 1694d97's fix (a fork's fork.json marked only after every start
+check). The optin-core tier runs no pytest of this repo: the files 218 touches and their neighbours ran by hand on
+7755db6f / d5a9d0f0's code (tests/test_ab.py and tests/test_farm_release.py 35 passed; with the farm, yardstick, cells,
+loop, smoke, publisher, worker-farm and privacy files 175 passed, 22 skipped - the worker not built in that checkout,
+no onnx there, the live-run fence).
+
+This commit moves the pin to d32f6f8, zero-core docs/az.md 70's checks on top of 1694d97 (1694d97..d32f6f8: docs/az.md
+only, so the gate above stands for it). zero-core's own full suite on its branch (the desktop, beside two live runs,
+GPU visible): 790 passed, 31 skipped, 3 failed, none this change's (a CUDA determinism test that fails the same on
+c850a5d with the GPU busy, a CUDA-graph test and a rolling-quota timing test that pass alone; docs/az.md 70); its
+`smoke_all.sh --with-this-core --build-only`: 3 of 3 games, GREEN.
+
+### 218.2 Open points
+
+* **Scratch launchers.** A launcher that starts a fresh run, or a fork, without a farm pool from a commit with a
+  published farm build is now refused at its start (exit 78) until it sets `selfplay_local_reason` (or attaches the
+  farm); a run resumed after PAUSE is never refused, only warned.
+* **A stopped pool leaves its farm run as it was**: the coordinator keeps serving the last generation registered before
+  the refusal until someone pauses the farm run (the log says so); the pool does not PUT `paused` itself.
+* **The farm evaluation** (`eval_remote pool:...`, zero-core docs/az.md 65) still retries its SystemExit refusals
+  (zero-core 65's "REFUSED (SystemExit)" retry): only the self-play pool's refusals are classified here.
+* **ab.py** checks an arm's farm use but not its `selfplay_local_reason`: a desktop-only arm beside a published build
+  without one is refused by the run at its first start, and `go` stops there (its supervisor ends 'refused').
+* `pool_settings` does not set `pool_export` (legacy-meta3-r1 runs 'fast'; the fp16 variant is the float16 copy of
+  whichever graph the run exports).
+* Merging with branch `feat/h2h-backend` (217): the zero-core branches meet in `GamePackage.__init__` (`farm_build` and
+  `h2h_backend` added at the same places) and at the end of docs/az.md (69 and 70); here, in `tests/test_ab.py`'s end
+  and the gitlink. All "keep both".
