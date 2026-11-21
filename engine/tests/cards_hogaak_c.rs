@@ -1230,3 +1230,58 @@ fn the_decks_line_moonshadow_a_fetch_for_dryad_arbor_and_stitchers_supplier() {
     pass_to(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
     assert!(g.has_option(Choice::Card(m)) && g.has_option(Choice::Card(a)), "{}", opts(&g));
 }
+
+// ---- Moonshadow: more events ----------------------------------------------------------
+
+/// Hymn to Tourach's two random discards are one event (one instruction, CR
+/// 603.2c): one trigger for two permanent cards.
+#[test]
+fn moonshadow_two_cards_discarded_at_once_is_one_trigger() {
+    let mut g = moon_with(bare(), 0, 6).hand(0, &[DMM, SUPPLIER]).battlefield(1, &["Swamp", "Swamp"]).hand(1, &["Hymn to Tourach"]).at(Step::Main1, 1).start();
+    let h = hand(&g, 1, "Hymn to Tourach");
+    g.choose(Choice::Cast(h));
+    pay_with(&mut g, target(player(0)));
+    resolve(&mut g);
+    assert_eq!(g.player(0).graveyard.len(), 2, "{}", log(&g));
+    assert_eq!(m1(&g, bf(&g, 0, MOON)), 5, "one event, one trigger\n{}", log(&g));
+}
+
+/// The cleanup step's discard to the maximum hand size (CR 514.1, a
+/// turn-based action) puts its cards into the graveyard at once: one
+/// trigger.
+#[test]
+fn cr_514_1_the_cleanup_discard_is_one_event() {
+    let names = [DMM, SUPPLIER, MOON, "Forest", "Island", "Island", "Island", "Island", "Island"];
+    let mut g = moon_with(bare(), 0, 6).hand(0, &names).library(0, &["Island"; 5]).library(1, &["Island"; 5]).at(Step::End, 0).start();
+    pass_to(&mut g, |g| g.kind() == Some(DecisionKind::Discard));
+    for n in [DMM, SUPPLIER] {
+        let c = hand(&g, 0, n);
+        g.choose(Choice::Card(c));
+    }
+    pass_to(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.player(0).hand.len(), 7);
+    assert_eq!(m1(&g, bf(&g, 0, MOON)), 5, "{}", log(&g));
+}
+
+/// Stitcher's Supplier dying, then its dies trigger's mill: two events, two
+/// triggers (the death, a creature card; the mill's land cards).
+#[test]
+fn moonshadow_and_stitchers_supplier_dying_two_events() {
+    let mut g = moon_with(bare(), 0, 6)
+        .battlefield(0, &[SUPPLIER])
+        .library(0, &["Forest", "Island", "Swamp", "Island"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let s = bf(&g, 0, SUPPLIER);
+    let bolt = hand(&g, 1, "Lightning Bolt");
+    g.choose(Choice::Cast(bolt));
+    {
+        let t = g.tgt(s);
+        pay_with(&mut g, target(t))
+    };
+    resolve(&mut g);
+    assert_eq!(gy(&g, 0), vec![SUPPLIER, "Forest", "Island", "Swamp"], "{}", log(&g));
+    assert_eq!(m1(&g, bf(&g, 0, MOON)), 4, "{}", log(&g));
+}
