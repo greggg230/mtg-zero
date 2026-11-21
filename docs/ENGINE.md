@@ -41540,3 +41540,260 @@ c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890
 (gate 2: 6 games, 2,890 rows, 150 batches); core pytest 723 passed - skipped: 17 live-run-hazard tests (fenced).
 
 Main fast-forwarded 4c77c950 -> 62b9a028 (main had not moved since the branch: the gate stands as run).
+
+### 220.3 Lane C: Stitcher's Supplier, Dark Matter Manipulator, Moonshadow, Dryad Arbor (branch `hogaak-c`)
+
+**Why.** Lane C of the Legacy Hogaak Tempo deck (MTGGoldfish archetype "Legacy Hogaak Tempo", paper, deck 8027954,
+fetched 2026-11-21: `E:/mtg-zero-scratch/hogaak/`, its PROVENANCE.md and BRIEF.md): four of its seven cards outside
+the cube and legacy IR, all main deck. Branch `hogaak-c` from main e9ff0e24. Lanes A (Hogaak, Arisen Necropolis) and
+B (Mockingbird, Massacre) are other branches; the integration merges the three. The user's rules: no approximation of
+any class (docs/shortcuts.md unchanged), no encoding gap (none was needed: no layout change, no new float), every
+ruling tested, the cube's behaviour digests equal. New code in `engine/src/lower/hogaak_c.rs`,
+`ir/mtgz_ir/cards/parser/legacy_hogaak_c.py`; generic machinery in the engine's event, layer and trigger code.
+
+* Stitcher's Supplier {B}, Creature — Zombie 1/1: "When this creature enters or dies, mill three cards."
+* Dark Matter Manipulator {B}, Creature — Human Warlock 1/2: "When this creature enters, mill three cards. / This
+  creature gets +2/+0 for every seven cards in your graveyard."
+* Moonshadow {B}, Creature — Elemental 7/7: "Menace / This creature enters with six -1/-1 counters on it. /
+  Whenever one or more permanent cards are put into your graveyard from anywhere while this creature has a -1/-1
+  counter on it, remove a -1/-1 counter from this creature."
+* Dryad Arbor, Land Creature — Forest Dryad 1/1, green (a colour indicator): "(This land isn't a spell, it's affected
+  by summoning sickness, and it has "{T}: Add {G}.")"
+
+#### 220.3.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, sidecar), `ir/mtgz_ir/cards/parser/legacy_hogaak_c.py` and widened recognizers (`creature_builder.py`, `roto_board.py`, `roto_mana.py`, `triggers.py`), `effects/predicates.py` (`Event.CARD_PUT_INTO_GRAVEYARD`), `effects/generic/roto_board.py` (`CardsInYourGraveyard.per`); `data/cards/*`, `card_ir/src/generated.rs` | 220.3.2; IR defect 440 (docs/ir_defects.md AA) |
+| Identities | `engine/src/az/legacy_cards.txt` | the four appended after Rough // Tumble (569-572 on this branch; the integration numbers the three lanes' seven in deck order); no test names a number |
+| Lowering | `lower/hogaak_c.rs` (`RemoveCountersFromSource`, the graveyard count's filter check), `lower/trigger.rs` (`CardPutIntoGraveyard`), `lower/statics.rs` (`CardsInYourGraveyard` as a count), `lower/effect.rs` (the chain) | every field named, the rest denied |
+| Rules | `db.rs` (`EventKind::PutIntoGraveyard`, `Mod::PtPerGraveyardCards`, the event in `SEEN_RARE_EVENTS`), `game.rs` (the event in `move_card`, `Game::gy_arrivals`), `triggers.rs` (matched at the end of a simultaneous move; a graveyard card as the subject), `layers.rs` (layer 7c), `cost_order.rs`, `az/tail_encode.rs`, `public_state.rs`, `az/build.rs` (the new field and mod classified) | 220.3.3 |
+| Tests | `engine/tests/cards_hogaak_c.rs` (47), `tests/ir/test_legacy_hogaak_c.py` (15), `support.rs` (`SUPPORTED_LEGACY`), `fuzz.rs` (a seed list, 220.3.5) | 220.3.6 |
+| Fuzz pool | `engine/src/fuzz/games.rs` (`FUZZ_POOL=hogaak_c`), `worker/src/fuzz.rs` (the pool list) | 220.3.6 |
+| Rulings | `data/rulings/legacy.rulings.json` (the four cards' 7 rulings, all Dryad Arbor's), `triage.tsv` (7 rows), `docs/rulings.md` | every one tested |
+
+#### 220.3.2 The IR
+
+The four Scryfall records (`raw/scryfall_hogaak_new.json`, the orchestrator's fetch of 2026-11-21) appended to the
+legacy pool. Stitcher's Supplier parsed as it was: two `TriggeredAbility` arms, `enters` and `dies`, each
+`SelfMill(3)` (the parser's compound-condition shape, 220.3.4). The other three didn't:
+
+* **Dryad Arbor** parsed wrong (IR defect 440, fixed at the parser): the creature builder claims it and rebuilt its
+  type line from the artifact and enchantment flags only, so it was a `Creature` with no `produces`.
+  `legacy_hogaak_c.as_land_creature` keeps the printed type line and card types (`Land`, `Creature`) and gives it its
+  basic land types' intrinsic mana (CR 305.6) as `produces: [G]`, `mana_only_from_produces`. The roto pool's Dryad
+  Arbor changes the same way; no cube or EoE printing is a land creature.
+* **Dark Matter Manipulator**'s "+2/+0 for every seven cards in your graveyard" had no grammar: the roto recognizer of
+  Knight of the Reliquary's "for each <type> card in your graveyard" takes "for every <N> [<type>] cards" too,
+  `CardsInYourGraveyard { card_filter: (any card), per: 7 }` (a new field, 1 by default: every existing printing
+  encodes as before).
+* **Moonshadow**: "enters with six -1/-1 counters" (the creature builder's recognizer took +1/+1 counters up to five;
+  now +1/+1 or -1/-1 up to ten: `enters_with_named_counters [("-1/-1", 6)]`); "remove a -1/-1 counter from this
+  creature" (Dark Depths' `RemoveCountersFromSource` recognizer took word kinds only); "one or more permanent cards are
+  put into your graveyard from anywhere" (`parse_hogaak_c_trigger_phrase`: the new event `CARD_PUT_INTO_GRAVEYARD`,
+  subjects the graveyard's owner and the card, with `Subject("card", IsPermanentCard()) & Controlled(you, "player") &
+  OneOrMoreBatch()`); "while this creature has a -1/-1 counter on it" (the intervening-"while" path, whose phrasebook
+  had three literal gates, now also "this <permanent> has a <kind> counter on it" -> `Source(HasCounter(kind))`).
+
+`python tools/card_ir.py export`: schema `693d23a4a259...` -> **`f6ceba400ce2...`** (730 classes: `CardsInYourGraveyard`
+and `RemoveCountersFromSource` reach the schema, the `Event` enum gains one member); `powerlsv.ir.json` and
+`eoe.ir.json` are main's byte for byte but `schema_sha256`; `legacy.ir.json` 27 cards. `check` passes (the five files
+are the regeneration), `roundtrip` passes (546, 27, 483). Every pool's claimed printings compared with main's
+(`PYTHONHASHSEED=0`, card by card): cube and EoE unchanged; the roto and all pools change Dryad Arbor (entry 440) and
+nothing else (Knight of the Reliquary and Elvish Reclaimer only gain the new field at its default in their Python
+reprs; their IR is equal).
+
+#### 220.3.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Supplier: "When this creature enters or dies, mill three cards" | 603.6a, 700.4, 603.6c, 603.10a, 701.17a-c | the existing `Enters` and `Dies` triggers (a dies trigger looks back: it triggers as the creature leaves, its source gone) and `Ext::Mill` (`Game::mill`: the top three, fewer if the library has fewer, none from an empty one: no draw, no loss) |
+| DMM: "When this creature enters, mill three cards" | 603.6a, 701.17a | the same |
+| DMM: "+2/+0 for every seven cards in your graveyard" | 613.4c, 611.3a, 108.2 | `Mod::PtPerGraveyardCards { filter: Any, per: 7, p: 2, t: 0 }`, a static ability's layer 7c modification: `p` per full group of seven cards (not tokens: `Game::graveyard_cards`) of the static's controller's graveyard, counted whenever power is read (combat damage, any effect reading it mid-resolution, the encoding); the cost analysis (`cost_order.rs`) counts a card put into or out of a graveyard as changing it |
+| Moonshadow: menace | 702.111b | the existing keyword |
+| "This creature enters with six -1/-1 counters on it" | 614.1c, 122.6 | `CardDef.enters_counters` (`Game::entering_abilities`): on the battlefield with them from the start, however it enters (a spell, Show and Tell, a reanimation; not with no abilities, CR 614.12) |
+| "Whenever one or more permanent cards are put into your graveyard from anywhere" | 603.2c, 110.4a, 400.2, 603.6c, 603.10 | `EventKind::PutIntoGraveyard` (subjects: the graveyard's owner, the card), recorded in `move_card` once a card (not a token) is in a graveyard, the replacement effects applied (614.1a: a card Leyline of the Void or Dauthi Voidwalker exiles instead never is); with `TrigPred::Batch` the ability triggers once per event (one instruction, one cost, one simultaneous move) however many permanent cards it puts there; "permanent card" read from the card in the graveyard (`Filter::Type(PERMANENT)`: an MDFC's front face, a split card's halves combined, an adventurer card a creature card) |
+| ... "from anywhere" doesn't look back | 603.6c, 603.10 | "an ability that triggers when a card is put into a certain zone 'from anywhere' is never treated as a leaves-the-battlefield ability, even if an object is put into that zone from the battlefield": matched with the objects that exist immediately after the event, so in a simultaneous move (SBAs, "destroy all", a cost sacrificing several) the events wait in `Game::gy_arrivals` and are matched as it ends (`end_batch`, in its event group): a Moonshadow put into the graveyard by the same event doesn't trigger, for itself or the others |
+| "while this creature has a -1/-1 counter on it" | 603.2, 603.4 | `TrigPred::Source(HasCounter(M1M1))`: part of the trigger condition, read as the event is matched; not an intervening "if" (603.4 is about "if" only), so not read again on resolution |
+| "remove a -1/-1 counter from this creature" | 122.8, 400.7 | `Ext::RemoveCounters { on: Source, counter: M1M1, n: 1 }`: from the source if it is still the same object on the battlefield, as many as it has up to one (none: nothing happens) |
+| +1/+1 and -1/-1 counters | 704.5q, 122.3 | the existing state-based action (before a simultaneous move's events are matched: the same check) |
+| Dryad Arbor: a land and a creature | 205.2a, 305.9, 302.6 | `CardDef.types` LAND and CREATURE; every check reads the type it needs (`is_type`, `is_creature`): played only (`priority_options_all` offers a land's play, never its cast; Omniscience casts spells only), a land play (305.2), not a spell (no stack, 305.1); put onto the battlefield by an effect it is no land play (305.4: Show and Tell, a fetch land) |
+| "{T}: Add {G}" | 305.6 | the IR's `produces` -> the intrinsic mana ability (`lower/printing.rs`) |
+| "it's affected by summoning sickness" | 302.6, 602.5a | `Game::activation_ready`: a {T} ability of a creature (mana abilities included, in payments and floating) needs it under its controller's control since their turn began; attacks likewise (`combat.rs`); blocking isn't restricted |
+| green | 204.1, 202.2e | `color_indicator` (in every zone); colour-changing effects apply (Painter's Servant) |
+| a Forest, a Dryad | 205.3i, 205.3m | subtypes; a fetch land's "Forest card" finds it, untapped and summoning sick |
+| under Magus of the Moon | 305.7, 613.1d | the existing "nonbasic lands are Mountains" (ENGINE.md 99.12): its land type Mountain only, a Mountain's mana ability ("{T}: Add {R}", still a creature's {T} ability: summoning sickness applies), still a green 1/1 Dryad creature |
+| everything else | 700.4, 704.5g | a creature for removal, damage, "creatures you control", attacks and blocks; a nonbasic land for Wasteland, "lands you control", landwalk (rules_check's forestwalk); not legendary (Karakas) |
+
+#### 220.3.4 Readings taken
+
+* **Moonshadow and the moment it is checked.** CR 603.6c's last sentence decides the case the brief asked about: a
+  Moonshadow leaving the battlefield at the same time as other permanent cards doesn't trigger (it isn't there after
+  the event), and dying alone it doesn't trigger for itself. The condition ("while it has a -1/-1 counter") is read
+  then too. No official ruling (Moonshadow has none); the CR text is explicit.
+* **The card's characteristics in the graveyard.** With no look back, "permanent card" is the card as it is there (CR
+  603.10): a face-down permanent turned face up as it left is its card (an instant manifested would not count); a
+  double-faced card has its front face's characteristics (712.8a), a split card both halves' (709.4), an adventurer
+  card is a creature card (715.4: Brazen Borrower, Petty Theft countered).
+* **"Your graveyard"** is the graveyard of Moonshadow's controller after the event: cards that player owns (a card
+  goes to its owner's graveyard, 400.3).
+* **Batching** is the engine's event groups (ENGINE.md 8, 33): one instruction of a resolution, one cost, one
+  simultaneous move. Two separate events before the first trigger resolves trigger it twice (each with the counter
+  still on it); the second does nothing if the first removed the last one. A Stitcher's Supplier dying (one event)
+  then milling on resolution (another) is two triggers. The cleanup step's discard to the maximum hand size is one
+  turn-based action (514.1): its discards share one group, one trigger.
+* **Stitcher's Supplier's two arms.** "When this creature enters or dies" is one ability with two trigger events; the
+  IR writes it as two `TriggeredAbility` arms sharing the effect (Orcish Bowmasters' "when ... enters and whenever
+  ..." too). The events can't happen together, so the two arms trigger exactly when the one ability would; no card of
+  the tables counts abilities or makes an ability trigger an additional time. Losing abilities, copying (Mockingbird)
+  and countering a triggered ability (Consign to Memory) treat both alike.
+* **Dark Matter Manipulator's seven** counts full groups ("for every seven": 6 cards +0, 7-13 +2, 14 +4); the
+  graveyard is its controller's (a stolen Manipulator reads the thief's).
+* **Dryad Arbor and its ruling c0965c9d** (flash): no card of the cube, legacy or EoE tables gives a land flash or lets
+  a land be played as though it had flash, so the ruling's premise is unreachable; its consequences that hold anyway
+  are tested (never on another player's turn, never without a land play left, never with an object on the stack).
+  Ruling 0dfaac8c's text-changing effects (Crystal Spray) are likewise in no table; its colour-changing half is tested.
+
+#### 220.3.5 Fixes and findings outside the four
+
+* **The engine needed no rules fix for a land creature.** Every check reads the characteristic it needs:
+  `priority_options_all` offers a land's play first (305.9), `Game::activation_ready` applies 302.6 to any creature's
+  {T} ability (mana abilities included), combat reads `is_creature`, the payment's "whenever you tap a creature / a
+  Forest for mana" bonuses (`tap_bonus_wide`) give a land creature both, Magus of the Moon keeps the creature type and
+  subtype (305.7). Audited: `cast.rs`, `pay.rs`, `activate.rs`, `combat.rs`, `rules_check.rs`, `layers.rs`,
+  `eoe_w2.rs` (the Magus), the encoders (`perm` descriptor bits from `types_of`, `SICK` for creatures, the per-player
+  summaries count it as a land and a creature), the bots (heuristics over legal actions), the deck checks and samplers
+  (a land card: the land / spell splits of `hidden_decks.rs` and `sample.rs` classify it as a land, consistently).
+  Convoke (a summoning-sick creature may convoke, 302.6) is Hogaak's, lane A's: no cube card has it.
+* **The constructed table's definition ids move.** The legacy IR is sorted by name, so Dark Matter Manipulator, Dryad
+  Arbor and Moonshadow renumber the legacy definitions after them (Murktide Regent, Street Wraith, ...) and the tokens
+  and faces after the cards. Identities (the registry) are unchanged, but chance keys name definitions and the
+  determinize checks consume random draws over them, so constructed games played at random diverge:
+  `digest_formats`' constructed and metagame digests and the dealt digests change (220.3.7), and
+  `tests/fuzz.rs::a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game` lost two of its positive-evidence
+  seeds (3,900,000,012 and 3,900,000,079; replaced by 3,900,000,019 and 3,900,000,087, found by a scan). **With the four
+  cards taken out of the table again (a local check, reverted) and all of this branch's code kept, every one of those
+  digests is main's** (constructed 16441662701e233d, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8, dealt per
+  seat 5fa30432bf8cd63f, EoE and driver unchanged) **and the two old seeds pass**: the code changes no game; adding
+  cards to constructed play's table does, as every legacy lane's. Not re-recorded here (the integration adds the other
+  lanes' cards too and records once).
+
+#### 220.3.6 The encoding
+
+No layout change, no new float, no gap: Moonshadow's -1/-1 counters are layout v7's `counters` tokens (kind and the
+count's 64 binary digits, ENGINE.md 142.7), its waiting trigger a `stack` token; Dark Matter Manipulator's power is
+the permanent's `POWER` float through layer 7c (and a `numbers` token past float16's range); Dryad Arbor's two card
+types are its descriptor's type bits (layer 4, `types_of`), its summoning sickness the `SICK` status. Tests read each
+back from the row (220.3.7). New fields classified for the public-state gate: `Game::gy_arrivals` (derived,
+transient: empty between decisions; `az/build.rs` refuses a described position with one) and the static-only
+`Mod::PtPerGraveyardCards` (`STATIC_ONLY_MODS`: a static ability's effect is its source's text applied to the encoded
+board; the graveyard is encoded). No encoding_needs file.
+
+#### 220.3.7 Tests, the fuzz pool
+
+* **`engine/tests/cards_hogaak_c.rs`, 47 tests** (the CR in each name; Dryad Arbor's seven rulings, `// ruling:`;
+  the other three cards have none): the definitions; Stitcher's Supplier (mills three as it enters and as it dies, a
+  look-back dies trigger; fewer than three cards, an empty library, no loss; bounced by Petty Theft or exiled instead
+  by Leyline of the Void: no mill, and its enters mill exiled); Dark Matter Manipulator (0, 6, 7, 13, 14, 20, 21 cards:
+  1, 1, 3, 3, 5, 5, 7 power, toughness 2; its controller's graveyard only, a token not counted; its own mill growing it
+  at once; with a +1/+1 or -1/-1 counter; combat damage with the power as it is when dealt, a Brainstorm resolving in
+  the declare-attackers step); Moonshadow (six -1/-1 counters as it enters, a 7/7 off the battlefield; menace against
+  one blocker; one trigger per mill of the Supplier and the Manipulator, none for instants and sorceries; a creature of
+  its controller dying, not the opponent's; discards by Thoughtseize and Hymn to Tourach (two cards, one trigger), not
+  an instant; the cleanup step's discard of two permanent cards, one trigger; a countered creature spell, not a
+  countered instant; a token dying, no trigger; Dryad Arbor destroyed by Wasteland; a fetch land's cost, the trigger
+  above the fetch's ability; the condition at the event: none without a counter, two events on one counter trigger
+  twice and the second does nothing; dying with others or alone, no trigger, a survivor triggers once for two deaths;
+  +1/+1 counters annihilating its -1/-1 ones; Leyline of the Void and Dauthi Voidwalker: no trigger; an adventurer
+  card, an MDFC's instant front, an MDFC's creature front and a split card discarded; Petty Theft countered; its trigger
+  countered by Consign to Memory; the Supplier's death then mill, two triggers); Dryad Arbor (played, never cast, a
+  land play, no stack, priority back at once; Omniscience doesn't cast it, Show and Tell's put is no land play and it is
+  sick; summoning sickness: no {G} for a Birds of Paradise and no attack the turn it is played, both the next turn; it
+  blocks while sick; green in hand, on the battlefield and in the graveyard, Painter's Servant's colour added; a Forest
+  and a Dryad, found by Misty Rainforest untapped and sick; under Magus of the Moon a Mountain Dryad creature tapping for
+  {R}; not on the other player's turn, not with no land play left, not with a spell on the stack; removal: Orcish Bowmasters'
+  ping kills it, Fatal Push and Wasteland destroy it; Karakas can't return it; counted as a land and a creature;
+  attacking taps it); the encoding (220.3.6: Dryad Arbor's two card types and its `SICK` status the turn it is played
+  and not the next; Dark Matter Manipulator's power float at 6, 7 and 14 cards; Moonshadow's counters token, 6 then 5,
+  and its trigger's stack token); the deck's line (Moonshadow, Verdant Catacombs for Dryad Arbor, the Supplier the next
+  turn: a 3/3 attacking beside the Arbor). `docs/interactions.md` has the matrix. `tools/untested_cards.py`: 573
+  supported (27 legacy), none named by no card test.
+* **`tests/ir/test_legacy_hogaak_c.py`, 15 tests**: the four printings; "for every N cards" (full groups: 0, 6, 7,
+  13, 14, 20, 21 cards give 0, 0, 1, 1, 2, 2, 3; "for every one" refused); the roto pool's Dryad Arbor; a land
+  creature's basic land types' colours, a non-basic land type giving none, types that don't add up refused; the new
+  trigger condition's four forms and three non-forms; the counter gate; the counter and remove-counter grammars.
+  `test_legacy_creatures.py` and `test_fetch_cube.py` pin the legacy pool's list (+4).
+* **`support.rs`** `SUPPORTED_LEGACY` +4; **`tests/fuzz.rs`** the look test's seeds (220.3.5).
+* **`FUZZ_POOL=hogaak_c`** (`engine/src/fuzz/games.rs`, `HOGAAK_C_DECK`): the Hogaak Tempo 60 with the other lanes'
+  Hogaak (4) and Mockingbird (3) out: Dryad Arbor 1 -> 4, a third Thoughtseize, a second Brazen Borrower and two Fatal
+  Push in (4 Stitcher's Supplier, 4 Dark Matter Manipulator, 4 Moonshadow, 4 Dryad Arbor, 3 Thoughtseize, 2 Kaito, 4
+  Force of Will, 3 Daze, 2 Fatal Push, 3 Orcish Bowmasters, 2 Brazen Borrower, 3 Ponder, 4 Brainstorm, 4 Underground
+  Sea, Swamp, Undercity Sewers, 4 Misty Rainforest, 4 Verdant Catacombs, 4 Wasteland; checked by
+  `az::constructed::check`), against the Delver 60 in either seat, one game in three the mirror (`seed % 3`);
+  constructed play's table; every check of the default mode. Counted: the three creature spells cast (each stack item
+  once), Dryad Arbor played as a land (`Choice::Play`), Moonshadow's triggers on the stack and its -1/-1 counters removed
+  (a count that went down on the same object), Dark Matter Manipulators seen at +2/+0 or more, Dryad Arbors attacking
+  (per object and turn) and chosen as a mana source (`PayMana`, `ActivateMana`). With 200 games or more each must be
+  non-zero. The worker's pool list (`worker/src/fuzz.rs`) has `hogaak_c` (games only).
+
+#### 220.3.8 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/hogaak-c`, through `tools/slotd.sh` (a training run live on the
+desktop); the fuzz on the Mac (`tools/mac.sh`, bit-identical to the desktop, ENGINE.md 44).
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`, on
+  fc4f2b31; the commits after it change two tests' names, docs and the IR tests' lists): **2,773 passed, 0 failed, 37
+  ignored** (27 binaries; `cards_suite` 1,438 with `cards_hogaak_c` 47, `az` 57 (the public-state gate with the new
+  field and mod classified, no new gap), `misc_suite` 210, `rules_suite` 453, `rulings_suite` 397, `fuzz` 19,
+  `support` 9, `hidden` 28, `limits` 13). `cards_hogaak_c` rerun on the final commit: 47 passed.
+* **The cube's behaviour digests equal** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no
+  `DIGEST_WRITE`): full **44372545881ef768** (every one of the 2,500 games equal to `tests/data/digests.txt`),
+  `DIGEST_ENCODING=0` **a965c3fc8d3bba8a** (210.6's), `DIGEST_ENCODING=v5` **9f4cb802bae20e3b** (main's v5 isn't
+  recorded since 130.7; the full digest hashes the whole layout v7 row at the same decisions, and the v5 projection's
+  code is unchanged). No v7-only full digest is printed separately (the full digest is v7's).
+* **`digest_formats`**: EoE **c3a9c786030f42eb** (`=0` 734841d8ae3dc2e4) and driver **6a03572828250b86** equal; the
+  constructed table's digests move with the four cards (220.3.5): constructed 16441662701e233d -> 8087e7d334f553d3
+  (570 of 570 lines; `=0` 1ad7c2120c8e5674), metagame 56ff52ffef1b1913 -> 3915dcf6cbb07271 (288 of 288; `=0`
+  22fb1ab86315c51d), dealt a890c27da3c7d1a8 -> b17f0dca92f9111d (79 of 80), dealt per seat 5fa30432bf8cd63f ->
+  d91a942badcfce62 (60 of 60). **Without the four cards in the table every one of them is main's** (the check of
+  220.3.5). Not re-recorded: the integration records them once, with all three lanes' cards.
+* **`FUZZ_POOL=hogaak_c FUZZ_GAMES=20000`** (the Mac, two shards of 10,000, `FUZZ_FIRST` 0 and 10000, on 80b99672,
+  the code of the final commit): **no failure**; 20,000 games (wins 9,871 / 9,977, 152 drawn at the turn cap, none
+  aborted), 32.3 turns and 309.8 decisions a game, 9,518,535 options completed; Stitcher's Supplier cast 13,930 times,
+  Dark Matter Manipulator 14,303, Moonshadow 14,064, Dryad Arbor played as a land 36,043; Moonshadow's triggers on the
+  stack 9,056, -1/-1 counters removed 44,909; Dark Matter Manipulators at +2/+0 or more 18,008; Dryad Arbors attacking
+  4,917, tapped for mana 176,327 (the counters are process-wide: the binary's replay test's games are included, 124.4).
+  Every check of the default mode: invariants, clones, `determinize` for both viewers (view, known cards, clouds, the
+  information-set walk), every option completed in the game and in the sampled worlds, the rows finite, the rules
+  checks (ENGINE.md 150).
+* **The `fuzz` profile** (debug assertions), 1,000 games (the Mac): no failure (471 / 518, 11 drawn).
+  **`FUZZ_CHANCE=10`**, 600 games: no failure in the games (18,694 chance walks, 7,527 replays whose outcome the force
+  changed); the binary's `the_murktide_trigger_is_asserted_over_enough_games` fails under any `FUZZ_CHANCE` (its
+  synthetic totals carry no chance walks and `check_games` asks for them past 100 games, games.rs's `chance_every`
+  check; main's too: not this branch's). **`FUZZ_BELIEF=2`**, 600 games: no failure (9,136 weighted worlds).
+* `FUZZ_POOL=hogaak_c FUZZ_GAMES=300` on the desktop: no failure (wins 140 / 156, 4 drawn).
+* `python tools/card_ir.py check` and `roundtrip`: pass. `python -m pytest tests/ir`: 2,699 passed, 4 failed (the
+  pinned legacy pool lists, then updated: rerun 59 passed with `test_legacy_hogaak_c.py` and `test_pipeline.py`).
+* `bash tools/build_py.sh`, `python -m pytest -q tests --ignore=tests/ir`: 698 passed, 31 skipped, 1 failed:
+  `test_mac_remote.py::test_a_worker_plays_mtg[matches]` timed out on the loaded desktop (its own deadline; a
+  training run beside it) and passes alone (both modes: 2 passed, 181 s).
+* `python tools/rulings_doc.py --check`: current (1,674 rulings, 1,307 distinct, 1,297 class a, every one tested).
+  `python tools/untested_cards.py`: 573 supported (27 legacy), 0 named by no card test.
+* No docs/shortcuts.md entry, no approximation; no layout or encoding change; no zero-core change.
+
+#### 220.3.9 Limits and merge points
+
+* **Other lanes' interactions** are the integration's: Hogaak convoking with Dryad Arbor (a summoning-sick Arbor may
+  tap for convoke, 302.6) and delving Moonshadow's fuel, Mockingbird copying the four (Moonshadow's "enters with" as a
+  copy, 614.12, 707.9), Massacre's -X/-X on them (Moonshadow and its counters).
+* **Merge points**: `legacy_cards.txt` (the four after Rough // Tumble; lane order A, B, C at integration), the legacy
+  pool (`ir/data/legacy_delver.*`) and the export (each lane exported its own: re-export once), the parser
+  (`creature_builder.py`'s end and its counter recognizer, `triggers.py`'s phrase chain end and
+  `_parse_intervening_while_phrase`, `roto_board.py`, `roto_mana.py`, `effects/predicates.py`'s `Event`,
+  `object_predicates.py`), `lower/effect.rs` (one more `lower_effect_*` in the chain), `lower/mod.rs`,
+  `lower/statics.rs`, `lower/trigger.rs`, `db.rs` (`EventKind`, `Mod`, `seen_bits`), `game.rs`, `triggers.rs`,
+  `layers.rs`, `cost_order.rs`, `tail_encode.rs`, `public_state.rs` (`STATIC_ONLY_MODS` 5, the field list),
+  `az/build.rs`, `fuzz/games.rs` (`PoolMode::HogaakC`, the deck, counters, report, checks), `worker/src/fuzz.rs`,
+  `tests/fuzz.rs` (the seed list: re-scan after the merge), `tests/support.rs`, `tests/cards_suite.rs`,
+  `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/ir_defects.md` (section AA), `docs/card_ir.md` ("Current
+  numbers": left to the integrated export).
