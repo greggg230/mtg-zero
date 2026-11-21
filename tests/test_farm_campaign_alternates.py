@@ -195,7 +195,7 @@ def test_alternates_variants_definition_and_registration(tmp_path, farm, stubs, 
                               for n in ('dml', 'gpu')}
 
 
-def test_refusals_put_nothing_and_none_is_said(tmp_path, farm, stubs):
+def test_refusals_put_nothing_and_none_is_said(tmp_path, farm, stubs, monkeypatch):
     _index(farm)
     cl = FD.Client('https://farm.test', token='t', transport=farm)
     # another engine's alternate: refused, the reason in the state, nothing put
@@ -228,6 +228,19 @@ def test_refusals_put_nothing_and_none_is_said(tmp_path, farm, stubs):
         assert why in st['alternates_note'] and any('CPU worker only' in x for x in lines)
         assert 'alternates' not in C.run_body(dict(st, build_game='mtg'))
         assert C.definition_fields(dict(st, build_game='mtg'))['builds'] == [st['build_id']]
+    # settings a Mac cannot replay exactly (a libm refusal): the release's macOS route left out with a note; a caller's
+    # list naming it refused
+    def libm(st_, d_, p, log):
+        raise C.CampaignError(f'the games would replay differently on {p}')
+    monkeypatch.setattr(C, 'platform_check', libm)
+    d, st = _state(tmp_path / 'm', farm)
+    C.prepare_alternates(cl, d, st, lambda m: None)
+    st = C.load_state(d)
+    assert [x['build_id'] for x in st['alternates']] == [farm.cuda, farm.dml] and farm.mac not in st['builds']
+    assert 'left out' in st['alternates_note'] and farm.mac not in st['alt_routes']
+    d, st = _state(tmp_path / 'm2', farm, alternates=[farm.cuda, farm.mac])
+    with pytest.raises(C.CampaignError, match='replay differently'):
+        C.prepare_alternates(cl, d, st, lambda m: None)
     # a campaign made before alternates (no alt_want): its requests unchanged
     old = {k: v for k, v in st.items() if k not in ('alt_want', 'alternates', 'builds', 'alternates_ready',
                                                      'alternates_note', 'alt_routes', 'variants')}

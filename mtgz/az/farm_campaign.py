@@ -474,7 +474,8 @@ def prepare_alternates(cl, d, st, log, cache=None):
     index's for the build, or the caller's) checked as a run's (zero.farm_def.run_alternates: worker builds of the
     build's game, each requiring its pack; `when.vendor` from a GPU pack, `when.platform` for another platform's build)
     and each the default build's engine (its manifest's engine_commit); a platform alternate's settings checked to
-    replay there (platform_check); each GPU alternate named its variant (zero.farm_pool.variant_of: its vendor's, else
+    replay there (platform_check: a refusal leaves the release's platform route out with a note, and refuses a caller's
+    list); each GPU alternate named its variant (zero.farm_pool.variant_of: its vendor's, else
     the first without one; none: the gen's default graph), each named variant exported per gen (export_variant), and
     every graph a GPU alternate will play self-tested on this machine's GPU through that alternate's own worker and pack
     (gpu_selftest). min_agent: at least farm_def.VARIANT_AGENT when a variant is named (zero-farm PROTOCOL 14.1); each
@@ -512,7 +513,20 @@ def prepare_alternates(cl, d, st, log, cache=None):
                 raise CampaignError(f'alternate {b} is the engine of commit {str(m.get("engine_commit"))[:12]}, the build '
                                     f'{st["build_id"]} of {str(base.get("engine_commit"))[:12]}: not the same games')
         for p in sorted({x['when'].get('platform') for x in alternates} - {None}):
-            platform_check(st, d, p, log)
+            try:
+                platform_check(st, d, p, log)
+            except CampaignError as e:
+                if want['alternates'] != RELEASE:
+                    raise
+                # (the release's default list: these settings cannot be played exactly on that platform - its route is
+                # left out, said in the log and the state; an alternate the caller named refuses instead)
+                gone = [x['build_id'] for x in alternates if x['when'].get('platform') == p]
+                alternates = [x for x in alternates if x['build_id'] not in gone]
+                builds = [b for b in builds if b not in gone]
+                for b in gone:
+                    mans.pop(b, None)
+                notes.append(f'the {p} alternate {",".join(gone)} is left out: {e}')
+                log(f'alternates: {notes[-1]}')
         variants = FP.variant_setting(want['variants'])
         for x in alternates:
             if 'vendor' in x['when']:
