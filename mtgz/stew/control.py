@@ -301,6 +301,10 @@ class Ops:
             except Interrupted:
                 halt.set()
                 return
+            except Exception as e:             # noqa: BLE001 - the job failed to run: said below
+                with lock:
+                    errs.append(f"{j['id']}: {e!r}")
+                return
             if rc != 0 or not J.valid_result(j, jload(out)):
                 with lock:
                     errs.append(f"{j['id']}: exit {rc} (log {j['id']}.log)")
@@ -323,4 +327,8 @@ class Ops:
             raise Interrupted('judge')
         if errs:
             raise OpsError('judge jobs failed: ' + '; '.join(errs))
-        return {j['id']: jload(os.path.join(jdir, j['id'] + '.json')) for j in jobs}
+        out = {j['id']: jload(os.path.join(jdir, j['id'] + '.json')) for j in jobs}
+        bad = [i for i, j in zip(out, jobs) if not J.valid_result(j, out[i])]
+        if bad:
+            raise OpsError(f'judge jobs without a valid result: {bad}')
+        return out
