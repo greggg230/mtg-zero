@@ -1174,3 +1174,134 @@ fn cr_118_9_bolass_citadel_casts_hogaak_for_life_rather_than_its_mana_cost() {
     assert!(on_bf(&g, 0, HOGAAK));
 }
 
+
+// ---- convoke with a blocking creature (a test card with flash) -------------------
+
+/// Constructed play's table with "Test Flash Necropolis" (Creature - Avatar
+/// 1/1, {2}: "Flash. You can't spend mana to cast this spell. Convoke"): the
+/// payment of no mana at instant speed, which Hogaak (no flash) never has.
+fn flash_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let card = json!({"name": "Test Flash Necropolis", "custom": true, "printing": {
+            "$t": "CardPrinting", "name": "Test Flash Necropolis", "card_types": ["Creature"], "subtypes": ["Avatar"],
+            "supertypes": [], "type_line": "Creature - Avatar", "power": 1, "toughness": 1,
+            "mana_cost": {"$t": "ManaCost", "generic": 2}, "mana_cost_str": "{2}",
+            "keywords": [{"$t": "Keyword", "kind": "flash"}], "has_convoke": true, "cant_spend_mana_to_cast": true}});
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(engine::db::load_legacy_document().cards);
+        cards.push(serde_json::from_value::<card_ir::Card>(card).expect("the test card's IR"));
+        let db = CardDb::from_cards(&cards);
+        db.expect_id("Test Flash Necropolis").unwrap_or_else(|e| panic!("{e}"));
+        db.leak()
+    })
+}
+
+#[test]
+fn cr_506_4b_702_51a_a_blocking_creature_tapped_for_convoke_still_blocks_and_deals_damage() {
+    // ruling: 7f0ee199
+    // P0's Cogwork Librarian (3/3) attacks; P1 blocks with its Librarian and,
+    // in the declare blockers step, casts the flash test card by tapping that
+    // blocker and another creature (no mana: two untapped Islands stay). The
+    // tapped blocker still blocks: the two Librarians trade. (Hogaak itself
+    // is cast only as a sorcery, so never with an attacker or blocker
+    // untapped in combat: the test card's is the same payment.)
+    let mut g = Scenario::new(flash_db())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+        .battlefield(0, &[GREY])
+        .battlefield(1, &[GREY, RED, "Island", "Island"])
+        .hand(1, &["Test Flash Necropolis"])
+        .hand(0, &[HOGAAK])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let att = bf(&g, 0, GREY);
+    let blk = bf(&g, 1, GREY);
+    g.choose(Choice::Card(att));
+    g.choose(Choice::Pass);
+    // (Hogaak isn't castable in combat: a creature spell without flash.)
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers));
+    g.choose(Choice::Card(att));
+    // (The red creature doesn't block.)
+    if g.kind() == Some(DecisionKind::DeclareBlockers) {
+        g.pass();
+    }
+    g.drive_until(|g| at_priority(g) && g.to_move() == Some(1) && g.turn().step == Step::DeclareBlockers);
+    let t = g.card(1, "Test Flash Necropolis", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(t)), "{}", opts(&g));
+    g.choose(Choice::Cast(t));
+    let red = bf(&g, 1, RED);
+    until_priority(&mut g, &|g| {
+        if convoking(g) {
+            // The blocker and the red creature.
+            cards_offered(g).into_iter().find(|&c| c == blk || c == red).map(Choice::Card)
+        } else {
+            None
+        }
+    });
+    assert!(g.obj(blk).tapped && g.obj(red).tapped, "{}", log(&g));
+    assert!(g.permanents_of(1).filter(|&c| g.name(c) == "Island").all(|c| !g.obj(c).tapped), "no mana: {}", log(&g));
+    assert!(g.blockers_of(att).contains(&blk), "still blocking (CR 506.4b)");
+    g.drive_until(|g| g.turn().step > Step::CombatDamage || g.is_over());
+    assert_eq!(g.obj(att).zone, Zone::Graveyard, "the tapped blocker dealt its damage: {}", log(&g));
+    assert_eq!(g.obj(blk).zone, Zone::Graveyard);
+}
+
+// ---- the encoding ----------------------------------------------------------------
+
+#[test]
+fn convokes_picks_and_cost_reach_both_players_inputs() {
+    // During Hogaak's convoke (a task holding picks: ENGINE.md 142.10's pick
+    // floats) the creatures picked so far are each a pick of its permanent's
+    // row, in both players' inputs (public), the context names Hogaak, the
+    // task (a cost's picks), how many picks and the cost they pay.
+    let mut g = scen()
+        .battlefield(0, &[RED, RED, RED, GREY, GREY, GREY, GREEN, GREEN])
+        .graveyard(0, &["Ponder"])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    let ponder = g.card(0, "Ponder", Zone::Graveyard);
+    g.choose(Choice::Card(ponder));
+    g.pass(); // (no other card to delve)
+    assert!(convoking(&g), "{}", opts(&g));
+    let cs: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    for v in 0..2u8 {
+        assert_eq!(perm_float(&g, v, cs[0], perm::PICK_RANK), 0.0);
+    }
+    let x0 = head(&g, 0);
+    assert_eq!(x0[O_CONTEXT + ctx::TASK + 12], 1.0, "a cost's picks");
+    assert_eq!(x0[O_CONTEXT + ctx::HAS_CARD], 1.0);
+    // {5}{B/G}{B/G} less the Ponder delved: {4}{B/G}{B/G}.
+    assert_eq!(x0[O_CONTEXT + ctx::COST], 4.0 / 8.0);
+    assert_eq!(x0[O_CONTEXT + ctx::COST + 7], 2.0 / 4.0);
+    assert_eq!(x0[O_CONTEXT + ctx::PICKED], 0.0);
+    g.choose(Choice::Card(cs[0]));
+    for v in 0..2u8 {
+        assert!(perm_float(&g, v, cs[0], perm::PICK_RANK) > 0.0, "P{v} sees the pick");
+        assert_eq!(perm_float(&g, v, cs[1], perm::PICK_RANK), 0.0);
+    }
+    assert!(perm_float(&g, 0, cs[0], perm::PICKS_ME) > 0.0, "picked by the frame player (P0)");
+    assert!(perm_float(&g, 1, cs[0], perm::PICKS_OPP) > 0.0, "picked by the other player (P0, for P1)");
+    assert_eq!(head(&g, 0)[O_CONTEXT + ctx::PICKED], 0.25);
+    // Which creature was picked is in the input: two games that differ only
+    // in the first pick encode apart for both players.
+    let mut other = scen()
+        .battlefield(0, &[RED, RED, RED, GREY, GREY, GREY, GREEN, GREEN])
+        .graveyard(0, &["Ponder"])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    begin_hogaak(&mut other, 0, Zone::Hand);
+    let p2 = other.card(0, "Ponder", Zone::Graveyard);
+    other.choose(Choice::Card(p2));
+    other.pass();
+    let os: Vec<CardIdx> = other.permanents_of(0).filter(|&c| other.is_creature(c)).collect();
+    other.choose(Choice::Card(os[1]));
+    for v in 0..2u8 {
+        assert_ne!(Row::of(&g, v).head, Row::of(&other, v).head, "P{v}: which creature was picked");
+    }
+}

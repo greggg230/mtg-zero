@@ -1312,6 +1312,58 @@ fn found_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The gate's positions of Hogaak, Arisen Necropolis's payment (ENGINE.md 220.1; constructed play's
+/// table): its delve's picks, then its convoke's (`Task::ConvokePay`, a task holding picks: the
+/// creatures picked so far, each a pick of its permanent's row), cast from the graveyard; and the
+/// priority before, with Hogaak castable from the graveyard. Added where `enclosing_picks_positions`
+/// are.
+fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    const HOGAAK: &str = "Hogaak, Arisen Necropolis";
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [(HOGAAK, 4), ("Orcish Bowmasters", 4), ("Elvish Spirit Guide", 4), ("Simian Spirit Guide", 4), ("Island", 22), ("Swamp", 22)] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 8])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Elvish Spirit Guide", "Simian Spirit Guide", "Elvish Spirit Guide", "Orcish Bowmasters", "Simian Spirit Guide", "Swamp"])
+        .graveyard(0, &["Island", HOGAAK, "Swamp", "Orcish Bowmasters"])
+        .battlefield(1, &["Island", "Simian Spirit Guide"])
+        .at(Step::Main1, 0)
+        .start();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 220).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let mut out = vec![("hogaak", wrap(&g))];
+    let h = g.card(0, HOGAAK, Zone::Graveyard);
+    g.choose(Choice::Cast(h));
+    for _ in 0..40 {
+        let Some(d) = g.pending_decision() else { break };
+        if d.kind == DecisionKind::Priority {
+            break;
+        }
+        out.push(("hogaak", wrap(&g)));
+        // One graveyard card delved, then PASS; then the creatures.
+        let c = match d.kind {
+            DecisionKind::ChooseGraveyardCard if g.player(0).graveyard.len() == 3 => d.options.iter().map(|o| o.choice).find(|c| *c != Choice::Pass).unwrap(),
+            DecisionKind::ChooseGraveyardCard => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert!(out.len() >= 6, "Hogaak's payment: {} positions
+{}", out.len(), g.log_lines().join("
+"));
+    out
+}
+
 fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     let mut x = g.g.view_of(v);
     x.push(u64::MAX - 77);
@@ -1399,6 +1451,7 @@ fn public_state_reaches_the_encoding() {
     let mut pos = gate_positions(scale(60) as usize, 59);
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
+    pos.extend(hogaak_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1613,6 +1666,7 @@ fn public_states_encode_apart() {
     let mut pos = gate_positions(scale(60) as usize, 59);
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
+    pos.extend(hogaak_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
@@ -2722,7 +2776,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
     // prediction at tilt 1, from a stream of its own)
     let (mut trng, mut tilted) = (Rng::new(106), 0);
-    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()) {
+    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };
