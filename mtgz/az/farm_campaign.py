@@ -31,6 +31,9 @@ A campaign is a farm run of its own (`cmp-<name>`) holding one such job:
   * games      ids [0, games); `games_per_lease` ('auto' = ~7.5 min of a machine)
   * share      the campaign's share of the farm's run leases while a live run's self-play also wants them
                (PROTOCOL rev 13; default 0.25; a coordinator before rev 13 ignores it: evaluation goes first)
+  * job_class  the eval batch's lane class (None: none, the batch of before): e.g. 'backfill' puts `"class":
+               "backfill"` on the run PUT's eval batch and no `share` (a backfill takes none) - for the coordinator's
+               backfill lane (zero-farm rev 25, not yet live: rev 24 refuses the field, so nothing passes it yet)
   * deadline   seconds after which the games the farm has not delivered are played here (`local`), by the same
                worker executable on the same graphs (so they are the same games)
   * alternates the routes beside the build's CPU worker (zero-farm PROTOCOL 9.4, 11.4, 14; docs/ENGINE.md 215): by
@@ -711,14 +714,18 @@ def run_body(st, eval_on=True, state=None):
         # allows, so ids stay below `games`; checkpoints never change, so max_stale is moot)
         sp = {'quota': st['games'], 'slack': 0, 'max_stale': 1000, 'games_per_lease': st['games_per_lease'],
               'gpu': 'any', 'needs': st.get('needs'), 'job': dict(eval_template(st), seed=int(st['seed']))}
-        if st.get('share') is not None:
+        if st.get('job_class'):
+            sp['class'] = st['job_class']              # (a lane class takes no share: rev 25's backfill)
+        elif st.get('share') is not None:
             sp['share'] = st['share']
         b['selfplay'] = sp
     elif eval_on:
         job = dict(eval_template(st), seed=int(st['seed']))
         ev = {'batch': st['batch'], 'games': st['games'], 'checkpoints': sorted(int(g) for g in st['gens']),
               'games_per_lease': st['games_per_lease'], 'gpu': 'any', 'needs': st.get('needs'), 'job': job}
-        if st.get('share') is not None:
+        if st.get('job_class'):
+            ev['class'] = st['job_class']              # (a lane class takes no share: rev 25's backfill)
+        elif st.get('share') is not None:
             ev['share'] = st['share']
         b['eval'] = ev
     return b
@@ -793,7 +800,7 @@ def setup_farm(cl, d, st, log, opts):
 def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=None, paired=True, share=DEFAULT_SHARE,
            priority=0.5, games_per_lease='auto', deadline_s=DEFAULT_DEADLINE_S, spot=DEFAULT_SPOT, ort_dll=None,
            min_agent=None, needs=None, meta=None, client=None, root=None, log=log_stderr, opts=None, samples=False,
-           alternates=RELEASE, variants=DEFAULT_VARIANTS):
+           alternates=RELEASE, variants=DEFAULT_VARIANTS, job_class=None):
     """A new campaign (or the existing one of that name, resumed where it stopped) -> its state directory. `settings`:
     a run's evaluation settings (match_settings); `seats` [{"net": 1}, {"net": 2}] (A vs B, `b` given) or
     [{"net": 1}, {"net": 1}] (self-play of A), each network seat with its set when it has one (`campaign_seats`,
@@ -803,7 +810,8 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
     `settings` = selfplay_settings; seats [{"net": 1}, {"net": 1}], unpaired). `alternates` / `variants`: the farm's
     other routes and the graphs their GPUs play (module docstring; prepare_alternates): RELEASE (the default) the
     release index's for the build, None none, or a list of build ids; `variants` a pool_variants text ('' none: the GPU
-    alternates play each gen's default graph). A resumed campaign keeps what it was created with."""
+    alternates play each gen's default graph). `job_class`: the eval batch's lane class (module docs; None: none - the
+    PUT bodies of before). A resumed campaign keeps what it was created with."""
     run = slug(name)
     d = state_dir(run, root)
     opts = opts or {}
@@ -831,6 +839,10 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
               'spot': float(spot), 'created': time.time(), 'meta': meta or {}, 'have': [], 'failed': {},
               'machines': {}, 'leases': {}, 'cursor': 0, 'job': {'kind': 'play', 'trace': True, 'samples': bool(samples)},
               'alt_want': want}
+        if job_class:
+            if not isinstance(job_class, str) or not SLUG_RE.match(job_class):
+                raise CampaignError(f'job_class {job_class!r}: a lane class name ([a-z0-9-])')
+            st['job_class'] = job_class
         os.makedirs(d, exist_ok=True)
         st['settings'] = job_settings(worker, build_id, settings, d, log, samples, seats=seats)
         st['spec'] = st['settings']['spec' if samples else 'eval_spec']

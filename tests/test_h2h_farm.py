@@ -368,3 +368,20 @@ def test_a_standalone_cells_comparison_keeps_its_backend(tmp_path, monkeypatch, 
     assert b == 'local' and why.startswith('the checkout has uncommitted changes')
     with pytest.raises(SystemExit, match='backend farm refused'):
         Y.standalone_backend(ck, ref, ys, cdir, 'farm')
+
+
+def test_a_lane_class_replaces_the_share_only_when_set(tmp_path):
+    """submit(job_class=...): the run PUT's eval batch (or a samples job's self-play) carries `class` and no `share` only
+    when a class is given (the coordinator's backfill lane, zero-farm rev 25); None: the bodies of before."""
+    st = {'build_game': 'mtg', 'build_id': 'b' * 24, 'runtime': 'r' * 24, 'priority': 0.5, 'batch': 'c1', 'games': 8,
+          'gens': {'1': {}}, 'games_per_lease': 'auto', 'seed': 0, 'settings': {'x': 1}, 'seats': [{'net': 1}] * 2,
+          'paired': True, 'share': 0.5, 'job': {'kind': 'play', 'trace': True, 'samples': False}}
+    ev = C.run_body(st)['eval']
+    assert ev['share'] == 0.5 and 'class' not in ev
+    ev = C.run_body(dict(st, job_class='backfill'))['eval']
+    assert ev['class'] == 'backfill' and 'share' not in ev
+    sp = C.run_body(dict(st, job_class='backfill', job={'kind': 'play', 'trace': True, 'samples': True}))['selfplay']
+    assert sp['class'] == 'backfill' and 'share' not in sp
+    assert C.run_body(dict(st, job={'kind': 'play', 'trace': True, 'samples': True}))['selfplay']['share'] == 0.5
+    import inspect
+    assert inspect.signature(C.submit).parameters['job_class'].default is None
