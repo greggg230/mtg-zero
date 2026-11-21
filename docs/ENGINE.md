@@ -41989,6 +41989,33 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
 
+## 220. Legacy Hogaak Tempo: the deck's cards (lanes `hogaak-a`, `hogaak-b`, `hogaak-c`; integrated on `hogaak`, 2026-11-21)
+
+**Why.** The user asked on 2026-11-21 for every card of MTGGoldfish's Legacy Hogaak Tempo list that mtg-zero did not
+support yet, so the deck can be played - best-of-one and best-of-three with its sideboard - beside the Delver, Doomsday
+and Sneak and Show 75s. **The deck and its provenance**: the archetype page
+<https://www.mtggoldfish.com/archetype/legacy-hogaak-tempo#paper>, whose export field (`deck_input[deck]`) is the
+archetype's representative paper list, deck 8027954 (<https://www.mtggoldfish.com/deck/8027954>): "Dimir Hogaak" by
+Jonathan Canfield, North American Eternal Weekend - Legacy Championship, 2026-10-31, 5th place (12-3), deck source
+melee.gg; read with plain curl on 2026-11-21 (the download link `/deck/download/8027954` returns 403, Cloudflare), 60
+main and 15 sideboard, pinned verbatim as `data/decks/hogaak_tempo_8027954.txt` (220.4). **The seven new cards** (every
+other card of the 75 was supported: the cube's Kaito, Bane of Nightmares, Orcish Bowmasters, Brazen Borrower, Karakas,
+Dauthi Voidwalker, Fatal Push, Force of Negation, ...; the legacy table's Consign to Memory), ported by three lanes from
+main e9ff0e24 in parallel:
+
+| Lane | Branch | Cards | Section |
+|---|---|---|---|
+| A | `hogaak-a` | Hogaak, Arisen Necropolis (main 4) | 220.1 |
+| B | `hogaak-b` | Mockingbird (main 3), Massacre (sideboard 2) | 220.2 |
+| C | `hogaak-c` | Stitcher's Supplier (4), Dark Matter Manipulator (4), Moonshadow (4), Dryad Arbor (1) | 220.3 |
+
+then merged on `hogaak` (220.4: the identities, the deck, `FUZZ_POOL=hogaak`, the cross-lane tests, the digests).
+**The rules** (the user's, for every lane and the integration): no approximation of any class - every reachable state
+faithful to the Comprehensive Rules and the Oracle text, no new docs/shortcuts.md entry, a choice the action layout's
+slots can't hold decomposed rather than cut; no encoding gap - every public state the cards create reaches the
+network's input exactly (the public-state gate of `tests/az.rs`), layout v7 unchanged; every official ruling of the
+cards tested (`// ruling:`); the cube's behaviour digests equal.
+
 ### 220.1 Lane A: Hogaak, Arisen Necropolis (branch `hogaak-a`)
 
 **Why.** MTGGoldfish's Legacy Hogaak Tempo (paper, the archetype's representative list, deck 8027954, fetched
