@@ -41738,3 +41738,15 @@ For every release to carry one, so that campaigns list it by default:
   `--no-alternates`.
 * A GPU self-test runs on this machine's GPU (seconds each, cached per graph and route); a machine without a GPU of a
   listed route's provider refuses the campaign (by design: pass `--alternates` without it, or `--no-alternates`).
+
+### 215.7 The gate
+
+On 47c1eb75 (the code and 215), in the warm worktree warm-1, `--offload local`, with the system Python 3.13:
+**GATE PASSED WITH SKIPS python 47c1eb75b749 in 691s** - pytest 724 passed in four shards (153, 167, 261, 143), skipped:
+7 live-run-hazard tests (fenced: live runs on this machine); the run-loop smoke 16 games, 0 unfinished; privacy 0
+findings. Two earlier runs failed on tests this branch does not touch: on 37ba1cf8 with the zero-farm venv's Python,
+`tests/test_artifact_cache.py::test_an_acquired_lease_outlives_the_process_that_asked` (a venv's python.exe on Windows
+is a launcher whose child is the interpreter, so the Popen pid is not the pid the child records; it passes with the
+system Python, as in the gate above), and on 0c8ce0ef `tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`
+(its 300 s wait ran out while the shards ran two to three times slower than usual beside the live runs and this
+section's farm test; alone: 2 passed in 197 s).
