@@ -1457,3 +1457,31 @@ fn cr_601_2h_castability_and_the_payment_agree_on_random_boards() {
     }
     assert!(castable_n >= 120 && paths_n >= 1200, "castable boards {castable_n}, payment paths {paths_n}");
 }
+
+#[test]
+fn cr_601_2g_escapes_graveyard_cards_are_never_fed_by_a_mana_source_hogaak_doesnt_activate() {
+    // Underworld Breach's escape exiles three other graveyard cards; with two
+    // there and a Lotus Petal on the battlefield, a spell whose mana is paid
+    // could sacrifice the Petal for mana first (601.2g) to make the third
+    // (ENGINE.md 34.4). Hogaak's payment activates no mana source: only its
+    // own permission is a route (no route to choose). The Petal floated first
+    // (its mana stays), escape is a route too.
+    let mut g = scen()
+        .battlefield(0, &["Underworld Breach", "Lotus Petal", GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .graveyard(0, &[HOGAAK, "Ponder", "Brainstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    let mut own = g.clone();
+    begin_hogaak(&mut own, 0, Zone::Graveyard);
+    assert_ne!(own.kind(), Some(DecisionKind::ChooseRoute), "{}", opts(&own));
+    assert_eq!(own.stack().last().unwrap().from, engine::game::CastFrom::Permission { free: false, any_mana: false });
+    g.choose(Choice::Yes);
+    let petal = bf(&g, 0, "Lotus Petal");
+    g.choose(Choice::Card(petal));
+    until_priority(&mut g, &|g| (g.kind() == Some(DecisionKind::ActivateMana)).then_some(Choice::Pass));
+    begin_hogaak(&mut g, 0, Zone::Graveyard);
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseRoute), "{}", opts(&g));
+    let mut routes: Vec<Choice> = g.offered();
+    routes.sort_by_key(|c| format!("{c:?}"));
+    assert_eq!(routes, vec![Choice::Number(10), Choice::Number(2)], "{}", opts(&g));
+}

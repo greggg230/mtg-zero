@@ -218,3 +218,22 @@ Constructed play's table (`CardDb::constructed`); every test in `engine/tests/ca
 | Price of Progress x the lands | Magus of the Moon, a fetch land in response | `cr_305_7_nonbasic_lands_under_magus_of_the_moon_still_count`, `cr_608_2h_price_of_progress_counts_the_lands_as_it_resolves` | tested |
 | Rough // Tumble x flying now | Dragon's Rage Channeler's delirium | `cr_613_1f_rough_and_tumble_read_flying_as_it_is_now` | tested |
 | Rough // Tumble x copies, names, counts | Lutri, Disruptor Flute, Murktide Regent, Inquisition of Kozilek | `cr_707_10_a_copy_of_rough_is_rough`, `cr_709_4a_disruptor_flute_naming_rough_taxes_rough_only`, `cr_709_4_rough_tumble_is_one_card_for_murktide_regent`, `cr_202_3d_rough_tumble_in_hand_has_mana_value_eight` | tested |
+
+## Legacy Hogaak Tempo, lane A: Hogaak, Arisen Necropolis (ENGINE.md 220.1)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_hogaak_a.rs`. The deck's other
+lanes' cards (Stitcher's Supplier, Mockingbird, Dark Matter Manipulator, Moonshadow, Dryad Arbor, Massacre) are tested
+with Hogaak at the integration.
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| No mana x convoke and delve | lands, floating mana, a Lotus Petal | `cr_601_2h_hogaak_is_paid_by_convoke_alone_never_by_mana`, `cr_601_2h_lands_and_floating_mana_never_make_hogaak_castable`, `cr_601_2g_a_lotus_petal_is_no_source_of_hogaak_but_floated_first_it_is_delve_fuel`, `cr_601_2h_castability_and_the_payment_agree_on_random_boards` | tested |
+| Convoke x colours | hybrid pips, multicoloured and colourless creatures, Kaito as a creature, the Orc Army token | `cr_107_4e_702_51a_a_hybrid_pip_takes_a_black_or_a_green_creature`, `cr_702_51a_a_multicoloured_creature_pays_either_of_its_colours`, `cr_702_51a_kaito_a_creature_during_its_controllers_turn_convokes`, `cr_702_51a_orcish_bowmasters_army_token_convokes`, `cr_702_51a_each_pick_leaves_the_rest_payable` | tested |
+| Convoke x mana abilities | Sylvan Caryatid tapped, a creature sacrificed for mana | `cr_702_51a_a_creature_tapped_for_mana_first_cant_convoke_and_one_sacrificed_is_gone` | tested |
+| Convoke x combat | a blocker tapped for convoke (a flash test card) | `cr_506_4b_702_51a_a_blocking_creature_tapped_for_convoke_still_blocks_and_deals_damage` | tested |
+| Costs x convoke and delve | Disruptor Flute's {3}, Omniscience, Elite Spellbinder's {2}, Green Goblin's reduction, Thalia (no tax), Bolas's Citadel | `cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase`, `cr_601_2f_elite_spellbinders_tax_on_hogaak_cast_from_exile`, `cr_601_2f_spells_cast_from_the_graveyard_cost_less_green_goblin`, `cr_601_2f_thalia_doesnt_tax_hogaak_a_creature_spell`, `cr_118_9_bolass_citadel_casts_hogaak_for_life_rather_than_its_mana_cost` | tested |
+| Its graveyard permission x other permissions | Yawgmoth's Will, Underworld Breach (escape), Six (retrace) | `cr_601_3_yawgmoths_will_and_its_own_permission_are_one_cast`, `cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission`, `cr_702_81a_six_gives_it_retrace_and_the_discarded_land_may_be_delved` | tested |
+| Cast from the graveyard x delve | itself on the stack, another Hogaak | `cr_601_2a_a_hogaak_cast_from_the_graveyard_is_on_the_stack_and_cant_delve_itself`, `cr_702_66a_another_hogaak_in_the_graveyard_is_delve_fuel` | tested |
+| Counterspells x Hogaak | Daze (paid with mana), Force of Will then the graveyard cast | `cr_118_12_daze_is_paid_with_mana_after_hogaak_is_cast`, `cr_601_3_force_of_will_counters_it_then_it_is_cast_again_from_the_graveyard` | tested |
+| Zones x Hogaak | Karakas, Dauthi Voidwalker (no delve fuel, a countered Hogaak exiled) | `cr_205_4_karakas_returns_hogaak_to_its_owners_hand`, `cr_614_1a_dauthi_voidwalker_leaves_no_delve_fuel_and_exiles_a_countered_hogaak` | tested |
+| Legend rule, trample | a second Hogaak; a blocker | `cr_704_5j_the_legend_rule_for_a_second_hogaak`, `cr_702_19b_hogaak_tramples_over_a_blocker` | tested |
