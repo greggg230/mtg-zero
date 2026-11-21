@@ -41540,3 +41540,194 @@ c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890
 (gate 2: 6 games, 2,890 rows, 150 batches); core pytest 723 passed - skipped: 17 live-run-hazard tests (fenced).
 
 Main fast-forwarded 4c77c950 -> 62b9a028 (main had not moved since the branch: the gate stands as run).
+
+### 220.2 Lane B: Mockingbird, Massacre (branch `hogaak-b`, 2026-11-21)
+
+**Why.** Lane B of MTGGoldfish's Legacy Hogaak Tempo (deck 8027954, `E:/mtg-zero-scratch/hogaak/`, its PROVENANCE.md):
+Mockingbird (3 main) and Massacre (2 side), each faithful to its Oracle text, the Comprehensive Rules and its official
+rulings in constructed play's table (`CardDb::constructed`). From main e9ff0e24; the IR pipeline is this repo's
+(ENGINE.md 170). Lanes A (Hogaak) and C (Stitcher's Supplier, Dark Matter Manipulator, Moonshadow, Dryad Arbor) are on
+their own branches; Mockingbird copying their cards and Massacre against them are the integration's tests (220.4).
+
+* Mockingbird {X}{U}, Creature - Bird Bard 1/1: "Flying / You may have this creature enter as a copy of any creature on
+  the battlefield with mana value less than or equal to the amount of mana spent to cast this creature, except it's a
+  Bird in addition to its other types and it has flying."
+* Massacre {2}{B}{B}, Sorcery: "If an opponent controls a Plains and you control a Swamp, you may cast this spell without
+  paying its mana cost. / All creatures get -2/-2 until end of turn."
+
+#### What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, meta: 25 cards), `ir/mtgz_ir/cards/parser/spell_builder.py`, `data/cards/*`, `card_ir/src/generated.rs` | the two Scryfall records appended (E:/mtg-zero-scratch/hogaak/raw); Massacre's free-cast line parsed (below); schema `693d23a4a259` -> **`c4383b8e06b9`** (`c4383b8e06b97a3d62f3e64fdea458865d489a84a2e8daaf1ef2417171a1842d`), 729 classes (`AndCondition` added); `powerlsv.ir.json` and `eoe.ir.json` the previous files but the hash |
+| Identities | `engine/src/az/legacy_cards.txt` | Mockingbird, Massacre appended after Rough // Tumble (final numbers at integration; no test names one) |
+| Lowering | `lower/printing.rs` (`lower_enters_as_copy`'s `max_mv_mana_spent`; `free_cast_condition` through `lower_condition`), `lower/filter.rs` (`OpponentsControlAtLeast`, `AndCondition` in `lower_condition!`), `db.rs` (`cond_reads_source`), `lower/mod.rs` (`exc_subtype`: creature or land types only) | every field named, the rest denied |
+| "The amount of mana spent to cast this creature" | `eoe_w3.rs` (`reads_mana_spent` sees an enters-as-copy filter) | **the existing general record reused**: the payment records `Mark::ManaSpent` on the spell (`pay.rs`, EoE W3: every unit paid, convoke's and improvise's taps excluded), the resolution carries it to the permanent (`W3State::entering_spent`, `w3_entered_spent`), `Filter::MvAtMostManaSpent` compares a candidate's mana value with the entering permanent's record (0 when it wasn't cast). Nothing new was needed but turning it on for Mockingbird |
+| Rules fixes | `cast.rs` (`mana_value_of`), `copies.rs` (`enter_as_copy`), `layers.rs` (`has_subtype`) | CR 202.3b, 107.3m, 205.3d (below: fixes outside the cards) |
+| Testkit | `testkit.rs` | `Game::mana_value_now` (rules tests read 202.3 directly) |
+| Tests | `engine/tests/cards_hogaak_b.rs` (41; `cards_suite`), `tests/ir/test_legacy_hogaak_b.py` (11), `tests/support.rs` (`SUPPORTED_LEGACY`), `tests/fuzz.rs` (one test's seeds, below), `tests/ir/test_fetch_cube.py` and `test_legacy_creatures.py` (the pinned pool lists) | below |
+| Fuzz | `engine/src/fuzz/games.rs` (`FUZZ_POOL=hogaak_b`, `HOGAAK_B_DECK`, `count_hogaak_b`) | below |
+| Rulings | `data/rulings/legacy.rulings.json` (the two cards' records appended: Mockingbird's 7, Massacre none), `triage.tsv` (6 rows; 602bf769 was the triage's already), `docs/rulings.md` | every ruling tested |
+| Docs | this subsection, `docs/ir_defects.md` section Z, `docs/interactions.md` | |
+
+#### The IR
+
+Mockingbird already parsed (the U/B cube's enter-as-copy grammar, from the roto pool): `enters_as_copy_types:
+[Creature]`, `enters_as_copy_max_mv_mana_spent`, `enters_as_copy_add_subtypes: [Bird]`, `enters_as_copy_add_keywords:
+[flying]`; the lowering denied the cap (no card of the tables had it). Massacre didn't: its first line had no grammar.
+`spell_builder._FREE_CAST_IF_LINE_RE` ("If <condition>, you may cast it without paying its mana cost.", Once Upon a
+Time's) now takes "cast this spell" too, and `_free_cast_condition` reads the condition as a fixed phrase or one or more
+control clauses joined by " and " ("an opponent controls a <Subtype>" -> `OpponentsControlAtLeast(HasSubtype, 1)`,
+"you control a <Subtype>" -> `ControlPermanent(HasSubtype)`; both -> `AndCondition`): a parameterized recognizer for the
+Nemesis cycle's shape (the parser's rule, its AGENTS.md). The second line is the existing `PumpAllCreaturesUEOT
+{ power: -2, toughness: -2 }` (Toxic Deluge's and Harvester of Misery's). No other printing of the three pools changes
+(`tools/card_ir.py export`, then `check` identical and `roundtrip` ok: cube 546, legacy 25, eoe 483). No IR defect
+(docs/ir_defects.md section Z; entries 420-439 unused).
+
+#### The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| "{X}{U}" | 202.3e, 107.3b | X on the stack only: mana value 1 + X there, 1 in hand, in the graveyard and on the battlefield; cast without paying its mana cost (Omniscience) X is 0 |
+| "Flying"; 1/1 Bird Bard | 702.9 | its printed values; declining the copy leaves them (ruling f30367a6) |
+| "You may have this creature enter as a copy of any creature on the battlefield" | 707.5, 614.1c, 614.12a, 616.1 | the existing `EntersAsCopy` (Phyrexian Metamorph's, ENGINE.md 26.3): as it is put onto the battlefield its `Enters` event waits; its controller chooses (`ChoosePermanent`, `PASS` = nothing, paged past any slot limit, ENGINE.md 100.2) among every creature of either player now - tokens, copies, face-down creatures, an animated land, Kaito in his controller's turn - but itself and not one entering at the same time (Show and Tell's other card); then what it entered as enters |
+| "with mana value less than or equal to the amount of mana spent to cast this creature" | 601.2h, 202.3 | `Filter::MvAtMostManaSpent` against the entering permanent's `Mark::ManaSpent`: X and {U} and any cost increase (Disruptor Flute's {3}; ruling 5a1ea5ca: "all mana spent ... additional costs as well"), from any source (Ancient Tomb's two, Lotus Petal), mana floating unspent not counted; 0 when cast without paying its mana cost or put onto the battlefield without being cast; the candidate's mana value as it is (X 0 on the battlefield, ruling 602bf769: Walking Ballista is 0; a copy of a back face 0, 202.3b) |
+| "except it's a Bird in addition to its other types and it has flying" | 707.9a-b, 707.3, 205.3d | the copy's exceptions (`Except::subtypes` Bird, `kws` flying), part of its copiable values: a copy of the copy (another Mockingbird, Phyrexian Metamorph) has them too (ruling 5239ef09); a Bird only while it is a creature (205.3d: copying an animated Creeping Tar Pit makes a land, not a Bird) |
+| what is copied | 707.2, 707.8, 708.2a, 111.3 | printed values and other copy effects only: no counters, tapped status, attachments or noncopy effects (ruling de35ba2a); a token's original characteristics, and the copy is no token (ruling f2b97e8c: copying an Orc Army makes a 0/0 that dies as the Mockingbird card); a transformed permanent's face up, and the copy can't transform (Revealing Eye); a face-down creature's face-down 2/2 (nothing of the hidden card) |
+| the copied "enters" abilities | 707.5, 603.6a, 614.1c, 614.12, 306.5b, 107.3m | its enter triggers trigger (Orcish Bowmasters, ruling 4376972c); its "enters with" and "as enters" replacements apply (Arwen's indestructible counter, True-Name Nemesis's player, Creeping Tar Pit enters tapped, Murktide Regent's counters for cards exiled with it - none); a planeswalker copy enters with its printed loyalty (Kaito); an "enters with X" replacement uses Mockingbird's X (107.3m: Walking Ballista with X 2 has two counters) |
+| legendary and land copies | 704.5j, 305.1 | copying its controller's own legend brings the legend rule (Ragavan, Kaito); a land copy is no land play |
+| "If an opponent controls a Plains and you control a Swamp, you may cast this spell without paying its mana cost" | 118.9, 118.9a, 118.9d, 601.2b, 601.2f, 205.3, 613.1d | an alternative cost (`AltCost` with no mana and `only_if` `Cond::All([OpponentsControlAtLeast(Subtype Plains, 1), ControlAtLeast(Subtype Swamp, 1)])`), offered by `ChooseAltCost` (`NUMBER` 1) beside the mana cost while the condition holds as the cost is chosen; the subtypes as they are (Tundra, Scrubland, a basic Plains; Underground Sea; not a nonbasic land under Magus of the Moon); cost increases still apply (Thalia's {1}); it is still a spell cast (Force of Will counters it) |
+| "All creatures get -2/-2 until end of turn" | 611.2c, 613.4c, 704.5f, 704.3, 514.2 | the existing `Ext::Apply` over `On::Each(creature)`: the set is the creatures as it resolves (a creature entering later or a land animated later is not affected); state-based actions then kill those at toughness 0 or less at once (dies triggers: Haywire Mite; Sanguine Evangelist's Bat enters after and is a 1/1); later modifications add up in layer 7c (Kaito's +1 emblem); it ends in the cleanup step |
+
+#### Readings taken
+
+* **107.3m and Mockingbird's X.** Ruling 602bf769 ("If the copied creature has {X} in its mana cost, X is 0") is the
+  copied mana cost's X: the candidate's mana value and the copy's own (202.3e, 107.3g). An "enters with X" replacement
+  of what Mockingbird enters as is another X: 107.3m gives it the X of the spell that became the object (Mockingbird
+  cast with X 2 entering as Walking Ballista has two +1/+1 counters; with X 0, none: it dies). Phyrexian Metamorph's
+  spell has no X, so its copies keep 0.
+* **Kaito.** "During your turn ... he's a 3/4 Ninja creature" sets his card types (the card's ruling: not a planeswalker
+  then) and his creature types (layer 4 over the copy's layer 1): Mockingbird copying Kaito in its controller's turn is
+  a 3/4 Ninja creature with flying and hexproof; it entered with Kaito's loyalty (306.5b: as it enters it is a
+  planeswalker); in the other player's turn it is a planeswalker, so not a Bird (205.3d).
+* **The condition is checked as the cost is chosen** (601.2b): paying Thalia's {1} by tapping the Swamp that allowed
+  the free cast is fine. Massacre moving to the stack (601.2a) changes neither side's lands.
+* **"An opponent controls a Plains"**: a permanent of the other player with the subtype now (phased-out permanents
+  don't exist, 702.26b; a Plains card in a hand or graveyard isn't controlled).
+* **The -2/-2 effects** are one effect per creature as the set is locked, each with its own timestamp: they modify
+  power and toughness only (layer 7c, summed), so their order among the creatures doesn't matter.
+
+#### Fixes and findings outside the two cards
+
+* **CR 202.3b** (`cast.rs::mana_value_of`): a copy of the back face of a nonmodal double-faced object (a permanent
+  copying a transformed Concealing Curtains; a token copy back face up, 707.8a; a copy of such a spell) has mana value
+  0; the engine gave the front face's. Reachable with Mockingbird (a cube creature with a creature back face; the
+  Delver deck's Tamiyo transforms into a planeswalker, which Mockingbird can't copy), Phyrexian Metamorph, Saheeli and
+  the cube's token copies. The cube digest is unchanged.
+* **CR 107.3m** (`copies.rs::enter_as_copy`): an entering copy's "enters with X" uses the X of the spell that became
+  it (its `Enters` note's X, `entered_counts`); the engine used 0 always. Only Mockingbird has an X among the cards that
+  enter as copies: digest unchanged.
+* **CR 205.3d** (`layers.rs::has_subtype`, `lower/mod.rs::exc_subtype`): a copy exception's subtype applies only while
+  the object has the card type it corresponds to (creature types: creature or kindred; land types: land); the lowering
+  refuses any other kind of exception subtype loudly. Superior Spider-Man copies creature cards and Echoing Deeps
+  lands, so the cube's and EoE's games are unchanged.
+* **Found, not changed (EoE only)**: EoE W3's `DamageEachSourceMv` reads a source that left the battlefield through
+  `lki_copy`'s definition, which doesn't remember whether the permanent was a copy (202.3b's 0 for a copy of a back
+  face); no EoE card makes such a source.
+
+#### The encoding
+
+No new state, no layout change, no gap. The copy: the permanent's identity is Mockingbird's, `perm::COPY` and
+`perm::COPY_OF` (the copied card's identity), its keywords as they are (flying), `perm::MANA_SPENT` (layout v6), and
+layout v7's `effects` token for the copy effect: the copied identity and the exceptions (subtype Bird by its stable
+name id, flying). The constructed table's copy exceptions name four subtypes in all (Superior Spider-Man's three,
+Bird), so any copy of copies fits the token's four (`ef::SUBS`; `every_tables_copy_exceptions_fit_the_effects_token`).
+Mockingbird's X on the stack (`stack::X`) and its record there (`stack::MANA_SPENT`); Massacre's alternative cost
+(`stack::ALT`, `ALT_INDEX`); the -2/-2 effects (`effects` tokens). The public-state gate (`--test az`, `public_state_reaches_the_encoding`): passes with no new gap (487 positions, 278
+fields, 243 perturbations; "a permanent becomes a copy of another" 475 applied, every view and encoding changed; "the
+mana spent to cast a permanent" 487 applied); the exceptions' encoding is checked by hand
+(`the_copy_its_identity_bird_flying_and_mana_spent_reach_the_encoding`).
+
+#### Tests, the fuzz pool
+
+* **`engine/tests/cards_hogaak_b.rs`, 41 tests** (every ruling: `// ruling:`; the CR in each name): Mockingbird's card
+  and mana value (202.3e), declining, the amount (X and {U}, mana value 3 with X 2, Disruptor Flute's {3}, Ancient
+  Tomb, floating mana, Lotus Petal, Omniscience's free cast, Show and Tell), every creature of both players and a token
+  over the pages, copying Orcish Bowmasters (its enter and draw triggers), Brazen Borrower, an Orc Army token, a tapped
+  creature with counters, a copy of a copy and Phyrexian Metamorph copying it, Walking Ballista with X 0 and 2
+  (107.3m), Arwen, True-Name Nemesis, Murktide Regent, Ragavan (the legend rule and none), Kaito, Tamiyo (712.11a), a
+  transformed Concealing Curtains (202.3b), an animated Creeping Tar Pit (205.3d), a face-down creature (708.2a, and P0's
+  worlds); the copy choice and the copy across `determinize`; the encoding (identity, copy flag, copied identity,
+  flying, mana spent; the `effects` token's Bird and flying; a declined one); the tables' copy exceptions against the
+  token. Massacre: the card, its free cast with and without other mana, the subtypes on either side, not free without
+  both (and a Plains in hand), Magus of the Moon, Thalia's {1}, Force of Will, both sides' creatures dying at once
+  with dies triggers and a later token, a creature entering and a land animated later, the cleanup, the Delver board
+  with Kaito's emblem. `docs/interactions.md` has the matrix. `tools/untested_cards.py`: 571 supported (25 legacy), 0
+  untested. `docs/rulings.md`: 1,674 rulings (1,307 distinct), untested 0.
+* **`tests/ir/test_legacy_hogaak_b.py`, 11 tests**: the two printings, the free-cast line's two wordings, the
+  parameterized condition and what it leaves unclaimed.
+* **`FUZZ_POOL=hogaak_b`**: `HOGAAK_B_DECK` (60): Mockingbird and Massacre four each; Orcish Bowmasters 4, Brazen
+  Borrower 2, Kaito 2, Concealing Curtains 2, Walking Ballista 2, True-Name Nemesis, Phyrexian Metamorph, Murktide
+  Regent (copy targets of mana value 0 to 7, back faces, X, as-enters choices, copies of copies); Force of Will 4,
+  Brainstorm 4, Ponder 3, Daze 3, Thoughtseize 2; Underground Sea 4, Scrubland 2, Tundra 2, Swamp 2, Island 2, Plains,
+  Verdant Catacombs 3, Polluted Delta 3, Wasteland 2. Against the Delver 60 in either seat, one game in three the
+  mirror (an opponent with a Plains: the free cast). With 200 games or more it requires Mockingbird cast, a copy made, a
+  copy declined, Massacre cast for free and Massacre resolving (and counts Massacre cast, copies of a back face, a
+  Mockingbird as Walking Ballista with counters).
+
+#### Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/hogaak-b`, release profile unless said; the 20k and the regression
+fuzz on the Mac with `tools/mac.sh` (bit-identical, ENGINE.md 44).
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,767
+  passed, 0 failed, 37 ignored** (`cards_suite` 1,432 with `cards_hogaak_b` 41, `az` 57, `misc_suite` 210, `rules_suite`
+  453, `rulings_suite` 397, `fuzz` 19, `support` 9, `hidden` 28, `limits` 13).
+* **Behaviour digests** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no `DIGEST_WRITE`): full
+  **44372545881ef768**, every one of the 2,500 games equal to `tests/data/digests.txt` (main's, 210.6), on each of the
+  branch's rules commits; `DIGEST_ENCODING=0` **a965c3fc8d3bba8a** (main's, 210.6); `DIGEST_ENCODING=v5`
+  **9f4cb802bae20e3b** (not recorded for main since 210; the full digest's games are main's line for line, and the v5
+  projection is a function of them). `--test digest_formats`: EoE **c3a9c786030f42eb** and driver **6a03572828250b86**
+  equal; constructed and metagame differ through the table prior (Limits), every digest equal with the two cards taken
+  out of the table.
+* **`FUZZ_POOL=hogaak_b FUZZ_GAMES=20000`** (the Mac, `tools/fuzz_shards.py`, 16 shards): PASSED, no failure; wins 9,693 /
+  9,738, 569 drawn at the turn cap, none aborted, 36.2 turns and 448.8 decisions a game, 16,664,101 options completed;
+  Mockingbird cast 20,937, copies made 7,033, declined 14,078, copies of a back face 966, a Mockingbird as Walking
+  Ballista with counters 4; Massacre cast 15,510, for free 9,582, resolved 7,582.
+* **The `fuzz` profile** (debug assertions), 1,000 games (4 shards): PASSED (wins 477 / 499, 24 drawn; 1,315,803 options
+  completed; Mockingbird 1,080, copies 351 / declined 700, Massacre free 501, resolved 402). **`FUZZ_CHANCE=10`** 600
+  games and **`FUZZ_BELIEF=2`** 600 games (the `fuzz` profile, one process each): both passed, with the end-of-run checks (`FUZZ_CHANCE=10`: 26,770 chance walks, 10,167 replays whose
+  outcome the force changed; `FUZZ_BELIEF=2`: 128,673 weighted worlds). (`tools/fuzz_shards.py` scrubs every `FUZZ_*`
+  variable of the caller, so these two run the test binary directly.).
+* **Regression fuzz** (the Mac): `FUZZ_POOL=delver` 4,000 games + 200 matches + 200 post-sideboard (Murktide Regent cast
+  2,030 times, its trigger 62, Prismari Charm 2,981), the default pool 2,000 games + 100 matches, `FUZZ_POOL=sns` 2,000:
+  all PASSED.
+* `python tools/card_ir.py check`: identical; `roundtrip` ok; `python -m pytest tests/ir` for the legacy pool, the
+  pipeline and the new file (166 passed). `python tools/rulings_doc.py`: current. `bash tools/build_py.sh`, `python -m
+  pytest -q tests`: 3,397 passed, 31 skipped, 1 failed:
+  `test_mac_remote.py::test_a_worker_plays_mtg[matches]` timed out (the desktop loaded by the live run and this lane's
+  fuzz) and passes alone (both parameters: 2 passed, 207 s).
+* No docs/shortcuts.md entry; no layout change; no zero-core change.
+
+#### Limits and merge points
+
+* **Other lanes' cards**: Mockingbird copying Hogaak (mana value 7; "you can't spend mana to cast this spell" and
+  convoke/delve are the spell's, not the copy's), Stitcher's Supplier and Dark Matter Manipulator (their enter
+  triggers), Moonshadow (its six -1/-1 counters), Dryad Arbor (a land creature: a land copy, no land play); Massacre
+  against them; the deck's `FUZZ_POOL=hogaak`. The integration's (220.4).
+* **The constructed and metagame digests and one fuzz test move with the table**: adding two cards to constructed play's
+  table changes `TablePrior`'s support, whose draws deal the best-of-three hidden decks (ENGINE.md 129.1): `--test
+  digest_formats` constructed 16441662701e233d and metagame 56ff52ffef1b1913 differ on this branch while every
+  best-of-one line of both is the same game (compared with the definitions hashed by name and without chance keys,
+  which carry definition ids), and with the two cards taken out of the table every digest is main's. Not re-recorded
+  (the integration adds seven cards: it re-records once, the maintainer's call). `tests/fuzz.rs::
+  a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game`'s seeds 3,900,000,012 and 079 no longer reach the
+  look: 3,900,000,019 and 087 replace them (a scan of its ranges, 46 seeds reach one); the integration rescans.
+* **Merge points**: `legacy_cards.txt` (lane order: A, B, C), the legacy pool files and the schema (re-export once),
+  `spell_builder.py` (the free-cast line), `lower/printing.rs` (the enters-as-copy cap, `free_cast_condition`),
+  `lower/filter.rs` (`lower_condition!`), `lower/mod.rs` (`exc_subtype`), `db.rs` (`cond_reads_source`), `cast.rs`
+  (`mana_value_of`), `copies.rs` (`enter_as_copy`), `layers.rs` (`has_subtype`), `eoe_w3.rs` (`reads_mana_spent`),
+  `testkit.rs`, `fuzz/games.rs` (the pool), `tests/support.rs`, `tests/fuzz.rs`, `tests/cards_suite.rs`, the pinned
+  pool lists of `tests/ir`, `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/interactions.md`. "Mana spent to
+  cast" needed nothing new: lane A's Hogaak ("you can't spend mana to cast this spell") reads the same record if it
+  needs one.
