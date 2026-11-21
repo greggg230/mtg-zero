@@ -191,7 +191,9 @@ def _mac_env(tmp_path, fbx, monkeypatch, release_json=None):
     FB.add(_entry(cs[0], FB.rust_key(cs[0], root), cuda=None))
     b = FB.builds_dir()
     with open(os.path.join(b, 'release.json'), 'w') as f:
-        json.dump(dict({'cpu_runtime': 'r' * 24, 'mac_runtime': MAC_RT}, **(release_json or {})), f)
+        # (mac_fuzz off unless a test turns it on: these tests are about the macOS part's release build; the default -
+        # on since docs/ENGINE.md 219 - is test_the_macos_switches')
+        json.dump(dict({'cpu_runtime': 'r' * 24, 'mac_runtime': MAC_RT, 'mac_fuzz': False}, **(release_json or {})), f)
     os.makedirs(os.path.join(b, MAC_RT))
     with open(os.path.join(b, MAC_RT, 'manifest.json'), 'w') as f:
         json.dump({'platform': 'macos-arm64', 'version': 'ort-mac'}, f)
@@ -242,17 +244,17 @@ def _mac_env(tmp_path, fbx, monkeypatch, release_json=None):
 
 
 def test_the_macos_switches():
-    """On by default with its gates and publish, without the fuzz build and the Mac's speed windows; release.json turns
-    each off (or on), a flag wins for one run."""
+    """On by default with its gates, publish and the fuzz build (docs/ENGINE.md 219), without the Mac's speed windows;
+    release.json turns each off (or on), a flag wins for one run."""
     import farm_release as FR
     s = dict(FR.DEFAULTS)
     sw = lambda argv, s: (lambda a: (a.mac, a.mac_gates, a.mac_publish, a.mac_fuzz, a.speed_mac))(  # noqa: E731
         FR.mac_switches(FR.parser().parse_args(['release', 'x', *argv]), s))
-    assert sw([], s) == (True, True, True, False, False)
-    assert sw(['--no-mac-gates', '--speed-mac', '--mac-fuzz'], s) == (True, False, True, True, True)
-    assert sw(['--no-mac'], s)[0] is False and sw(['--no-mac-publish', '--no-speed-mac'], s)[2:] == (False, False, False)
-    off = dict(s, mac=False, mac_speed=True)
-    assert sw([], off) == (False, True, True, False, True) and sw(['--mac'], off)[0] is True
+    assert sw([], s) == (True, True, True, True, False)
+    assert sw(['--no-mac-gates', '--speed-mac', '--no-mac-fuzz'], s) == (True, False, True, False, True)
+    assert sw(['--no-mac'], s)[0] is False and sw(['--no-mac-publish', '--no-speed-mac'], s)[2:] == (False, True, False)
+    off = dict(s, mac=False, mac_speed=True, mac_fuzz=False)
+    assert sw([], off) == (False, True, True, False, True) and sw(['--mac', '--mac-fuzz'], off)[::3] == (True, True)
 
 
 def test_when_an_entry_has_its_macos_part():

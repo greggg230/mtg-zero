@@ -41988,3 +41988,110 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
+
+## 219. The farm's Macs fuzz: a macOS fuzz build as each fuzz campaign's alternate, one set of campaigns per engine, failures keyed the same on every platform (branch `feat/backfill`, 2026-11-21)
+
+Why: in the week to 2026-11-21 the two farm Macs had no lease 43% of their time on the farm, because the fuzz
+campaigns were Windows-only (zero-farm PROTOCOL 11.4 already lets a campaign list one worker build per platform; no
+campaign did). Every live run and A/B arm also registered its own four fuzz campaigns even when its engine was main's
+(20+ campaigns of one commit, competing with each other). No rule, card, encoding, search or worker change; behaviour
+digests untouched. Python tools only: tools/farm_campaign.py, tools/fuzz_steward.py, tools/farm_release.py,
+tools/farm_gates.py.
+
+### 219.1 Fuzz campaigns with alternates (`farm_campaign.py create|update --alternate ID`)
+
+* `--alternate ID` (repeatable) names a signed fuzz build of another platform, found like the build (the farm_build dist
+  directories and `<ZERO_BIG_DISK>/zero-farm-builds`) and checked by its manifest only (a Mach-O executable does not start
+  on Windows): a worker, the build's game and profile, another platform than the build's (one per platform), the same
+  engine commit or one with the same farm worker inputs (`farm_builds.rust_key`). The build's own `fuzz-check --mode M
+  --env ... --platform <the alternate's>` must accept the mode there (197.3's libm refusals: `delver_dealt2-matches`,
+  `FUZZ_BELIEF`, ... stay Windows-only). The definition's `builds` are the build and its alternates.
+* **A PUT is the campaign's whole configuration** (the coordinator resets what a PUT leaves out). `FIELDS` now carries
+  `alternates`, `min_agent`, `gpu`, `providers` besides the old nine, and `current_fields` reads them back from GET (each
+  alternate without its `problems`), so `update`, `pause`, `resume` and the steward's share changes
+  (`put_campaign`) keep a campaign's alternates. Before, a steward share change would have dropped any alternate.
+  `update --no-alternates` removes them; `update --alternate ...` replaces the list.
+
+### 219.2 The steward's Macs and one set of campaigns per engine (tools/fuzz_steward.py)
+
+* **One set per engine** (`dedupe`, default on): targets of one engine hash (main and the runs pinned to it, an A/B's
+  arms) share one owner's build, campaigns, pace and local jobs; the others follow it. An owner whose run ends hands
+  everything to a follower; a later target of a retired owner's engine resumes those paused campaigns instead of making
+  four new ones; two owners of one engine in an older state merge (main's campaigns stay, the other's are paused). Only
+  the steward's own state named per-target campaigns, so nothing else changes (campaign names stay
+  `fz-<owner>-<sha7>-<alias>`).
+* **The Mac part** (`mac_farm`, default on): the owner gets a macOS fuzz build of its engine - found (the release's, see
+  219.3, or any signed one of the same engine hash; a found build that may never have been published is published
+  with `farm_build.py --publish-dir`), else built (`farm_build.py --profile fuzz --platform macos-arm64 --publish`: on
+  the Mac, signed here) - and every campaign whose mode macOS may play lists it (`farm_campaign.py update NAME
+  --alternate ID`; new campaigns are created with it). A failed macOS build is logged and tried again after
+  `mac_retry_h` (6 h); the Windows campaigns never wait for it.
+* `find_build` takes a platform (default windows-x64) and never returns another platform's build. Before, a macOS fuzz
+  build of the same commit in a dist directory could have been picked as a Windows target's build.
+* **Failures from a Mac** arrive like a PC's (the campaign's failures; the build id is the macOS build's, and the queue
+  records each seed's platform). They are replayed here on the Windows build of the same engine, and key to the same
+  id as on a PC: `neutral_site` names a chunk crash's `crash exit <code>` the same on both platforms (219.4); the
+  replay compares neutral sites.
+
+### 219.3 The release builds the macOS fuzz build by default (tools/farm_release.py)
+
+`mac_fuzz` now defaults to true (`--no-mac-fuzz` / release.json `"mac_fuzz": false` turn it off): every release's macOS
+part builds and publishes the macOS fuzz build next to the release build (216), and its Mac gates run 197.4(c), the fuzz
+identity, and the new part (d) below. The steward finds that build for main's engine without building one.
+
+### 219.4 Measured: Mac fuzz finds and reports failures the same way (`farm_gates.py --mac` parts c and d)
+
+New part (d) of `farm_gates.py --mac` (with the fuzz workers; `--no-fuzz-faults` skips it): one fuzz job with the
+worker's test faults (zero-core `ZERO_FARM_TEST_FAULT`, taken only by fuzz-profile builds whose process has
+`ZERO_FARM_ALLOW_TEST_FAULTS=1`) on both builds. The faults are a panic, an abort, a stack overflow and a hang at seeds
+first+2/5/8/11, `--seed-timeout 20`. Each side's `fuzz-final.json` (the failures an agent uploads) is read; it passes
+when the same seeds fail on both, nothing else does, and every failure's steward id (site and message, the site
+platform-neutral), mode and repro (the engine commit aside) are equal.
+
+On main 1e7416c5's engine: the Windows fuzz build c37801105831b0c62553f8b2 and the macOS fuzz build
+de486c2e6e785fd5df47f3b0 (signed, not published), with the Mac idle on AC power:
+
+* (c) identity: `games` seeds [1000, 1400), every seed's outcome identical (400 of 400).
+* (d) faults (93 s): the same four seeds fail on both, and the four ids are equal with neutral sites:
+
+| fault | site on Windows | site on the Mac | neutral site | steward id before / after |
+|---|---|---|---|---|
+| panic | `third_party/zero-core/crates/worker/src/fuzz.rs:346` | the same | the same | equal / equal |
+| abort | `crash exit 3221226505` (0xC0000409) | `crash exit -6` (SIGABRT) | `crash abort` | different / equal |
+| stack overflow | `crash exit 3221225725` (0xC00000FD) | `crash exit -6` | `crash stack overflow` | different / equal |
+| hang | `HANG games` | the same | the same | equal / equal |
+
+Without `neutral_site` one crash seen on a PC and on a Mac would have been two queue entries, and a Mac crash's replay
+here would have "failed at another site". A Unix abort and a stack overflow share exit -6; Rust's "has overflowed its
+stack" message, printed on both platforms, tells them apart. The steward's queue held no crash entries, so no id
+changes for an existing entry. The coordinator's own per-campaign site count (`first_of_site`) still sees the raw site.
+
+### 219.5 Tests
+
+* tests/test_farm_campaign.py: the PUT body's new fields, and a macOS alternate created, kept by update / share / pause
+  and by the steward's put pattern, removed and re-added. It is refused, with nothing signed or put, for: a libm-refused
+  mode (`delver_dealt2-matches`), another engine's build, the build's own platform, two of one platform, an unknown
+  build.
+* tests/test_fuzz_steward.py:
+  * neutral sites;
+  * one set per engine (follow, hand-over, pause, reclaim, re-pin, the merge of an older state);
+  * `find_build` per platform, including the release's copies;
+  * the Mac part (a build started, a failure retried only after `mac_retry_h`, the alternates on the three modes macOS
+    may play and not on `dd2m`, a follower never building);
+  * part (d)'s comparison on the measured outputs.
+* tests/test_farm_release.py: the switches' new default. The macOS-part tests keep `mac_fuzz` off in their
+  release.json; they test the release build's mechanics.
+
+### 219.6 Switching it on (not done here)
+
+Merge, then restart the steward from main (`python tools/fuzz_steward.py stop`, then the logon task or `run`). At its
+first check, main's and the live runs' duplicate campaigns merge (the followers' are paused), the owner's macOS build is
+found or built, and the three Mac-playable campaigns list it.
+
+What to watch:
+* a Mac takes a fuzz lease when no run needs it;
+* its seeds are credited;
+* its leases are not given back as starved. The agent's starvation check counts the worker process's CPU only, not its
+  chunk processes; that is the same on Windows, where fuzz works.
+
+The release watcher builds the macOS fuzz build from its next release on (219.3).
