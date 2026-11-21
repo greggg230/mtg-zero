@@ -41530,3 +41530,13 @@ its CPU's 1,609) and the PC played self-play on the AMD GPU, its records accepte
 variant form 'matmul' (docs/az.md 46.10); a run's AMD PCs get it with `pool_variants` 'gpu=fp16,dml=matmul@amd'.
 `farm_release.py`'s dml-selftest now runs the float32 graph (what AMD PCs play); `farm_builds.pool_settings`' docstring
 names 'matmul@amd'. Python and docs only (no Rust input changed).
+
+### 213.3 The gate of 62b9a028 and the merge
+
+On 62b9a028 (213.2), in the warm worktree warm-3, `--offload local`, `--baseline-root` warm-2 at 4c77c950 (main before
+the change): **GATE PASSED WITH SKIPS optin-core 62b9a028328e in 2609s** - core tests 215 passed; checkpoint_compat byte
+identity (visits and cq, 3,185 samples each); the digests as recorded (constructed 16441662701e233d, EoE
+c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8); farm compat identical
+(gate 2: 6 games, 2,890 rows, 150 batches); core pytest 723 passed - skipped: 17 live-run-hazard tests (fenced).
+
+Main fast-forwarded 4c77c950 -> 62b9a028 (main had not moved since the branch: the gate stands as run).
