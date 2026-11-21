@@ -893,6 +893,7 @@ def pull(cl, d, st, log=log_stderr):
                     new.append(row)
             _append_rows(d, new)
             if new:
+                st.setdefault('first_result', time.time())    # (the queue's wait: the batch put to its first game)
                 m = st['machines'].setdefault(r.get('machine_id') or '?', 0)
                 st['machines'][r.get('machine_id') or '?'] = m + len(new)
                 lz = st['leases'].setdefault(r.get('lease_id') or '?', {'machine': r.get('machine_id'), 'games': 0})

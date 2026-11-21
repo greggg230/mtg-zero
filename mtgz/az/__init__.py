@@ -497,6 +497,9 @@ PACKAGE = register(GamePackage(
     setting_classes=SETTING_CLASSES,
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
     engine_paths=ENGINE_PATHS,
+    # zero.h2h's farm backend (docs/ENGINE.md 217, zero-core docs/az.md 69): `python -m mtgz.az.h2h` plays on zero-farm
+    # when the farm can play exactly the match (--backend auto, the default), else here - decided before any game
+    h2h_backend='mtgz.az.h2h_farm:BACKEND',
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
