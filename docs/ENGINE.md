@@ -42688,3 +42688,231 @@ desktop); the fuzz on the Mac (`tools/mac.sh`, bit-identical to the desktop, ENG
   `tests/fuzz.rs` (the seed list: re-scan after the merge), `tests/support.rs`, `tests/cards_suite.rs`,
   `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/ir_defects.md` (section AA), `docs/card_ir.md` ("Current
   numbers": left to the integrated export).
+
+### 220.4 The lanes merged; the deck, `FUZZ_POOL=hogaak`, the digests (branch `hogaak`)
+
+Branch `hogaak` from main 1e7416c5 (e9ff0e24, the lanes' branch point, and 12 commits of farm and docs work: ENGINE.md
+214-216, zero-core pin ba607c2 -> c850a5d; no engine, card or IR file). The lanes merged in their order, each its own
+merge commit: A (`hogaak-a` 29ca2296: 3ee72ad1), B (`hogaak-b` c273ef11: f5c8f496), C (`hogaak-c` a05a399c: 3d5fd696).
+No layout or encoding change (layout v7 as on main, no spare float), no zero-core change, no docs/shortcuts.md entry.
+
+#### 220.4.1 The conflicts and how each was resolved
+
+No two lanes changed one rule differently: every conflict was additive, resolved by keeping every lane's behaviour,
+interleaved functions rebuilt whole (never spliced).
+
+| File | Resolution |
+|---|---|
+| `docs/ENGINE.md` | main's 214-216, then 220.1, 220.2, 220.3 (each lane's subsection whole); this section's header and 220.4 |
+| `engine/src/fuzz/games.rs` | `PoolMode` keeps `HogaakA`, `HogaakB`, `HogaakC` (pools `hogaak_a`, `hogaak_b`, `hogaak_c`); each lane's deck, counters, report line, totals and end-of-run checks rebuilt whole beside the others (the reports' and checks' blocks of two lanes shared their closing lines in git's hunks: re-closed, one missing brace found by the first build); `constructed_mode()` and the pool lists (module docs, the unknown-pool panic, the games-only message) name the three in lane order |
+| `engine/src/lower/mod.rs`, `engine/tests/cards_suite.rs` | every lane's module (`lower::hogaak_a`, `lower::hogaak_c`; `cards_hogaak_a`, `_b`, `_c`) |
+| `engine/tests/support.rs` | `SUPPORTED_LEGACY` the seven sorted in (30 legacy cards) |
+| `engine/src/az/legacy_cards.txt` | the lanes' lines, then (000b2c82) the seven in the deck's order (220.4.2) |
+| `engine/tests/fuzz.rs` | the hand-look test's seeds: lanes B and C had found the same replacements (3,900,000,019 and 087 for 012 and 079); rescanned on the merged table (220.4.6) |
+| `ir/data/legacy_delver.json` (+ `.sheet.json`, `.meta.json`) | the union of the lanes' Scryfall records as each fetched them (the orchestrator's fetch of 2026-11-21, `raw/scryfall_hogaak_new.json`), lane order: A's Hogaak, B's Mockingbird and Massacre, C's four; 30 cards (the sidecar's counts 30, its `fetched_at` the lanes' common one); built by script from main's file plus each lane's appended records (each lane's first 23 equal main's) |
+| `data/rulings/legacy.rulings.json`, `triage.tsv` | the union in the legacy pool's order (Hogaak's 9 rulings, Mockingbird's 7, Dryad Arbor's 7; the other four none), 18 new triage rows. Lane C had added a second row for 0dfaac8c, a ruling text Pact of Negation's row already had (the triage is one row per distinct text; `rulings_doc.py` let the later win): folded into the one row, naming both cards |
+| `tests/ir/test_fetch_cube.py`, `test_legacy_creatures.py` | the pinned legacy pool list: the seven by lane, 30 cards |
+| `docs/ir_defects.md`, `docs/interactions.md` | the lanes' sections Y, Z, AA and their matrices, in lane order; a short merge note in AA and this section's matrix |
+| `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs`, `docs/rulings.md` | not merged by hand: regenerated from the merged inputs at each merge (`python tools/card_ir.py export`, `tools/rulings_doc.py`; 220.4.3) |
+
+Files git merged without a conflict, read where two lanes touched the same code: `db.rs` (A's `CastingRules::own_gy_cast`
+/ `no_mana`, B's `cond_reads_source`, C's `EventKind::PutIntoGraveyard`, `Mod::PtPerGraveyardCards` and the rare event
+bit), `cast.rs` (A's routes and castability of a spell of no mana, B's `mana_value_of` for 202.3b), `lower/printing.rs`
+(A's two casting fields, B's enters-as-copy cap and free-cast condition), `layers.rs` (B's 205.3d `has_subtype`, C's
+layer 7c graveyard count), `cost_order.rs`, `public_state.rs`, `az/tail_encode.rs` (A's convoke picks, C's new field and
+mod classified), `creature_builder.py` (A's casting-keyword hook before `legacy_creatures`, C's land creature and
+counter grammars). The workspace builds without an error or a warning.
+
+#### 220.4.2 The IR, the identities
+
+* **The export** (`python tools/card_ir.py export` from the merged parser over the 30-card legacy pool): schema
+  **`180659137eceef5a707ad7ebcd2ba8ce66fd302aa3f841ea3b67301393915752`** (main `693d23a4a259...`), 731 classes: exactly
+  the union of the lanes' additions (A's two printing fields, B's `AndCondition`, C's `CardsInYourGraveyard`,
+  `RemoveCountersFromSource`, the `Event` member and `CardsInYourGraveyard.per`). `powerlsv.ir.json` (sha256
+  `3119ab6e427caf38`) and `eoe.ir.json` (`caee0949bce52b30`) are main's files byte for byte once the schema hash is
+  replaced (compared card by card and as bytes); `legacy.ir.json` (30 cards, `b0fd711f9ec8c95d`): each card's IR equal to
+  its lane's export, the 23 others main's. `powerlsv.schema.json` `a0bf3784208d6a65`, `generated.rs` `2dbfa3cede8bca1a`.
+  `check`: identical; `roundtrip`: cube 546, legacy 30, eoe 483 cards ok. docs/card_ir.md, "Current numbers".
+* **Identities** (`engine/src/az/legacy_cards.txt`, after Rough // Tumble = 568), in the deck's order: Hogaak, Arisen
+  Necropolis **569**, Stitcher's Supplier **570**, Mockingbird **571**, Dark Matter Manipulator **572**, Moonshadow
+  **573**, Dryad Arbor **574**, Massacre **575**. No test names a number (`constructed.rs` checks every registry line
+  at `LEGACY_BASE` + its line and `the_hogaak_75_and_its_provenance` the last seven lines by name).
+
+#### 220.4.3 The deck and where it is registered
+
+* **The files**: `data/decks/hogaak_tempo_8027954.txt`, the scratch pin byte for byte (MTGGoldfish's export field, a
+  `sideboard` line before the 15), and `.json` in the Doomsday file's format: "Dimir Hogaak", archetype "Legacy Hogaak
+  Tempo", Jonathan Canfield, North American Eternal Weekend - Legacy Championship, 2026-10-31, "5th place, 12-3", paper,
+  deck source melee.gg, the deck, archetype-page and download URLs, how it was fetched (the export field via plain curl
+  on 2026-11-21, the download link 403); `export_names` Brazen Borrower -> "Brazen Borrower // Petty Theft" (the only
+  name that differs from the card table's).
+* **Registered (done)**: `az::constructed::{LEGACY_HOGAAK, LEGACY_HOGAAK_EXPORT}`, `Decklist::legacy_hogaak()` (beside
+  the Delver and Doomsday decks); `mtgz.az.decklists.LEGACY_HOGAAK` - every spec helper takes it by name
+  (`mirror_spec`, `mirror_bo3_spec`, `pair_spec`, `metagame_spec(decks=META3 + (LEGACY_HOGAAK,))`, so a metagame spec
+  with it in its deck names is one call); `FUZZ_POOL=cross` plays its best-of-three pairs (220.4.4); the fuzz's real 75s
+  (`real_75`, `REAL_75_NAMES`). Tests: `constructed.rs::the_hogaak_75_and_its_provenance` (the export equals the JSON;
+  every card of the 75 supported; CR 100.2a / 100.4a over both - Brazen Borrower's one and one, three more make five,
+  refused; at most `MAX_DECK`; the legacy cards in the registry's order: main the six, sideboard-only Consign to Memory
+  and Massacre; the registry's last seven lines) and `the_hogaak_75_plays_best_of_one_and_best_of_three` (best-of-one
+  of its main against the Delver, Doomsday and Sneak and Show 60s and itself, and constructed best-of-three with its
+  sideboard against each 75, both seats, random play to the end, the row finite at every decision);
+  `tests/test_delver.py::test_the_hogaak_deck_and_its_loader` (the loader; a mirror, a best-of-three pairing and a
+  four-deck metagame built and started through the bindings; no preset names it).
+* **Left for the user (not done)**: no run preset or live spec plays it - `legacy-meta3` and its digest spec
+  (`digest_specs.json`'s `meta3`), `FUZZ_POOL=meta`'s three 75s (which mirror that preset), the cells yardstick's
+  `CELL_DECKS`, delverai's deck labels and `combo_stats`' short names stay the three-deck metagame's: adding the deck to
+  a run's metagame is the user's call. The constructed digest's best-of-one lines still pair the three main 60s (220.4.7).
+
+#### 220.4.4 `FUZZ_POOL=hogaak`, and the Hogaak 75 in `FUZZ_POOL=cross`
+
+* **Games**: the real Hogaak 60 (`hogaak_decks`) against the real Delver, Doomsday and Sneak and Show 60s in either seat,
+  one game in four the mirror (`seed % 8`); best-of-one, constructed play's table, every check of the default mode. The
+  lanes' counters run in it (`count_hogaak_a`, `_b`, `_c`) beside its own `HOGAAK_SEEN`: with 200 games or more it
+  requires **Hogaak cast from a graveyard paid by convoke and delve together**, **a Mockingbird entered as a copy**, **a
+  Moonshadow -1/-1 counter removed**, **a Dark Matter Manipulator at +2/+0 or more**, **a Dryad Arbor played** and **a
+  Stitcher's Supplier trigger resolved** (its mill).
+* **Matches**: constructed best-of-three between the real 75s - the Hogaak 75 against each of the three in either seat
+  and its mirror twice (`HOGAAK_PAIRS`, `seed % 8`), one match in four 12-turn games - then post-sideboard matches of
+  its mirror; every check of `FUZZ_POOL=delver`'s matches (the constructed worlds, the deck-tilted deals, the
+  information sets, the hidden 60s). **Massacre** is a sideboard card: random sideboarding and random play cast it about
+  once in 35 matches and resolve it about once in 70, so its counter (`hogaak_massacre`, a Massacre spell resolved) is
+  required with 500 matches or more. `FUZZ_HIDDEN_DECKS=1` is refused with it (Show and Tell's pick, 129.3).
+* **`FUZZ_POOL=cross`**: `CROSS_PAIRS` now every pair with Doomsday, Sneak and Show or Hogaak, both seats, and the three
+  mirrors (15, `seed % 15`; its games unchanged: Doomsday against Sneak and Show).
+* The release worker knows `hogaak_a`, `hogaak_b` (games only, beside lane C's `hogaak_c`) and `hogaak` (games and
+  matches; `FUZZ_DECK_TILT` allowed in its matches) (`worker/src/fuzz.rs`).
+
+#### 220.4.5 The cross-lane tests (`engine/tests/cards_hogaak.rs`, 16)
+
+The CR rule in each name, rulings cited (`// ruling:`): Mockingbird copying Hogaak - only with seven mana spent (six
+not), a legendary 8/8 Avatar Bird with trample and flying, black and green, the Mockingbird card, mana value 7
+(5a1ea5ca, de35ba2a); copying its controller's own Hogaak - the legend rule, and in the graveyard the card is
+Mockingbird, mana value 1, without Hogaak's graveyard permission; copying Moonshadow - the copied "enters with six
+-1/-1 counters" applies (a 1/1), menace and flying, and its trigger works (P0's Wasteland sacrificed: the copy loses a
+counter; the Sea it destroys: P1's Moonshadow) (4376972c); copying Dryad Arbor - mana value 0, a Land Creature - Forest
+Dryad Bird, green by the copied colour indicator, flying, no land play (a Forest still playable), summoning sick for its
+mana ability, tapping for {G} the next turn (1df01b0e, 9da0e7ba); copying Stitcher's Supplier - mills three as it enters
+and, bolted, three more as it dies, the card in the graveyard Mockingbird; copying Dark Matter Manipulator - its mill
+and the +2/+0 per seven cards of its controller's graveyard; declining with the four offered at X 1 and Hogaak not
+(f30367a6); Hogaak convoked by a summoning-sick Dryad Arbor paying a {B/G} pip as green (fbdd4f47, dbf4ec31); the deck's
+turn-three Hogaak - Stitcher's Supplier's and Dark Matter Manipulator's mills and a Verdant Catacombs as delve fuel,
+the two, Orcish Bowmasters and its Orc Army as convoke (c6f70acd); Moonshadow beside Hogaak cast from the graveyard -
+delve's exile and the graveyard-to-stack move trigger nothing, the legend rule's Hogaak does once (4029cc96); Massacre
+killing Stitcher's Supplier, Dryad Arbor and Dark Matter Manipulator at once - one Moonshadow trigger for the batch
+(603.2c) beside the Supplier's dies trigger, then one for its mill, Hogaak a 6/6; a Moonshadow dying in the same event
+doesn't trigger (603.6c); Massacre against Moonshadow's counters (four live, five and six die); Massacre's free cast
+with each of the Hogaak 75's Swamps (Underground Sea, Swamp, Undercity Sewers) against a Tundra, and never against a land
+of the Delver, Doomsday or Sneak and Show 75s (no Plains among them: in the deck's real matchups it is hard-cast), then
+free against a Delver board; Hogaak countered by Force of Will and cast again from the graveyard (the deck's mills as
+fuel, Orcish Bowmasters and Dryad Arbor as convoke); Karakas saving Hogaak from Swords to Plowshares (cast again from
+hand), and returning a Mockingbird copying Hogaak to its owner's hand as Mockingbird. docs/interactions.md has the matrix.
+
+#### 220.4.6 Seed-pinned tests the lanes touched, rescanned on the merged table
+
+* `tests/fuzz.rs::a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game` (`delver_dealt2` matches that must
+  reach a look at the viewer's hand in a step that begins the next game): the scan of seeds 0..300 and
+  3,900,000,000..300 finds 41 on the merged table; the nine pinned seeds (30, 55, 95, 135, 3,900,000,015, 019, 026, 087,
+  151 - lanes B's and C's list) are all among them.
+* `tests/known_face_key.rs` (two fuzz cases replayed with recorded world seeds): the table prior now leaves out all
+  twelve legacy cards that joined after the cases were recorded (the Delver sideboard's five and the seven), the
+  recorded support. That alone does not bring the recorded worlds back: the K cached decks are drawn from a key that
+  hashes the shown cards' definition ids (`DealCache::key`), and Dark Matter Manipulator (like Consign to Memory at 122)
+  sorts before Disruptor Flute in the legacy IR, so the Flutes these games show have another id - which exclusion list
+  passed was luck (each lane's passed; on the merged table neither lane A's list nor all twelve did). Seed 466's
+  recorded world seed still reaches its face choice; seed 4248's is rescanned to 4 (the first of 1..400 whose two
+  worlds keep one node along the recorded path and name two different known cards at its end; about one in four do).
+
+#### 220.4.7 Digests
+
+The cube's digests **EQUAL** to main's (`--test digest`): full **44372545881ef768** (every one of the 2,500 games equal
+to `tests/data/digests.txt`), `DIGEST_ENCODING=0` **a965c3fc8d3bba8a**, `DIGEST_ENCODING=v5` **9f4cb802bae20e3b**; EoE
+**c3a9c786030f42eb** and the driver **6a03572828250b86** equal. The constructed family moves - constructed play's table
+holds seven more cards (the table prior's support, the legacy definition ids) - and is re-recorded with `DIGEST_WRITE=1`
+(f067b5e8; recorded on the Mac, bit-identical to the desktop, ENGINE.md 44):
+
+| digest | main | `hogaak` | lines |
+|---|---|---|---|
+| constructed (`digests_constructed.txt`) | 16441662701e233d | **91b6cf60576961a7** | 570 of 570 |
+| metagame (`digests_metagame.txt`) | 56ff52ffef1b1913 | **be3766d1f943c95c** | 288 of 288 |
+| dealt (`dealt_decks.rs`, `digests_dealt.txt`) | a890c27da3c7d1a8 | **f0bfffd26a70a753** | 79 of 80 |
+| dealt per seat (`dealt_per_seat.rs`, `digests_dealt_per_seat.txt`) | 5fa30432bf8cd63f | **c67b186ba7d00e51** | 60 of 60 |
+
+**The proof** (once, on the merged code; each lane had shown it for its cards, `E:/mtg-zero-scratch/hogaak/digests_a.md`):
+the scratch branch `hogaak-proof` (never merged; its own Mac checkout and target dir) = `hogaak` at 83459964 with the
+seven filtered out of `CardDb::constructed` (one line in `db.rs`): constructed **16441662701e233d**, metagame
+**56ff52ffef1b1913**, dealt **a890c27da3c7d1a8**, dealt per seat **5fa30432bf8cd63f**, EoE and driver unchanged -
+exactly main's recorded files (every test passes against them). So no rule, payment, encoding or fuzz change of the
+three lanes and the merge alters a game of those specs: the digests move only because the table holds seven more
+cards. (The commits after 83459964 change tests, digests and docs only.)
+
+#### 220.4.8 Checks
+
+Code at 1052673b (the commits after it are docs only); the heavy runs on the Mac (`tools/mac.sh`, bit-identical,
+ENGINE.md 44), the desktop throttled beside the live run.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary, at 04650c87, the same code):
+  **2,872 passed, 0 failed, 37 ignored** - `cards_suite` 1,533 (`cards_hogaak` 16 and the lanes' 38, 41, 47), `misc_suite`
+  212 (`constructed` with the Hogaak 75's two), `rules_suite` 453, `rulings_suite` 397, `az` 57, `hidden` 28, `fuzz` 19,
+  `limits` 13, `support` 9 (the legacy list of 30).
+* **The public-state gate** (`--test az`): 496 positions, 279 fields (134 public, 12 hidden, 133 derived), 243
+  perturbations: **231 encoded, 2 deliberate limits, 0 known gaps, 0 gaps for the next layout**; 120 hidden-decklist
+  perturbations reach only their owner; the pairwise pass 140,239 states, 0 panicked. No encoding gap.
+* **Digests**: 220.4.7.
+* **`FUZZ_POOL=hogaak`, 20,000 games, 1,000 matches and 1,000 post-sideboard matches** (`tools/fuzz_shards.py`, 16
+  shards a loop): **PASSED**, no failure; games wins 9,972 / 9,950, 78 drawn, none aborted, 26.3 turns and 244.5
+  decisions a game, 7,905,421 options completed. Seen: Hogaak cast from a hand 6,966 and from a graveyard 7,119, by
+  convoke 14,085, by delve 13,942, by both 13,942, **from a graveyard by convoke and delve 6,987**; Mockingbird cast 6,264,
+  **copies made 3,299**, declined 3,525; Stitcher's Supplier cast 10,012, its triggers 2,880, **resolved 1,553**; Dark Matter
+  Manipulator cast 10,073, **at +2/+0 or more 13,437**; Moonshadow cast 9,899, its triggers 6,763, **-1/-1 counters removed
+  41,175**; **Dryad Arbor played 6,168**, attacking 1,336, tapped for mana 53,348; Massacre (sideboard) in the matches
+  cast 25, **resolved 12**, in the post-sideboard matches cast 43, resolved 17. The fuzz binary's 16 other tests passed.
+* **The `fuzz` profile** (debug assertions), `FUZZ_POOL=hogaak` 1,000 games, 50 matches + 50 post-sideboard (16 shards):
+  PASSED. **`FUZZ_CHANCE=10`**, 600 games (the `fuzz` profile, the test binary's `fuzz_random_games` directly:
+  `tools/fuzz_shards.py` scrubs the caller's `FUZZ_*`): passed - 14,783 chance walks, 5,173 replays whose outcome the
+  force changed; `the_murktide_trigger_is_asserted_over_enough_games` fails whenever `FUZZ_CHANCE` is set (its
+  synthetic totals carry no chance walks, a pre-existing artefact, 220.3.8), so it was not run. **`FUZZ_BELIEF=2`**,
+  600 games, 30 matches + 30 post-sideboard (the `fuzz` profile, the whole binary but the Murktide and hand-look tests):
+  passed - 71,353 weighted worlds.
+* **Regression fuzz, 2,000 games each** (12 shards): `delver` (and 100 matches + 100 post-sideboard), `doomsday`,
+  `sneak_show`, `cross` (and 100 + 100: the Hogaak pairs among them), `hogaak_a`, `hogaak_b`, `hogaak_c`: all PASSED.
+* **IR**: `python tools/card_ir.py check` identical, `roundtrip` ok (220.4.2); `python -m pytest tests/ir`: **2,730 passed**.
+* `bash tools/build_py.sh`, `python -m pytest -q tests --ignore=tests/ir` on the Mac: 665 passed, 31 skipped, 2 failed
+  and 1 deselected - the three of the gate's `PYTEST_DESKTOP_ONLY` that fail on macOS by design
+  (`test_deck_scorer.py::test_the_engines_fixtures_are_reproducible`, platform floating point;
+  `test_run_publisher.py::test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished`;
+  `test_artifact_cache.py::test_check_scope_reads_cargo_dep_info`); the engine gate runs them on the desktop.
+* `python tools/rulings_doc.py --check`: current - 1,690 rulings (1,319 distinct), 1,313 class a, every one tested, 0
+  untested. `python tools/untested_cards.py`: 576 supported (30 legacy), **0** named by no card test.
+  `python tools/privacy_check.py`: 0 findings.
+* **The suite gate** on 1052673b (`python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,hogaak,cross`,
+  in this worktree, every step on the Mac beside the live legacy-meta3-r1): **GATE PASSED suite 1052673bd712** - privacy,
+  the test build, the full engine suite (2,867 passed, 24 binaries), the sharded 2,000-game fuzz of the default pool (and
+  100 matches), the default pool with hidden decklists, `delver_dealt`, `hogaak` and `cross` (each with 100 matches + 100
+  post-sideboard), the checkout unchanged (`gates/1052673bd712-suite.json`). The engine tier: 220.4.10.
+
+#### 220.4.9 Findings, limits and follow-ups
+
+* **Pre-existing on main, found by this pool's first probe**: an information-set divergence in a Doomsday-mirror
+  post-sideboard match - `play_match_spec(163, <the Doomsday 75 mirror, best-of-three, "start_game": 2,
+  "game_episodes": true>)` fails `check_match_information_set` ("same keys, different encodings of P1 at 57219 (0.03125 /
+  0.015625)", game 2, a tail token of P1's row). It fails identically on main 1e7416c5 (scratch branch `hogaak-mainref`,
+  only the repro test added), on the merged code and on the proof branch: not the Hogaak cards'. This pool reached it
+  only through a mistake of its own post-sideboard pairing (the pair's first 75, here Doomsday, instead of the Hogaak
+  mirror; fixed in 83459964); main's `FUZZ_POOL=cross` plays Doomsday-mirror post-sideboard matches on other seeds.
+  Repro and details: `E:/mtg-zero-scratch/hogaak/finding_dd_mirror_post_163.md`. Left for a follow-up.
+* **Follow-up (the lanes' reported engine gaps outside their cards, not changed here)**: mana abilities activated
+  while a spell is cast beyond the payment's sources (601.2g before 601.2h: Chromatic Star or Wizard's Rockets during
+  Hogaak's cast, 220.1.5, 220.1.9); convoke through `PayMana` taking a class's creatures as interchangeable (two of one
+  definition in different states); `normal_payable` and castability's `alt_payable` leaving convoke's and improvise's
+  sources out; the payment's partway picks (`PayMana::chosen`) missing from `Game::view_of` and the encoding; delve's
+  remaining-cards check ignoring convoke for a delve spell other than Hogaak; EoE W3's `DamageEachSourceMv` and a
+  copy's 202.3b mana value (220.2).
+* Massacre's free cast is reachable in no real matchup of the four 75s (none has a Plains-typed land); its
+  cards_hogaak and lane B tests cover it against Tundra, Scrubland and Plains.
+* Scratch branches left in the repository (never merged, local and on the Mac only): `hogaak-proof` (the digest
+  proof), `hogaak-mainref` and `hogaak-scratch` (the repro and the seed scans).
+
+#### 220.4.10 The engine gate
+
+The engine tier on this section's commit, `--tested-sha 1052673bd712` with its suite report and the cube's digests
+(`--expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a`): its result follows in the next commit (docs only).
