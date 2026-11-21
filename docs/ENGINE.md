@@ -41988,3 +41988,84 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
+
+## 218. Farm guards: forks on their own farm runs, a refusing worker stops loudly, inert pool settings said, a reason to stay local; `pool_settings` with the GPU variants and the macOS alternate (zero-core pin c850a5d -> f93ec16, zero-core `feat/farm-guards`, docs/az.md 70; branch `feat/farm-guards`, 2026-11-21)
+
+**Why.** The farm review of 2026-11-21 (the maintainer's notes; section C.2, C.7 and D.6-D.8) found experiments landing
+desktop-only, or worse, without a decision: a fork that kept `selfplay_remote pool:<parent>` published into the parent's
+farm run and `tools/ab.py` would then pause the parent's farm run (ab.py checked only the arms' overrides); a pool whose
+worker refused the settings retried "refused" for a whole A/B while the run played on the desktop; `pool_*` settings
+with `selfplay_remote ''` did nothing and silently turned the farm yardsticks off; the launchers people use are scratch
+scripts that call the run loop or fork_run, which no tool-level check reaches; and a `--pool-build published` run got
+no `pool_variants` (AMD PCs on their CPUs, the CUDA PCs on the float32 graph) and no macOS alternate (the Macs idle).
+
+**The pin** (zero-core docs/az.md 70; Python only, plus one trainer-only key in the worker's settings table, so the
+worker plays and encodes exactly as before - the farm-compat gate below):
+
+* `tools/fork_run.py --source`: every `pool:<farm run>` of the source's self-play (its setting or its
+  `selfplay_remotes` file) becomes the fork's OWN farm run, named after the fork's directory (`--farm own`, default) or
+  `--farm NAME`; a farm evaluation of the source's becomes `pool:<name>-eval`; the source's pool settings kept;
+  `--farm none` keeps the fork on this machine; a `--set` naming the source's farm run is refused. Printed as `FARM:`
+  lines. Every fork gets `fork.json` (`started` once its first start passed its checks).
+* The farm pool: a definitive refusal (`farm_pool.Refused`: the worker's check-config refusing the settings - the
+  keys and their statuses named, not cut off -, no worker, the platform or rolling check, a manifest refusing an
+  alternate) refuses the run's start (exit 78) when met by a new pool's settings check, or stops the pool loudly on
+  its thread (STOPPED + the fix in the log at once and every iteration, `selfplay.pools.<name>.stopped` in the metrics,
+  progress.json `state` 'stopped', the dashboard). Network and coordinator errors stay transient (retried).
+* The run's start: pool settings that do nothing are warned of; without a self-play pool and without a reason, a
+  published farm build of the commit (the game package's `farm_build` hook) refuses a fresh start or a fork's first
+  start (exit 78) and warns on a resume. The reason: the new run setting **`selfplay_local_reason`** (trainer-only),
+  or `$ZERO_SELFPLAY_LOCAL_REASON`.
+
+**This repo.**
+
+* `mtgz.az` registers `farm_build='mtgz.az.farm_builds:published_for_run'`: `lookup('HEAD')` of the checkout the run
+  runs from (an exact release, or a release of the same Rust inputs, 196), described with how to attach it
+  (`--selfplay-remote pool:<farm run> --pool-build published`). A machine without the builds index has none: no check.
+* `mtg-smoke` (and every smoke preset made from it: delver-smoke, delver-bo3-smoke, legacy-meta3-smoke, eoe-smoke, ...)
+  carries `selfplay_local_reason` 'a smoke run: a few games on this machine', so the README's quick start and the
+  gates' run-loop smoke start on a released commit; `tests/conftest.py` sets `ZERO_SELFPLAY_LOCAL_REASON` ('a pytest
+  run') for the runs the tests start (in process or as processes).
+* **`farm_builds.pool_settings(e, alternates=True, cfg=None, log=None)`**: `pool_alternates` is the CUDA alternate,
+  the DirectML one, then the entry's published macOS build (`mac_build`) **only when the run's settings `cfg` pass the
+  farm pool's own platform check** (`mac_check` -> `zero.farm_pool.platform_check` with the release worker:
+  `check-config --platform macos-arm64`, the libm rule, 216.1's reason for leaving it out - a run whose settings it
+  refuses would now have its pool stopped); and **`pool_variants`** names the variant each GPU alternate plays,
+  `VARIANT_OF` = CUDA 'gpu=fp16', DirectML 'dml=matmul@amd' (legacy-meta3-r1's launcher's 'gpu=fp16,dml=matmul@amd',
+  211 / 213.2; left out when the release has neither). A route left out is said through `log` (no published macOS
+  build, a failed macOS part, no run settings, the worker not on this machine, the platform check's refusal).
+  `published_pool` (`--pool-build published`) resolves the run's settings as zero.run will (`run_settings`: its
+  config.json < the flags) when the release has a macOS build and prints what it left out; `tools/ab.py`'s
+  `"pool_build": "published"` checks the source's settings with the arm's overrides; `farm_release.py lookup
+  --pool-args` has no run settings (the macOS build left out, said on stderr). `pool_export` is not set by it (a run's
+  choice: legacy-meta3-r1 runs 'fast').
+* **`tools/ab.py`**: `effective(s, arm, k)` - the arm's forked config.json, else the source's config + the overrides +
+  fork_run's farm rule (`zero.tools.fork_run.fork_farm`) - is what `check` judges (an arm that inherits the source's
+  farm self-plays on its own farm run and needs the spec's `"farm"` and its gates; the plan prints each arm's farm runs
+  and fork_run's notes); `farm_pause` (and `go` after each arm) pauses only the arm's own farm run - one that the
+  source, another arm or any run directory under `runs_dir` names too (`farm_owners`: selfplay_remote, eval_remote or
+  a selfplay_remotes file) raises `FarmNotOwn`: `FARM PAUSE REFUSED`, nothing PUT. The judge path is untouched.
+* **The yardsticks**: `farm_campaign.run_pool_note(cfg)` - pool settings set while selfplay_remote names no pool (the
+  farm path off: `run_pool` is None), or a pool without its build or worker - is logged by the watcher
+  (`tools/run_yardsticks.py watch`) as a `WARNING:` line at its start, next to its settings line.
+
+**Existing runs** (checked read-only on 2026-11-21 under the desktop's runs directory): no run has a fork.json, so
+every resume - live runs after PAUSE included - is a resume (at most warning lines, never refused); every farm run's
+pool state already has its template (`play`), so no settings check runs at a farm run's restart. legacy-meta3-r1 and
+the mirror fork lr3 attach their farm pools (no warning). The paused desktop-only runs would print the published-build
+warning on a resume from a released commit, and the inert-settings warning where they carry pool settings.
+
+**Measured** (the desktop, 2026-11-21, read-only): `lookup('HEAD')` 0.03 s; the pool's settings check on
+legacy-meta3-r1's settings with its release worker f22f63bb 0.23 s (56 play keys), an unknown key refused in 0.04 s
+naming it (`no_such_setting (unknown)`); `pool_settings` of main 1e7416c5's release (5e4023e2) with legacy-meta3-r1's
+settings 0.12 s: `pool_alternates` CUDA 1bf4304c, DirectML 2bc046a8 and macOS cc8db289 (the platform check passed),
+`pool_variants` 'gpu=fp16,dml=matmul@amd'.
+
+**Tests.** `tests/test_farm_release.py` (+3, 3 updated for `pool_variants`): `pool_settings`' variants and macOS
+route (passed, no settings, a libm refusal, not published, failed, no worker here; the variants per alternate);
+`--pool-build published` checking the run's resolved settings (config.json + flags) and leaving the macOS build out on
+a refusal with the reason printed; the `farm_build` hook (none / the release's description) and the run's start
+through it (refused first start, warned resume, a reason). `tests/test_ab.py` (+2): an arm's effective settings (its
+own farm runs, an override kept, an override naming the source's farm refused, a forked arm's config.json), the
+farm-pause guard (the source's farm run refused with nothing PUT, the CLI's `FARM PAUSE REFUSED`, its own paused, one
+another arm or another run's selfplay_remotes file names refused); the yardsticks' note. zero-core's own: docs/az.md 70.

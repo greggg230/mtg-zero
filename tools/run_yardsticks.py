@@ -548,6 +548,10 @@ class Watcher:
                 return 0
             self.log(f"watching {self.run}: {json.dumps(ys)}" + ('' if not ys['bo1_games'] else
                      f"; best-of-one opponents {[o['name'] for o in Y.opponents(self.run, cfg, ys)]}"))
+            from mtgz.az import farm_campaign as C
+            note = C.run_pool_note(cfg)        # (farm settings that do nothing: said, docs/ENGINE.md 218)
+            if note:
+                self.log(f'WARNING: {note}')
             lanes = Y.lanes(self.run, cfg, ys)
             ew = None
             if not self.once:

@@ -1,11 +1,11 @@
 """The published farm builds of MTG Zero's commits (docs/ENGINE.md 196): the index `tools/farm_release.py` writes - one
 entry per released commit: its release worker build, the CUDA alternate, the runtime packs, the gate lines, the macOS
-build (`mac.release`, docs/ENGINE.md 216; not a run alternate here: `pool_settings` leaves it out, a run adds it to its
-`pool_alternates` after the platform check) - and the lookups launchers use ("the build for my commit").
+build (`mac.release`, docs/ENGINE.md 216; a run alternate only after the run's settings pass the platform check:
+`pool_settings` with the run's settings, docs/ENGINE.md 218) - and the lookups launchers use ("the build for my commit").
 
     from mtgz.az import farm_builds as FB
     e = FB.lookup('HEAD')                 # the entry for this checkout's commit, or None
-    FB.pool_settings(e)                   # {'pool_build', 'pool_runtime', 'pool_worker', 'pool_alternates'}
+    FB.pool_settings(e, cfg=run_cfg)      # {'pool_build', 'pool_runtime', 'pool_worker', 'pool_alternates', 'pool_variants'}
 
 Where: `<ZERO_BIG_DISK>/zero-farm-builds/index.json` (the desktop's copies of registered builds sit beside it as
 `<build_id>/`), or $MTGZ_FARM_BUILDS (a directory). A machine without either has no index (lookups answer None).
@@ -16,7 +16,11 @@ flags; the worker executable would be byte-identical), marked `"exact": false`.
 
 `python -m mtgz.az.run ... --pool-build published[:<rev>]` takes the ids from here (`published_pool`): the run's
 settings get the build of the checkout's commit (or <rev>'s) and, unless given, its runtime pack, its signed
-executable and its CUDA alternate.
+executable, its alternates (CUDA, DirectML, and macOS when the run's settings replay exactly there) and the GPU variants
+those alternates play (docs/ENGINE.md 218).
+
+`published_for_run` is the game package's `farm_build` hook (zero-core docs/az.md 70): a run whose self-play stays on
+this machine beside a published build of its commit says why (`selfplay_local_reason`) at its first start.
 """
 import hashlib
 import json
@@ -224,16 +228,92 @@ def lookup(rev='HEAD', root=None, path=None, runtime=None):
     return None if e is None else dict(e, asked=sha)
 
 
-def pool_settings(e, alternates=True):
+# the GPU variant each alternate of a release plays (zero-core docs/az.md 67, 46.10; docs/ENGINE.md 211, 213.2): the
+# CUDA alternate the gen's graph in float16, AMD's DirectML alternate the fast-matmul graph in float32 - what
+# legacy-meta3-r1 runs with and what match campaigns name by default (farm_campaign.submit, ENGINE.md 215)
+VARIANT_OF = {'cuda': 'gpu=fp16', 'dml': 'dml=matmul@amd'}
+MAC_PLATFORM = 'macos-arm64'
+
+
+def mac_check(e, cfg):
+    """May a run with settings `cfg` list entry `e`'s published macOS build as an alternate? -> (True, None) or (False,
+    why). The farm pool's own platform check (zero.farm_pool.platform_check: the release worker's `check-config
+    --platform macos-arm64`, the game's libm rule, zero-core docs/az.md 62) - a run whose settings it refuses would have
+    its pool stopped (docs/ENGINE.md 218), so such a run gets no macOS alternate."""
+    mac = mac_build(e)
+    if not mac:
+        return False, ('the release has no published macOS build' + (describe_mac(e) and f' ({describe_mac(e)[2:]})'))
+    if cfg is None:
+        return False, f'macOS build {mac}: no run settings to check for macOS (the platform check needs them)'
+    w = e.get('worker')
+    if not w or not os.path.isfile(w):
+        return False, f'macOS build {mac}: the release worker {w} that judges the settings is not on this machine'
+    import shutil
+    import tempfile
+    from zero import farm_pool as FP
+    d = tempfile.mkdtemp(prefix='mtgz-mac-check-')
+    try:
+        FP.platform_check(w, dict(cfg), d, MAC_PLATFORM, log=lambda m: None)
+    except SystemExit as x:                    # (farm_pool.Refused: a libm refusal, a worker too old to judge)
+        return False, f'macOS build {mac}: {getattr(x, "reason", None) or x}'
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    return True, None
+
+
+def pool_settings(e, alternates=True, cfg=None, log=None):
     """A build entry -> the farm pool's run settings (zero-core docs/az.md 45): pool_build, pool_runtime, pool_worker
-    (the desktop's copy of the signed executable) and, with `alternates`, pool_alternates (the CUDA alternate, then the
-    DirectML one for AMD GPUs - zero-farm PROTOCOL rev 22; '' when there is none). An AMD PC plays the DirectML
-    alternate on the GPU only with the run's `pool_variants` naming a 'matmul@amd' variant (float32; zero-core docs/az.md
-    46.10); without it the gen's default graph, which DirectML refuses, runs there on the CPU."""
+    (the desktop's copy of the signed executable) and, with `alternates`, pool_alternates - the CUDA alternate, the
+    DirectML one for AMD GPUs (zero-farm PROTOCOL rev 22), then the published macOS build when the run's settings `cfg`
+    pass the platform check (`mac_check`; '' when there is none) - and pool_variants naming the variant each GPU
+    alternate plays (`VARIANT_OF`: 'gpu=fp16' with a CUDA alternate, 'dml=matmul@amd' with a DirectML one; left out
+    with neither): without 'dml=matmul@amd' an AMD PC runs the gen's default graph, which DirectML refuses, on its CPU.
+    A route left out is said through `log` (docs/ENGINE.md 218)."""
+    say = log or (lambda m: None)
     out = {'pool_build': e['build_id'], 'pool_runtime': e['runtime'], 'pool_worker': e['worker']}
     if alternates:
-        out['pool_alternates'] = ','.join(b for b in ((e.get('cuda') or {}).get('build_id'), (e.get('dml') or {}).get('build_id')) if b)
+        alts, variants = [], []
+        for k in ('cuda', 'dml'):
+            b = (e.get(k) or {}).get('build_id')
+            if b:
+                alts.append(b)
+                variants.append(VARIANT_OF[k])
+        ok, why = mac_check(e, cfg)
+        if ok:
+            alts.append(mac_build(e))
+        else:
+            say(f'farm build: no macOS alternate - {why}')
+        out['pool_alternates'] = ','.join(alts)
+        if variants:
+            out['pool_variants'] = ','.join(variants)
     return out
+
+
+def run_settings(argv):
+    """A run's settings as `python -m mtgz.az.run argv` will resolve them (zero.run: DEFAULTS < preset < its
+    config.json < the flags), for the platform check of `pool_settings`; None (said) when they cannot be resolved (the
+    run then fails on its own at its start)."""
+    try:
+        from zero import run as R
+        a = R.parse(argv)
+        saved = {}
+        p = os.path.join(a.run, 'config.json')
+        if os.path.exists(p):
+            with open(p, encoding='utf-8') as f:
+                saved = json.load(f)
+        return R.resolve_config(a, saved)
+    except (SystemExit, ValueError, OSError) as x:
+        print(f'farm build: the run\'s settings could not be resolved here ({x}): no macOS alternate', flush=True)
+        return None
+
+
+def published_for_run(run, cfg):
+    """The game package's `farm_build` hook (zero-core docs/az.md 70): the published farm build of this checkout's
+    commit (`lookup('HEAD')`), described for the run's log with how to use it, or None (none, or no index here)."""
+    e = lookup('HEAD')
+    if e is None:
+        return None
+    return f'{describe(e)}; use it with --selfplay-remote pool:<farm run> --pool-build published'
 
 
 def describe_mac(e):
@@ -268,8 +348,9 @@ def _flag(argv, name):
 
 def published_pool(argv, root=None, path=None):
     """A run's command line with `--pool-build published` (or `published:<rev>`) replaced by the published build of the
-    checkout's commit (or <rev>'s) and its --pool-runtime, --pool-worker and --pool-alternates added unless given
-    (`python -m mtgz.az.run` does it: the ids are saved in config.json like any flag). SystemExit when there is none."""
+    checkout's commit (or <rev>'s) and its --pool-runtime, --pool-worker, --pool-alternates and --pool-variants added
+    unless given (`pool_settings` with the run's settings: `run_settings`; `python -m mtgz.az.run` does it: the ids are
+    saved in config.json like any flag). SystemExit when there is none."""
     i, v = _flag(argv, '--pool-build')
     if v is None or not (v == 'published' or v.startswith('published:')):
         return argv
@@ -283,7 +364,7 @@ def published_pool(argv, root=None, path=None):
         out[i + 1] = e['build_id']
     else:
         out[i] = f'--pool-build={e["build_id"]}'
-    for k, val in pool_settings(e).items():
+    for k, val in pool_settings(e, cfg=run_settings(out) if mac_build(e) else None, log=print).items():
         flag = '--' + k.replace('_', '-')
         if k != 'pool_build' and _flag(out, flag)[1] is None:
             out += [flag, val]

@@ -932,7 +932,10 @@ def cmd_lookup(a):
     if a.json:
         print(json.dumps(e, indent=1))
     elif a.pool_args:
-        print(' '.join(f'--{k.replace("_", "-")} {v if v else chr(39) * 2}' for k, v in FB.pool_settings(e).items()))
+        # (no run settings here: the macOS build is left out, said on stderr - a run gets it through --pool-build
+        # published, which checks its settings for macOS; docs/ENGINE.md 218)
+        ps = FB.pool_settings(e, log=lambda m: print(m, file=sys.stderr))
+        print(' '.join(f'--{k.replace("_", "-")} {v if v else chr(39) * 2}' for k, v in ps.items()))
     else:
         print(FB.describe(e))
     return 0
