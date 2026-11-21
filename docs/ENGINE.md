@@ -41621,3 +41621,212 @@ this machine).
 
 This commit moves the pin to c850a5d, zero-core docs/az.md 68's measurements on top of ba607c2 (ba607c2..c850a5d:
 docs/az.md only, so the gate above stands for it), and adds the measurements above.
+## 215. Match campaigns on the whole farm: every alternate of the build's release by default - CUDA, DirectML for AMD, macOS - with GPU variants per network and the GPU self-test (`farm_campaign.submit` `alternates` / `variants`, `--no-alternates`; branch `feat/campaign-alternates`, 2026-11-21)
+
+Branch `feat/campaign-alternates` from main e9ff0e24; Python and docs only (no Rust input, no zero-core change: the
+pin stays 35a47a9). Why: the user wants experiments that play many games - head-to-heads, A/B judges, the yardsticks -
+on zero-farm by default, and match campaigns (165) were slow there partly because they ran on Windows CPUs only:
+`submit` created the campaign's coordinator run with the build's CPU worker and no alternates, so an NVIDIA PC played
+its leases on its CPU, an AMD PC too, and the Macs never took one. The coordinator's leases table showed it: the
+legacy-meta3-r1 cells campaigns' leases (`cmp-legacy-meta3-r1-cellsbase-*`, 11-18 to 11-20) all on the CPU builds
+(5307720f, d5b6a787, f1fa951d), 32 games taking 45-60 minutes on one PC, while the same run's own evaluation batches
+(`legacy-meta3-r1-eval`, zero-core docs/az.md 65) go to its CUDA, DirectML and macOS alternates, a Mac playing 100
+games in ~5 minutes. Campaign runs are coordinator runs: a run's `alternates` (zero-farm PROTOCOL 9.4, 11.4) and model
+variants (14) apply to them unchanged.
+
+### 215.1 What a campaign lists now
+
+`mtgz.az.farm_campaign.submit(..., alternates='release', variants='gpu=fp16,dml=matmul@amd')` - the defaults, so the
+CLI (`tools/farm_campaign.py submit`), the yardsticks' farm path (`measure_bo1_farm`, `play_pair_farm`: the cells and
+`tools/ab.py judge`) and anything else that calls `submit` get them without a change. Before anything is put
+(`prepare_alternates`, once per campaign, its result in the state):
+
+1. **The ids.** `alternates='release'`: every alternate the release index (`mtgz.az.farm_builds`, written by
+   `tools/farm_release.py`, 196) holds for the campaign's worker build - its newest published entry whose `build_id` it
+   is: the CUDA alternate, the DirectML alternate for AMD GPUs (213), the macOS build when it was published
+   (`--mac-publish`, 197.6), in that order of preference. A route the release lacks is a note; a build the index has no
+   release of (a worker signed by hand) gets no alternates - **CPU only, said in the log and the state**
+   (`alternates_note`), never silently. `alternates=None` (`--no-alternates`): none, also noted. A list
+   (`--alternates ID,ID`): exactly those builds.
+2. **Checked as a run's** (`zero.farm_def.run_alternates`): worker builds of the build's game, each requiring its pack;
+   `when.vendor` from a GPU pack's `gpu.vendor`, `when.platform` for another platform's build (a CPU alternate). And
+   each must be the default build's engine (its signed manifest's `engine_commit`): a campaign's games are replayed
+   here by this engine, so an alternate of another commit is refused (the live run's macOS build b96e45a0 is c8e40f5a's,
+   its default f22f63bb e9ff0e24's: a campaign of f22f63bb does not list it).
+3. **A platform alternate** (macOS) only if the job's settings replay exactly there: the default worker's `check-config
+   --eval --platform macos-arm64` (zero-core docs/az.md 62, as the eval pool checks; without `--eval` for a samples
+   job). A libm refusal leaves the release's macOS route out with a note in the log and the state (the yardsticks have
+   no flag to drop it); a list that names it is refused.
+4. **Variants.** Each GPU alternate is named its variant (`zero.farm_pool.variant_of` over `variants`, the run
+   setting `pool_variants`' syntax: its vendor's, else the first without one) - by default the CUDA alternate 'gpu'
+   (`fp16`: `onnx_export.to_float16` of the network's graph) and AMD's DirectML alternate 'dml' (`matmul`: the
+   checkpoint exported again as graph 'fast-matmul' by `zero.farm_h2h.export_cached`, float32, the one zero-onnx/2
+   graph DirectML runs deterministically on AMD, zero-core docs/az.md 46.10). Every named variant is exported for
+   every network of the campaign (gen 1 = A, gen 2 = B) beside its graph in the export cache
+   (`~/.zero-farm/campaigns/_exports/<key>/model-<form>.onnx`; the fast-matmul weight-swap templates under
+   `_exports/templates/`), then signed in the definition (`checkpoints[gen].variants`, PROTOCOL 14.1), uploaded
+   (`ckpt/<run>/<gen>/model-<name>.onnx`) and registered with the gen (`PUT .../checkpoint/<gen>` `variants`, 14.2). A
+   variant no listed alternate names is not exported. `variants=''`: the GPU alternates play each gen's default graph.
+5. **The GPU self-test.** Every graph a GPU alternate will play - its variant, else the gen's default graph - is
+   self-tested on this machine's GPU through **that alternate's own signed worker and runtime pack** (the desktop's
+   copies under `$ZERO_BIG_DISK/zero-farm-builds/<id>/`, each checked against the coordinator's signed manifest: the
+   manifest's bytes are the id, the executable its sha256, the platform this machine's - another platform's executable
+   is never run here, 212): `probe-providers --runtime-dir <pack> --model <graph> --reference <the gen's reference set>
+   --providers <the pack's GPU provider>,cpu --reps 2`, both providers passing (the graph's tolerance - float16's for a
+   float16 graph, zero-core docs/az.md 67 - and the same answers twice): tools/farm_release.py's cuda-selftest /
+   dml-selftest on the campaign's own networks. Results kept beside the export by (graph sha256, alternate, pack), so a
+   network the yardsticks use again is not tested again. Without variants, AMD's DirectML alternate fails here (DirectML
+   refuses zero-onnx/2 default graphs, 46.10): the campaign is refused rather than playing AMD PCs on their CPU unsaid.
+6. **min_agent**: at least `farm_def.VARIANT_AGENT` (0.3.5) when a variant is named (a definition that signs one,
+   PROTOCOL 14.1; the coordinator counts it so anyway). Not the highest route's minimum: each alternate's own build
+   carries its agent minimum (the CUDA build 0.2.11, the DirectML build 0.3.11, the macOS build 0.3.0) and the
+   coordinator holds a route from an older agent per machine (PROTOCOL 9.4 condition 6, coordinator `choiceFor`),
+   whereas a run's `min_agent` gates every route: 0.3.11 would keep the macOS agents (0.3.10 today) from the whole
+   campaign. The routes' minima are in the state (`alt_routes`).
+
+Any failure - an alternate that is not the build's engine, an export, a self-test - raises `CampaignError` with the
+reason also in the state (`alternates_error`); nothing has been put on the farm, and `submit NAME` again resumes there.
+Then the run PUT carries `alternates` (each GPU one with its `model`) and the raised `min_agent` before the first
+definition (PROTOCOL 14.5); the definition's `builds` list the alternates' builds after the default; `gpu` stays 'any';
+GPU leases are sized by the coordinator (`games_per_lease` 'auto': `gpu_games_per_lease` absent = auto, PROTOCOL
+9.4). `status` and the collected result name the alternates and the note. A campaign created before this branch (no
+`alt_want` in its state) puts exactly what it put before - its PUT bodies and definitions have no `alternates` key and
+`builds` [the build] - so resuming one changes nothing.
+
+Flags (`tools/farm_campaign.py submit`): `--alternates release|ID[,ID...]`, `--no-alternates`, `--variants SPEC`
+('' = none). The yardsticks have no setting of their own for it (they inherit the default).
+
+### 215.2 Tests
+
+`tests/test_farm_campaign_alternates.py` (5; a fake coordinator and fake signed builds, no farm, GPU or network): the
+release index's routes and notes; the PUT's alternates with `when` and `model`, the definition's builds and signed
+variants (validated by `farm_def.prepare`), the variants uploaded and registered with each gen, the first PUT carrying
+the alternates before the definition, min_agent 0.3.5 and the routes' own minima, the self-test of every graph through
+each GPU route's own worker and pack (the Mac's never run here); the refusals (another engine, a failing self-test, a
+libm refusal of a named macOS build) with the reason in the state and nothing put; the release's macOS route left out
+on a libm refusal; none at all noted; a campaign from before the branch unchanged; a route of another platform never
+run here and a tampered executable refused; the self-test's reading of probe-providers (one passing adapter of two is a
+pass; a non-deterministic GPU, a crash); a release whose only route is a refused macOS build ends CPU only, noted.
+With tests/test_farm_play.py, test_cells_yardstick.py, test_farm_release.py, test_yardsticks.py and
+test_yardstick_cost.py: 56 passed, 4 skipped (live-run fence, no locally built worker); privacy check 0 findings.
+
+### 215.3 End to end on the farm (2026-11-21)
+
+`tools/farm_campaign.py submit alts-test --a <legacy-meta3-r1>/models/iter_1040.pt --b .../iter_1024.pt --games 64
+--build f22f63bb0c461180b6260b3e --sims 32 --bo1 --games-per-lease 16` from this branch (18e06f8b), under the slot
+throttle, then `collect alts-test`: the yardsticks' best-of-one of the run's evaluation spec at 32 simulations, paired,
+seed 0, the default share (0.25) and priority; the build of main e9ff0e24's release (CPU pack d531424b). The online farm
+then: four Windows PCs (three with an NVIDIA GPU, one with an AMD GPU, agents 0.3.13) and two Macs (0.3.10).
+`--games-per-lease 16` only to cut the 64 games into four leases (a set number sizes GPU leases too, PROTOCOL 9.4).
+
+* **Setup** (499 s on the desktop, nothing on the farm until it passed): the two exports 149.5 and 128.0 s; the release
+  note "no macOS build (tools/farm_release.py --mac): Macs take none of the leases"; variants: `matmul` 139.9 s for
+  gen 1 (the fast-matmul weight-swap template and its reference positions, once per architecture) and 2.2 s for gen 2
+  (a weight swap), `fp16` 0.3 and 1.6 s; the GPU self-tests on the desktop's GPU, all deterministic - CUDA alternate
+  cca21cdd on the `gpu` (float16) graphs: max abs 1.19e-2 and 7.65e-3 (its CPU 1.08e-2, 5.81e-3; float16's tolerance
+  5e-2), DirectML alternate 92041956 on the `dml` (float32 MatMul) graphs: 8.85e-6 and 5.13e-6 (CPU 4.89e-6, 5.99e-6);
+  min_agent none -> 0.3.5. The coordinator's view (GET run): both alternates with their `model`, `problems` [] and
+  `variant_notes` [] (the AMD one's `gpu_notes`: "amd GPUs run dml only; offered to agents from 0.3.11"); definition 1
+  with builds [f22f63bb, cca21cdd, 92041956], `needs_agent` 0.3.5, variants `dml` and `gpu` for gens 1 and 2.
+* **Leases** (the leases table, read only): none for 24 minutes after the batch was put (17:26:53 UTC): the GPU PCs
+  were playing the live run's self-play on their GPUs and deferred the batch, and the one PC routed as a CPU PC was in
+  a fuzz lease (215.6). Then four leases of 16 games, 17:51:03 to 17:58:31, **every one on an alternate with its
+  variant**: the CUDA alternate (variant `gpu`) 2 leases, 32 games, on two NVIDIA PCs - one played on CUDA (its
+  agent's bench: 705 rows/s CUDA against 512 CPU; the worker's CUDA self-test 1.6e-2 and 7.4e-3), the other's agent
+  measured its CPU faster at these 4-row batches (685 against 442) and played the float16 graph on the CPU (self-test
+  1.1e-2, 5.8e-3); the DirectML alternate (variant `dml`) 2 leases, 32 games, on the AMD PC, whose agent measured
+  its CPU faster at 4-row batches (654 against DirectML's 90: DirectML's fixed cost per call, zero-core docs/az.md
+  46.10) and played the float32 MatMul graph on the CPU. No lease on the default CPU build; no Mac (no macOS build).
+  Leases took 3.4 to 6.6 minutes for 16 games. Larger GPU leases (`games_per_lease` 'auto': at least 128 games a GPU
+  lease) are where the agents' benches choose the GPUs; the routing, the variants and their self-tests are what this
+  test shows.
+* **Collect**: 64 of 64 games from the farm, 0 local, 0 failed; every row's digest checked; the spot check 4 of 64 (the
+  campaign's 5%) equal, and all 64 replayed from seed + moves afterwards (by hand: `spot_check(frac=1.0)`), equal -
+  the CUDA-played lease's games among them; the games' digest 3938f0af409706e3; the farm run paused (the
+  coordinator: `state` paused). **Readout** gen 1040 vs gen 1024: score 0.406 +- 0.042 (32 pairs: 7 both lost, 24
+  split, 1 both won), Elo -65.9 +- 30.0 (95% -127 to -8.5), margin -3.19, 0 unfinished - the direction and size of
+  the run's own farm evaluation (its Elo pool: gen 1024 1042, gen 1040 980, each +- ~170).
+* **Wall time**: 40 minutes from the submit to the result - 8.3 setting up, 24 queued, 7.5 playing, 20 s collecting.
+
+### 215.4 The judges' lease-size sidecar is no longer needed
+
+A stopgap of 2026-11-18 (`judge_lease_size.py` in the maintainer's scratch, not in the repo) re-PUT every open batch of
+the legacy-meta3-r1 cells campaigns with `games_per_lease` 32: an 'auto' eval lease was sized to ~450 s of the
+machine's measured rate, and a PC that had played 1-7 games at once measured a low rate and kept getting 1-7 game
+leases (the 11-18 `cellsbase-01089b042b-c0` leases: 1 to 7 games each). The coordinator's CPU eval lease floor (zero-farm
+PROTOCOL rev 18, 12.3: an 'auto' eval lease that is not a GPU lease gets at least `eval_games_per_thread` (2) x the PC's
+threads, RAM-capped) does the same job: the 11-20 `cellsbase-db604a586e` campaigns ran with `games_per_lease` 'auto'
+(the sidecar was no longer running: its log's last action 11-18 15:53, no process) and got 12- to 40-game leases (40
+on a 20-thread PC, 32 on 16-thread PCs). The sidecar can stay retired; its hub todo can close. (It also re-PUT
+`alternates` as it found them, so it would not have undone this section's.)
+
+### 215.5 macOS in every release: what it would take (a proposal; nothing changed)
+
+The watcher (`tools/farm_release_watch.py`, 196.4) runs `farm_release.py release <head>` with no flags, so a release
+has no macOS build unless one is forced by hand with `--mac --mac-publish` (as for c8e40f5a's b96e45a0, which
+legacy-meta3-r1 still lists although its default build is e9ff0e24's: a campaign of e9ff0e24 refuses it, 215.1 point 2).
+For every release to carry one, so that campaigns list it by default:
+
+1. **Flags.** `release <head> --mac --mac-gates --mac-publish --no-speed-mac` from the watcher: a `--release-args`
+   pass-through (or those flags fixed) in farm_release_watch.py, then the watcher stopped (`--stop`) and started again
+   from a pinned worktree of a commit that has it (196.4). `release.json` already names `mac_runtime` (the macOS CPU
+   pack 040b1882, published), so `--mac` works today. `--mac-gates` (197.4: farm parity on the Mac, the records across
+   platforms) because a published macOS build is now played by default; `--no-speed-mac` because the speed gate's Mac
+   windows wait for an idle Mac (the bench booking `~/mtgz-macfarm/bench.lock`, the run's quiet lock
+   `~/mtgz-remote/.eval.lock`) and the Mac is itself a farm machine and the run's eval host - a release must not stall
+   or fail on "machine in use".
+2. **Reuse.** The release's reuse step (same Rust inputs: no build, 196.2 step 1) requires the source entry's CUDA and
+   DirectML routes to match what is wanted but not its macOS build: a commit reusing e9ff0e24's entry (`mac` null)
+   would get none even with `--mac`. The condition needs `bool(same.get('mac')) == want_mac` (and the macOS runtime
+   the same), or, better, a reused entry gets only the missing macOS part built and published (the Rust inputs are
+   equal, so the source commit's Mac build is this commit's).
+3. **The Mac build path** (197.2, farm_build.py `--platform macos-arm64`): the commit pushed to the Mac's mirror (the
+   `mac` remote, `refs/heads/farm-build-<sha12>`) and the zero-core pin to its core mirror (tools/mac.sh's), the Mac's
+   one farm checkout `~/mtg-zero-wt/farm-build` checked out forced and clean under its lock (`<checkout>.mac-lock`: one
+   build at a time, a second waits, a dead owner's lock is taken over), `cargo build --release -p mtgz_worker` at `nice
+   -n 15` in its own target dir with no RUSTFLAGS, copied back and checked (a thin arm64 Mach-O linking only
+   libSystem, `codesign --verify`, `info`), signed on the desktop (the key never leaves it), published (`--mac-publish`:
+   registered with the coordinator and copied to `$ZERO_BIG_DISK/zero-farm-builds/<id>/`), recorded in the entry's
+   `mac.release` - which is what `release_alternates` reads. No booking is needed for a build (only for speed windows);
+   it shares the Mac with the live run's evaluation, gate offloads (tools/mac.sh, at most two) and the Mac's own farm
+   agent, all at nice 15.
+4. **The Mach-O in the builds directory.** `--mac-publish` puts a Mach-O `mtgz-worker` in
+   `$ZERO_BIG_DISK/zero-farm-builds/<id>/`; a Windows process that runs every alternate's executable there broke the
+   farm pool once (212: WinError 193 every poll, no gen published). Fixed in zero-core 03686a1 (the pool reads the
+   manifest's platform first); this section's campaign code never runs another platform's executable (`local_build`
+   refuses by the manifest's platform; only the Windows GPU routes are self-tested). Any run whose `pool_alternates`
+   names a macOS build must be on a commit with zero-core >= 03686a1 before the watcher publishes macOS builds (the
+   live legacy-meta3-r1 is: core 35a47a9).
+5. **The coordinator** takes platforms already (rev 17, migration 0013; the Macs play legacy-meta3-r1's evaluation
+   on b96e45a0), and the macOS agents (0.3.10) meet the build's minimum (0.3.0) and the variants' (0.3.5).
+
+### 215.6 Open points
+
+* **The default graph on CPU and Mac.** A campaign's networks are exported as the default zero-onnx/2 graph (165:
+  `farm_h2h.export`), while the live run's pool and evaluation export the fast graph (`pool_export` 'fast', zero-core
+  docs/az.md 63: ~2.5x cheaper per batch on a CPU, the Mac's measurement). Exporting campaigns' graphs the fast way
+  (through `export_cached` with a template per architecture) would speed up their CPU and Mac leases too; not done
+  here (it changes every CPU lease's graph, not only the alternates').
+* **The coordinator's eval deferral counts the Macs as CPU capacity for a batch they cannot play** (zero-farm,
+  PROTOCOL 12.2, coordinator `cpuEvalRate`: every online PC with `gpu_play` 0, whatever its platform). A PC that plays
+  a run's self-play on its GPU defers an eval batch unless the CPU PCs' eval rates x `eval_horizon_s` fall short of its
+  unissued games; with the two Macs counted, a Windows-only campaign (no macOS build in its release) is never
+  "behind", so the GPU PCs take it only at a rolling renewal while the live run's generation has no headroom, and the
+  CPU PCs only when free. A coordinator change (count only PCs of a platform the batch has a build for); not made here.
+  A release with a macOS build sidesteps it: the Macs then play the campaign themselves.
+* **The yardsticks** have no setting to opt out of alternates (they inherit the default); the CLI has
+  `--no-alternates`.
+* A GPU self-test runs on this machine's GPU (seconds each, cached per graph and route); a machine without a GPU of a
+  listed route's provider refuses the campaign (by design: pass `--alternates` without it, or `--no-alternates`).
+
+### 215.7 The gate
+
+On 47c1eb75 (the code and 215), in the warm worktree warm-1, `--offload local`, with the system Python 3.13:
+**GATE PASSED WITH SKIPS python 47c1eb75b749 in 691s** - pytest 724 passed in four shards (153, 167, 261, 143), skipped:
+7 live-run-hazard tests (fenced: live runs on this machine); the run-loop smoke 16 games, 0 unfinished; privacy 0
+findings. Two earlier runs failed on tests this branch does not touch: on 37ba1cf8 with the zero-farm venv's Python,
+`tests/test_artifact_cache.py::test_an_acquired_lease_outlives_the_process_that_asked` (a venv's python.exe on Windows
+is a launcher whose child is the interpreter, so the Popen pid is not the pid the child records; it passes with the
+system Python, as in the gate above), and on 0c8ce0ef `tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`
+(its 300 s wait ran out while the shards ran two to three times slower than usual beside the live runs and this
+section's farm test; alone: 2 passed in 197 s).
