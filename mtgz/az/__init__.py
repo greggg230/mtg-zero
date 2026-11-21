@@ -498,6 +498,10 @@ PACKAGE = register(GamePackage(
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
     engine_paths=ENGINE_PATHS,
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
+    # a multi-source distillation's row selector (zero-core docs/az.md 71, docs/ENGINE.md 222.1): a metagame run's
+    # rows by the acting player's deck and the pairing ({"actor"}, {"pairing"}, {"not_pairing"}), read exactly from
+    # each row's bags (mtgz.az.rowselect)
+    row_selectors={'mtg': 'mtgz.az.rowselect:row_select'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
     env_prefix='MTGZ', presets=PRESETS, tokens={'mtg': LAYOUT, 'team_draft': LAYOUT_DRAFT, 'mtg_eoe': LAYOUT_EOE},
