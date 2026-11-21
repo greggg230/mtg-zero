@@ -3,19 +3,22 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
 
     python tools/farm_release.py release <commit | worktree> [--force] [--regate] [--no-publish] [--no-slot]
         [--speed-baseline <build id>] [--speed-minutes 3] [--speed-tolerance 0.05] [--speed-cuda] [--no-speed]
+        [--no-mac] [--no-mac-gates] [--no-mac-publish] [--mac-fuzz] [--speed-mac]
     python tools/farm_release.py lookup <commit> [--json | --pool-args]
     python tools/farm_release.py list [N]
     python tools/farm_release.py reference --config <run>/config.json --checkpoint <run>/models/iter_N.pt
                                           --export <dir with model.onnx + reference.npz of that checkpoint>
     python tools/farm_release.py config                    # the settings in force (release.json + defaults)
 
-`release` runs unattended and stops at the first failing step with "farm_release: FAILED at <step>: ..." (exit 1):
+`release` runs unattended and stops at the first failing step with "farm_release: FAILED at <step>: ..." (exit 1) - except
+in the macOS part (below), whose failure is recorded and leaves the published builds in place (exit 3):
 
 1. **reuse**: the commit's farm worker inputs (`mtgz.az.farm_builds.rust_key`: every Rust path's git tree, the
    zero-core pin, the toolchain, the farm build's flags - tools/zcache.py's rule, read from the commit) equal a
    published entry's -> that build is the commit's too: an index entry `reused_from` it, nothing built, signed or
    published (its gates stand; `--regate` runs the farm gates again on this commit's Python). A commit already in
-   the index is done (`--force`: release it again).
+   the index is done (`--force`: release it again). Either way an entry without a complete macOS part gets only that
+   part (the backfill, below).
 2. **checkout**: the release worktree (`<the main checkout's sibling mtg-zero-wt>/farm-release`, its own target dir
    `<ZERO_BIG_DISK>/cargo-target/mtg-zero/farm-release`; created once, reused) at the commit: forced, untracked files
    removed, the zero-core submodule at the pin and clean. A worktree argument must be clean; its HEAD is released.
@@ -39,11 +42,11 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
    them, zero-core docs/az.md 61) - the refusal that once forced a rebuild shows here.
 8. **gates**: the commit's tools/farm_gates.py on the reference config and checkpoint with the signed worker and the
    CPU pack (gate 2: the worker vs the Python remote worker, gate 3: records replayed), CPU only.
-8b. **speed** (docs/ENGINE.md 200; after the macOS steps with `--mac`): this checkout's tools/farm_speed.py - the new
+8b. **speed** (docs/ENGINE.md 200): this checkout's tools/farm_speed.py - the new
    build against the previous published release build (`--speed-baseline`: another) in interleaved windows new, old,
    old, new of `--speed-minutes` (3) each, leaves/s, on the desktop's CPU (holding a slot; below normal priority), with
-   `--mac` the Mac (its builds; the previous macOS build from the index or `--speed-mac-baseline`, `speed.mac_baseline`
-   in release.json), with `--speed-cuda` the GPU (tiny). Each side plays the reference checkpoint: the old side the
+   `--speed-cuda` the GPU (tiny); the Mac's windows are the macOS part's step `speed-mac` (off by default). Each side
+   plays the reference checkpoint: the old side the
    reference export, the new side the commit's own export of it (gates' model.onnx; release.json `speed.export`
    "same": the reference export too), so an export change counts with the build. Only on an idle machine: before each
    window no user input for 3 minutes and AC power, input during a window discards it (redone at most 3 times, then
@@ -60,29 +63,57 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
    `<builds>/releases/<sha12>/result.json` (a failure too, with its step) and the release notes - one line per gate -
    in `<builds>/releases/<sha12>/notes.txt`.
 
-**`--mac`** (opt-in; zero-farm PROTOCOL.md 11, docs/ENGINE.md 197; needs the Mac, `MTGZ_MAC`): after the gates,
-11. **mac-build**: `farm_build.py --root <release worktree> --profile release --platform macos-arm64 --runtime-id
-   <mac_runtime>` - the same commit built on the Mac, signed here (not published) - and with `--mac-fuzz` the macOS
-   fuzz build (`--profile fuzz --platform macos-arm64`), each copied to ~/mtgz-macfarm/builds/<build_id>/ on the Mac;
-12. **mac-gates** (`--mac-gates`): `farm_gates.py --mac` with that worker and pack on the reference (farm parity on
-   the Mac, the reference export's records replayed here with 0 refused and rows identical; with `--mac-fuzz` also a
-   fuzz chunk on both fuzz builds, outcomes identical);
-13. **mac-plan**: what the runs and campaigns would need - printed and saved (`releases/<sha12>/mac-plan.json`), never
+**The macOS part** (zero-farm PROTOCOL.md 11, docs/ENGINE.md 197 and 216; needs the Mac, `MTGZ_MAC`): ON by default
+(release.json `mac`, default true; `--no-mac` or `"mac": false`: none), and AFTER the index entry is written, so the
+Windows, CUDA and DirectML builds are published whatever happens on the Mac:
+11. **mac-reach**: ssh to the Mac answers within 20 s (else the part fails at once: asleep, offline, refused);
+12. **mac-build**: `farm_build.py --root <release worktree> --profile release --platform macos-arm64 --runtime-id
+   <mac_runtime>` at the commit the entry's build was built at (`built_at`: so its manifest's engine_commit is the
+   Windows build's) - built on the Mac in its one farm checkout under that checkout's lock at nice 15, signed here -
+   and with `mac_fuzz` (`--mac-fuzz`) the macOS fuzz build (`--profile fuzz --platform macos-arm64`), each copied to
+   ~/mtgz-macfarm/builds/<build_id>/ on the Mac;
+13. **mac-gates** (`mac_gates`, default true; `--no-mac-gates`): `farm_gates.py --mac` with that worker and pack on the
+   reference (farm parity on the Mac, the reference export's records replayed here with 0 refused and rows identical;
+   with `mac_fuzz` also a fuzz chunk on both fuzz builds, outcomes identical);
+14. **speed-mac** (`mac_speed`, default FALSE: its windows need an idle Mac, and the Mac is a farm machine and a run's
+   evaluation host; `--speed-mac`): step 8b's Mac windows (the previous macOS build from the index or
+   `--speed-mac-baseline`, `speed.mac_baseline` in release.json) into `releases/<sha12>/speed-mac/`;
+15. **publish-mac** (`mac_publish`, default true; `--no-mac-publish`): the macOS builds published and copied to
+   `<builds>/<build_id>/` - a Mach-O executable there, which nothing on Windows runs (zero-core's farm pool and the
+   match campaigns read a build's platform from its manifest first, docs/ENGINE.md 212);
+16. **mac-plan**: what the runs and campaigns would need - printed and saved (`releases/<sha12>/mac-plan.json`), never
    PUT: for each `--mac-run RUN=<config.json>` (default the reference run) the libm check (`check-config --platform
    macos-arm64` of this commit's Windows worker: a run whose replay depends on the platform's libm gets no macOS
    alternate), the config change (`pool_alternates` + the macOS build: the farm pool makes it a CPU alternate,
    zero-core docs/az.md 62) and the PUT body and definition builds it would send; for each `--mac-campaign ID` its
    configuration (GET, read only), the libm check of its mode (`fuzz-check --platform macos-arm64`) and the PUT with
-   `"alternates": [{"build_id": <macOS fuzz build>, "when": {"platform": "macos-arm64"}}]`.
-The macOS builds are not published (`--mac-publish` publishes them too: only once the coordinator takes platforms,
-migration 0013) and get no index entry of their own: the entry's `mac` field records them.
+   `"alternates": [{"build_id": <macOS fuzz build>, "when": {"platform": "macos-arm64"}}]`. A plan that cannot be
+   made is noted in it, never the part's failure;
+17. **record**: the entry's `mac` field (`release` {build_id, dir, mac_path, published}, `fuzz`, `gates`, `speed`,
+   `plan`, `runtime`, `commit` built at, `at`) on every published entry of the same build that lacks a complete one
+   (mtgz.az.farm_builds.update: in place, under the index lock). The macOS builds get no index entry of their own.
+
+**Backfill.** An entry's macOS part is complete when its `mac.release` names a build - published when `mac_publish`,
+for the current `mac_runtime`, with a fuzz build when `mac_fuzz` (the Mac gates are not re-run for an entry that has its
+build). A reused entry (step 1) or a commit already in the index whose entry is not complete gets only the macOS part:
+another entry of the same build that has a complete one is copied (nothing built), else steps 11-17 run at its
+`built_at`. A complete entry: nothing (a second run builds nothing).
+
+**A failed macOS part** (the Mac unreachable, no `mac_runtime`, a build, a gate or the publish failing, anything raised)
+never takes the rest with it: the entry keeps its published builds and records `mac: {"failed": <step>, "error", "at",
+"built"}` (no `release`: the campaigns list no macOS route), result.json `mac_failed`, the notes, and the last line
+`farm_release: MACOS PART FAILED at <step>: ...`; exit status **3**. The next run of the same commit backfills it (the
+watcher retries it, tools/farm_release_watch.py).
 
 Publishing makes a build AVAILABLE: no run is attached or changed. Heavy steps (build, modules, gates) each hold a slot
 of tools/slotd.sh (`--no-slot`: not), and the whole release runs below normal priority. One release at a time on the
 machine (`<builds>/.release.lock`).
 
 Settings: `<builds>/release.json` (machine-local, untracked; `config` prints what is in force): cpu_runtime,
-cuda_runtime, cuda_min_agent, python (the gates' interpreter: torch + onnx + onnxruntime; default this one), url,
+cuda_runtime, cuda_min_agent, dml_runtime, dml_min_agent, mac_runtime, mac_min_agent, the macOS part's switches `mac`
+(true), `mac_gates` (true), `mac_publish` (true), `mac_fuzz` (false), `mac_speed` (false) - each overridden for one run by
+its flag (`--mac` / `--no-mac`, `--mac-gates` / `--no-mac-gates`, ..., `--speed-mac` / `--no-speed-mac`) -, python (the
+gates' interpreter: torch + onnx + onnxruntime; default this one), url,
 reference {config, checkpoint, export} (default `<builds>/reference/`, written by `reference`), speed (the speed gate:
 tolerance, minutes, warmup_s, blocks, retry_blocks, idle_min_s, idle_wait_max_s, idle_redo, model, export,
 mac_baseline, machines {cpu, mac, cuda: job layout, priority / nice, ...}; tools/farm_speed.py SPEED_DEFAULTS). A runtime pack's
@@ -118,17 +149,52 @@ DEFAULTS = {
     'dml_runtime': None,                           # the DirectML pack for AMD GPUs (farm_build.py --runtime --pack dml)
     'dml_min_agent': '0.3.11',                     # agents that use AMD GPUs through DirectML (PROTOCOL rev 22)
     'mac_min_agent': '0.3.0',                      # agents that know platforms (PROTOCOL 11)
+    # the macOS part of every release (module docs, docs/ENGINE.md 216); each overridden by its flag for one run
+    'mac': True,                                   # build it (and backfill entries without one)
+    'mac_gates': True,                             # farm_gates.py --mac on the reference
+    'mac_publish': True,                           # publish the macOS builds (what campaigns list)
+    'mac_fuzz': False,                             # the macOS fuzz build too
+    'mac_speed': False,                            # the speed gate's Mac windows (they need an idle Mac)
     'python': None,
     'url': 'https://farm.greggg230.com',
     'reference': None,
 }
 SLOT_WAIT = 4 * 3600
+EXIT_MAC_FAILED = 3          # published (or released already) without its macOS part: recorded, a later run backfills
+MAC_SWITCHES = (('mac', 'mac'), ('mac_gates', 'mac_gates'), ('mac_publish', 'mac_publish'), ('mac_fuzz', 'mac_fuzz'),
+                ('speed_mac', 'mac_speed'))     # (argument, release.json key)
 
 
 class Failed(Exception):
     def __init__(self, step, msg):
         super().__init__(f'{step}: {msg}')
         self.step = step
+
+
+def mac_switches(a, s):
+    """The macOS part's switches of one run: each flag given (`--mac` / `--no-mac`, ...) wins, else release.json's
+    value (DEFAULTS: on, gates, publish; no fuzz, no Mac speed windows)."""
+    for arg, key in MAC_SWITCHES:
+        if getattr(a, arg, None) is None:
+            setattr(a, arg, bool(s.get(key)))
+    return a
+
+
+def mac_complete(e, s, publish=True, fuzz=False):
+    """Entry `e`'s macOS part is complete (module docs, Backfill): `mac.release` names a build, published when `publish`,
+    for `s`'s mac_runtime, with a fuzz build when `fuzz`."""
+    m = (e or {}).get('mac') or {}
+    rel = m.get('release') or {}
+    if not rel.get('build_id') or (publish and not rel.get('published')):
+        return False
+    if m.get('runtime') and s.get('mac_runtime') and m['runtime'] != s['mac_runtime']:
+        return False
+    return not fuzz or bool((m.get('fuzz') or {}).get('build_id'))
+
+
+def first_line(msg, n=400):
+    lines = [ln.strip() for ln in str(msg).splitlines() if ln.strip()]
+    return (lines[0] if lines else '')[:n]
 
 
 def fb():
@@ -200,6 +266,10 @@ class Release:
         self.builds = builds_dir()
         self.result = {'commit': None, 'started': now(), 'steps': {}, 'seconds': {}}
         self.log_dir = None
+        self.step = None            # (the step running: a macOS part's failure names it)
+        self.mac_failed = None      # this run's macOS part failure ({step, error}) -> exit EXIT_MAC_FAILED
+        self.mac_built = {}         # (the macOS builds made before a failure: named in its record)
+        self.wt = self.target = self.dist = None
 
     def say(self, m):
         print(f'[farm_release {time.strftime("%H:%M:%S")}] {m}', flush=True)
@@ -219,9 +289,10 @@ class Release:
             raise Failed(step, f'exit {p.returncode}; the end of {path}:\n{out[-3000:]}')
         return out
 
-    def timed(self, step, f, *args):
+    def timed(self, step, f, *args, **kw):
         t0 = time.time()
-        r = f(*args)
+        self.step = step
+        r = f(*args, **kw)
         self.result['seconds'][step] = round(time.time() - t0, 1)
         self.say(f'{step}: done in {self.result["seconds"][step]:.0f} s')
         return r
@@ -382,7 +453,11 @@ class Release:
         have = FB.find(ix, commit=sha, runtime=rt)
         if have and not self.a.force:
             self.say(f'{sha[:12]} is released already: {FB.describe(have)}')
-            return dict(have, already=True)
+            e = {k: v for k, v in have.items() if k not in ('exact', 'asked')}
+            if self.mac_wanted(e):
+                self.say(f'{sha[:12]}: its entry has no complete macOS part: the macOS part only (the backfill)')
+                e = self.mac_backfill(e)
+            return dict(e, already=True)
         same = FB.find(ix, key=key, runtime=rt)
         want_dml = bool(self.s.get('dml_runtime')) and not self.a.no_dml
         if same and not self.a.force and (same.get('cuda') or {}).get('runtime') in (None, self.s['cuda_runtime']) \
@@ -400,7 +475,11 @@ class Release:
                 if not self.a.no_speed:
                     e['speed'] = self.timed('speed', self.speed, os.path.dirname(e['worker']), None, None, e['build_id'], True)
                 e['seconds'] = r['seconds']
-            return FB.add(e)
+            e = FB.add(e)
+            if self.mac_wanted(e):
+                self.say(f'{sha[:12]}: the reused entry has no complete macOS part: the macOS part only (the backfill)')
+                e = self.mac_backfill(e)
+            return e
         preflight(self.s, cuda=not self.a.no_cuda)
         self.dist = os.path.join(self.target_root(), 'farm-build', 'dist')
         self.timed('checkout', self.checkout, sha)
@@ -426,27 +505,18 @@ class Release:
         tpl = self.timed('template', self.template, exe, bid)
         gates = self.timed('gates', self.gates, exe)
         r['steps']['gates'] = gates
-        mac = None
-        if self.a.mac:
-            mac = {'release': self.timed('mac-build', self.mac_build, 'release')}
-            r['steps']['mac'] = mac
-            fz = self.timed('mac-build-fuzz', self.mac_build, 'fuzz') if self.a.mac_fuzz else None
-            if fz:
-                mac['fuzz'] = fz
-            if self.a.mac_gates:
-                mac['gates'] = self.timed('mac-gates', self.mac_gates, mac['release'], fz)
         if self.a.no_speed:
             speed = {'skipped': '--no-speed', 'line': 'SPEED GATE SKIPPED (--no-speed)'}
             self.say('speed: SKIPPED (--no-speed)')
         else:
-            speed = self.timed('speed', self.speed, bdir, (r['steps'].get('cuda') or {}).get('dir'),
-                               (mac or {}).get('release'), self.a.speed_baseline)
+            speed = self.timed('speed', self.speed, bdir, (r['steps'].get('cuda') or {}).get('dir'), None, self.a.speed_baseline)
         r['steps']['speed'] = speed
-        if self.a.mac:
-            mac['plan'] = self.timed('mac-plan', self.mac_plan, exe, mac['release'], fz, cuda)
-            mac['runtime'] = self.s['mac_runtime']
         if self.a.no_publish:
             self.say('--no-publish: signed and checked, not published (no index entry)')
+            mac = None
+            if self.a.mac:
+                mac = self.mac_backfill({'commit': sha, 'built_at': sha, 'build_id': bid, 'worker': exe, 'cuda': cuda},
+                                        record=False)['mac']
             return dict(r, build_id=bid, runtime=rt, cuda=cuda, dml=dml, mac=mac, template=tpl, gates=gates, speed=speed,
                         published=False)
         worker = self.timed('publish', self.publish, bdir)
@@ -454,24 +524,24 @@ class Release:
             cuda['worker'] = slash(os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe'))
         if dml:
             dml['worker'] = slash(os.path.join(self.timed('publish-dml', self.publish, r['steps']['dml']['dir']), 'mtgz-worker.exe'))
-        if mac and self.a.mac_publish:
-            for k in ('release', 'fuzz'):
-                if k in mac:
-                    mac[k]['published'] = slash(self.timed(f'publish-mac-{k}', self.publish, mac[k]['dir']))
         e = {'commit': sha, 'built_at': sha, 'rust_key': key, 'core_commit': r['core_commit'], 'build_id': bid,
              'version': os.path.basename(os.path.normpath(bdir)), 'runtime': rt, 'worker': slash(os.path.join(worker, 'mtgz-worker.exe')),
-             'cuda': cuda, 'dml': dml, 'mac': mac, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
+             'cuda': cuda, 'dml': dml, 'mac': None, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
              'gates': gates, 'speed': speed, 'reference': {k: local_config.portable_path(v) for k, v in self.s['reference'].items()},
              'url': self.s['url'], 'published': True, 'created': now(), 'seconds': r['seconds']}
-        return FB.add(e)
+        e = FB.add(e)
+        # (the macOS part after the entry: whatever happens on the Mac, the Windows, CUDA and DirectML builds stand)
+        return self.mac_backfill(e) if self.a.mac else e
 
-    def speed(self, new_dir, cuda_dir=None, mac=None, baseline=None, export_only=False):
+    def speed(self, new_dir, cuda_dir=None, mac=None, baseline=None, export_only=False, desktop=True):
         """Step `speed` (module docs, 8b; docs/ENGINE.md 200): this checkout's tools/farm_speed.py - the desktop's
-        machines under a slot, then the Mac - into releases/<sha12>/speed/ -> the index's speed record; slower or an
-        error -> Failed('speed')."""
+        machines under a slot, then the Mac when `mac` (its release build) is given - into releases/<sha12>/speed/ -> the
+        index's speed record; slower or an error -> Failed('speed'). `desktop` False: the Mac's windows alone (the macOS
+        part's step speed-mac, into releases/<sha12>/speed-mac/; Failed('speed-mac'))."""
         import farm_speed as FS
         sp = self.s['speed']
-        out = os.path.join(self.log_dir, 'speed')
+        step = 'speed' if desktop else 'speed-mac'
+        out = os.path.join(self.log_dir, step)
         shutil.rmtree(out, ignore_errors=True)
         os.makedirs(out)
         model = self.a.speed_model or sp.get('model') or 'reference'
@@ -492,38 +562,140 @@ class Release:
             if v is not None:
                 common += [flag, str(v)]
         tool = [self.s['python'], os.path.join(TOOLS, 'farm_speed.py'), 'gate']
-        local = ['cpu'] + (['cuda'] if self.a.speed_cuda and cuda_dir else [])
-        cmd = tool + ['--machines', ','.join(local)] + common + (['--cuda-new', cuda_dir] if 'cuda' in local else [])
-        self.run('speed', cmd, cwd=ROOT, slot=True, check=False)
+        local = (['cpu'] + (['cuda'] if self.a.speed_cuda and cuda_dir else [])) if desktop else []
         res_path = os.path.join(out, 'result.json')
-        res = load_json(res_path)
+        res = None
+        if local:
+            cmd = tool + ['--machines', ','.join(local)] + common + (['--cuda-new', cuda_dir] if 'cuda' in local else [])
+            self.run(step, cmd, cwd=ROOT, slot=True, check=False)
+            res = load_json(res_path)
         want = list(local)
-        if res and res.get('passed') and mac and not self.a.no_speed_mac:
+        if (not local or res and res.get('passed')) and mac:
             mb = self.a.speed_mac_baseline or (None if export_only else sp.get('mac_baseline'))
             cmd = tool + ['--machines', 'mac', '--mac-new', mac['dir']] + common
             if export_only:
                 cmd += ['--mac-baseline', mac['build_id']]
             elif mb:
                 cmd += ['--mac-baseline', mb]
-            self.run('speed', cmd, cwd=ROOT, check=False, log='speed-mac')
+            self.run(step, cmd, cwd=ROOT, check=False, log='speed-mac')
             want.append('mac')
             res = load_json(res_path)
         if not res or set(want) - set(res.get('machines') or {}):
             # (a machine with no result - its run died before writing one - fails: never the others' pass)
             log = ''.join(open(os.path.join(self.log_dir, f'{n}.log'), encoding='utf-8', errors='replace').read()
                           for n in ('speed', 'speed-mac') if os.path.exists(os.path.join(self.log_dir, f'{n}.log')))
-            raise Failed('speed', f'{res_path}: not every machine of {want} has a result; the end of the logs:\n{log[-2500:]}')
+            raise Failed(step, f'{res_path}: not every machine of {want} has a result; the end of the logs:\n{log[-2500:]}')
         rec = FS.summary(res, slash(res_path))
-        self.result['steps']['speed'] = rec
+        self.result['steps'][step] = rec
         self.say(res['line'])
         if not res['passed']:
-            raise Failed('speed', res['line'])
+            raise Failed(step, res['line'])
         return rec
 
     def target_root(self):
         return release_worktree()[1]
 
-    # ------------------------------------------------------------------ macOS (--mac)
+    # ------------------------------------------------------------------ the macOS part (module docs 11-17)
+    def mac_wanted(self, e):
+        """The macOS part is on and entry `e`'s is not complete (module docs, Backfill)."""
+        return bool(self.a.mac) and not mac_complete(e, self.s, self.a.mac_publish and not self.a.no_publish, self.a.mac_fuzz)
+
+    def mac_backfill(self, e, record=True):
+        """The macOS part of entry `e` (module docs 11-17 and Backfill) -> `e` with its `mac`, also set (`record`) on every
+        published entry of its build that lacks a complete one. Another entry of the build that has one is copied
+        (nothing built). A failure - Failed or anything else - is recorded (`mac: {failed, error, at, built}`, the
+        result's `mac_failed`, self.mac_failed: the exit status), never raised: the entry's other builds stand."""
+        FB = fb()
+        publish = bool(self.a.mac_publish) and not self.a.no_publish and record
+        done = lambda x: mac_complete(x, self.s, publish, self.a.mac_fuzz)  # noqa: E731
+        if record:
+            have = [x for x in FB.load()['builds'] if x.get('published') and x.get('build_id') == e['build_id'] and done(x)]
+            if have:
+                mac = have[-1]['mac']
+                n = FB.update(e['build_id'], {'mac': mac}, only=lambda x: not done(x))
+                self.say(f'mac: build {e["build_id"]} has the macOS build {mac["release"]["build_id"]} already (the entry of '
+                         f'{have[-1]["commit"][:12]}): recorded on {n} more entr{"y" if n == 1 else "ies"}, nothing built')
+                self.result['steps']['mac'] = {'copied_from': have[-1]['commit'], 'build_id': mac['release']['build_id']}
+                return dict(e, mac=mac)
+        commit = e.get('built_at') or e.get('reused_from') or e['commit']
+        self.mac_built = {}
+        try:
+            mac = self.mac_part(commit, e, publish)
+        except Exception as x:      # noqa: BLE001 - recorded and loud, never the release's other builds lost
+            step = x.step if isinstance(x, Failed) else (self.step or 'mac')
+            err = str(x) if isinstance(x, Failed) else f'{type(x).__name__}: {x}'
+            mac = {'failed': step, 'error': err[-3000:], 'at': now(), 'commit': commit, 'built': self.mac_built}
+            self.mac_failed = {'step': step, 'error': err}
+            self.result['mac_failed'] = {'step': step, 'error': err[-3000:], 'build_id': e.get('build_id')}
+            self.say(f'MACOS PART FAILED at {step} (the other builds stand; a later run backfills it): {err[-2500:]}')
+        self.result['steps']['mac'] = mac
+        if record:
+            n = FB.update(e['build_id'], {'mac': mac}, only=lambda x: not done(x))
+            self.say(f'mac: {"the failure" if mac.get("failed") else "macOS build " + mac["release"]["build_id"]} recorded on '
+                     f'{n} index entr{"y" if n == 1 else "ies"} of build {e["build_id"]}')
+        return dict(e, mac=mac)
+
+    def mac_part(self, commit, e, publish):
+        """Steps 11-16 for entry `e`'s build, at `commit` (its built_at) -> the `mac` record; Failed (or anything else)
+        at the first failing step."""
+        self.step = 'mac-build'
+        rt, _ = self.mac_runtime_name()
+        if self.a.mac_gates:
+            for k in ('config', 'export'):
+                if not os.path.exists(self.s['reference'][k]):
+                    raise Failed('mac-gates', f'the reference {k} {self.s["reference"][k]} is missing (farm_release.py reference ...)')
+        self.timed('mac-reach', self.mac_reach)
+        self.ensure_checkout(commit)
+        self.dist = getattr(self, 'dist', None) or os.path.join(self.target_root(), 'farm-build', 'dist')
+        mac = {'release': self.timed('mac-build', self.mac_build, 'release')}
+        self.mac_built['release'] = mac['release']['build_id']
+        fz = None
+        if self.a.mac_fuzz:
+            fz = mac['fuzz'] = self.timed('mac-build-fuzz', self.mac_build, 'fuzz')
+            self.mac_built['fuzz'] = fz['build_id']
+        if self.a.mac_gates:
+            mac['gates'] = self.timed('mac-gates', self.mac_gates, mac['release'], fz)
+        else:
+            mac['gates'] = {'skipped': '--no-mac-gates / mac_gates false'}
+            self.say('mac-gates: SKIPPED (mac_gates false)')
+        if self.a.speed_mac and not self.a.no_speed:
+            mac['speed'] = self.timed('speed-mac', self.speed, os.path.dirname(e['worker']), None, mac['release'], None,
+                                      desktop=False)
+        if publish:
+            for k in ('release', 'fuzz'):
+                if k in mac:
+                    mac[k]['published'] = slash(self.timed(f'publish-mac-{k}', self.publish, mac[k]['dir']))
+        try:
+            mac['plan'] = self.timed('mac-plan', self.mac_plan, e['worker'], mac['release'], fz, e.get('cuda'))
+        except Exception as x:      # noqa: BLE001 - the plan is advice: noted, not the part's failure
+            mac['plan'] = {'error': f'{type(x).__name__}: {x}'[:1500]}
+            self.say(f'mac-plan: not made ({type(x).__name__}: {first_line(x)}) - noted in the entry, not a failure')
+        mac.update(runtime=rt, commit=commit, at=now(),
+                   seconds={k: v for k, v in self.result['seconds'].items() if 'mac' in k})
+        return mac
+
+    def mac_reach(self):
+        """Step 11: the Mac answers over ssh within 20 s (BatchMode: no prompt), else Failed('mac-reach')."""
+        host = os.environ.get('MTGZ_MAC') or local_config.get('MTGZ_MAC')
+        if not host:
+            raise Failed('mac-reach', 'no Mac configured (MTGZ_MAC in ~/.config/zero/local.env); "mac": false in '
+                                      'release.json or --no-mac releases without the macOS part')
+        try:
+            p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', host, 'true'], capture_output=True,
+                               text=True, stdin=subprocess.DEVNULL, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise Failed('mac-reach', 'the Mac did not answer over ssh in 120 s (asleep or offline?)') from None
+        if p.returncode:
+            raise Failed('mac-reach', f'the Mac does not answer over ssh (exit {p.returncode}: {p.stderr.strip()[-300:]}) - '
+                                      f'asleep, offline or refused')
+
+    def ensure_checkout(self, commit):
+        """The release worktree at `commit` with its modules (a release that checked it out already: as it is)."""
+        if self.wt and git('rev-parse', 'HEAD', cwd=self.wt) == commit:
+            return
+        self.timed('checkout', self.checkout, commit)
+        self.timed('modules', self.modules)
+
     def mac_runtime_name(self):
         rt = self.s.get('mac_runtime')
         if not rt:
@@ -675,6 +847,16 @@ def write_notes(R, e=None):
         rec = e.get(k) or steps.get(k)
         if isinstance(rec, dict) and rec.get('line'):
             lines.append(rec['line'])
+    mac = e.get('mac') or steps.get('mac') or {}
+    if (mac.get('release') or {}).get('build_id'):
+        g = mac.get('gates') or {}
+        lines.append(f'macOS build {mac["release"]["build_id"]}' + (' published' if mac['release'].get('published') else ' (not published)')
+                     + (f', fuzz {mac["fuzz"]["build_id"]}' if (mac.get('fuzz') or {}).get('build_id') else '')
+                     + (', MAC FARM GATES SKIPPED' if g.get('skipped') else ', MAC FARM GATES PASSED (' + ', '.join(sorted(g)) + ')' if g else ''))
+        if (mac.get('speed') or {}).get('line'):
+            lines.append(mac['speed']['line'])
+    elif mac.get('failed'):
+        lines.append(f'MACOS PART FAILED at {mac["failed"]}: {first_line(mac.get("error"), 600)}')
     if r.get('failed'):
         lines.append(f'FAILED at {r["failed"]}: {str(r.get("error", ""))[:600]}')
     with open(os.path.join(R.log_dir, 'notes.txt'), 'w', encoding='utf-8', newline='\n') as f:
@@ -694,6 +876,7 @@ def preflight(s, cuda=True):
 
 def cmd_release(a):
     s = settings()
+    mac_switches(a, s)
     if not a.normal_priority:
         below_normal()
     R = Release(a, s)
@@ -714,13 +897,22 @@ def cmd_release(a):
         raise
     R.result.update(entry=e, finished=now(), total_s=round(time.time() - t0, 1))
     save_result(R)
-    if not e.get('already'):
+    if not e.get('already') or 'mac' in R.result['steps']:
         write_notes(R, e)
-    print(json.dumps({k: e.get(k) for k in ('commit', 'build_id', 'runtime', 'worker', 'cuda', 'reused_from', 'already',
-                                            'published', 'seconds')}))
+    out = {k: e.get(k) for k in ('commit', 'build_id', 'runtime', 'worker', 'cuda', 'reused_from', 'already', 'published', 'seconds')}
+    m = e.get('mac') or {}
+    out['mac'] = ({'build_id': m['release']['build_id'], 'published': bool(m['release'].get('published'))}
+                  if (m.get('release') or {}).get('build_id') else {'failed': m['failed']} if m.get('failed') else None)
+    print(json.dumps(out))
     g = (e.get('gates') or {}).get('line')
     sl = (e.get('speed') or {}).get('line')
     print(f'farm_release: {fb().describe(dict(e, exact=True))}' + (f'; {g}' if g else '') + (f'; {sl}' if sl else ''), flush=True)
+    if R.mac_failed:
+        # (the last line: what the watcher logs - loud, never a silent release without its macOS build)
+        print(f'farm_release: MACOS PART FAILED at {R.mac_failed["step"]}: {first_line(R.mac_failed["error"])} - '
+              f'{"published" if e.get("published") else "checked"} without it (exit {EXIT_MAC_FAILED}); the next '
+              f'`farm_release.py release {e["commit"][:12]}` backfills it (releases/{e["commit"][:12]}/)', flush=True)
+        return EXIT_MAC_FAILED
     return 0
 
 
@@ -750,7 +942,10 @@ def cmd_list(a):
     for e in fb().load()['builds'][-a.n:]:
         g = (e.get('gates') or {}).get('line', '')
         sl = (e.get('speed') or {}).get('line', '')
+        m = e.get('mac') or {}
+        mac = (m.get('release') or {}).get('build_id') or ('FAILED at ' + m['failed'] if m.get('failed') else '-')
         print(f"{e['created'][:16]} {e['commit'][:12]} build {e['build_id']} cuda {(e.get('cuda') or {}).get('build_id', '-')}"
+              + f' mac {mac}'
               + (f" (reused from {e['reused_from'][:12]})" if e.get('reused_from') else '') + (f'  {g}' if g else '')
               + (f'  {sl}' if sl else ''))
     return 0
@@ -770,7 +965,7 @@ def cmd_reference(a):
     return 0
 
 
-def main(argv=None):
+def parser():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
     r = sub.add_parser('release')
@@ -781,18 +976,23 @@ def main(argv=None):
     r.add_argument('--no-cuda', action='store_true', help='no CUDA alternate (and no GPU self-test)')
     r.add_argument('--no-dml', action='store_true', help='no DirectML alternate (AMD GPUs) even when dml_runtime is set')
     r.add_argument('--no-slot', action='store_true', help='heavy steps without tools/slotd.sh')
-    r.add_argument('--mac', action='store_true', help='also the macOS worker, signed (module docs: mac-build, mac-plan)')
-    r.add_argument('--mac-fuzz', action='store_true', help='with --mac: the macOS fuzz build too (campaign alternates)')
-    r.add_argument('--mac-gates', action='store_true', help='with --mac: tools/farm_gates.py --mac on the reference')
-    r.add_argument('--mac-run', action='append', default=[], help='with --mac: RUN=<config.json> whose change the plan prints')
+    on_off = argparse.BooleanOptionalAction
+    r.add_argument('--mac', action=on_off, default=None, help='the macOS part (module docs 11-17; default release.json '
+                   '"mac", true): built, gated, published, recorded - and backfilled into an entry without one')
+    r.add_argument('--mac-fuzz', action=on_off, default=None, help='the macOS fuzz build too (default release.json '
+                   '"mac_fuzz", false)')
+    r.add_argument('--mac-gates', action=on_off, default=None, help='tools/farm_gates.py --mac on the reference (default '
+                   'release.json "mac_gates", true)')
+    r.add_argument('--mac-run', action='append', default=[], help='the macOS part: RUN=<config.json> whose change the plan prints')
     r.add_argument('--mac-campaign', action='append', default=[], help='with --mac-fuzz: a campaign whose alternate the plan prints')
-    r.add_argument('--mac-publish', action='store_true', help='with --mac: publish the macOS builds too (a coordinator with '
-                   'platforms only)')
+    r.add_argument('--mac-publish', action=on_off, default=None, help='publish the macOS builds (default release.json '
+                   '"mac_publish", true)')
     r.add_argument('--no-speed', action='store_true', help='skip the speed gate (step 8b; recorded as skipped)')
     r.add_argument('--speed-baseline', help='the speed gate\'s old build (default: the previous published release build)')
-    r.add_argument('--speed-mac-baseline', help='with --mac: the old macOS build (default: the index\'s previous, else '
+    r.add_argument('--speed-mac-baseline', help='with --speed-mac: the old macOS build (default: the index\'s previous, else '
                    'release.json speed.mac_baseline)')
-    r.add_argument('--no-speed-mac', action='store_true', help='with --mac: the speed gate on the desktop only')
+    r.add_argument('--speed-mac', action=on_off, default=None, help='the speed gate\'s Mac windows, step speed-mac (default '
+                   'release.json "mac_speed", false: they need an idle Mac)')
     r.add_argument('--speed-cuda', action='store_true', help='the speed gate on the desktop\'s GPU too (tiny windows)')
     r.add_argument('--speed-model', help='reference (default) | run:<run dir> | <model.onnx>: the network the sides play')
     r.add_argument('--speed-minutes', type=float, help='minutes per window (default 3; release.json speed.minutes)')
@@ -811,7 +1011,11 @@ def main(argv=None):
     rf.add_argument('--checkpoint', required=True)
     rf.add_argument('--export', required=True, help='a directory with model.onnx and reference.npz of the checkpoint')
     sub.add_parser('config')
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None):
+    a = parser().parse_args(argv)
     if a.cmd == 'config':
         print(json.dumps(settings(), indent=1))
         return 0

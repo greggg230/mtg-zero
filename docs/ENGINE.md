@@ -41540,3 +41540,97 @@ c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890
 (gate 2: 6 games, 2,890 rows, 150 batches); core pytest 723 passed - skipped: 17 live-run-hazard tests (fenced).
 
 Main fast-forwarded 4c77c950 -> 62b9a028 (main had not moved since the branch: the gate stands as run).
+
+## 216. A macOS build in every farm release: on by default, the backfill of an entry without one, a Mac failure that keeps the release (branch `feat/release-mac`, 2026-11-21)
+
+Branch `feat/release-mac` from main e9ff0e24. **Why:** the user (2026-11-21) wants every zero-farm worker release to carry
+a published macOS build, so the Macs get farm work by default: match campaigns (215, branch `feat/campaign-alternates`)
+list a release entry's published macOS build (`mac.release`) as an alternate, and a run adds it to `pool_alternates`
+(after the pool's platform check, zero-core docs/az.md 62). The release watcher (196.4) ran `farm_release.py release
+<head>` with no flags, so no release since c8e40f5a's forced one (b96e45a0) had a macOS build: e9ff0e24's entry named
+CPU f22f63bb, CUDA cca21cdd and DirectML 92041956, `mac` null. This is 215.5's proposal, done. Python tools only: no
+rule, card, encoding, search, training or worker change; behaviour digests untouched.
+
+### 216.1 What changed
+
+* **On by default, as release.json settings** (`tools/farm_release.py` DEFAULTS, overridden by `<builds>/release.json`,
+  each by its flag for one run): `mac` true (`--mac` / `--no-mac`), `mac_gates` true (`--mac-gates` /
+  `--no-mac-gates`: 197.4's farm gates on the Mac, because a published macOS build is now played by default),
+  `mac_publish` true (`--mac-publish` / `--no-mac-publish`: what campaigns list), `mac_fuzz` false (`--mac-fuzz`),
+  `mac_speed` **false** (`--speed-mac` / `--no-speed-mac`: the speed gate's Mac windows need an idle Mac, and the Mac is a
+  farm machine and a run's evaluation host - a release must not stall or fail on "machine in use"). So the watcher and a
+  hand-run `release` both make the macOS part; `"mac": false` in release.json (or `--no-mac`) turns it off.
+* **After the index entry, never before it.** The macOS part used to run between the farm gates and the speed gate, so a
+  Mac that was asleep, a Mac build or a Mac gate failing stopped the release before anything was published. Now the
+  release publishes its Windows, CUDA and DirectML builds and writes the index entry first, then runs the macOS part
+  (module docs, steps 11-17): **mac-reach** (ssh `BatchMode`, `ConnectTimeout=20`: a sleeping Mac fails in seconds, not
+  after a TCP timeout), **mac-build** at the entry's `built_at` (the commit its Windows build was built at, so the macOS
+  manifest's engine_commit is the Windows build's - 215's campaigns require the same engine; `farm_build.py --platform
+  macos-arm64`: the Mac's one farm checkout under its lock, `nice -n 15`, signed on the desktop), **mac-gates**,
+  **speed-mac** (only with `mac_speed`; its own `releases/<sha12>/speed-mac/`), **publish-mac** (registered and copied to
+  `<builds>/<build_id>/`), **mac-plan** (advice: a plan that cannot be made is noted in the record, not a failure) and
+  **record**: the entry's `mac` field, in place (`mtgz.az.farm_builds.update`, under the index lock) on every published
+  entry of the same build that lacks a complete one - the commit's own release and the commits that reused it.
+* **The backfill** (the reuse and "already in the index" paths). An entry's macOS part is complete when `mac.release`
+  names a build, published when `mac_publish`, for the current `mac_runtime`, with a fuzz build when `mac_fuzz` (the Mac
+  gates are not re-run for an entry that has its build). A commit whose Rust inputs equal a published entry's still
+  reuses it (no Windows build), and a commit already in the index is still done - but an entry that is not complete gets
+  only the macOS part: another entry of the same build that has a complete one is copied (nothing built, the Mac not
+  reached), else steps 11-17 at its `built_at`. A complete entry: nothing; a second run builds nothing.
+* **A failed macOS part keeps the release, loudly.** Any failure in it (the Mac unreachable, no `mac_runtime`, a build,
+  a gate or the publish failing, anything raised) is caught there: the entry keeps its published builds and records
+  `mac: {"failed": <step>, "error", "at", "commit", "built"}` (no `release` key: campaigns list no macOS route and say
+  so), result.json gets `mac_failed`, notes.txt a `MACOS PART FAILED at <step>` line, the output's last line is
+  `farm_release: MACOS PART FAILED at <step>: ... (exit 3); the next farm_release.py release <sha12> backfills it`, and
+  the exit status is **3** (0: everything wanted; 1: failed, as before). `describe` (lookup, the final line) shows
+  `NO macOS build (failed at <step>)`; `list` a `mac` column.
+* **The watcher** (`tools/farm_release_watch.py`): exit 3 is a released head (in `done`, `"mac_failed": true`), logged as
+  `released <head> WITHOUT ITS MACOS BUILD`, with the state's `mac_pending` {head, attempts, last_try, line}; while that
+  head is main's newest, `farm_release.py release <head>` runs again - the macOS part only - every `--mac-retry-every`
+  seconds (3600), at most `--mac-retries` times (6), then `GIVING UP` (log, `mac_pending.gave_up`). A retry that works
+  logs `macOS part of <head> backfilled` and clears it; a newer head's release takes over (its entry gets its own
+  macOS part, or this one's when it reuses the build). `--status` prints `mac_pending`.
+* **`farm_builds`**: `update(build_id, fields, only)` (in place, under the lock), `mac_build(e)` (the published macOS
+  build id), `describe` names the macOS build. `pool_settings` (what `--pool-build published` and `lookup --pool-args`
+  give a run) does **not** add the macOS build to `pool_alternates`: a run's macOS alternate goes through the pool's
+  platform check, which stops the pool when the run's settings depend on the platform's libm (zero-core
+  `farm_pool.platform_check`), so adding it stays a run's own choice (mac-plan prints the change).
+* **The Mach-O in `<builds>/<build_id>/`** (215.5 point 4, 212): nothing on the release path runs it - the macOS
+  executable is checked by parsing its Mach-O header here and run only on the Mac (`info`, `fuzz-check`, the gates),
+  publishing verifies signatures only, and the speed gate's Mac windows run on the Mac. zero-core's farm pool reads a
+  build's platform from its manifest before running an alternate (03686a1; main's pin 35a47a9 has it), the campaigns'
+  `local_build` refuses another platform's build (215). A run whose `pool_alternates` names a macOS build must be on
+  a core at or after 03686a1.
+
+### 216.2 Tests
+
+tests/test_farm_release.py (15 passed; 8 new, the reuse test now runs `--no-mac`), with the steps that reach, build on
+or publish for the Mac replaced by recorders (no Mac, no network, no build):
+`test_the_macos_switches` (defaults on / gates / publish, no fuzz, no Mac speed; release.json and each flag),
+`test_when_an_entry_has_its_macos_part`, `test_index_update_and_the_macos_build_in_describe`,
+`test_release_backfills_the_macos_part_of_a_reused_entry_once` (built at `built_at`, recorded on both entries of the
+build, three more runs build nothing), `test_an_entry_gets_the_macos_build_another_entry_of_its_build_has` (copied, the
+Mac never reached), `test_a_failed_macos_part_keeps_the_published_builds_and_a_later_run_backfills_it` (unreachable, a
+build raising a RuntimeError, a failing Mac gate: each exit 3 with the entry intact and the failure in the entry,
+result.json, notes and the last line; then the backfill, with a failing mac-plan only noted),
+`test_no_macos_pack_is_a_loud_failure_not_a_silent_skip`, `test_a_new_build_is_published_before_its_macos_part` (the
+index holds the new entry when the Mac is first reached), `test_the_watcher_retries_a_failed_macos_part` (due / not due,
+given up after `--mac-retries`, a newer head, a retry that works). tests/test_farm_speed.py:
+`test_the_macos_parts_speed_windows_alone` (speed-mac: the Mac alone, its own directory, the desktop's result untouched).
+
+### 216.3 Restarting the watcher with the new behaviour
+
+The running watcher keeps its own code until restarted, but each release is a new `farm_release.py` process from the
+watcher's checkout: once main's checkout has this branch, releases make the macOS part even under the old watcher, which
+reads exit 3 as a failed head (not retried). So restart it right after the merge:
+
+1. `python tools/farm_release_watch.py --status` (note the pid; a release in progress shows in its log's tail);
+2. `python tools/farm_release_watch.py --stop` - it exits at its next sleep tick, i.e. **after** a release in progress
+   finishes (the STOP file is read between polls, never during a release); wait until `--status` says `not running`;
+3. start it again from the checkout of main that has this branch (as before, the zero-farm venv's Python):
+   `python tools/launch_hidden.py <builds>/release_watch.console.txt <zero-farm venv python> tools/farm_release_watch.py --python <same>`
+   (optional: `--mac-retry-every 3600 --mac-retries 6`, the defaults);
+4. `--status` again: running, `seen` = main's head; the log shows `watcher started`.
+
+Nothing in release.json has to change: the macOS part is on by default (`mac_runtime` 040b1882 is already set there).
+To release without it: `"mac": false` in release.json.
