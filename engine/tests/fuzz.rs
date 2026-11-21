@@ -110,9 +110,10 @@ fn a_listed_card_s_find_with_the_deck_known_cross_post_sideboard_match_98() {
 /// (determinize checks 1 in 4); the denominator is drawn from the match's random stream, so they are replayed at 4 in
 /// every profile (`CHECKPOINT_EVERY_OVERRIDE`). Each must reach such a look (positive evidence). (ENGINE.md 192: the
 /// remembered looks at another library moved the worlds' random draws; 52, 163 and 3,900,000,197 no longer reach one,
-/// 30, 55 and 3,900,000,012 do - a scan of seeds 0..300 and 3,900,000,000..300 found 41. ENGINE.md 220.2: two more
-/// cards in constructed play's table move the table prior's draws, TablePrior, 129.1: 3,900,000,012 and 079 no longer
-/// reach one, 3,900,000,019 and 087 do - the same scan found 46.)
+/// 30, 55 and 3,900,000,012 do - a scan of seeds 0..300 and 3,900,000,000..300 found 41. ENGINE.md 220.1-220.3: the
+/// Legacy Hogaak Tempo cards in constructed play's table move the table prior's draws (TablePrior, 129.1) and renumber
+/// the legacy definitions after them: 3,900,000,012 and 079 no longer reach one, 3,900,000,019 and 087 do. ENGINE.md
+/// 220.4, the seven merged: the same scan finds 41, the nine below among them.)
 #[test]
 fn a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game() {
     use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENDED_GAME_HAND_LOOKS};
