@@ -42082,11 +42082,18 @@ changes for an existing entry. The coordinator's own per-campaign site count (`f
 * tests/test_farm_release.py: the switches' new default. The macOS-part tests keep `mac_fuzz` off in their
   release.json; they test the release build's mechanics.
 
+Gate: `GATE PASSED WITH SKIPS python bbea9922540f in 1058s` (skips: the live-run fence only).
+
 ### 219.6 Switching it on (not done here)
 
-Merge, then restart the steward from main (`python tools/fuzz_steward.py stop`, then the logon task or `run`). At its
-first check, main's and the live runs' duplicate campaigns merge (the followers' are paused), the owner's macOS build is
-found or built, and the three Mac-playable campaigns list it.
+Merge, then restart the steward from main AT ONCE (`python tools/fuzz_steward.py stop`, then the logon task or `run`).
+The order matters: the release watcher runs farm_release.py afresh for each release, so the merge turns `mac_fuzz` on
+for its next release, which puts a macOS fuzz build into a dist directory the steward searches. A steward still running
+the code from before this section has no platform filter in `find_build`: at main's next rebuild it would take that
+Mach-O build as main's Windows fuzz build (`mtg-<sha>-fuzz-macos-arm64` sorts before `mtg-<sha>-fuzz`), and its
+campaign creation would then fail on `info`. At the new steward's first check, main's and the live runs' duplicate
+campaigns merge (the followers' are paused), the owner's macOS build is found or built, and the three Mac-playable
+campaigns list it.
 
 What to watch:
 * a Mac takes a fuzz lease when no run needs it;
