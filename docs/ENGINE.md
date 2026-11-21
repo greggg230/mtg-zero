@@ -42094,6 +42094,13 @@ GPU visible): 790 passed, 31 skipped, 3 failed, none this change's (a CUDA deter
 c850a5d with the GPU busy, a CUDA-graph test and a rolling-quota timing test that pass alone; docs/az.md 70); its
 `smoke_all.sh --with-this-core --build-only`: 3 of 3 games, GREEN.
 
+On 296c62f0 (this pin, 218.1's docs), in the warm worktree warm-1, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the automatic
+placement: **GATE PASSED WITH SKIPS python 296c62f04bf5 in 1752s** - privacy 0 findings; build and the release worker;
+pytest 1-of-4 135 passed, 4 skipped, 2-of-4 (the Mac) 170 passed, 2 skipped, 3-of-4 148 passed, 1 skipped, 4-of-4 278
+passed, 6 skipped, the desktop part 48 passed, 5 skipped; the run-loop smoke (mtg-smoke: its `selfplay_local_reason`)
+16 games, 0 unfinished - skipped: 8 live-run-hazard tests (fenced: a live run on this machine). The python tier is
+this repo's pytest, which the optin-core tier above does not run.
+
 ### 218.2 Open points
 
 * **Scratch launchers.** A launcher that starts a fresh run, or a fork, without a farm pool from a commit with a
