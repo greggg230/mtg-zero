@@ -12,7 +12,9 @@ The conditions (`plan`, in this order; the first that fails is the line's reason
      on the farm and are ignored there; --threads is the local top-up's (below).
   2. both checkpoints have their run's config.json next to models/ (the job's settings are A's run's; B's seat its
      own run's settings as its set).
-  3. this machine can put a campaign: the farm's admin token, data key and farm-release (zero.farm_def's paths).
+  3. this machine can put a campaign: the farm's admin token, data key and farm-release (zero.farm_def's paths); and
+     (checked after 6) this Python can export the networks the campaign still needs (onnx, onnxruntime, onnxscript;
+     not needed when the export cache has them, `missing_exports`).
   4. the checkout's tracked files are clean (`git status --untracked-files=no`, the zero-core submodule included): the
      farm plays the commit's build, so an uncommitted change would make the two backends play different games.
   5. a published farm build for the checkout's commit (mtgz.az.farm_builds.lookup: its own release, or that of a
@@ -30,18 +32,28 @@ The conditions (`plan`, in this order; the first that fails is the line's reason
      checkpoint and its GPU variants, ~5-8 minutes of this machine, and the queue behind the farm's rolling self-play
      and fuzz leases, often 20-45 minutes; such a match is a few minutes of this machine's GPU. 0 = any size.
 
+The decision line of a match that passes 1-6 carries an estimate (`estimate`), so the choice is visible: the farm's
+minutes - setup (the exports this campaign still needs, from the export cache), queue and play at the farm's measured
+rates (the recent campaigns on this machine: their put-to-first-result wait and their game-simulations a minute of
+play; else 30 minutes and 270 a minute) - against this machine's minutes at its local rate (--device: the GPU 2,560,
+the CPU 45 game-simulations a minute).
+
 The farm path (`Runner`): each batch (the plain match: one; `--sprt` / `--target-se`: zero.h2h's `batch_loop`, batch k
 seeded seed + 7919 k) is one analysis campaign (docs/ENGINE.md 165, 215) - `cmp-h2h-<run>-<A>v<B>-<hash>[-b<k>]`, the
 hash over both networks' sha256, the job's play settings, seats, seed, games, pairing and build, so the same command
 again resumes or collects the same campaign instead of playing it again (a campaign of that name with other inputs, or
 one on the coordinator without its state here, is refused). Every alternate of the build's release (CUDA, DirectML for
-AMD, macOS when its settings replay exactly there) with the GPU variants, share --farm-share (0.25). The deadline (per
-batch): --farm-deadline-h, else 1 h + 0.25 s per game-simulation, at most 12 h; then the games the farm has not
-delivered are played here by the same worker (its --threads), as every campaign does. Its rows come back to zero.h2h
+AMD, macOS when its settings replay exactly there) with the GPU variants, share --farm-share (0.5, `AUTO_SHARE`: above
+the campaigns' 0.25 while a run is live, because the alternative is this machine's GPU under that run). The deadline
+(per batch): --farm-deadline-h, else 1 h + 0.25 s per game-simulation, at most 12 h; then the games the farm has not
+delivered are played here by the same worker (its --threads), as every campaign does - each piece holding a slot of the
+machine's heavy-command throttle (tools/slotd.sh, docs/ENGINE.md 166) while a run is live here (`topup_wrap`), so it
+never piles onto a live run's iteration. Its rows come back to zero.h2h
 (the summary and the line are a local match's; --records from the traced records), and the line adds `campaign`, the
 build and its `routes`, `coverage` (farm / local games), `machines` (a short hash of each farm machine id, as the game
-records keep it, with its games; 'local' for the top-up), `games_digest`, `spot` and the times (`setup_s`, `queue_s`:
-the batch put to its first result, `wall_s`). Which route each lease took is in the coordinator's leases table only.
+records keep it, with its games; 'local' for the top-up), `by_route` (A's score per route: 'cpu', 'cuda:gpu' - the CUDA
+alternate's float16 variant -, 'dml:dml', 'macos-arm64', 'local'; mtgz.az.farm_campaign.by_route, from the leases
+table), `games_digest`, `spot` and the times (`setup_s`, `queue_s`: the batch put to its first result, `wall_s`).
 
 Results are not bit-identical across backends (torch here, the ONNX worker there; the GPU routes play float16 /
 MatMul variants): the line's `backend` says which, so series are never mixed by accident.
@@ -63,6 +75,19 @@ DEADLINE_BASE_S = 3600.0
 DEADLINE_PER_WORK_S = 0.25
 DEADLINE_MAX_S = 12 * 3600.0
 MAX_STEPS = 5000                                   # (zero.h2h.match's default: the local match's driver)
+# an auto campaign's share of the farm's run leases beside a live run's self-play (zero-farm PROTOCOL 5.4): above the
+# campaigns' 0.25 (tools/farm_campaign.py's default) - the alternative is this machine's GPU, i.e. pausing or slowing
+# the live run that trains on it for hours (2026-11-20: 72 minutes), and a head-to-head campaign has a deadline
+AUTO_SHARE = 0.5
+# the estimate on the decision line (game-simulations a minute): this machine's local rate, measured - the GPU from
+# the 2026-11-20 ISMCTS check (4 x 2,400 Legacy games at 64 simulations in ~240 minutes, conc 512, 6 threads), the CPU
+# from this section's 8-game check (docs/ENGINE.md 217); the farm's from the recent campaigns on this machine
+# (`farm_history`), else these defaults (215.3: 64 games at 32 simulations in 7.5 minutes of play, 24 queued)
+LOCAL_RATE = {'cuda': 2560.0, 'cpu': 45.0}
+FARM_RATE = 270.0
+FARM_QUEUE_MIN = 30.0
+EXPORT_MIN = 2.5                                   # (a checkpoint's first export, 215.3: 128-150 s)
+VARIANT_MIN = 2.4                                  # (its first fast-matmul variant of an architecture: 140 s)
 
 
 def _log(m):
@@ -213,6 +238,117 @@ def routes_of(e):
     return '/'.join(out) or 'CPU only'
 
 
+def farm_history(root=None, n=12):
+    """The farm's measured pace from the newest campaigns on this machine that kept it (a `first_result` and a result
+    with no local game) -> (queue minutes, play game-simulations a minute) medians, or None for each without data."""
+    import glob
+    from . import farm_campaign as C
+    paths = sorted(glob.glob(os.path.join(root or C.STATE_ROOT, 'cmp-*', 'state.json')), key=os.path.getmtime)[-60:]
+    qs, rates = [], []
+    for p in reversed(paths):
+        try:
+            with open(p, encoding='utf-8') as f:
+                st = json.load(f)
+        except (OSError, ValueError):
+            continue
+        res, sub, first = st.get('result') or {}, st.get('submitted'), st.get('first_result')
+        if not (res and sub and first) or (res.get('coverage') or {}).get('local'):
+            continue
+        sims = [(s.get('set') or {}).get('eval_sims', (st.get('settings') or {}).get('eval_sims', 0))
+                for s in st.get('seats') or []]
+        work = st['games'] * (sum(sims) / len(sims) if sims else 0)
+        play_s = res.get('seconds', 0) - (first - sub)
+        qs.append((first - sub) / 60.0)
+        if work and play_s > 30:
+            rates.append(work / (play_s / 60.0))
+        if len(qs) >= n:
+            break
+    med = lambda v: sorted(v)[len(v) // 2] if v else None  # noqa: E731
+    return med(qs), med(rates)
+
+
+ONNX_MODULES = ('onnx', 'onnxruntime', 'onnxscript')   # (a network's export for the farm: zero.onnx_export)
+
+
+def missing_exports(a, cfg, b, entry=None):
+    """The exports a campaign of this match still needs (mtgz.az.farm_campaign's export cache: each network's graph
+    and reference set, its GPU variants for the release's CUDA ('fp16') and DirectML ('matmul') routes) -> [(gen, what)]."""
+    from zero import games as G
+    from . import farm_campaign as C
+    forms = [f for k, f in (('cuda', 'fp16'), ('dml', 'matmul')) if entry is None or (entry.get(k) or {}).get('build_id')]
+    out = []
+    for gen, ck in ((1, a.a), (2, b)):
+        if ck is None:
+            continue
+        key = hashlib.sha256(f'{C.file_sha256(ck)}|{G.spec_json(cfg["eval_spec"])}|{gen}'.encode()).hexdigest()[:20]
+        d = os.path.join(C.EXPORT_CACHE, key)
+        if not os.path.exists(os.path.join(d, 'export.json')):
+            out.append((gen, 'export'))
+        out += [(gen, f) for f in forms if not os.path.exists(os.path.join(d, f'variant-{f}.json'))]
+    return out
+
+
+def no_onnx():
+    """The modules this Python lacks for an export (`ONNX_MODULES`), [] when it has them."""
+    import importlib.util
+    return [m for m in ONNX_MODULES if importlib.util.find_spec(m) is None]
+
+
+def estimate(a, seq, cfg, b, entry=None):
+    """The decision line's estimate (module docs): 'estimate: farm ~S setup + ~Q queue + ~P play = ~T min, local ~L min
+    of this machine's GPU|CPU'."""
+    w = work_of(a, seq)
+    setup = 0.5
+    for gen, what in missing_exports(a, cfg, b, entry):
+        setup += {'export': EXPORT_MIN, 'matmul': VARIANT_MIN if gen == 1 else 0.1}.get(what, 0.05)
+    q, rate = farm_history()
+    q = FARM_QUEUE_MIN if q is None else q
+    rate = FARM_RATE if rate is None else rate
+    play = w / rate
+    dev = 'GPU' if str(getattr(a, 'device', 'cpu')).startswith('cuda') else 'CPU'
+    loc = w / LOCAL_RATE['cuda' if dev == 'GPU' else 'cpu']
+    return (f'estimate: farm ~{setup:.0f} setup + ~{q:.0f} queue + ~{play:.0f} play = ~{setup + q + play:.0f} min, '
+            f"local ~{loc:.0f} min of this machine's {dev}")
+
+
+def _bash():
+    """Git Bash on Windows (a bare `bash` there can be WSL's: tools/fuzz_steward.py's rule; MTGZ_BASH overrides),
+    `bash` elsewhere."""
+    from zero import local_config
+    v = local_config.get('MTGZ_BASH')
+    if v:
+        return v
+    if os.name == 'nt':
+        g = shutil.which('git')
+        if g:
+            base = os.path.dirname(os.path.dirname(os.path.realpath(g)))
+            for c in (os.path.join(base, 'bin', 'bash.exe'), os.path.join(os.path.dirname(base), 'bin', 'bash.exe')):
+                if os.path.exists(c):
+                    return c
+    return 'bash'
+
+
+def topup_wrap():
+    """A local top-up piece's command prefix (asked before each piece): a slot of the machine's heavy-command
+    throttle (tools/slotd.sh, docs/ENGINE.md 166) while a run's supervisor is live here (zero.runctl.live_supervisors),
+    else none."""
+    from zero import runctl
+    try:
+        live = runctl.live_supervisors()
+    except Exception:                              # noqa: BLE001 - unknown: throttle
+        live = True
+    return [_bash(), os.path.join(ROOT, 'tools', 'slotd.sh')] if live else None
+
+
+def _merge_routes(done):
+    """The batches' per-route games (a sequential match: the scores are per batch, in each batch's own by_route)."""
+    out = {}
+    for x in done:
+        for lab, r in (x.get('by_route') or {}).items():
+            out[lab] = {'games': out.get(lab, {}).get('games', 0) + r.get('games', 0)}
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ names
 def _it(path):
     stem = os.path.splitext(os.path.basename(path))[0]
@@ -248,7 +384,9 @@ class Backend:
                         help='hours after a batch is put before the games the farm has not delivered are played here '
                              'by the same worker (default 1 h + 0.25 s per game-simulation, at most 12 h)')
         ap.add_argument('--farm-share', type=float, default=None, metavar='X',
-                        help="the campaign's share of the farm's run leases beside the live runs' self-play (0.25)")
+                        help=f"the campaign's share of the farm's run leases beside a live run's self-play (default "
+                             f"{AUTO_SHARE}: above the campaigns' 0.25 - the alternative is this machine's GPU under that "
+                             f"run)")
 
     def plan(self, a, ask, sides, seq):
         """-> (ok, why, runner): the conditions of the module docs, in order."""
@@ -276,7 +414,11 @@ class Backend:
                           f'{" ..." if len(dirty) > 3 else ""}): the farm plays its commit\'s build')
         e = release_of()
         cfg, seats, b = job(a, sides)
-        share = C.DEFAULT_SHARE if a.farm_share is None else a.farm_share
+        lack = no_onnx()
+        if lack and missing_exports(a, cfg, b, e):
+            raise NotHere(f'this Python cannot export the networks for the farm (no {", ".join(lack)}; the zero-farm '
+                          f'environment has them, and a network exported once is cached for every later campaign)')
+        share = AUTO_SHARE if a.farm_share is None else a.farm_share
         if not 0 < share <= 1:
             raise NotHere(f'--farm-share {share}: in (0, 1]')
         d = tempfile.mkdtemp(prefix='h2h-farm-')
@@ -287,17 +429,18 @@ class Backend:
             raise NotHere(f'build {e["build_id"]} refuses the job: {str(x)[-600:]}') from None
         finally:
             shutil.rmtree(d, ignore_errors=True)
+        est = estimate(a, seq, cfg, b, e)
         if ask == 'auto':
             w = work_of(a, seq)
             if w < a.farm_min_work:
                 raise NotHere(f'{w} game-simulations, below the farm\'s minimum (--farm-min-work {a.farm_min_work}: '
-                              f'its setup and queue cost more than playing this here)')
+                              f'its setup and queue cost more than playing this here); {est}')
         r = Runner(a, e, cfg, play, seats, b, share, seq)
         first = r.name_of(0, (a.batch_games or a.games) if seq else a.games, a.seed)
         where = f'build {e["build_id"][:8]} + {routes_of(e)}'
         if not e.get('exact', True):
             where += f' (the release of {e["commit"][:12]}: the same Rust inputs)'
-        return f'campaign cmp-{first}{" and one a batch after it" if seq else ""}, {where}', r
+        return f'campaign cmp-{first}{" and one a batch after it" if seq else ""}, {where}; {est}', r
 
 
 BACKEND = Backend()
@@ -310,6 +453,8 @@ class Runner:
         self.a, self.e, self.cfg, self.play_settings, self.seats, self.b = a, entry, cfg, play, seats, b
         self.share, self.seq = share, seq
         self.done = []
+        self.argv = {'a': os.path.abspath(a.a), 'b': os.path.abspath(a.b), 'games': a.games, 'sims': a.sims,
+                     'seed': a.seed, 'paired': bool(a.paired)}
 
     def name_of(self, k, n, seed):
         key = campaign_key(self.a, self.play_settings, self.seats, self.e['build_id'], k, n, seed, self.seq)
@@ -343,12 +488,13 @@ class Runner:
         t0 = time.time()
         d = C.submit(name, a.a, n, self.cfg, self.seats, seed, self.e['build_id'], self.e['worker'],
                      self.e['runtime'], b=self.b, paired=bool(a.paired), share=self.share,
-                     deadline_s=deadline_s(a, n), meta={'cmd': 'h2h', 'h2h_key': key, 'batch': k if self.seq else None},
+                     deadline_s=deadline_s(a, n), meta={'cmd': 'h2h', 'h2h_key': key, 'batch': k if self.seq else None,
+                                                        'argv': self.argv},
                      client=client, log=_log)
         t1 = time.time()
         _log(f'campaign {run}: put in {t1 - t0:.0f} s; collecting (deadline {deadline_s(a, n) / 3600:.2f} h after the '
              f'put; `python tools/farm_campaign.py collect {name} --deadline-now` plays the rest here now)')
-        res = C.collect(d, client=client, threads=a.threads, describe_games=False, log=_log)
+        res = C.collect(d, client=client, threads=a.threads, wrap=topup_wrap, describe_games=False, log=_log)
         st = C.load_state(d)
         rows = sorted(C.games(d), key=lambda r: int(r['gid']))
         if [int(r['gid']) for r in rows] != list(range(n)):
@@ -360,6 +506,7 @@ class Runner:
             mach[t] = mach.get(t, 0) + int(c)
         sub = st.get('submitted') or st.get('created')
         self.done.append({'campaign': run, 'games': n, 'coverage': res['coverage'], 'machines': mach,
+                          'by_route': res.get('by_route') or {},
                           'digest': res['digest'], 'spot': {x: res['spot'][x] for x in ('checked', 'ok')},
                           'alternates': [x['build_id'] for x in res.get('alternates') or []],
                           'alternates_note': res.get('alternates_note'),
@@ -392,6 +539,7 @@ class Runner:
                'games_digest': self.done[0]['digest'] if one else [x['digest'] for x in self.done],
                'spot': {'checked': sum(x['spot']['checked'] for x in self.done),
                         'ok': sum(x['spot']['ok'] for x in self.done)}}
+        out['by_route'] = self.done[0]['by_route'] if one else _merge_routes(self.done)
         notes = sorted({x['alternates_note'] for x in self.done if x.get('alternates_note')})
         if notes:
             out['routes_note'] = '; '.join(notes)

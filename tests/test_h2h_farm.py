@@ -95,9 +95,12 @@ def farm_ok(monkeypatch, tmp_path):
              'cuda': {'build_id': '1' * 24}, 'dml': {'build_id': '2' * 24},
              'mac': {'release': {'build_id': '3' * 24, 'published': True}}, 'exact': True}
     calls = []
+    monkeypatch.setattr(C, 'STATE_ROOT', str(tmp_path / 'campaigns'))
+    monkeypatch.setattr(C, 'EXPORT_CACHE', str(tmp_path / 'campaigns' / '_exports'))
     monkeypatch.setattr(HF, 'can_put', lambda: None)
     monkeypatch.setattr(HF, 'tracked_changes', lambda root=None: [])
     monkeypatch.setattr(HF, 'release_of', lambda root=None: entry)
+    monkeypatch.setattr(HF, 'no_onnx', lambda: [])
 
     def job_settings(worker, build_id, cfg, d, log, samples=False, seats=None):
         calls.append((worker, build_id, seats))
@@ -113,13 +116,16 @@ def test_the_conditions_in_order(tmp_path, monkeypatch, farm_ok):
     big = [a16, a16, '--paired', '--games', '200', '--sims', '64', '--a-infoset-merge', '1', '--a-leaf-value-view',
            'root', '--b-infoset-merge', '0']
     ok, why, runner = HF.BACKEND.plan(*_args(*big)[:1], 'auto', *_args(*big)[1:])
-    assert ok and why.startswith('campaign cmp-h2h-run-16v16-') and why.endswith(', build 5e4023e2 + CUDA/DML/macOS')
+    assert ok and why.startswith('campaign cmp-h2h-run-16v16-')
+    assert ', build 5e4023e2 + CUDA/DML/macOS; estimate: farm ~5 setup + ~30 queue + ~47 play = ~83 min, local ~284 min ' \
+           "of this machine's CPU" in why
     assert calls[-1][1] == entry['build_id'] and calls[-1][2][0]['set']['eval_infoset_merge'] == 1
     # under auto a small match plays here; asked for the farm it goes there whatever its size
     small = [a16, a16, '--paired', '--games', '8', '--sims', '64']
     a, sides, seq = _args(*small)
     ok, why, _ = HF.BACKEND.plan(a, 'auto', sides, seq)
     assert not ok and why.startswith('512 game-simulations, below the farm\'s minimum (--farm-min-work 12800')
+    assert why.endswith("local ~11 min of this machine's CPU")
     assert HF.BACKEND.plan(a, 'farm', sides, seq)[0]
     a, sides, seq = _args(*small, '--farm-min-work', '0')
     assert HF.BACKEND.plan(a, 'auto', sides, seq)[0]
@@ -155,6 +161,12 @@ def test_the_conditions_in_order(tmp_path, monkeypatch, farm_ok):
         raise C.CampaignError('worker build 5e40 does not play per-seat settings')
     monkeypatch.setattr(C, 'job_settings', refuses)
     assert 'refuses the job: worker build 5e40 does not play per-seat settings' in HF.BACKEND.plan(a, 'auto', sides, seq)[1]
+    # a Python without onnx: only while an export is still needed
+    monkeypatch.setattr(HF, 'no_onnx', lambda: ['onnx'])
+    assert HF.BACKEND.plan(a, 'auto', sides, seq)[1].startswith('this Python cannot export the networks for the farm (no '
+                                                                'onnx;')
+    monkeypatch.setattr(HF, 'missing_exports', lambda *x, **k: [])
+    assert 'refuses the job' in HF.BACKEND.plan(a, 'auto', sides, seq)[1]
 
 
 def test_release_of_names_the_command(tmp_path, monkeypatch):
@@ -249,7 +261,7 @@ def test_the_runner_plays_a_campaign_a_batch(tmp_path, monkeypatch, farm_ok):
     rows = r.play(0, 4, 0)
     assert [x['gid'] for x in rows] == [0, 1, 2, 3] and rows[1]['scores'] == [2.0, 0.0] and rows[0]['rec'] == {'gid': 0}
     p = put[0]
-    assert p['games'] == 4 and p['seed'] == 0 and p['b'] is None and p['share'] == C.DEFAULT_SHARE
+    assert p['games'] == 4 and p['seed'] == 0 and p['b'] is None and p['share'] == HF.AUTO_SHARE == 0.5
     assert p['seats'][0] == {'net': 1, 'set': {'eval_sims': 16}} and p['meta']['cmd'] == 'h2h'
     assert p['deadline_s'] == 3600 + 0.25 * 4 * 12 and 'alternates' not in p['kw'], 'the release alternates (default)'
     info = r.info()
@@ -266,6 +278,39 @@ def test_the_runner_plays_a_campaign_a_batch(tmp_path, monkeypatch, farm_ok):
     with pytest.raises(C.CampaignError, match='other inputs'):
         r._check_name(C.slug(p['name']), 'f' * 64, None)
     r._check_name(C.slug(p['name']), key, None)
+
+
+def test_the_estimate_reads_the_farms_pace_and_the_export_cache(tmp_path, monkeypatch):
+    root = tmp_path / 'campaigns'
+    monkeypatch.setattr(C, 'STATE_ROOT', str(root))
+    monkeypatch.setattr(C, 'EXPORT_CACHE', str(root / '_exports'))
+    assert HF.farm_history() == (None, None)
+    for k, (q, play, sims, local) in enumerate(((600, 1200, 64, 0), (1200, 2400, 64, 0), (60, 60, 64, 5))):
+        C.save_state(str(root / f'cmp-x{k}'), {'games': 200, 'settings': {'eval_sims': sims}, 'seats': [{'net': 1}, {'net': 2}],
+                                               'submitted': 1000.0, 'first_result': 1000.0 + q,
+                                               'result': {'seconds': q + play, 'coverage': {'local': local}}})
+    q, rate = HF.farm_history()
+    assert q == 20.0 and rate == 200 * 64 / 20.0, 'medians of the campaigns without local games'
+    run = _run(tmp_path)
+    a = h2h.parser().parse_args([_ck(run, 16), _ck(run, 16), '--games', '200', '--device', 'cuda'])
+    cfg = {'eval_spec': json.dumps({'x': 1})}
+    assert HF.estimate(a, False, cfg, None) == ("estimate: farm ~5 setup + ~20 queue + ~20 play = ~45 min, local ~5 min of "
+                                                "this machine's GPU")
+    from zero import games as G
+    key = __import__('hashlib').sha256(f'{C.file_sha256(_ck(run, 16))}|{G.spec_json(cfg["eval_spec"])}|1'.encode()).hexdigest()[:20]
+    os.makedirs(root / '_exports' / key)
+    for f in ('export.json', 'variant-matmul.json', 'variant-fp16.json'):
+        (root / '_exports' / key / f).write_text('{}')
+    assert HF.estimate(a, False, cfg, None).startswith('estimate: farm ~0 setup + ~20 queue')
+
+
+def test_the_top_up_takes_a_throttle_slot_beside_a_live_run(monkeypatch):
+    from zero import runctl
+    monkeypatch.setattr(runctl, 'live_supervisors', lambda: [{'pid': 1, 'run': 'r'}])
+    w = HF.topup_wrap()
+    assert w[-1].endswith(os.path.join('tools', 'slotd.sh')) and os.path.basename(w[0]).lower().startswith('bash')
+    monkeypatch.setattr(runctl, 'live_supervisors', lambda: [])
+    assert HF.topup_wrap() is None
 
 
 def test_farm_campaign_submit_takes_chance_k(tmp_path, monkeypatch):
@@ -286,3 +331,40 @@ def test_farm_campaign_submit_takes_chance_k(tmp_path, monkeypatch):
             FC.main(['submit', 'x', '--a', _ck(run, 16), '--games', '8', '--build', 'b' * 24,
                      '--state-root', str(tmp_path / 's')] + extra, client=cl)
         assert got['chance_k'] == want
+
+
+def test_a_standalone_cells_comparison_keeps_its_backend(tmp_path, monkeypatch, farm_ok):
+    """run_yardsticks.py cells-match / ab.py judge (docs/ENGINE.md 217): auto plays on the farm unless the comparison's
+    earlier games (its cache's baselines, its rows file) were played here; farm earlier and impossible now: refused."""
+    from mtgz.az import yardsticks as Y
+    entry, _ = farm_ok
+    run = _run(tmp_path)
+    ck, ref = _ck(run, 16), _ck(run, 0)
+    ys = Y.normalize({'bo1_games': 0, 'blunders': False, 'cells_games': 4, 'cells_refs': ['ref=' + ref],
+                      'cells_decks': ['izzet_delver_8016541', 'doomsday_8027957']})
+    jobs = []
+    monkeypatch.setattr(C, 'match_job', lambda rule_ck, a, b, sims, spec, tilts=None: (
+        jobs.append((rule_ck, a, b)) or ({'eval_spec': spec}, {}, [{'net': 1}, {'net': 1 if a == b else 2}])))
+    cdir = str(tmp_path / 'cache')
+    assert Y.standalone_backend(ck, ref, ys, cdir, 'local')[0] == 'local'
+    backend, why, farm = Y.standalone_backend(ck, ref, ys, cdir, 'auto')
+    assert backend == 'farm' and why == 'build 5e4023e2 + CUDA/DML/macOS'
+    assert farm['own_base'] and farm['rule_ck'] == ck and farm['pool']['build_id'] == entry['build_id']
+    assert (ck, ck, ref) in jobs and (ck, ref, ref) in jobs, 'every chooser match and its baseline checked'
+    os.makedirs(cdir)
+    with open(Y.base_file(cdir, 'old'), 'w') as f:
+        json.dump({'results': {}, 'time': 1}, f)                 # (an earlier baseline played here)
+    assert Y.standalone_backend(ck, ref, ys, cdir, 'auto')[:2] == (
+        'local', "kept: the comparison's earlier games (1 baselines / rows in its cache and rows file) were played here")
+    assert Y.standalone_backend(ck, ref, ys, cdir, 'farm')[0] == 'farm'
+    with open(Y.base_file(cdir, 'old'), 'w') as f:
+        json.dump({'results': {}, 'time': 1, 'backend': 'farm'}, f)
+    assert Y.standalone_backend(ck, ref, ys, cdir, 'auto')[0] == 'farm'
+    monkeypatch.setattr(HF, 'tracked_changes', lambda root=None: [' M x.py'])
+    with pytest.raises(SystemExit, match='earlier games were played on the farm'):
+        Y.standalone_backend(ck, ref, ys, cdir, 'auto')
+    os.remove(Y.base_file(cdir, 'old'))
+    b, why, _ = Y.standalone_backend(ck, ref, ys, cdir, 'auto')
+    assert b == 'local' and why.startswith('the checkout has uncommitted changes')
+    with pytest.raises(SystemExit, match='backend farm refused'):
+        Y.standalone_backend(ck, ref, ys, cdir, 'farm')

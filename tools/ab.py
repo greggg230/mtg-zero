@@ -33,7 +33,8 @@ THE SPEC (JSON):
     "env": {"ZERO_TOKEN_GRAPHS": "1"},        # extra environment of the arms' supervisors
     "require_source_idle": true,              # go refuses while the source's supervisor is live (the one GPU)
     "judge": {"games": 200, "device": "cuda", "sims": null, "seed": null, "decks": null, "yardsticks": null,
-              "vs_start": true},              # cells-match's options; vs_start: each arm against the start too
+              "vs_start": true,               # cells-match's options; vs_start: each arm against the start too
+              "backend": null, "reuse_control": false},   # where it plays (THE JUDGE below; docs/ENGINE.md 217)
     "publish": {"h2h": true,                  # the judge publishes (go / judge; --no-publish skips it)
                 "live": true,                 # each arm's supervisor runs the run-owned publisher as a SIDE run
                 "live_options": {"every": 8, "games": 6},   # the arm's `publish` dict (mtgz.az.publish KEYS)
@@ -53,6 +54,14 @@ THE JUDGE (<out>/judge/): for each treatment T, cells-match T's last checkpoint 
 .json: {summary, rows}); with judge.vs_start, every arm's last checkpoint against the common start (<arm>_vs_start
 .json; the start copied to judge/start_iter_KKKK.pt); then report.json / report.md (the matches' summaries, each arm's
 metrics over its iterations). One baseline cache (judge/cells_base) for all of them.
+Where the judge plays (docs/ENGINE.md 217): one backend per experiment. judge.backend 'auto' | 'farm' | 'local' fixes
+it; null (the default) decides it once - an experiment judged before (any match's result or a cached baseline in
+judge/) stays 'local' (every judge before ENGINE.md 217 played here); a new one asks cells-match for 'auto' on its first
+match (the farm when it can play exactly those games: a clean, released checkout, ...) - and keeps what that match was
+played on in judge/backend.json, passing it explicitly to every later match (which then refuses rather than mixes).
+Each match plays its control - the pair's baseline, the control or the start against itself - on the same backend
+(cells-match's one backend per comparison); judge.reuse_control true (cells-match --reuse-control) reuses a cached
+baseline of another backend instead, said in the log and the rows.
 
 PUBLISHING (default on; `--no-publish`, or "publish": {"h2h": false}): the judge posts one Head-to-heads experiment
 h2h.<id> through delverai's tools/upload_h2h.py --manifest (mtgz.az.site_h2h finds it): for each treatment the overall
@@ -74,7 +83,8 @@ build). The judge runs in the common code's worktree (`code.worktree`): the chec
 THE FARM (opt-in, "farm": {...}): an arm self-plays on the farm when its settings name a pool (`selfplay_remote`
 'pool:<farm run>' with pool_build / pool_worker / pool_runtime / pool_alternates ...: setting overrides like any other,
 in `common` or per arm - the same lease settings for every arm unless the A/B is about them; the worker build must play
-the arm's engine: one build per engine, published with tools/farm_build.py beforehand). With "gates" (default true),
+the arm's engine: one build per engine, published with tools/farm_release.py release <sha> beforehand). With "gates"
+(default true),
 `farm-gates` runs tools/farm_gates.py on each farm arm's forked config.json and checkpoint K with its pool_worker
 (<out>/farm_gates/<arm>/summary.json), and `launch` refuses a farm arm without a passed summary for that worker
 (AGENTS.md: farm compatibility is required; `go` runs the missing gates first). The coordinator's farm run is created
@@ -100,7 +110,7 @@ from mtgz.az import site_h2h as S  # noqa: E402
 RESERVED = ('publish', 'iters')
 LIVE_DEFAULTS = {'every': 8, 'games': 6, 'device': 'cpu', 'threads': 4, 'census': 0}
 JUDGE_DEFAULTS = {'games': 200, 'device': 'cuda', 'sims': None, 'seed': None, 'decks': None, 'yardsticks': None,
-                  'vs_start': True}
+                  'vs_start': True, 'backend': None, 'reuse_control': False}
 TERMINAL = ('done', 'stopped', 'refused', 'gave_up', 'paused')
 
 
@@ -164,6 +174,8 @@ def normalize(spec, base='.'):
     s['judge'] = dict(JUDGE_DEFAULTS, **(s.get('judge') or {}))
     if s['judge']['games'] % 2:
         raise SystemExit('spec: judge.games - an even number (games per cell)')
+    if s['judge']['backend'] not in (None, 'auto', 'farm', 'local'):
+        raise SystemExit("spec: judge.backend - 'auto', 'farm', 'local' or null (docs/ENGINE.md 217)")
     pub = dict({'h2h': True, 'live': True, 'live_options': {}, 'link': None, 'url': None}, **(s.get('publish') or {}))
     pub['link'] = pub['link'] or os.path.basename(os.path.normpath(src['run']))
     s['publish'] = pub
@@ -474,6 +486,23 @@ def judge_matches(s, k):
     return out
 
 
+def judge_backend(s, out):
+    """The experiment's judge backend (THE JUDGE, docs/ENGINE.md 217) -> (backend for the next match, why, fixed): the
+    spec's judge.backend; else judge/backend.json's (decided by its first match); else 'local' for an experiment judged
+    before (a match's result or a cached baseline in judge/: every judge before 217 played here); else 'auto' (the first
+    match decides). `fixed`: it is the experiment's already."""
+    if s['judge'].get('backend'):
+        return s['judge']['backend'], 'judge.backend', True
+    rec = jload(os.path.join(out, 'backend.json'), None)
+    if isinstance(rec, dict) and rec.get('backend') in ('farm', 'local'):
+        return rec['backend'], f"judge/backend.json ({rec.get('why')})", True
+    done = [k for k, _, _ in judge_matches(s, fork_k(s)) if os.path.exists(os.path.join(out, k + '.json'))]
+    base = os.path.join(out, 'cells_base')
+    if done or (os.path.isdir(base) and any(f.endswith('.json') for f in os.listdir(base))):
+        return 'local', 'judged before docs/ENGINE.md 217 (its results and baselines were played here)', False
+    return 'auto', 'a new experiment: its first match decides', False
+
+
 def judge(s, publish=True):
     out = judge_dir(s)
     os.makedirs(out, exist_ok=True)
@@ -491,12 +520,16 @@ def judge(s, publish=True):
     env.pop('CUDA_VISIBLE_DEVICES', None)
     j = s['judge']
     res = {}
+    backend, why, fixed = judge_backend(s, out)
+    print(f'judge: backend {backend} - {why}', flush=True)
     for key, a, b in judge_matches(s, k):
         jp = os.path.join(out, key + '.json')
         if not os.path.exists(jp):
             cmd = [python(s), 'tools/run_yardsticks.py', 'cells-match', fin[a], '--ref', fin[b], '--ref-label', b,
                    '--games', str(j['games']), '--cache', os.path.join(out, 'cells_base'),
-                   '--out', os.path.join(out, key + '.rows.jsonl'), '--json']
+                   '--out', os.path.join(out, key + '.rows.jsonl'), '--json', '--backend', backend]
+            if j.get('reuse_control'):
+                cmd.append('--reuse-control')
             for opt in ('sims', 'seed', 'device'):
                 if j.get(opt) is not None:
                     cmd += [f'--{opt}', str(j[opt])]
@@ -514,6 +547,11 @@ def judge(s, publish=True):
             r = json.loads(p.stdout)
             r['seconds'] = round(time.time() - t0, 1)
             jsave(jp, r)
+            if not fixed:                      # (the experiment's backend: its first match's, kept for every later one)
+                backend, fixed = r.get('backend') or 'local', True
+                jsave(os.path.join(out, 'backend.json'), {'backend': backend, 'why': f'the first match ({key}) was '
+                                                          f'played there ({why})', 'time': round(time.time())})
+                print(f'judge: backend {backend} for every later match (judge/backend.json)', flush=True)
         res[key] = (jload(jp) or {})['summary']
     rep = {'id': s['id'], 'k': k, 'iters': s['iterations'], 'control': s['control'], 'matches': res,
            'arms': {a: summarize(s, a, k) for a in s['arms']}}
