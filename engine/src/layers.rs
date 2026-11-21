@@ -622,6 +622,17 @@ impl Game {
                         dp += *a as Wide * n;
                         dt += *b as Wide * n;
                     }
+                    // "+2/+0 for every seven cards in your graveyard" (Dark
+                    // Matter Manipulator; layer 7c, CR 613.4c): the static's
+                    // controller's graveyard as it is now (cards only, CR
+                    // 108.2), one unit per full group of `per`.
+                    Mod::PtPerGraveyardCards { filter, per, p: a, t: b } => {
+                        let ctl = self.objs[s.i()].controller;
+                        let ctx = crate::cast::Ctx { controller: ctl, source: Some(self.obj_ref(s)) };
+                        let n = self.graveyard_cards(ctl).filter(|&g| self.card_matches(filter, g, &ctx)).count() as Wide / *per as Wide;
+                        dp += *a as Wide * n;
+                        dt += *b as Wide * n;
+                    }
                     Mod::PowerPlusGreatestMv { types } => {
                         let ctl = self.objs[s.i()].controller;
                         dp += self

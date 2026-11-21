@@ -1,5 +1,5 @@
 //! One test binary for the card tests (`cards.rs` and every `cards_*.rs`) (docs/ENGINE.md 167.9): each file a module of it, so the engine is linked once
-//! for all 71 instead of once per file. Run one file's tests with its module name as the filter:
+//! for all 72 instead of once per file. Run one file's tests with its module name as the filter:
 //! `cargo test --release -p engine --test cards_suite cards::` (was `--test cards`).
 //! A file keeps its own `mod common;` / kit modules: `#[path]` loads it like a crate root, so its modules
 //! resolve beside it as before.
@@ -68,6 +68,8 @@ mod cards_eoe_w6_granted;
 mod cards_eoe_w6_mana;
 #[path = "cards_eoe_w6_top.rs"]
 mod cards_eoe_w6_top;
+#[path = "cards_hogaak_c.rs"]
+mod cards_hogaak_c;
 #[path = "cards_legacy.rs"]
 mod cards_legacy;
 #[path = "cards_m4b1.rs"]
