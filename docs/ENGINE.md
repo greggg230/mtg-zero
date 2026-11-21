@@ -41988,3 +41988,27 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
+
+## 221. zero-core pin c850a5d -> f1b5a8c: farm match leases in fewer, larger batches on evaluator lanes of their own (zero-core `feat/eval-speed`, docs/az.md 70; branch `feat/eval-speed`, 2026-11-21)
+
+**Why.** Farm match (eval) leases on a PC's CPU spent ~98% of their time in ONNX Runtime at ~2 rows a call: 32 games of a
+cells campaign took 45-60 minutes on one PC (215). The worker played them in the run's own `groups` (legacy-meta3-r1:
+4), both networks on one evaluator thread, one session with the job's 16-20 search threads.
+
+**The pin** (zero-core docs/az.md 70; the worker crate only - no engine, encoding or search change): an eval job's
+batches go to evaluator lanes of their own (on the CPU a lane per network seat, on CUDA one per generation, other GPU
+providers one lane as before); on the CPU a job line without `groups` plays in one group (never the settings'), each
+lane a session of at most 4 threads (macOS's 3). GPU jobs keep their groups. Only the batches change.
+
+**Parity** (2026-11-21, the desktop's CPU beside the live runs, below normal priority, the CPU pack d531424b;
+legacy-meta3-r1 iter_1040 against iter_1024, the yardsticks' best-of-one spec, 32 simulations, paired, traced):
+
+* *Old worker, layouts* (main 1e7416c5's release worker 5e4023e2): games 0-7 in the settings' groups 4 with 4
+  intra-op threads, in groups 1 with 2 threads, and as two leases (0-3, 4-7) in groups 1 with 1 thread: **every row and
+  trace digest identical** - the CPU graph answers a row the same in any batch and on any thread count.
+* *New worker against old* (this core's worker, built here): games 0-7 in its default layout (1 group, 2 lanes x 2
+  threads), with 4 lanes in 2 groups, and with `--lanes one` (the layout before) on games 2-5: **8 of 8 / 8 of 8 / 4 of
+  4 rows and digests identical to the old worker's**.
+* *zero-core's eval gate* (`tools/worker_eval_gate.py`, the new worker against `zero.farm_eval.match_driver`, groups 1,
+  sparse rows, 4 search + 4 ONNX Runtime threads, untraced): **8 of 8 rows identical, 60 batches identical**; both sides'
+  rows equal the old worker's.
