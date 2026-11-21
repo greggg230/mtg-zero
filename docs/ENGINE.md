@@ -41540,3 +41540,39 @@ c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890
 (gate 2: 6 games, 2,890 rows, 150 batches); core pytest 723 passed - skipped: 17 live-run-hazard tests (fenced).
 
 Main fast-forwarded 4c77c950 -> 62b9a028 (main had not moved since the branch: the gate stands as run).
+
+## 214. zero-core pin 35a47a9 -> ba607c2: per-seat evaluation settings - an eval job seat's `set`, zero.h2h's per-side options for farm campaigns (zero-core `feat/seat-settings`, docs/az.md 68; zero-farm PROTOCOL.md 5.2; branch `feat/seat-settings`, 2026-11-21)
+
+**Why.** The 2026-11-20 ISMCTS check (legacy-meta3-r1 iter_1040 against itself, side A with information-set merging,
+side B without: `mtgz.az.h2h CK CK --paired --games 2400 --sims 64 --a-infoset-merge 1 --b-infoset-merge 0`, 4 x 2,400
+games) ran on the desktop beside the live runs, because a farm eval job had one settings block for both seats. The owner
+wants such head-to-heads and A/B tests on the farm by default.
+
+**The pin** (zero-core docs/az.md 68): an eval job's network seat may carry `"set"` - run settings that seat plays other
+than the job's (`{"net": 1, "set": {"eval_infoset_merge": 1}}`: Run.nn_seat of the job's settings with the set over
+them), keys only of what an evaluation seat reads (zero_worker `SEAT_READS`), refused otherwise by the worker and its
+check-config; the worker announces the feature `seat_settings`; `zero.seat_settings` is the one mapping of zero.h2h's
+per-side options to a seat's set, used by zero.h2h itself, zero.farm_h2h and the campaigns here. A seat without a set is
+the seat of before (rows, records, digests). The only Rust change is in the worker crate (`crates/worker`: the seat's
+parse and settings, the feature); play and the encoding are unchanged.
+
+**Farm campaigns** (`mtgz.az.farm_campaign`, ENGINE.md 165; `tools/farm_campaign.py submit`): zero.h2h's per-side
+options (zero.seat_settings.add_side_args without the local-only `--graphs` / `--lookahead`: `--{a,b}-sims`, `--select` /
+`--{a,b}-select`, `--select-min-visits` / `--{a,b}-select-min-visits`, `--cq-c-*` / `--{a,b}-cq-c-*`,
+`--{a,b}-leaf-value-view`, `--{a,b}-belief-tilt / -tilts / -clip / -mix / -fast`, `--infoset-merge` /
+`--{a,b}-infoset-merge`, `--{a,b}-root-search`, `--gumbel-m` / `--{a,b}-gumbel-m`, `--{a,b}-gumbel-scale`) give each
+side its set over the campaign's settings (`side_sets`, `campaign_seats`). `match_settings(..., sides=)` checks each side
+against the local match's seat of that side - the side's seat's rule (its options applied as zero.h2h applies them) with
+the side's own run's margin_w / redet / eval_cache - so B's run's own cache is still refused (no per-side option sets
+it); without options the settings and seats are those of before (the yardsticks call it so). `check_seats` (in `submit`)
+accepts [gen 1, gen 2] or [gen 1, gen 1] seats, each with a set in an eval campaign (never with `--samples`);
+`job_settings` runs the build's check-config with the seats (a build without `seat_settings` refused before anything is
+put). `readout` covers two seats of one network with their own settings (A = the job's seats[0] as a whole) and names
+each side's rule and simulations as zero.h2h does (`select_a` / `select_b`, `sims_a` / `sims_b`; the A-vs-B readout gains
+them too). `--a CK --a-infoset-merge 1 --b-infoset-merge 0` without `--b` is the farm's form of the ISMCTS check.
+
+**Tests.** zero-core: the worker's `seat_sets_parse_and_apply` and `seat_sets_play_their_own_settings`, the full
+`cargo test -p zero_worker`, tests/test_seat_settings.py, tests/test_farm_h2h.py (docs/az.md 68). Here:
+tests/test_farm_play.py `test_per_side_options_are_the_seats_sets` (no options: the settings and seats of before; a merge
+and a sims option give A against itself two sets, checked per side; refusals: a set with samples, other gens, a b with
+self-play seats, a merge without root-view values, B's run's cache; the readout's rules and simulations).

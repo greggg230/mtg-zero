@@ -22,7 +22,10 @@ A campaign is a farm run of its own (`cmp-<name>`) holding one such job:
                digest; `match_settings` builds them so the seats are zero.h2h's (`h2h.match`: the yardsticks'),
                checked dict for dict
   * seats      [{"net": 1}, {"net": 2}] (A vs B; paired: games 2k, 2k + 1 share the deal, seats swapped) or
-               [{"net": 1}, {"net": 1}] (self-play of A; with `samples` the only form, unpaired)
+               [{"net": 1}, {"net": 1}] (self-play of A; with `samples` the only form, unpaired); in an eval campaign a
+               seat may carry its own settings, `{"net": 1, "set": {...}}` (zero-core docs/az.md 68: zero.h2h's per-side
+               options as run settings, zero.seat_settings; `match_settings(sides=...)`, `campaign_seats`) - e.g. A
+               against itself with A merging its trees and B not, an evaluation-only A/B on one network
   * seed       the batch's base seed (the run's job `seed`: game g's seed is game_seed(seed, g, paired), the seed a
                local zero.h2h match of the same games uses)
   * games      ids [0, games); `games_per_lease` ('auto' = ~7.5 min of a machine)
@@ -143,7 +146,8 @@ def match_seat(ckpt, sims, rule, chance_k=2, c_puct=1.0):
 
 
 def farm_seats(settings, seats):
-    """The driver seats an eval job plays at `settings` (zero.farm_eval.seat_dicts: Run.nn_seat), without keys."""
+    """The driver seats an eval job plays at `settings` (zero.farm_eval.seat_dicts: Run.nn_seat - of the settings with a
+    seat's set over them for a seat with one), without keys."""
     from zero import farm_eval as FE
     out = []
     for s in FE.seat_dicts(settings, seats):
@@ -153,14 +157,65 @@ def farm_seats(settings, seats):
     return out
 
 
-def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_puct=1.0, max_steps=5000):
+# the keys of an evaluation seat a local zero.h2h match takes from each side's own run or its own arguments
+# (h2h._seats: games.nn_seat's base with h2h.run_seat_keys), not from the move rule
+SEAT_BASE = ('key', 'sims', 'c_puct', 'selfplay', 'alpha', 'eps', 'temp_moves', 'sims_fast', 'p_full', 'chance_k',
+             'margin_w', 'redet', 'eval_cache')
+
+
+def side_sets(cfg, sides=None):
+    """Each side's set over a campaign's settings `cfg` (zero.seat_settings.sets_of: zero.h2h's per-side options in
+    `sides`, a namespace of zero.seat_settings.add_side_args, e.g. tools/farm_campaign.py submit's; None: none) -> [set_a,
+    set_b] ({}: the side plays the settings' seat). A combination zero.h2h refuses: CampaignError."""
+    if sides is None:
+        return [{}, {}]
+    from zero import seat_settings as SS
+    try:
+        return SS.sets_of(sides, cfg)
+    except ValueError as e:
+        raise CampaignError(str(e)) from None
+
+
+def campaign_seats(sets, b):
+    """An eval campaign's seats: gen 1 (A) and gen 2 (B, `b` true) or gen 1 again (A against itself), each with its set
+    when it has one (zero-core docs/az.md 68) - the seats of before when neither has."""
+    from zero import seat_settings as SS
+    return [SS.net_seat(1, sets[0] or None), SS.net_seat(2 if b else 1, sets[1] or None)]
+
+
+def check_seats(seats, b, samples=False):
+    """A campaign's seats (`submit`): [gen 1, gen 2] (A vs B: `b` given) or [gen 1, gen 1] (self-play of A), a seat's set
+    only in an eval campaign (a play job with samples plays self-play seats) -> the seats as the worker writes them back
+    (zero.farm_eval.check_seats); CampaignError otherwise."""
+    from zero import farm_eval as FE
+    try:
+        seats = FE.check_seats(seats)
+    except ValueError as e:
+        raise CampaignError(str(e)) from None
+    gens = [s.get('net') for s in seats]
+    if gens not in ([1, 2], [1, 1]):
+        raise CampaignError(f'seats {seats}: [{{"net": 1}}, {{"net": 2}}] or [{{"net": 1}}, {{"net": 1}}] (each may '
+                            f'carry a set)')
+    if (b is None) != (gens[1] == 1):
+        raise CampaignError('a second network b goes with seats [{"net": 1}, {"net": 2}], none with self-play')
+    if samples and any('set' in x for x in seats):
+        raise CampaignError('a play job with samples plays its run\'s self-play seat: no per-seat settings')
+    return seats
+
+
+def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_puct=1.0, max_steps=5000, sides=None):
     """The eval job's settings of zero.h2h.match(ckpt_a, ckpt_b, sims=sims, chance_k, c_puct, spec=spec,
     seat_a=seat_b=<A's run's rule with root belief tilts `tilts`>, paired) - the yardsticks' best-of-one
     (mtgz.az.yardsticks.bo1_seat: tilts = the run's without 'deck'): A's run's settings resolved, then eval_sims,
     c_puct, chance_k, max_steps, eval_spec, the belief tilts, sparse 0 (h2h's dense batches), eval_trace 1. Checked:
     the farm's seats (Run.nn_seat) are exactly the match's for both sides (B with its own run's margin_w / redet /
     eval_cache), else CampaignError naming the difference (e.g. an opponent whose run evaluates with another cache:
-    an eval job has one seat setting for both sides) -> (settings, rule)."""
+    no per-side option sets it) -> (settings, rule).
+
+    `sides` (zero-core docs/az.md 68): zero.h2h's per-side options (`side_sets`; None: none, the match above). A side
+    with options plays the settings with its set over them - the seat zero.h2h gives those options; the local match's
+    seat of that side is that seat's rule with the side's own run's margin_w / redet / eval_cache, checked per side as
+    above. The job's seats are then `campaign_seats(side_sets(settings, sides), ckpt_b)`."""
     from zero import games as G, h2h
     cfg = dict(h2h.run_settings(ckpt_a))
     if not cfg:
@@ -171,14 +226,21 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
         cfg['eval_belief_tilts'] = {k: float(v) for k, v in sorted(dict(tilts).items()) if v}
     cfg.update(eval_sims=int(sims), c_puct=float(c_puct), chance_k=int(chance_k), max_steps=int(max_steps),
                eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=GAME)
-    want = [match_seat(ckpt_a, sims, rule, chance_k, c_puct),
-            match_seat(ckpt_b or ckpt_a, sims, rule, chance_k, c_puct)]
-    got = farm_seats(cfg, [{'net': 1}, {'net': 2}])
+    if sides is None:
+        want = [match_seat(ckpt_a, sims, rule, chance_k, c_puct),
+                match_seat(ckpt_b or ckpt_a, sims, rule, chance_k, c_puct)]
+        got = farm_seats(cfg, [{'net': 1}, {'net': 2}])
+    else:
+        got = farm_seats(cfg, campaign_seats(side_sets(cfg, sides), True))
+        # (each side's rule: its seat's, the per-side options applied as zero.h2h applies them; its base its own run's)
+        want = [match_seat(ck, g['sims'], {k: v for k, v in g.items() if k not in SEAT_BASE}, chance_k, c_puct)
+                for ck, g in zip((ckpt_a, ckpt_b or ckpt_a), got)]
     for side, (w, g) in enumerate(zip(want, got)):
         if w != g:
             diff = {k: (w.get(k), g.get(k)) for k in sorted(set(w) | set(g)) if w.get(k) != g.get(k)}
             raise CampaignError(f'seat {"AB"[side]}: the farm would play {diff} (match vs farm): not the local '
-                                f'match\'s seat - an eval job has one seat setting for both sides')
+                                f'match\'s seat - an eval job seats both sides from one run\'s settings (a per-side '
+                                f'option changes only what zero.h2h\'s per-side options set)')
     return cfg, rule
 
 
@@ -204,16 +266,17 @@ def worker_info(worker):
     return info
 
 
-def job_settings(worker, build_id, cfg, d, log, samples=False):
+def job_settings(worker, build_id, cfg, d, log, samples=False, seats=None):
     """The template's settings: the keys the worker build calls `play` for an eval job (zero.farm_h2h.play_settings:
     the seats checked the same as the full settings'; `eval_trace` must be among them - a build before it refuses or
     drops it: CampaignError) or, with `samples`, for its self-play job (zero.farm_pool.play_settings: the driver checked
-    the same as the full settings')."""
+    the same as the full settings'). `seats`: the eval job's (checked by the worker's check-config with the settings; a
+    seat with a set needs a build that announces `seat_settings`, zero-core docs/az.md 68)."""
     from zero import farm_h2h as FH, farm_pool as FP
     try:
         if samples:
             return FP.play_settings(worker, build_id, cfg, d, log)
-        play = FH.play_settings(worker, build_id, cfg, d, log)
+        play = FH.play_settings(worker, build_id, cfg, d, log, seats=seats)
     except SystemExit as e:
         raise CampaignError(str(e)) from None
     if not play.get('eval_trace'):
@@ -347,7 +410,8 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
            min_agent=None, needs=None, meta=None, client=None, root=None, log=log_stderr, opts=None, samples=False):
     """A new campaign (or the existing one of that name, resumed where it stopped) -> its state directory. `settings`:
     a run's evaluation settings (match_settings); `seats` [{"net": 1}, {"net": 2}] (A vs B, `b` given) or
-    [{"net": 1}, {"net": 1}] (self-play of A); `seed`: the batch's base seed; `worker`: the build's executable
+    [{"net": 1}, {"net": 1}] (self-play of A), each network seat with its set when it has one (`campaign_seats`,
+    `check_seats`); `seed`: the batch's base seed; `worker`: the build's executable
     (`ort_dll`: an ONNX Runtime the local fallback loads; default the runtime pack next to the build); `meta`: the
     caller's notes (kept in the state). `samples`: a play job with the search's samples (self-play seats of
     `settings` = selfplay_settings; seats [{"net": 1}, {"net": 1}], unpaired)."""
@@ -358,10 +422,7 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
         st = load_state(d)
         log(f'campaign {run}: resuming ({len(st.get("have", []))}/{st["games"]} games in)')
     else:
-        if seats not in ([{'net': 1}, {'net': 2}], [{'net': 1}, {'net': 1}]):
-            raise CampaignError(f'seats {seats}: [{{"net": 1}}, {{"net": 2}}] or [{{"net": 1}}, {{"net": 1}}]')
-        if (b is None) != (seats[1] == {'net': 1}):
-            raise CampaignError('a second network b goes with seats [{"net": 1}, {"net": 2}], none with self-play')
+        seats = check_seats(seats, b, samples)
         if samples and (b is not None or paired):
             raise CampaignError('a play job with samples is self-play of one network, unpaired')
         if games < 1 or (paired and games % 2):
@@ -380,7 +441,7 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
               'spot': float(spot), 'created': time.time(), 'meta': meta or {}, 'have': [], 'failed': {},
               'machines': {}, 'leases': {}, 'cursor': 0, 'job': {'kind': 'play', 'trace': True, 'samples': bool(samples)}}
         os.makedirs(d, exist_ok=True)
-        st['settings'] = job_settings(worker, build_id, settings, d, log, samples)
+        st['settings'] = job_settings(worker, build_id, settings, d, log, samples, seats=seats)
         st['spec'] = st['settings']['spec' if samples else 'eval_spec']
         save_state(d, st)
     return _setup(d, st, client, opts, log)
@@ -786,13 +847,25 @@ def read_records(d):
 
 # ------------------------------------------------------------------------------------------------ collect
 def readout(d, st):
-    """A vs B (seats [{"net": 1}, {"net": 2}]): zero.h2h's summary of the games (zero.farm_eval.summary, A = gen 1) -
-    the fields a local zero.h2h.match prints; self-play: None."""
+    """A vs B (seats [{"net": 1}, {"net": 2}]) or two seats of one network with their own settings: zero.h2h's summary
+    of the games (zero.farm_eval.summary, A = the job's seats[0] as a whole), each side's move rule (`select_a`,
+    `select_b`: zero.h2h's names, e.g. '-ism' for a merged side) and, when they differ, simulations (`sims_a`, `sims_b`)
+    - the fields a local zero.h2h.match prints; self-play (two equal seats, or samples): None."""
     from zero import farm_eval as FE
-    if st['seats'][1] != {'net': 2}:
+    seats = st['seats']
+    if samples_job(st) or seats[0] == seats[1]:
         return None
     rows = [{k: v for k, v in r.items() if k not in ('rec', 'by', 'digest', 'aux')} for r in rows_of(d).values()]
-    return FE.summary(rows, st['paired'], {'net': 1}) if rows else None
+    if not rows:
+        return None
+    out = FE.summary(rows, st['paired'], seats[0])
+    if st.get('settings'):
+        tags = FE.seat_tags(st['settings'], seats)
+        out.update(select_a=tags[0], select_b=tags[1])
+        sims = [c['eval_sims'] for c in FE.seat_cfgs(st['settings'], seats)]
+        if sims[0] != sims[1]:
+            out.update(sims_a=sims[0], sims_b=sims[1])
+    return out
 
 
 def stop_farm(cl, st, log):

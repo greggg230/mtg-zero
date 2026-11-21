@@ -6,6 +6,7 @@ Analysis campaigns:
     python tools/farm_campaign.py submit NAME --a CKPT [--b CKPT] --games N --build ID [--worker EXE] [--sims 64]
            [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
            [--games-per-lease auto|N] [--deadline-h 3] [--spot 0.05] [--ort-dll DLL] [--min-agent V] [--wait]
+           [zero.h2h's per-side options: --a-infoset-merge 1 --b-infoset-merge 0, --a-sims N, --b-select visits, ...]
     python tools/farm_campaign.py submit NAME --a CKPT --samples [--set KEY=JSON ...] --games N --build ID ...
     python tools/farm_campaign.py status NAME
     python tools/farm_campaign.py collect NAME [--no-local] [--threads 4] [--wrap CMD ...] [--no-describe]
@@ -14,7 +15,11 @@ Analysis campaigns:
   zero.h2h.match plays them (mtgz.az.farm_campaign.match_settings: A's run's evaluation settings, `--sims`, the spec,
   the root belief tilts; the seats checked equal to the local match's): `--bo1` = the yardsticks' best-of-one (A's
   run's eval spec without its best-of-three keys, its tilts without 'deck': mtgz.az.yardsticks), else `--spec` (default
-  A's run's evaluation spec) and `--tilts` (default the run's). `--samples`: a play job with search samples - A against
+  A's run's evaluation spec) and `--tilts` (default the run's). zero.h2h's per-side options (zero-core
+  zero.seat_settings.add_side_args without the local-only ones; zero-core docs/az.md 68, docs/ENGINE.md 214) give a
+  side its own settings - its seat `{"net": gen, "set": {...}}` - e.g. `--a CK --a-infoset-merge 1 --b-infoset-merge 0`
+  (no --b: A against itself, side A merging its trees): an evaluation-only A/B on one network, the readout naming each
+  side's rule (`select_a` / `select_b`); the worker build must announce `seat_settings`. `--samples`: a play job with search samples - A against
   itself with its run's self-play seat on its self-play settings, `--set` over them (e.g. --set 'selfplay_resign_t=0'
   --set 'spec="{...dealt_decks...}"'), unpaired. The build: a signed release worker that knows
   eval_trace, found as for fuzz campaigns (or `--worker`); its runtime pack from its manifest. Prints the state
@@ -372,7 +377,10 @@ def analysis_main(argv, client=None):
     ap.add_argument('--key', default=FD.data_key_path())
     ap.add_argument('--farm-release', default=FD.farm_release_path())
     ap.add_argument('--state-root')
+    from zero import seat_settings as SS
+    SS.add_side_args(ap, local=False)          # (zero.h2h's per-side options: the seats' sets, zero-core docs/az.md 68)
     a = ap.parse_args(argv)
+    sides = SS.given(a)
     cl = client or FD.Client(a.url, token=read_token(a.token_file))
     run = C.slug(a.name)
     d = C.state_dir(run, a.state_root)
@@ -380,6 +388,8 @@ def analysis_main(argv, client=None):
     try:
         if a.action == 'submit':
             if os.path.exists(os.path.join(d, 'state.json')):
+                if sides:
+                    ap.error(f'per-side options {sorted(sides)}: only when a campaign starts (it resumes as it was)')
                 C.resume(d, client=cl, opts=opts)
             else:
                 if not (a.a and a.games and a.build):
@@ -391,8 +401,8 @@ def analysis_main(argv, client=None):
                 else:
                     exe, man = find_worker(a.build, a.dist)
                 if a.samples:
-                    if a.b or a.bo1:
-                        ap.error('--samples: self-play of --a only (no --b, no --bo1)')
+                    if a.b or a.bo1 or sides:
+                        ap.error('--samples: self-play of --a only (no --b, no --bo1, no per-side options)')
                     over = {}
                     for kv in a.set:
                         k, sep, v = kv.partition('=')
@@ -411,13 +421,13 @@ def analysis_main(argv, client=None):
                     spec = a.spec or h2h.run_eval_spec(a.a, C.GAME)
                     tilts = json.loads(a.tilts) if a.tilts is not None else None
                 if not a.samples:
-                    settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b)
-                seats = [{'net': 1}, {'net': 2}] if a.b else [{'net': 1}, {'net': 1}]
+                    settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b, sides=a if sides else None)
+                seats = [{'net': 1}, {'net': 1}] if a.samples else                     C.campaign_seats(C.side_sets(settings, a if sides else None), bool(a.b))
                 gpl = a.games_per_lease if a.games_per_lease == 'auto' else int(a.games_per_lease)
                 C.submit(a.name, a.a, a.games, settings, seats, a.seed, a.build, exe, man.get('requires_runtime'),
                          b=a.b, paired=not (a.unpaired or a.samples), share=a.share, samples=a.samples, priority=a.priority, games_per_lease=gpl,
                          deadline_s=a.deadline_h * 3600, spot=a.spot, ort_dll=a.ort_dll, min_agent=a.min_agent,
-                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1, 'set': a.set}, client=cl, root=a.state_root, opts=opts)
+                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1, 'set': a.set, 'sides': sides}, client=cl, root=a.state_root, opts=opts)
             print(d)
             if not a.wait:
                 return 0
