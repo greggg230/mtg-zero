@@ -42000,7 +42000,9 @@ both sides); one **deck stew** per deck, distilled from every specialist whose p
 where that deck acts; one **main stew**, distilled from the deck stews (each row's teacher the stew of its acting
 deck) plus a retention share for the pairings no specialist covers. Everything in the stew is best of three (the
 user, 2026-11-21): the specialists self-play full matches with sideboarding (`"format": "bo3"`, `game_episodes`,
-`start_game` 1; no matchup-model teacher), and every judging comparison is best-of-three matches. Until now each of
+`start_game` 1; their sideboarding learnt the Delver mirror's way - dealt decks per seat, a per-pairing matchup model
+and its tables as teacher decisions - once that lane merges: section 223), and every judging comparison is
+best-of-three matches on the plain evaluation spec (the network's own sideboarding). Until now each of
 these steps was made by hand for one experiment (the mirror-only fork's launch script with the source run's supervisor
 arguments, the farm runs paused and activated on the coordinator by a script, an end watcher that resumes the meta3
 run, the vs-pb1@262 refmatch watcher); the orchestrator makes them one resumable loop.
@@ -42039,10 +42041,12 @@ format: a best-of-three 60 + its sideboard), `candidates`, `source` {`run`, `ite
 specialist self-plays on its own farm run), `distill` (the sources file's `train` block), `distill_cli` (extra
 tools/distill.py arguments: `--device cuda`), `distill_iters` (6: the newest data iterations of a turn a generation
 distils from), `retention_share` ("field" or a number), `judge` {...} (222.3), `hold_after` (["<phase>@<generation>"]),
-`env` (the stew's processes' environment), `archive` ("copy" | "link")}, `code` {`worktree`, `sha`, `python`, `farm`
+`env` (the stew's processes' environment), `archive` ("copy" | "link"), `spec_extra` / `deck_spec_extra` (below)},
+`code` {`worktree`, `sha`, `python`, `farm`
 (pool_build, pool_runtime, pool_worker, pool_alternates, pool_variants, pool_min_agent; `"pool_build": "published"` =
 the published farm build of `code.sha`), `farm_gates` (true)}, `yield_runs` [{`run`, `farm_runs`}], `beside_runs`
-(live runs a stew off the GPU may run beside, never touched: the CPU smoke beside the meta3 run), `notes`. Unknown
+(live runs a stew off the GPU may run beside, never touched: the CPU smoke beside the meta3 run), `requires` (what
+the recipe needs merged first; init and plan say it), `notes`. Unknown
 keys, an odd judge count, a hold tag that names no phase, a seed of a pairing no specialist has, a farm run name over
 63 characters and the like are refused by name.
 
@@ -42063,10 +42067,17 @@ written by the stew - the source run's config.json, then the stew's own keys, th
 passes only `--iters`) - and the seed's heads checked against it (fork_run's `check_heads`: net.HeadMissing is
 reported, never patched around). The stew's own keys: `spec` = `eval_spec` = the recipe's metagame restricted to the
 pairing (`metagame_spec([A, B], weights [[0, 1], [1, 0]])`: every match A against B, either seat; a mirror `[A]`,
-`[[1]]`), `iters` 0, evaluation off (`eval_every` 100000, `elo_anchors` '', `eval_remote` '', `yardsticks` {}),
-`publish` {}, `matchup_every` 0, `forced_find_schedule` {} (the source spec's forced find is dropped, with a note in
+`[[1]]`) with `recipe.spec_extra` over its top level and `recipe.deck_spec_extra[<deck>]` over each deck's entry
+(self-play options: dealt decks per seat, the per-deck table keys of 223) - and `eval_spec` the plain one (no extras:
+an evaluation never deals decks or plays tables) -, `iters` 0, evaluation off (`eval_every` 100000, and `eval_games`,
+`eval_random_games`, `elo_games` 0: zero.run always evaluates iteration 0; `elo_anchors` '', `eval_remote` '',
+`yardsticks` {}), `publish` {}, `forced_find_schedule` {} (the source spec's forced find is dropped, with a note in
 state.json and the report: the engine refuses it in best of three, 180.1, and a new run would restart its schedule
-at its first p), `selfplay_remote` 'pool:<name>-<alias A>-<alias B>' (`recipe.farm`; '' without).
+at its first p), `selfplay_remote` 'pool:<name>-<alias A>-<alias B>' (`recipe.farm`; '' without). The matchup
+model's settings (`matchup_every`, `matchup_window`, ...: 223's sideboarding) are ordinary run settings of
+`recipe.settings` - the stew neither sets nor clears them, so they come from the recipe or the source. The engine
+parses each specialist's spec at init (a game made from it): an option this build refuses - dealt decks in a metagame
+before 223 merges - fails `init`, not the run's first start.
 
 **1. train.** Each specialist of the generation in turn (the field's pairing order): its turn's target (version g's
 iteration + `turn_iters`) recorded in state.json first (a resumed turn keeps it); the stew's STOP / PAUSE checked; the
@@ -42144,10 +42155,10 @@ python tools/stew.py add-deck stews/first hogaak_tempo_NNNN --alias hogaak
 python tools/stew.py stop stews/first [--pause]
 ```
 
-**Tests** (`tests/test_stew.py`, 17, and `tests/test_stew_judge.py`, 6: fakes for every process, the coordinator and
+**Tests** (`tests/test_stew.py`, 18, and `tests/test_stew_judge.py`, 6: fakes for every process, the coordinator and
 the networks; nothing starts a process): pairings (K*N - K(K-1)/2), the config's refusals; init's layout, the
 specialists' settings (the restricted best-of-three spec of both 75s, evaluation off, the forced find dropped, the farm
-run's name, recipe and pairing overrides) and an idempotent second init; generation 0 to its hold point (round-robin
+run's name, recipe and pairing overrides; the recipe's spec extras and matchup settings, the plain eval_spec, dealt decks refused at init by this build) and an idempotent second init; generation 0 to its hold point (round-robin
 turns of B iterations, farm runs active only in their turns, the yield run paused before the first turn and given back,
 the deck stews' sources: teachers, selectors, opponent-share weights, the rows' layout, the per-source record; the
 report's gen-over-gen, cells, gaps and field rates), the loop on after the hold (the main stew's sources routed to the
@@ -42239,5 +42250,5 @@ touches it).
   run long and draw at the turn limit, so the first stew's games an iteration come from the real network (222.2).
   The rest of the smoke (a 50-step distillation per net, 8-match judging) needs 222.1's `tools/distill.py --sources`
   and the MTG row selector: pending their branch.
-* *Tests*: `tests/test_stew.py` 17, `tests/test_stew_judge.py` 6, `tests/test_stew_control.py` 4 (2 of them start
+* *Tests*: `tests/test_stew.py` 18, `tests/test_stew_judge.py` 6, `tests/test_stew_control.py` 4 (2 of them start
   processes: `live_run_hazard`).

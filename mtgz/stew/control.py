@@ -132,6 +132,13 @@ class Ops:
         from zero import run as R
         return R.resolve_config(R.parse(['--run', run_dir]), dict(saved))
 
+    def check_spec(self, game, spec):
+        """The engine parses the spec (a game made from it): its refusal (an option this build does not have, e.g.
+        dealt decks in a metagame before they were built) raised now, not at the run's first start."""
+        import mtgz.az  # noqa: F401
+        from zero import games as G
+        G.engine().Game(game, G.spec_json(spec), 2, 0)
+
     def check_heads(self, ckpt, cfg):
         """fork_run's check_heads of the seed against the specialist's settings: net.HeadMissing reported, never
         patched around (a root belief needs the auxiliary head of the game's targets)."""

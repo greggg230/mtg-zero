@@ -9,12 +9,14 @@ unordered pairing with at least one candidate, mirrors included), the shares, th
      "seeds": {"<A>|<B>": "<.pt>"},                      # a pairing's own seed (default: the main stew's gen 0)
      "recipe": {"turn_iters": 32, "format": "bo3", "game_episodes": true, "start_game": 1,
                 "settings": {...}, "pair_settings": {"<A>|<B>": {...}}, "farm": true,
+                "spec_extra": {...}, "deck_spec_extra": {"<deck>": {...}},   # self-play spec keys (dealt decks...)
                 "distill": {...}, "distill_cli": ["--device", "cuda"], "distill_iters": 6,
                 "retention_share": "field", "judge": {...}, "hold_after": ["judge_deck_gap@0"], "env": {...},
                 "archive": "copy"},
      "code": {"worktree": null, "sha": null, "python": null, "farm": {...}, "farm_gates": true},
      "yield_runs": [{"run": "<run dir>", "farm_runs": ["<farm run>", ...]}],
      "beside_runs": ["<run dir>", ...],                  # live runs it may run beside, never touched (a CPU stew)
+     "requires": ["..."],                                # what the recipe needs merged first (init and plan say it)
      "notes": "..."}
 
 Kept light: json, os, re only (the decklists module for the deck checks).
@@ -28,6 +30,9 @@ SLUG_RE = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
 ALIAS_RE = re.compile(r'^[a-z0-9]{1,16}$')
 # what the stew sets in every specialist's settings itself (recipe.settings may not)
 RESERVED = ('run', 'spec', 'eval_spec', 'iters', 'selfplay_remote', 'resolver')
+# the specialist spec's own keys (recipe.spec_extra may not set them): the format and the restricted metagame
+SPEC_OWN = ('constructed', 'format', 'game_episodes', 'start_game', 'max_turns', 'mulligans', 'metagame', 'decks')
+DECK_OWN = ('name', 'main', 'sideboard')
 
 DEFAULT_DISTILL = {'steps': 20000, 'batch': 512, 'lr': 5e-4, 'lr_min': 1e-5, 'warmup': 500, 'wd': 1e-4,
                    'teacher_w': 1.0, 'value_q': 0.5, 'margin_w': 0.5, 'eval_every': 1000, 'save_every': 2000,
@@ -37,7 +42,7 @@ DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims':
                  'main_arms': True, 'est_s_per_match': 3.5}
 JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend per comparison)
 DEFAULT_RECIPE = {'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
-                  'pair_settings': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
+                  'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
                   'distill_iters': 6, 'retention_share': 'field', 'judge': DEFAULT_JUDGE, 'hold_after': [], 'env': {},
                   'archive': 'copy'}
 DEFAULT_CODE = {'worktree': None, 'sha': None, 'python': None, 'farm': None, 'farm_gates': True}
@@ -205,7 +210,8 @@ def normalize(cfg, check_lists=True):
     """stew.json -> the config with every default filled in (a new dict). ConfigError naming what is wrong."""
     if not isinstance(cfg, dict):
         raise ConfigError('stew.json: a JSON object')
-    known = {'name', 'decks', 'candidates', 'source', 'seeds', 'recipe', 'code', 'yield_runs', 'beside_runs', 'notes'}
+    known = {'name', 'decks', 'candidates', 'source', 'seeds', 'recipe', 'code', 'yield_runs', 'beside_runs',
+             'requires', 'notes'}
     bad = sorted(set(cfg) - known)
     if bad:
         raise ConfigError(f'stew.json: unknown keys {bad} ({sorted(known)})')
@@ -243,6 +249,12 @@ def normalize(cfg, check_lists=True):
                               f'its farm run)')
     if not isinstance(r['pair_settings'], dict):
         raise ConfigError('recipe.pair_settings: {"<A>|<B>": {run settings}}')
+    if not isinstance(r['spec_extra'], dict) or [k for k in SPEC_OWN if k in r['spec_extra']]:
+        raise ConfigError(f'recipe.spec_extra: keys of the specialists\' self-play spec, none of {SPEC_OWN} (the stew '
+                          f'builds those: the restricted metagame of the recipe\'s format)')
+    if not isinstance(r['deck_spec_extra'], dict) or not all(
+            isinstance(v, dict) and not [k for k in DECK_OWN if k in v] for v in r['deck_spec_extra'].values()):
+        raise ConfigError(f'recipe.deck_spec_extra: {{"<deck>": {{keys of its metagame entry, none of {DECK_OWN}}}}}')
     if not isinstance(r['distill_cli'], list) or not all(isinstance(x, str) for x in r['distill_cli']):
         raise ConfigError('recipe.distill_cli: a list of strings (extra tools/distill.py arguments)')
     rs = r['retention_share']
@@ -336,7 +348,14 @@ def normalize(cfg, check_lists=True):
     if not isinstance(br, list) or not all(isinstance(x, str) and x for x in br):
         raise ConfigError('beside_runs: [DIR, ...] (live runs the stew runs beside without touching them)')
     out['beside_runs'] = list(br)
+    req = cfg.get('requires') or []
+    if not isinstance(req, list) or not all(isinstance(x, str) for x in req):
+        raise ConfigError('requires: ["..."] (what the recipe needs merged first)')
+    out['requires'] = list(req)
     out['notes'] = cfg.get('notes', '')
+    bad = [d for d in r['deck_spec_extra'] if d not in names]
+    if bad:
+        raise ConfigError(f'recipe.deck_spec_extra: {bad} not in the field {names}')
     for a, b in pairs:                          # (the farm runs' names: checked now, not at the first turn)
         farm_run(out['name'], decks, a, b)
     return out

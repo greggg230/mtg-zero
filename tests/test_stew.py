@@ -33,6 +33,7 @@ class FakeOps:
         self.train_noop = False
         self.on_supervisor = None
         self.sources_of = {}
+        self.engine_specs = True
 
     def cmdline(self, cmd):
         return ' '.join(str(c) for c in cmd)
@@ -51,6 +52,12 @@ class FakeOps:
 
     def check_heads(self, ckpt, cfg):
         self.calls.append(('heads', ckpt))
+
+    def check_spec(self, game, spec):
+        self.calls.append(('spec', game))
+        if self.engine_specs:                       # (the engine's own parse: a refusal raises ValueError)
+            from mtgz.stew.control import Ops
+            Ops.check_spec(self, game, spec)
 
     def launch_cmd(self, run, args):
         return ['python', 'tools/supervise.py', run] + list(args)
@@ -278,7 +285,7 @@ def test_init_layout_and_specialist_settings(stew, tmp_path):
     assert all('sideboard' in d for d in m2['decks'])
     for k, v in {'eval_every': 100000, 'elo_anchors': '', 'eval_remote': '', 'yardsticks': {}, 'publish': {},
                  'eval_games': 0, 'eval_random_games': 0, 'elo_games': 0,
-                 'matchup_every': 0, 'games': 2444, 'lr': 1e-4,
+                 'matchup_every': 4, 'games': 2444, 'lr': 1e-4,
                  'selfplay_remote': 'pool:tst-izzet-doomsday'}.items():
         assert cfg2[k] == v, k
     assert any('forced_find dropped' in n for n in mirror['notes'])
@@ -298,6 +305,32 @@ def test_recipe_settings_override(tmp_path, monkeypatch):
     assert cfg['games'] == 900 and cfg['eval_belief_tilts'] == {'deck': 1.0} and cfg['lr'] == 5e-5
     cfg3 = jload(os.path.join(s.st.abs(s.st.net(C.spec_name(DEL, SNS))['run']), 'config.json'))
     assert cfg3['lr'] == 1e-4
+
+
+def test_spec_extras_and_matchup_settings_come_from_the_recipe(tmp_path):
+    src = make_source(tmp_path)
+    dealt = {'p': 0.85, 'swaps': [0, 15], 'per_seat': True}
+    mm = {'matchup_every': 16, 'matchup_window': 32, 'matchup_min_window': 8, 'matchup_half_life': 16.0,
+          'matchup_worlds': 8000, 'matchup_table_min_gain': 0.005, 'matchup_swap_z': 2.0, 'matchup_members': 20}
+    cfgp = make_cfg(tmp_path, src, settings=mm, spec_extra={'dealt_decks': dealt},
+                    deck_spec_extra={DD: {'table_key': 1}})
+    ops = FakeOps(tmp_path)
+    # this build's engine refuses dealt decks in a metagame (lane 3 adds them): refused at init, not at the run's start
+    with pytest.raises(ValueError, match='dealt_decks'):
+        Stew.init(os.path.join(str(tmp_path), 'stew'), cfgp, ops=ops, log=lambda m: None)
+    ops.engine_specs = False
+    s = Stew.init(os.path.join(str(tmp_path), 'stew'), cfgp, ops=ops, log=lambda m: None)
+    cfg = jload(os.path.join(s.st.abs(s.st.net(C.spec_name(DEL, DD))['run']), 'config.json'))
+    spec, ev = json.loads(cfg['spec']), json.loads(cfg['eval_spec'])
+    assert spec['dealt_decks'] == dealt and 'dealt_decks' not in ev
+    assert [d.get('table_key') for d in spec['metagame']['decks']] == [None, 1]
+    assert all('table_key' not in d for d in ev['metagame']['decks'])
+    assert ev['metagame'] == dict(spec['metagame'], decks=ev['metagame']['decks'])
+    assert all(cfg[k] == v for k, v in mm.items())
+    for bad in ({'spec_extra': {'metagame': {}}}, {'deck_spec_extra': {DD: {'main': []}}},
+                {'deck_spec_extra': {'nope': {}}}):
+        with pytest.raises(C.ConfigError):
+            C.normalize({'name': 'x', 'decks': META3, 'candidates': [DEL], 'source': {'run': 'r'}, 'recipe': bad})
 
 
 def test_init_refuses_another_config(stew, tmp_path):

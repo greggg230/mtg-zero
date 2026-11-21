@@ -114,15 +114,24 @@ class Stew:
             s['chooser'] = int(chooser)
         return json.dumps(s, separators=(',', ':'))
 
-    def specialist_spec(self, a, b):
+    def specialist_spec(self, a, b, extras=True):
         """The specialist's self-play spec: the recipe's metagame restricted to its pairing (decks [A, B], weights
-        [[0, 1], [1, 0]]: each match A against B, either seat; a mirror decks [A], weights [[1]])."""
+        [[0, 1], [1, 0]]: each match A against B, either seat; a mirror decks [A], weights [[1]]) with
+        `recipe.spec_extra` over its top level and `recipe.deck_spec_extra[<deck>]` over each deck's entry (self-play
+        options such as dealt decks per seat; `extras` False: the plain spec, the specialist's eval_spec)."""
         from mtgz.az import decklists as D
         r = self.cfg['recipe']
         k = self.spec_keys()
         decks, w = ([a], [[1]]) if a == b else ([a, b], [[0, 1], [1, 0]])
-        return D.metagame_spec(decks, fmt=r['format'], weights=w, max_turns=k['max_turns'], mulligans=k['mulligans'],
+        spec = D.metagame_spec(decks, fmt=r['format'], weights=w, max_turns=k['max_turns'], mulligans=k['mulligans'],
                                game_episodes=bool(r['game_episodes']), start_game=int(r['start_game']))
+        if not extras or not (r['spec_extra'] or r['deck_spec_extra']):
+            return spec
+        s = json.loads(spec)
+        s.update(r['spec_extra'])
+        for d in s['metagame']['decks']:
+            d.update(r['deck_spec_extra'].get(d['name']) or {})
+        return json.dumps(s, separators=(',', ':'))
 
     def farm_settings(self):
         """code.farm's pool settings ("pool_build": "published" -> the published build of the code's commit)."""
@@ -144,9 +153,10 @@ class Stew:
         return out
 
     def specialist_settings(self, a, b):
-        """The specialist's settings: the source run's config.json, then the stew's own (the pairing's spec, evaluation
-        off, no publisher / yardsticks / matchup model / forced find, its farm run), then code.farm, recipe.settings and
-        recipe.pair_settings -> (settings, notes)."""
+        """The specialist's settings: the source run's config.json, then the stew's own (the pairing's spec with the
+        recipe's spec extras, the plain one as eval_spec, evaluation off, no publisher / yardsticks / forced find, its
+        farm run), then code.farm, recipe.settings (e.g. the matchup model's settings) and recipe.pair_settings ->
+        (settings, notes)."""
         src = dict(self.source_cfg())
         r = self.cfg['recipe']
         notes = []
@@ -156,12 +166,10 @@ class Stew:
             notes.append('forced_find dropped: ' + (
                 'the engine refuses it in best-of-three (ENGINE.md 180)' if r['format'] == 'bo3' else
                 'a new run would restart its schedule at its start p'))
-        if src.get('matchup_every'):
-            notes.append('matchup_every -> 0 (no matchup-model teacher)')
         fr = C.farm_run(self.cfg['name'], self.st.decks() if self.st else self.cfg['decks'], a, b)
-        stew = {'spec': spec, 'eval_spec': spec, 'iters': 0, 'eval_every': 100000, 'elo_anchors': '',
-                'eval_remote': '', 'eval_games': 0, 'eval_random_games': 0, 'elo_games': 0, 'yardsticks': {},
-                'publish': {}, 'matchup_every': 0, 'forced_find_schedule': {},
+        stew = {'spec': spec, 'eval_spec': self.specialist_spec(a, b, extras=False), 'iters': 0, 'eval_every': 100000,
+                'elo_anchors': '', 'eval_remote': '', 'eval_games': 0, 'eval_random_games': 0, 'elo_games': 0,
+                'yardsticks': {}, 'publish': {}, 'forced_find_schedule': {},
                 'selfplay_remote': ('pool:' + fr) if r['farm'] else ''}
         out = dict(src)
         out.update(stew)
@@ -212,6 +220,8 @@ class Stew:
         cfg = self.cfg
         if cfg['code'].get('worktree') or cfg['code'].get('sha'):
             self.say(f"code: {self.ops.wt} at {self.ops.check_code(cfg['code'].get('sha'))[:12]}")
+        for r in cfg.get('requires') or []:
+            self.say(f'requires: {r}')
         src = cfg['source']['run']
         it = self.source_iter()
         ck = os.path.join(src, 'models', f'iter_{it:04d}.pt')
@@ -295,6 +305,7 @@ class Stew:
             self.say(f'{sn}: fork_run {seed} -> {run}')
             self.ops.fork_new_run(seed, run, self.p('logs', 'init.log'))
         settings, notes = self.specialist_settings(a, b)
+        self.ops.check_spec(settings.get('game', 'mtg'), settings['spec'])
         cfgp = os.path.join(run, 'config.json')
         resolved = self.ops.resolve(run, settings)
         old = jload(cfgp)
@@ -916,6 +927,7 @@ class Stew:
         g, ph = st.d['round'], st.d['phase']
         L = [f'next: {st.tag()}' + (' (then HOLD: recipe.hold_after)' if st.tag() in self.cfg['recipe']['hold_after']
                                     else '')]
+        L += [f'requires: {r}' for r in self.cfg.get('requires') or []]
         if self.cfg['yield_runs']:
             L.append('yield first: ' + '; '.join(
                 f"python tools/pause_run.py {y['run']} --wait + farm runs {y['farm_runs']} -> paused"
