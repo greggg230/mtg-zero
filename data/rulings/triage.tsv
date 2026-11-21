@@ -1300,3 +1300,10 @@ cafea326	a	triggers	a nonbasic land entering under the Magus loses its enters tr
 5c226a47	a	copies	a copy of a spell must be countered on its own; countering the replicated spell leaves its copies (Consign to Memory)
 19831073	a	stack	triggered abilities ("when", "whenever", "at"; keyword triggers such as ward and storm) are targets for "counter target triggered ability"
 53e85191	a	stack	Hydroblast can target any spell or permanent; the colour is checked only on resolution
+c5c89b6e	a	other	Dryad Arbor changed into another basic land type (a Mountain under Magus of the Moon) is still a creature and a Dryad (CR 305.7)
+0dfaac8c	a	other	a colour indicator (CR 204): no text-changing effect touches it; colour-changing effects still apply (Painter's Servant, CR 613.1e)
+5fa00503	a	zones	Dryad Arbor is played as a land: no stack, not a spell, no response, no mana cost, the land play for the turn (CR 305.9, 305.1)
+1df01b0e	a	other	green by its colour indicator in every zone (CR 204.1, 202.2e)
+9da0e7ba	a	other	Forest is a land type and Dryad a creature type (CR 205.3i, 205.3m): fetchable as a Forest
+2c34d4ba	a	other	changed into another basic land type it is still a green Dryad creature (CR 305.7)
+c0965c9d	a	zones	flash would lift only the timing of a land play: never on another player's turn, never without a land play left (CR 305.2b, 305.3); no card of the tables gives a land flash

@@ -1025,8 +1025,10 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Brotherhood's End",
     "Cavern of Souls",
     "Consign to Memory",
+    "Dark Matter Manipulator",
     "Disruptor Flute",
     "Doomsday",
+    "Dryad Arbor",
     "Edge of Autumn",
     "Flow State",
     "Flusterstorm",
@@ -1036,6 +1038,7 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Meltdown",
     "Misdirection",
     "Mistrise Village",
+    "Moonshadow",
     "Murktide Regent",
     "Omniscience",
     "Pact of Negation",
@@ -1044,6 +1047,7 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Prismari Charm",
     "Rough // Tumble",
     "Show and Tell",
+    "Stitcher's Supplier",
     "Street Wraith",
 ];
 
