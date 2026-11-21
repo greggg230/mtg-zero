@@ -414,8 +414,9 @@ def test_committed_legacy_pool_matches_meta(fc):
     # The Delver mirror's two, then mtg-zero's Legacy Doomsday deck's cards:
     # lane A's four, lane B's three, lane C's three (mtg-zero ENGINE.md
     # 124.1-124.3), then its Legacy Sneak and Show deck's six (ENGINE.md 123),
-    # then the Delver 75's five sideboard cards (ENGINE.md 122), then its Legacy
-    # Hogaak Tempo deck's lane A card (ENGINE.md 220.1).
+    # then the Delver 75's five sideboard cards (ENGINE.md 122), then the
+    # Legacy Hogaak Tempo deck's cards by lane (ENGINE.md 220.1-220.2):
+    # lane A's one, lane B's two.
     assert [c["name"] for c in cards] == names == [
         "Murktide Regent", "Prismari Charm",
         "Doomsday", "Pact of Negation", "Personal Tutor", "Flow State",
@@ -425,5 +426,6 @@ def test_committed_legacy_pool_matches_meta(fc):
         "Brotherhood's End", "Disruptor Flute", "Magus of the Moon",
         "Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble",
         "Hogaak, Arisen Necropolis",
+        "Mockingbird", "Massacre",
     ]
-    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 24
+    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 26

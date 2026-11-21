@@ -12,6 +12,8 @@ mod cards_delver_sb;
 mod cards_doomsday_a;
 #[path = "cards_doomsday_b.rs"]
 mod cards_doomsday_b;
+#[path = "cards_hogaak_b.rs"]
+mod cards_hogaak_b;
 #[path = "cards_doomsday_c.rs"]
 mod cards_doomsday_c;
 #[path = "cards_eoe_a.rs"]

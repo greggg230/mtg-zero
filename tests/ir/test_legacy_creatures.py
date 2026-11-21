@@ -46,6 +46,7 @@ LEGACY_CARDS = {
     "Brotherhood's End", "Disruptor Flute", "Magus of the Moon",
     "Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble",
     "Hogaak, Arisen Necropolis",
+    "Mockingbird", "Massacre",
 }
 
 

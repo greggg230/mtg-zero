@@ -298,7 +298,16 @@ impl Game {
             return has;
         }
         let d = self.def_of(c);
-        let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(self.db, s));
+        // A copy exception's subtype only where it corresponds to one of the
+        // object's card types (CR 205.3d: Mockingbird copying an animated
+        // Creeping Tar Pit is a land, not a creature, so not a Bird; the
+        // lowering allows only creature and land types, `Lowerer::exc_subtype`;
+        // ENGINE.md 220.2).
+        let exc_fits = |s: u16| {
+            let creature = crate::eoe_w1::is_creature_type(self.db.subtype_name(s));
+            self.types_of(c) & if creature { types::CREATURE | types::KINDRED } else { types::LAND } != 0
+        };
+        let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(self.db, s)) && exc_fits(s);
         // Reconfigure (CR 702.151b, 205.3d): attached, it isn't a creature,
         // so it has no creature types either (ruling cff2c1c6). The cube's
         // one reconfigure card, Lion Sash (Equipment Cat), keeps Equipment.

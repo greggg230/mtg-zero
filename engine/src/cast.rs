@@ -1089,6 +1089,13 @@ impl Game {
         if self.exc(c).is_some_and(|e| e.no_cost) {
             return 0;
         }
+        // A copy of the back face of a nonmodal double-faced object (a
+        // permanent copying a transformed Delver of Secrets; a token copy with
+        // its back face up, 707.8a; a copy of such a spell) has mana value 0,
+        // not its front face's (CR 202.3b; ENGINE.md 220.2).
+        if self.def_of(c).front_mv.is_some() && (self.is_copy(c) || self.is_copy_obj(c)) {
+            return 0;
+        }
         let mv = self.def_of(c).mana_value() as u64;
         if self.objs[c.i()].zone != Zone::Stack {
             return mv;

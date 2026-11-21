@@ -1065,6 +1065,49 @@ pub enum Cond {
     AttackedWithSubtype(u16),
 }
 
+/// Does condition `c` read the source of the ability it gates (its
+/// counters, what it is attached to, the cards exiled with it)? Such a
+/// condition can't gate a spell's alternative cost, which is checked for the
+/// caster with no source (`Game::alt_payable`). Exhaustive: a new condition
+/// says.
+pub(crate) fn cond_reads_source(c: &Cond) -> bool {
+    match c {
+        Cond::SourceAttached | Cond::SourceCountersIn(..) | Cond::LinkedTypesAtLeast(_) => true,
+        Cond::All(v) => v.iter().any(cond_reads_source),
+        Cond::ControlAtLeast(..)
+        | Cond::ControlAtMost(..)
+        | Cond::HandExactly(_)
+        | Cond::GraveyardAtLeast(_)
+        | Cond::Delirium(_)
+        | Cond::Revolt
+        | Cond::YourTurnAtMost(_)
+        | Cond::HandAtMost(_)
+        | Cond::DevotionCoversLibrary(_)
+        | Cond::FirstSpellThisGame
+        | Cond::IsMonarch
+        | Cond::GainedLifeThisTurn
+        | Cond::ArtifactEnteredThisTurn
+        | Cond::APlayerControlsNoCreatures
+        | Cond::GainedLifeAtLeast(_)
+        | Cond::OpponentHasMoreCards
+        | Cond::SpellsCastThisTurn { .. }
+        | Cond::LibraryEmpty
+        | Cond::YourTurn
+        | Cond::LifeAtMostHalfStart
+        // ("Other than the source": a spell's source is no permanent.)
+        | Cond::ControlOtherOfColor(_)
+        | Cond::SpellsCastAtLeast(_)
+        | Cond::HasInitiative
+        | Cond::CompletedDungeon
+        | Cond::CityBlessing
+        | Cond::LandsPlayedAtLeast(_)
+        | Cond::OpponentControlsMoreLands
+        | Cond::Void
+        | Cond::OpponentsControlAtLeast(..)
+        | Cond::AttackedWithSubtype(_) => false,
+    }
+}
+
 impl Cond {
     /// Does it read the cards in `zone` (their number or kinds)? A spell
     /// leaving that zone for the stack can change it as its targets are

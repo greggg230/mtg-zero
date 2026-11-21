@@ -182,6 +182,19 @@ macro_rules! lower_condition {
             E::ControlPermanent(nodes::ControlPermanent { filter }) => {
                 Some(Cond::ControlAtLeast(lower_pred($l, filter)?, 1))
             }
+            // "If an opponent controls a <permanent>" ("your opponents control
+            // n or more": their permanents between them; ENGINE.md 220.2).
+            E::OpponentsControlAtLeast(nodes::OpponentsControlAtLeast { filter, n }) => {
+                let n = $l.int("OpponentsControlAtLeast.n", *n, 1, 99) as u8;
+                Some(Cond::OpponentsControlAtLeast(lower_pred($l, filter)?, n))
+            }
+            // "<condition> and <condition>": both hold (Massacre's "an
+            // opponent controls a Plains and you control a Swamp"; ENGINE.md
+            // 220.2).
+            E::AndCondition(nodes::AndCondition { left, right }) => {
+                let (a, b) = (lower_condition($l, left), lower_condition($l, right));
+                Some(Cond::All(vec![a?, b?]))
+            }
             E::ControlsAtMost(nodes::ControlsAtMost { filter, n }) => {
                 let n = $l.int("ControlsAtMost.n", *n, 0, 99) as u8;
                 Some(Cond::ControlAtMost(lower_pred($l, filter)?, n))

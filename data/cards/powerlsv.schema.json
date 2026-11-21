@@ -39,6 +39,7 @@
   ],
   "Condition": [
    "AlternativeCostWasPaid",
+   "AndCondition",
    "AnotherSpellCastThisTurn",
    "AtLeastNSpellsCastThisTurn",
    "AttackedWithThisTurn",
@@ -2179,6 +2180,38 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.predicates",
    "qualname": "And"
+  },
+  "AndCondition": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "Condition",
+     "name": "left",
+     "required": true,
+     "type": {
+      "categories": [
+       "Condition"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Condition",
+     "name": "right",
+     "required": true,
+     "type": {
+      "categories": [
+       "Condition"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "AndCondition"
   },
   "AnotherSpellCastThisTurn": {
    "category": "Condition",
