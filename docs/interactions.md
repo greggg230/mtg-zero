@@ -253,3 +253,24 @@ Supplier, Dark Matter Manipulator, Moonshadow and Dryad Arbor are other lanes' c
 | Mockingbird x types | Kaito (306.5b, a creature in its controller's turn), an animated Creeping Tar Pit (205.3d), Ragavan (704.5j) | `cr_306_5b_*`, `cr_205_3d_*`, `cr_704_5j_*` | tested |
 | Massacre x its free cast | Tundra, Scrubland, Plains; Underground Sea, Swamp; Magus of the Moon; Thalia; Force of Will | `cr_118_9_*`, `cr_205_3_*`, `cr_305_7_*`, `cr_118_9d_*`, `cr_601_2i_*` | tested |
 | Massacre x the board | Bowmasters and its army, Haywire Mite, Sanguine Evangelist's Bat, the Delver deck's creatures, Kaito's emblem, Creeping Tar Pit | `cr_704_5f_*`, `cr_611_2c_*`, `cr_514_2_*`, `cr_613_4c_*` | tested |
+
+## The Legacy Hogaak Tempo deck, lane C (ENGINE.md 220.3)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_hogaak_c.rs`. (Hogaak,
+Mockingbird and Massacre with these cards: the integration's.)
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Moonshadow x mill | Stitcher's Supplier, Dark Matter Manipulator | `cr_603_2c_moonshadow_one_trigger_per_mill`, `moonshadow_and_dark_matter_manipulators_mill`, `moonshadow_and_stitchers_supplier_dying_two_events` | tested |
+| Moonshadow x discard | Thoughtseize, Hymn to Tourach, the cleanup discard; double-faced, adventurer and split cards | `moonshadow_a_discarded_permanent_card`, `moonshadow_two_cards_discarded_at_once_is_one_trigger`, `cr_514_1_the_cleanup_discard_is_one_event`, `moonshadow_double_faced_adventure_and_split_cards_by_their_graveyard_characteristics` | tested |
+| Moonshadow x the stack | Counterspell on a creature spell and an instant, Petty Theft countered, Consign to Memory on its trigger | `moonshadow_a_countered_creature_spell`, `moonshadows_trigger_without_its_source_and_countered` | tested |
+| Moonshadow x the battlefield | a creature dying, a token dying, Dryad Arbor destroyed by Wasteland, a fetch land's cost, dying with others (Brotherhood's End) | `moonshadow_a_creature_dying_into_your_graveyard`, `moonshadow_a_token_dying_doesnt_trigger_it`, `moonshadow_dryad_arbor_destroyed_is_a_permanent_card`, `moonshadow_a_fetch_land_sacrificed_as_a_cost`, `cr_603_6c_moonshadow_dying_with_others_doesnt_trigger` | tested |
+| Moonshadow x replacement effects | Leyline of the Void, Dauthi Voidwalker | `cr_614_1a_cards_exiled_instead_dont_trigger_moonshadow` | tested |
+| Moonshadow x counters | +1/+1 counters (704.5q), the "while" condition | `cr_704_5q_plus_one_counters_annihilate_moonshadows_minus_ones`, `cr_603_4_moonshadows_while_is_checked_as_the_event_happens` | tested |
+| Dark Matter Manipulator x the graveyard | counters, combat damage read late (Brainstorm), tokens, the opponent's graveyard | `cr_613_4c_*`, `dark_matter_manipulator_deals_damage_with_its_power_as_it_is`, `dark_matter_manipulator_counts_only_its_controllers_graveyard_cards` | tested |
+| Stitcher's Supplier x leaving | Lightning Bolt (dies), Petty Theft (bounced), Leyline of the Void (exiled instead) | `cr_603_10a_stitchers_supplier_mills_three_when_it_dies`, `cr_700_4_stitchers_supplier_bounced_or_exiled_instead_doesnt_mill` | tested |
+| Dryad Arbor x land rules | Omniscience, Show and Tell, Misty Rainforest, the land play and its timing | `cr_305_9_*`, `cr_305_4_*`, `cr_305_3_*`, `cr_205_3_*` | tested |
+| Dryad Arbor x summoning sickness | its mana ability, attacking, blocking | `cr_302_6_*`, `dryad_arbor_attacks_and_taps` | tested |
+| Dryad Arbor x Magus of the Moon, Painter's Servant | a Mountain Dryad creature; colours | `cr_305_7_dryad_arbor_under_magus_of_the_moon`, `cr_204_1_dryad_arbor_is_green_in_every_zone` | tested |
+| Dryad Arbor x removal | Lightning Bolt, Orcish Bowmasters, Fatal Push, Wasteland; Karakas can't | `dryad_arbor_is_a_creature_and_a_nonbasic_land_for_removal`, `karakas_cant_return_dryad_arbor` | tested |
+| The deck's line | Moonshadow, Verdant Catacombs for Dryad Arbor, Stitcher's Supplier | `the_decks_line_moonshadow_a_fetch_for_dryad_arbor_and_stitchers_supplier` | tested |

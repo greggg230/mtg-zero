@@ -335,6 +335,19 @@ class Event(str, Enum):
     # Rust engine): no dispatch site fires it here (SEARCH_LIMITATIONS
     # cube creatures 14).
     LEAVES_GRAVEYARD = "leaves_graveyard"
+    # A card was put into a graveyard from any zone (CR 400.2: the
+    # battlefield, a library, a hand, the stack, exile). Subjects: the
+    # graveyard's owner (``"player"``) and the card as it is in the
+    # graveyard (``"card"``): an ability that triggers when a card is put
+    # into a zone "from anywhere" is never a leaves-the-battlefield ability
+    # and doesn't look back in time (CR 603.6c, 603.10), so a token (not a
+    # card) and a card exiled instead never fire it. "Whenever one or more
+    # permanent cards are put into your graveyard from anywhere"
+    # (Moonshadow) is ``Subject("card", IsPermanentCard()) &
+    # Controlled(subject="player") & OneOrMoreBatch()``. Data for the card
+    # IR (the mtg-zero Rust engine, ENGINE.md 220.3): no dispatch site fires
+    # it here.
+    CARD_PUT_INTO_GRAVEYARD = "card_put_into_graveyard"
 
 
 # Subject-slot names per event. Used by the engine to validate that a
@@ -393,6 +406,7 @@ EVENT_SUBJECTS: dict[Event, tuple[str, ...]] = {
     Event.SAGA_CHAPTER: ("obj", "lore_before", "lore_after"),
     Event.CLASS_LEVEL_GAINED: ("obj", "level"),
     Event.LEAVES_GRAVEYARD: ("player", "card"),
+    Event.CARD_PUT_INTO_GRAVEYARD: ("player", "card"),
 }
 
 

@@ -44,6 +44,7 @@
    "AtLeastNSpellsCastThisTurn",
    "AttackedWithThisTurn",
    "CardTypesAmongExiledWithSourceAtLeast",
+   "CardsInYourGraveyard",
    "CardsInYourGraveyardAtLeast",
    "ControlOtherPermanentOfColor",
    "ControlPermanent",
@@ -480,6 +481,7 @@
    "RemoveACounterFromSelf",
    "RemoveAllCountersAddManaPerCounter",
    "RemoveAllMatching",
+   "RemoveCountersFromSource",
    "RemoveNamedCounterFromSelfOrSacrifice",
    "RemoveTargetPermanents",
    "ReorderTopCards",
@@ -6038,6 +6040,46 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.state_predicates",
    "qualname": "CardsInGraveyardAtLeast"
+  },
+  "CardsInYourGraveyard": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "object",
+     "name": "card_filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "CardFilter"
+      ],
+      "t": "ref"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "at_least",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "per",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_board",
+   "qualname": "CardsInYourGraveyard"
   },
   "CardsInYourGraveyardAtLeast": {
    "category": "Condition",
@@ -16823,6 +16865,34 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "RemoveCountersFromSelfCost"
   },
+  "RemoveCountersFromSource": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_mana",
+   "qualname": "RemoveCountersFromSource"
+  },
   "RemoveNamedCounterFromSelfOrSacrifice": {
    "category": "Effect",
    "fields": [
@@ -22861,6 +22931,10 @@
     {
      "name": "LEAVES_GRAVEYARD",
      "value": "leaves_graveyard"
+    },
+    {
+     "name": "CARD_PUT_INTO_GRAVEYARD",
+     "value": "card_put_into_graveyard"
     }
    ],
    "module": "mtg_bot.effects.predicates",

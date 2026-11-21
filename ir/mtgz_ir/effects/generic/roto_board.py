@@ -551,11 +551,15 @@ class EventSubjectDealsDamageToEachOpponent(Effect):
 class CardsInYourGraveyard(Condition):
     """"there are N or more <type> cards in your graveyard" (Elvish
     Reclaimer: three land cards) and, as a variable amount, "for each
-    <type> card in your graveyard" (Knight of the Reliquary).
-    ``matches`` is "at least ``at_least``"; ``multiplier`` is the count."""
+    <type> card in your graveyard" (Knight of the Reliquary) or "for every
+    <per> [<type>] cards in your graveyard" (Dark Matter Manipulator's
+    seven: one unit per full ``per`` cards, the count divided by ``per``
+    rounded down). ``matches`` is "at least ``at_least``"; ``multiplier``
+    is the count (``per`` 1) or the number of full groups of ``per``."""
 
     card_filter: object
     at_least: int = 1
+    per: int = 1
 
     def _count(self, state, viewer_id) -> int:
         p = state.player_by_id(viewer_id)
@@ -565,7 +569,7 @@ class CardsInYourGraveyard(Condition):
         return self._count(state, viewer_id) >= self.at_least
 
     def multiplier(self, state, viewer_id, chosen_targets=None):
-        return self._count(state, viewer_id)
+        return self._count(state, viewer_id) // self.per
 
 
 @dataclass(frozen=True)

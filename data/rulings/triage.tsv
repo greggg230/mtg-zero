@@ -1266,7 +1266,7 @@ c8a74bc2	a	mana	a mana-cost-based search is restricted to the exact printed mana
 ce207f9e	a	zones	a search for a card with a stated quality may find nothing (CR 701.23b)
 4c4f55a3	a	stack	Pact of Negation countered or not resolving (an illegal target) creates no delayed trigger
 3e504e2e	a	stack	Pact of Negation resolving with a legal target that can't be countered still creates its trigger
-0dfaac8c	a	other	Pact of Negation is blue by its colour indicator; colour-changing effects still apply (text-changing effects: none in this engine)
+0dfaac8c	a	other	a colour indicator (CR 204: Pact of Negation blue, Dryad Arbor green): no text-changing effect touches it; colour-changing effects still apply (Painter's Servant, CR 613.1e)
 f1ca52a5	a	stack	change the target: no other legal target leaves it unchanged (115.7a)
 4e80ba07	a	stack	the changed-to target becomes a target of the deflected spell: becomes-target abilities (ward) trigger
 aee352b1	a	stack	a spell targeting a spell can be changed to any other spell on the stack, one resolving before it too
@@ -1312,3 +1312,9 @@ f2b97e8c	a	copies	a copy of a token copies the token's original characteristics,
 de35ba2a	a	copies	Mockingbird copies printed values plus Bird and flying only: no tapped status, counters, attachments or noncopy effects (CR 707.2, 707.9b)
 5a1ea5ca	a	mana	"the amount of mana spent to cast" counts all mana paid for the spell, X, additional costs and increases included (CR 601.2h)
 f30367a6	a	copies	Mockingbird may decline to copy: a 1/1 flying Bird Bard (CR 707.5, 614.1c)
+c5c89b6e	a	other	Dryad Arbor changed into another basic land type (a Mountain under Magus of the Moon) is still a creature and a Dryad (CR 305.7)
+5fa00503	a	zones	Dryad Arbor is played as a land: no stack, not a spell, no response, no mana cost, the land play for the turn (CR 305.9, 305.1)
+1df01b0e	a	other	green by its colour indicator in every zone (CR 204.1, 202.2e)
+9da0e7ba	a	other	Forest is a land type and Dryad a creature type (CR 205.3i, 205.3m): fetchable as a Forest
+2c34d4ba	a	other	changed into another basic land type it is still a green Dryad creature (CR 305.7)
+c0965c9d	a	zones	flash would lift only the timing of a land play: never on another player's turn, never without a land play left (CR 305.2b, 305.3); no card of the tables gives a land flash

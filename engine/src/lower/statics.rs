@@ -321,6 +321,32 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
         }
         return None;
     }
+    // "This gets +p/+t for every n cards in your graveyard" (Dark Matter
+    // Manipulator; ENGINE.md 220.3): the count of the static's controller's
+    // graveyard cards matching the card filter, one unit per full group.
+    if *bonus_per_condition_count {
+        if let Some(cats::Condition::CardsInYourGraveyard(nodes::CardsInYourGraveyard { card_filter, at_least, per })) = condition.as_deref() {
+            l.deny_ne("CardsInYourGraveyard.at_least(as a count)", at_least, &generated::defaults::d_CardsInYourGraveyard_at_least());
+            let per = l.int("CardsInYourGraveyard.per", *per, 1, 99) as u8;
+            let filter = super::filter::lower_card_filter(l, card_filter)?;
+            if !super::hogaak_c::graveyard_count_filter_ok(&filter) {
+                l.unsupported("CardsInYourGraveyard.card_filter(not a characteristics filter)");
+                return None;
+            }
+            let (p, t) = (
+                l.int("StaticAbility.power_bonus", *power_bonus, -9, 9),
+                l.int("StaticAbility.toughness_bonus", *toughness_bonus, -9, 9),
+            );
+            let other = !granted_keywords.is_empty()
+                || *must_attack_each_combat
+                || continuous_effect.is_some()
+                || !opponents_enter_tapped_types.is_empty();
+            if other || (p == 0 && t == 0) {
+                l.unsupported("StaticAbility.bonus_per_condition_count(with other modifications)");
+            }
+            return Some(StaticDef { scope, cond: None, mods: vec![Mod::PtPerGraveyardCards { filter, per, p, t }] });
+        }
+    }
     // "This gets +p/+t for each <permanent> you control" (the condition is
     // the count).
     if *bonus_per_condition_count {
