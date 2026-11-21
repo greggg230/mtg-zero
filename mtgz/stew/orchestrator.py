@@ -564,8 +564,11 @@ class Stew:
         games = sum(int(x.get('games') or 0) for x in sp)
         samples = sum(int(x.get('samples') or 0) for x in sp)
         secs = sum(float(r.get('seconds') or 0) for r in rows)
+        ep = [x['episodes'] for x in sp if isinstance(x.get('episodes'), dict)]
+        eg, ec = sum(int(e.get('games') or 0) for e in ep), sum(int(e.get('contests') or 0) for e in ep)
         return {'from': lo, 'to': hi, 'iters': len(rows), 'games': games, 'samples': samples,
-                'rows_per_match': round(samples / games, 1) if games else None, 'hours': round(secs / 3600, 2)}
+                'rows_per_match': round(samples / games, 1) if games else None,
+                'games_per_match': round(eg / ec, 3) if ec else None, 'hours': round(secs / 3600, 2)}
 
     # ---------------------------------------------------------------- 2. distil the deck stews
     def snapshot(self, g):

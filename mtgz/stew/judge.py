@@ -354,10 +354,11 @@ def report_md(rep):
          f"Written {rep['written']}; phase {rep['phase']}" + (' (held here)' if rep.get('held') else '') + '.', '']
     tr = rep.get('training') or {}
     if tr:
-        L += ['## Training', '', '| specialist | iterations | matches | rows | rows / match | hours |', '|---|---|---|---|---|---|']
+        L += ['## Training', '', '| specialist | iterations | matches | games / match | rows | rows / match | hours |',
+              '|---|---|---|---|---|---|---|']
         for k, t in tr.items():
-            L.append(f"| {k} | {t.get('from')} -> {t.get('to')} | {t.get('games')} | {t.get('samples')} | "
-                     f"{t.get('rows_per_match')} | {t.get('hours')} |")
+            L.append(f"| {k} | {t.get('from')} -> {t.get('to')} | {t.get('games')} | {t.get('games_per_match')} | "
+                     f"{t.get('samples')} | {t.get('rows_per_match')} | {t.get('hours')} |")
         L.append('')
     for net, d in (rep.get('distill') or {}).items():
         L += [f'## Distillation: {net}', '', f"sources {d.get('sources')}, steps {d.get('steps')}", '']
