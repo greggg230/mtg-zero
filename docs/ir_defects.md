@@ -1305,6 +1305,23 @@ Entries 340-349 are this lane's.
        ({C} as generic), the transform back faces (entry 9: the lowering already drops the copied cost) and the two
        split cards (the printed "{G} // {1}{B}" is the halves' costs combined, CR 709.4b).
 
+### Z. Legacy Hogaak Tempo, lane B: Mockingbird, Massacre (ENGINE.md 220.2)
+
+No defect (entries 420-439 are this lane's; none used). Checked against their Oracle text and not defects:
+Mockingbird (the U/B cube's enter-as-copy grammar, `cube_creatures_ub._ENTER_AS_COPY`, from the roto pool:
+`enters_as_copy_types: [Creature]`, `enters_as_copy_max_mv_mana_spent` for "with mana value less than or equal to the
+amount of mana spent to cast this creature", the Roto P4 exception `enters_as_copy_add_subtypes: [Bird]`,
+`enters_as_copy_add_keywords: [flying]`; flying and the 1/1 Bird Bard body; `{X}{U}` with `x_pips: 1`). Massacre had
+no IR (its free-cast line had no grammar: a coverage gap, not wrong data): `spell_builder._FREE_CAST_IF_LINE_RE` now
+takes "cast it" (Once Upon a Time, unchanged) or "cast this spell", and `_free_cast_condition` reads the condition as a
+fixed phrase (`_FREE_CAST_CONDITIONS`) or one or more control clauses joined by " and " ("an opponent controls a
+<Subtype>" -> `OpponentsControlAtLeast(HasSubtype, 1)`, "you control a <Subtype>" -> `ControlPermanent(HasSubtype)`,
+both -> `AndCondition`), a parameterized recognizer for the Nemesis cycle's shape; the effect line is the existing
+`PumpAllCreaturesUEOT { power: -2, toughness: -2 }`. No other printing of the three pools changes (the cube's and EoE's
+IR byte for byte but the schema hash; the schema gains `AndCondition`). Representational note: a conditional "cast
+without paying its mana cost" is `free_cast_condition` (Once Upon a Time's field), while Mindbreak Trap's conditional
+alternative cost is `alternative_costs[].condition`; both lower to an alternative cost with `only_if`.
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."

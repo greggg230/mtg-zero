@@ -218,3 +218,19 @@ Constructed play's table (`CardDb::constructed`); every test in `engine/tests/ca
 | Price of Progress x the lands | Magus of the Moon, a fetch land in response | `cr_305_7_nonbasic_lands_under_magus_of_the_moon_still_count`, `cr_608_2h_price_of_progress_counts_the_lands_as_it_resolves` | tested |
 | Rough // Tumble x flying now | Dragon's Rage Channeler's delirium | `cr_613_1f_rough_and_tumble_read_flying_as_it_is_now` | tested |
 | Rough // Tumble x copies, names, counts | Lutri, Disruptor Flute, Murktide Regent, Inquisition of Kozilek | `cr_707_10_a_copy_of_rough_is_rough`, `cr_709_4a_disruptor_flute_naming_rough_taxes_rough_only`, `cr_709_4_rough_tumble_is_one_card_for_murktide_regent`, `cr_202_3d_rough_tumble_in_hand_has_mana_value_eight` | tested |
+
+## Legacy Hogaak Tempo, lane B: Mockingbird and Massacre (ENGINE.md 220.2)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_hogaak_b.rs`. Hogaak, Stitcher's
+Supplier, Dark Matter Manipulator, Moonshadow and Dryad Arbor are other lanes' cards: their cells are the integration's.
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Mockingbird x the mana spent | X and {U}; Disruptor Flute's {3}; Ancient Tomb; Lotus Petal; floating mana; Omniscience (none); Show and Tell (not cast) | `cr_601_2h_*`, `cr_118_9_cast_without_paying_its_mana_cost_x_is_0_and_no_mana_is_spent`, `cr_601_2h_put_onto_the_battlefield_without_casting_it_no_mana_was_spent` | tested |
+| Mockingbird x enter triggers | Orcish Bowmasters (its enter and draw triggers) | `cr_707_5_copying_orcish_bowmasters_its_enter_trigger_and_the_exception`, `cr_707_5_copying_bowmasters_its_draw_trigger_is_the_copys_too` | tested |
+| Mockingbird x "enters with" / "as enters" | Arwen, Murktide Regent, True-Name Nemesis, Walking Ballista (107.3m) | `cr_614_1c_*`, `cr_607_2q_*`, `cr_614_12_*`, `cr_107_3m_copying_walking_ballista_x_is_mockingbirds` | tested |
+| Mockingbird x tokens and copies | the Orc Army, a Mockingbird copy, Phyrexian Metamorph | `cr_707_2_copying_a_token_*`, `cr_707_3_a_copy_of_a_copy_*` | tested |
+| Mockingbird x faces | a transformed Concealing Curtains (202.3b), Tamiyo (712.11a), a manifested face-down card | `cr_202_3b_*`, `cr_712_11a_*`, `cr_708_2_*` | tested |
+| Mockingbird x types | Kaito (306.5b, a creature in its controller's turn), an animated Creeping Tar Pit (205.3d), Ragavan (704.5j) | `cr_306_5b_*`, `cr_205_3d_*`, `cr_704_5j_*` | tested |
+| Massacre x its free cast | Tundra, Scrubland, Plains; Underground Sea, Swamp; Magus of the Moon; Thalia; Force of Will | `cr_118_9_*`, `cr_205_3_*`, `cr_305_7_*`, `cr_118_9d_*`, `cr_601_2i_*` | tested |
+| Massacre x the board | Bowmasters and its army, Haywire Mite, Sanguine Evangelist's Bat, the Delver deck's creatures, Kaito's emblem, Creeping Tar Pit | `cr_704_5f_*`, `cr_611_2c_*`, `cr_514_2_*`, `cr_613_4c_*` | tested |
