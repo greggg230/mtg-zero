@@ -1,6 +1,7 @@
 """The published farm builds of MTG Zero's commits (docs/ENGINE.md 196): the index `tools/farm_release.py` writes - one
-entry per released commit: its release worker build, the CUDA alternate, the runtime packs, the gate lines - and the
-lookups launchers use ("the build for my commit").
+entry per released commit: its release worker build, the CUDA alternate, the runtime packs, the gate lines, the macOS
+build (`mac.release`, docs/ENGINE.md 216; not a run alternate here: `pool_settings` leaves it out, a run adds it to its
+`pool_alternates` after the platform check) - and the lookups launchers use ("the build for my commit").
 
     from mtgz.az import farm_builds as FB
     e = FB.lookup('HEAD')                 # the entry for this checkout's commit, or None
@@ -148,21 +149,52 @@ def _alive(pid):
             return False
 
 
-def add(entry, path=None):
-    """Append `entry` to the index (under its lock; written to a temp file and renamed into place)."""
+def _index_for_write(path):
     path = path or index_path()
     if not path:
         raise ValueError('no farm builds directory (ZERO_BIG_DISK in ~/.config/zero/local.env, or MTGZ_FARM_BUILDS)')
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
+
+def _write(ix, path):
+    tmp = f'{path}.{os.getpid()}.tmp'
+    with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(ix, f, indent=1)
+        f.write('\n')
+    os.replace(tmp, path)
+
+
+def add(entry, path=None):
+    """Append `entry` to the index (under its lock; written to a temp file and renamed into place)."""
+    path = _index_for_write(path)
     with Lock(path + '.lock'):
         ix = load(path)
         ix['builds'].append(entry)
-        tmp = f'{path}.{os.getpid()}.tmp'
-        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
-            json.dump(ix, f, indent=1)
-            f.write('\n')
-        os.replace(tmp, path)
+        _write(ix, path)
     return entry
+
+
+def update(build_id, fields, only=None, path=None):
+    """Set `fields` on every published entry of worker build `build_id` (one executable: the release of the commit that
+    built it and the entries of the commits that reused it) for which `only(entry)` holds (every one when None) - in
+    place, under the index's lock -> how many entries changed. tools/farm_release.py records a release's macOS part
+    this way when it comes after the entry (docs/ENGINE.md 216)."""
+    path = _index_for_write(path)
+    with Lock(path + '.lock'):
+        ix = load(path)
+        hit = [e for e in ix['builds'] if e.get('published') and e.get('build_id') == build_id and (only is None or only(e))]
+        for e in hit:
+            e.update(fields)
+        if hit:
+            _write(ix, path)
+    return len(hit)
+
+
+def mac_build(e):
+    """An entry's published macOS release build id (its `mac.release`, zero-farm PROTOCOL 11), else None."""
+    rel = ((e or {}).get('mac') or {}).get('release') or {}
+    return rel.get('build_id') if rel.get('build_id') and rel.get('published') else None
 
 
 def find(ix, commit=None, key=None, runtime=None):
@@ -204,11 +236,23 @@ def pool_settings(e, alternates=True):
     return out
 
 
+def describe_mac(e):
+    """The entry's macOS part in a few words ('' when the entry has none and no failure)."""
+    m = e.get('mac') or {}
+    rel = m.get('release') or {}
+    if rel.get('build_id'):
+        return f", macOS build {rel['build_id']}" + ('' if rel.get('published') else ' (signed, not published)')
+    if m.get('failed'):
+        return f", NO macOS build (failed at {m['failed']})"
+    return ''
+
+
 def describe(e):
     c = e.get('cuda') or {}
     return (f"commit {e.get('asked', e['commit'])[:12]}: build {e['build_id']} (runtime {e['runtime']}"
             + (f", CUDA alternate {c['build_id']} for {c['runtime']}" if c.get('build_id') else ', no CUDA alternate')
             + (f", DirectML alternate {(e.get('dml') or {})['build_id']}" if (e.get('dml') or {}).get('build_id') else '')
+            + describe_mac(e)
             + (')' if e.get('exact', True) else f"; released for {e['commit'][:12]}, the same Rust inputs)"))
 
 

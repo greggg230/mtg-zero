@@ -9,10 +9,19 @@ newest head, one release at a time, below normal priority (farm_release.py's hea
 Every `--every` seconds (300): `git fetch origin main` (`--no-fetch`: local refs only), then the head = the newer of
 the local `main` and `origin/main` (the one that contains the other; diverged: origin/main). A head it has not handled
 yet goes to `farm_release.py release <head>`, which reuses the build of a commit with the same Rust inputs (no build:
-an index entry in seconds) and otherwise builds, signs, re-signs for CUDA, self-tests, gates and publishes. Heads that
-main passed while a release ran are skipped: the next poll takes the newest. A failed release is not retried for the
-same head (the next merge tries again; `farm_release.py release <head>` by hand). Publishing makes a build available
-only: nothing is attached to any run.
+an index entry in seconds) and otherwise builds, signs, re-signs for CUDA, self-tests, gates and publishes - and, as
+release.json says (docs/ENGINE.md 216; default on), the macOS part: the macOS build made on the Mac, its farm gates,
+published, recorded in the entry (a reused entry without one gets it too). Heads that main passed while a release ran
+are skipped: the next poll takes the newest. A failed release is not retried for the same head (the next merge tries
+again; `farm_release.py release <head>` by hand). Publishing makes a build available only: nothing is attached to any
+run.
+
+A release whose macOS part failed (farm_release.py exit 3: the Mac asleep or offline, its build, gate or publish
+failing) is published without it: logged as `released <head> WITHOUT ITS MACOS BUILD`, the state's `mac_pending`
+{head, attempts, last_try, line}, and retried - `farm_release.py release <head>` again, which builds only the missing
+macOS part - every `--mac-retry-every` seconds (3600), at most `--mac-retries` times (6; then `GIVING UP`, in the log
+and `mac_pending.gave_up`), while that head is main's newest. A newer head's release takes over (its entry gets its own
+macOS part, or this one's when it reuses the same build).
 
 Files in `<builds>` (mtgz.az.farm_builds.builds_dir(): $ZERO_BIG_DISK/zero-farm-builds): release_watch.log (one line
 per event; each release's own output in releases/<sha12>/), release_watch.json (state: pid, last head, last result),
@@ -32,6 +41,9 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(TOOLS)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, 'third_party', 'zero-core', 'python'))
+MAC_FAILED = 3          # farm_release.py's EXIT_MAC_FAILED: published without its macOS part
+MAC_RETRY_EVERY = 3600.0
+MAC_RETRIES = 6
 
 
 def FB():
@@ -112,6 +124,34 @@ def release(P, sha, python):
     return p.returncode, tail
 
 
+def mac_retry(P, st, a, h):
+    """Head `h` was released without its macOS part (module docs): `farm_release.py release <h>` again - the macOS part
+    only - once `--mac-retry-every` seconds have passed since the last try, at most `--mac-retries` times."""
+    pend = st.get('mac_pending')
+    every, most = getattr(a, 'mac_retry_every', MAC_RETRY_EVERY), getattr(a, 'mac_retries', MAC_RETRIES)
+    if not pend or pend.get('head') != h or pend.get('gave_up') or time.time() - pend.get('last_try', 0) < every:
+        return
+    n = pend.get('attempts', 1)            # (tries so far: the release itself and the retries)
+    log(P, f'{h[:12]}: retrying its macOS part (retry {n} of {most}): farm_release.py release {h[:12]}')
+    t0 = time.time()
+    rc, tail = release(P, h, a.python)
+    pend.update(attempts=n + 1, last_try=time.time(), line=' | '.join(tail))
+    if rc == 0:
+        st.pop('mac_pending', None)
+        if h in (st.get('done') or {}):
+            st['done'][h]['mac_failed'] = False
+        st['last'] = {'head': h, 'ok': True, 'line': tail[-1] if tail else ''}
+        log(P, f'macOS part of {h[:12]} backfilled in {time.time() - t0:.0f} s: {tail[-1] if tail else ""}')
+        return
+    what = 'FAILED again' if rc == MAC_FAILED else f'FAILED (exit {rc})'
+    if n >= most:
+        pend['gave_up'] = True
+        log(P, f'macOS part of {h[:12]} {what}: {" | ".join(tail)} - GIVING UP after {n} retries (farm_release.py release '
+               f'{h[:12]} by hand; the next merge tries again)')
+    else:
+        log(P, f'macOS part of {h[:12]} {what}: {" | ".join(tail)} (retried in {every:.0f} s)')
+
+
 def poll(P, st, a):
     h = head(not a.no_fetch, P)
     if not h:
@@ -119,7 +159,11 @@ def poll(P, st, a):
         return
     st['seen'] = h
     if h in (st.get('done') or {}) or h == st.get('failed'):
+        mac_retry(P, st, a, h)
         return
+    pend = st.pop('mac_pending', None)
+    if pend and not pend.get('gave_up'):
+        log(P, f'{pend["head"][:12]}\'s macOS part (failed) is left to {h[:12]}\'s release')
     log(P, f'main is at {h[:12]}: farm_release.py release {h[:12]}')
     t0 = time.time()
     rc, tail = release(P, h, a.python)
@@ -129,6 +173,14 @@ def poll(P, st, a):
         st['done'] = dict(list(st['done'].items())[-50:])
         st['last'] = {'head': h, 'ok': True, 'line': tail[-1] if tail else ''}
         log(P, f'released {h[:12]} in {time.time() - t0:.0f} s: {tail[-1] if tail else ""}')
+    elif rc == MAC_FAILED:
+        st['done'][h] = {'at': time.time(), 'seconds': round(time.time() - t0), 'mac_failed': True}
+        st['done'] = dict(list(st['done'].items())[-50:])
+        st['mac_pending'] = {'head': h, 'attempts': 1, 'last_try': time.time(), 'line': ' | '.join(tail)}
+        st['last'] = {'head': h, 'ok': True, 'mac': False, 'line': ' | '.join(tail)}
+        log(P, f'released {h[:12]} WITHOUT ITS MACOS BUILD (exit {rc}, {time.time() - t0:.0f} s): {" | ".join(tail)} - '
+               f'its macOS part is retried every {getattr(a, "mac_retry_every", MAC_RETRY_EVERY):.0f} s, at most '
+               f'{getattr(a, "mac_retries", MAC_RETRIES)} times (releases/{h[:12]}/)')
     else:
         st['failed'] = h
         st['last'] = {'head': h, 'ok': False, 'line': ' | '.join(tail)}
@@ -142,6 +194,8 @@ def status(P):
     alive = FB()._alive(pid) and os.path.exists(P['lock'])
     print(f'watcher: {"RUNNING pid " + str(pid) if alive else "not running"}; seen {str(st.get("seen"))[:12]}; '
           f'last {json.dumps(st.get("last"))}')
+    if st.get('mac_pending'):
+        print(f'macOS part pending: {json.dumps(st["mac_pending"])}')
     if os.path.exists(P['log']):
         print(''.join(open(P['log'], encoding='utf-8').readlines()[-5:]).rstrip())
     return 0
@@ -151,6 +205,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--every', type=float, default=300.0)
     ap.add_argument('--python', default=sys.executable, help='the interpreter farm_release.py runs with (torch, onnx)')
+    ap.add_argument('--mac-retry-every', type=float, default=MAC_RETRY_EVERY,
+                    help='seconds between retries of a released head\'s failed macOS part')
+    ap.add_argument('--mac-retries', type=int, default=MAC_RETRIES, help='retries of a failed macOS part per head')
     ap.add_argument('--no-fetch', action='store_true')
     ap.add_argument('--once', action='store_true')
     ap.add_argument('--status', action='store_true')
