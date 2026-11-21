@@ -188,7 +188,8 @@ def play_job(job):
     return {'v': JOB_V, 'id': job['id'], 'hash': job_hash(job), 'seconds': round(time.time() - t0, 1),
             'select': sel, 'unfinished': sum(1 for r in rows if not r.get('over')),
             'rows': [{'gid': int(r['gid']), 'result': [float(v) for v in r['result']], 'over': bool(r.get('over')),
-                      'games': len(r.get('episodes') or []) or 1} for r in rows]}
+                      'games': len(r.get('episodes') or []) or 1, 'decisions': int(r.get('decisions') or 0)}
+                     for r in rows]}
 
 
 def valid_result(job, res):
