@@ -469,3 +469,708 @@ fn cr_702_51a_every_set_of_creatures_and_graveyard_cards_that_pays_is_one_decisi
         assert_eq!(t.len() + e.len(), 7);
     }
 }
+
+// ---- delve (CR 702.66), with convoke ------------------------------------------
+
+#[test]
+fn cr_702_66a_delve_and_convoke_pay_one_cost_together() {
+    // ruling: c6f70acd
+    // Seven graveyard cards and two green creatures: delve pays the {5} (no
+    // more than the generic mana: five cards at most), the greens the pips.
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN])
+        .graveyard(0, &["Ponder", "Brainstorm", "Daze", "Force of Will", "Island", "Swamp", "Wasteland"])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    // Five picks: the first leaves enough cards above it for the four still
+    // needed (the creatures can't pay generic mana here: the pips need both).
+    for k in 0..5 {
+        assert!(delving(&g), "{}", opts(&g));
+        assert!(!g.has_option(Choice::Pass), "more cards needed: {}", opts(&g));
+        g.choose(Choice::Card(gyc[k]));
+    }
+    // No sixth card: delve pays generic mana only.
+    assert!(convoking(&g), "convoke next: {:?} {}", g.kind(), opts(&g));
+    let greens = creatures(&g, 0, GREEN);
+    pay(&mut g, 0, &[], &greens);
+    assert!(gyc[..5].iter().all(|&c| g.obj(c).zone == Zone::Exile));
+    assert!(gyc[5..].iter().all(|&c| g.obj(c).zone == Zone::Graveyard));
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK));
+    // One green creature and seven cards: the second pip is unpayable.
+    let g = scen()
+        .battlefield(0, &[GREEN, RED])
+        .graveyard(0, &["Ponder", "Brainstorm", "Daze", "Force of Will", "Island", "Swamp", "Wasteland"])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(!castable(&g, 0, Zone::Hand), "{}", opts(&g));
+}
+
+#[test]
+fn cr_702_66a_delving_more_leaves_creatures_untapped() {
+    // Four graveyard cards, seven creatures (two green): delve any number from
+    // none to four; with four, three creatures convoke. PASS is offered from
+    // the start (the creatures alone can pay).
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .graveyard(0, &["Ponder", "Brainstorm", "Daze", "Island"])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    assert!(delving(&g) && g.has_option(Choice::Pass), "{}", opts(&g));
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    let greens = creatures(&g, 0, GREEN);
+    let red = creatures(&g, 0, RED)[0];
+    pay(&mut g, 0, &gyc, &[greens[0], greens[1], red]);
+    let tapped = g.permanents_of(0).filter(|&c| g.obj(c).tapped).count();
+    assert_eq!(tapped, 3);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK));
+}
+
+#[test]
+fn cr_702_66a_delve_doesnt_change_hogaaks_mana_value() {
+    // ruling: 4029cc96
+    // Cast with five cards delved, Hogaak's mana value is still 7: Fatal Push
+    // ("destroy target creature if it has mana value 2 or less; revolt: 4 or
+    // less") has no legal target.
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN])
+        .graveyard(0, &["Ponder", "Brainstorm", "Daze", "Force of Will", "Island"])
+        .hand(0, &[HOGAAK])
+        .battlefield(1, &["Swamp"])
+        .hand(1, &["Fatal Push"])
+        .at(Step::Main1, 0)
+        .start();
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    let greens = creatures(&g, 0, GREEN);
+    pay(&mut g, 0, &gyc, &greens);
+    resolve(&mut g);
+    let h = bf(&g, 0, HOGAAK);
+    assert_eq!(db().def(g.obj(h).def).mana_value(), 7);
+    // P1's Fatal Push at it destroys nothing: mana value 7, not 2 or less.
+    g.pass();
+    assert_eq!(g.to_move(), Some(1), "{}", opts(&g));
+    let push = g.card(1, "Fatal Push", Zone::Hand);
+    g.choose(Choice::Cast(push));
+    until_priority(&mut g, &|g| (g.kind() == Some(DecisionKind::Target)).then(|| g.tgt(h)));
+    resolve(&mut g);
+    assert!(g.obj(h).zone == Zone::Battlefield, "{}", log(&g));
+}
+
+#[test]
+fn cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase() {
+    // ruling: 3719645d
+    // ruling: 1dce867e
+    // ruling: 0a2cf1a9
+    // Disruptor Flute naming Hogaak: "spells with the chosen name cost {3}
+    // more" (CR 601.2f): the total cost is {8}{B/G}{B/G}, all of it convoke's
+    // and delve's. With Omniscience ("without paying its mana cost", an
+    // alternative cost, CR 118.9) the total cost is {3}: convoke and delve
+    // still pay it (neither is an alternative cost), and no mana does.
+    // P0 casts its own Flute (it taxes every player's spells) and names
+    // Hogaak.
+    let flute_named = |g: &mut Game| {
+        let f = g.card(0, "Disruptor Flute", Zone::Hand);
+        g.choose(Choice::Cast(f));
+        until_priority(g, &|_| None);
+        g.pass_until(|g| g.kind() == Some(DecisionKind::NameCard));
+        g.choose(Choice::Def(def(HOGAAK)));
+        resolve(g);
+        assert!(on_bf(g, 0, "Disruptor Flute"), "{}", log(g));
+    };
+    // Ten units: seven creatures and three cards.
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY, "Swamp", "Swamp", "Swamp"])
+        .graveyard(0, &["Ponder", "Brainstorm", "Daze"])
+        .hand(0, &[HOGAAK, "Disruptor Flute"])
+        .at(Step::Main1, 0)
+        .start();
+    flute_named(&mut g);
+    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    let mut short = g.clone();
+    short.set_tapped(creatures(&short, 0, GREY)[0], true);
+    short.refresh_decision();
+    assert!(!castable(&short, 0, Zone::Hand), "nine units for ten: {}", opts(&short));
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay(&mut g, 0, &gyc, &all);
+    // (Two Swamps paid for the Flute; the third stays untapped.)
+    assert_eq!(g.permanents_of(0).filter(|&c| g.name(c) == "Swamp" && g.obj(c).tapped).count(), 2, "no land tapped for Hogaak: {}", log(&g));
+    // Omniscience: the free cast's total cost is the Flute's {3}.
+    let mut g = scen()
+        .battlefield(0, &["Omniscience", RED, "Swamp", "Swamp", "Swamp"])
+        .graveyard(0, &["Ponder", "Brainstorm"])
+        .hand(0, &[HOGAAK, "Disruptor Flute"])
+        .at(Step::Main1, 0)
+        .start();
+    flute_named(&mut g);
+    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseAltCost), "{}", opts(&g));
+    // (The mana cost isn't payable: one creature and two cards for {8}{B/G}{B/G}.)
+    assert_eq!(g.offered(), vec![Choice::Number(FREE)], "{}", opts(&g));
+    g.choose(Choice::Number(FREE));
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    let red = creatures(&g, 0, RED);
+    pay(&mut g, 0, &gyc, &red);
+    assert!(gyc.iter().all(|&c| g.obj(c).zone == Zone::Exile) && g.obj(red[0]).tapped);
+    // (Two Swamps paid for the Flute; the third stays untapped.)
+    assert_eq!(g.permanents_of(0).filter(|&c| g.name(c) == "Swamp" && g.obj(c).tapped).count(), 2, "no land for Hogaak: {}", log(&g));
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK));
+    // Omniscience without a tax: nothing to pay at all.
+    let mut g = scen().battlefield(0, &["Omniscience"]).hand(0, &[HOGAAK]).at(Step::Main1, 0).start();
+    assert!(castable(&g, 0, Zone::Hand));
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    g.choose(Choice::Number(FREE));
+    until_priority(&mut g, &|_| None);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK), "{}", log(&g));
+}
+
+#[test]
+fn cr_601_2f_thalia_doesnt_tax_hogaak_a_creature_spell() {
+    // Thalia: "Noncreature spells cost {1} more to cast": seven creatures
+    // still pay Hogaak.
+    let g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .hand(0, &[HOGAAK])
+        .battlefield(1, &["Thalia, Guardian of Thraben"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+}
+
+#[test]
+fn cr_601_2f_spells_cast_from_the_graveyard_cost_less_green_goblin() {
+    // Green Goblin (Norman Osborn's back face): "Spells you cast from your
+    // graveyard cost {2} less to cast": Hogaak from the graveyard costs
+    // {3}{B/G}{B/G}, five units (the reduction takes generic mana, CR 118.7a);
+    // with Norman Osborn's front face (no such ability) seven, so six
+    // creatures don't cast it.
+    let goblin = || {
+        scen()
+            .battlefield(0, &["Norman Osborn // Green Goblin"])
+            .battlefield(0, &[GREEN, GREEN, RED, RED, GREY])
+            .graveyard(0, &[HOGAAK])
+            .at(Step::Main1, 0)
+    };
+    let front = goblin().start();
+    assert!(!castable(&front, 0, Zone::Graveyard), "{}", opts(&front));
+    let mut g = goblin().transformed(0, "Norman Osborn // Green Goblin").start();
+    assert!(castable(&g, 0, Zone::Graveyard), "{}", opts(&g));
+    let h = cast_hogaak(&mut g, 0, Zone::Graveyard);
+    assert_eq!(g.obj(h).zone, Zone::Stack);
+    assert_eq!(g.permanents_of(0).filter(|&c| g.obj(c).tapped).count(), 5, "{}", log(&g));
+}
+
+// ---- "You may cast this card from your graveyard" ------------------------------
+
+#[test]
+fn cr_601_3_hogaak_is_cast_from_its_owners_graveyard() {
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .graveyard(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(castable(&g, 0, Zone::Graveyard), "{}", opts(&g));
+    // (Priority's "cast or play from the graveyard", ENGINE.md 100.5.)
+    assert!(g.has_option(Choice::FromGraveyard), "{}", opts(&g));
+    let h = cast_hogaak(&mut g, 0, Zone::Graveyard);
+    assert_eq!(g.obj(h).zone, Zone::Stack);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK), "{}", log(&g));
+}
+
+#[test]
+fn cr_601_3_only_its_owner_casts_it_from_their_own_graveyard() {
+    // P0's Hogaak in P0's graveyard: P1, with seven creatures, can't cast it.
+    let mut g = scen()
+        .graveyard(0, &[HOGAAK])
+        .battlefield(1, &[GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .at(Step::Main1, 1)
+        .start();
+    let h = g.card(0, HOGAAK, Zone::Graveyard);
+    assert!(!g.has_option(Choice::Cast(h)), "{}", opts(&g));
+    assert!(!g.has_option(Choice::FromGraveyard), "{}", opts(&g));
+    let _ = &mut g;
+}
+
+#[test]
+fn cr_307_1_601_3_hogaak_keeps_a_creature_spells_timing_from_the_graveyard() {
+    // Not in the opponent's turn, not with a spell on the stack, not outside a
+    // main phase: from the graveyard or the hand.
+    let board = [GREEN, GREEN, RED, RED, RED, GREY, GREY];
+    let g = scen().battlefield(0, &board).graveyard(0, &[HOGAAK]).hand(0, &[HOGAAK]).at(Step::Main1, 1).start();
+    let g = {
+        let mut g = g;
+        g.pass_until(|g| g.to_move() == Some(0) && at_priority(g));
+        g
+    };
+    assert!(!castable(&g, 0, Zone::Graveyard) && !castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    let g = scen().battlefield(0, &board).graveyard(0, &[HOGAAK]).at(Step::Upkeep, 0).start();
+    let g = {
+        let mut g = g;
+        g.drive_until(at_priority);
+        g
+    };
+    assert!(!castable(&g, 0, Zone::Graveyard), "{}", opts(&g));
+}
+
+#[test]
+fn cr_601_2a_a_hogaak_cast_from_the_graveyard_is_on_the_stack_and_cant_delve_itself() {
+    // Hogaak and four other cards in the graveyard, three creatures (two
+    // green): four cards delved and three creatures - castable. Delve's
+    // choices never offer the Hogaak being cast (it is on the stack, CR
+    // 601.2a). With only three other cards, not castable.
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED])
+        .graveyard(0, &["Ponder", HOGAAK, "Brainstorm", "Daze", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(castable(&g, 0, Zone::Graveyard), "{}", opts(&g));
+    let h = begin_hogaak(&mut g, 0, Zone::Graveyard);
+    assert!(delving(&g), "{}", opts(&g));
+    assert!(!g.has_option(Choice::Card(h)) && g.obj(h).zone == Zone::Stack, "{}", opts(&g));
+    let others: Vec<CardIdx> = g.player(0).graveyard.clone();
+    assert_eq!(others.len(), 4);
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay(&mut g, 0, &others, &all);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK));
+    let g = scen().battlefield(0, &[GREEN, GREEN, RED]).graveyard(0, &["Ponder", HOGAAK, "Brainstorm", "Daze"]).at(Step::Main1, 0).start();
+    assert!(!castable(&g, 0, Zone::Graveyard), "{}", opts(&g));
+}
+
+#[test]
+fn cr_702_66a_another_hogaak_in_the_graveyard_is_delve_fuel() {
+    // Two Hogaaks and three other cards in the graveyard, three creatures (two
+    // green): one Hogaak is cast, the other delved (it is a card in the
+    // graveyard; the one cast is on the stack).
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED])
+        .graveyard(0, &[HOGAAK, "Ponder", HOGAAK, "Brainstorm", "Daze"])
+        .at(Step::Main1, 0)
+        .start();
+    let hs = gy(&g, 0, HOGAAK);
+    assert!(g.has_option(Choice::Cast(hs[0])) && g.has_option(Choice::Cast(hs[1])), "{}", opts(&g));
+    g.choose(Choice::Cast(hs[1]));
+    assert!(delving(&g), "{}", opts(&g));
+    assert!(g.has_option(Choice::Card(hs[0])), "the other Hogaak is delve fuel: {}", opts(&g));
+    let rest: Vec<CardIdx> = g.player(0).graveyard.clone();
+    assert_eq!(rest.len(), 4);
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay(&mut g, 0, &rest, &all);
+    assert_eq!(g.obj(hs[0]).zone, Zone::Exile);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK));
+}
+
+#[test]
+fn cr_601_3_yawgmoths_will_and_its_own_permission_are_one_cast() {
+    // With Yawgmoth's Will ("you may cast spells from your graveyard") the
+    // two permissions allow the same cast (its costs): no route to choose.
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY, "Swamp", "Swamp", "Swamp"])
+        .hand(0, &["Yawgmoth's Will"])
+        .graveyard(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    let w = g.card(0, "Yawgmoth's Will", Zone::Hand);
+    g.choose(Choice::Cast(w));
+    until_priority(&mut g, &|_| None);
+    resolve(&mut g);
+    begin_hogaak(&mut g, 0, Zone::Graveyard);
+    assert_ne!(g.kind(), Some(DecisionKind::ChooseRoute), "{}", opts(&g));
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay(&mut g, 0, &[], &all);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK), "{}", log(&g));
+}
+
+#[test]
+fn cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission() {
+    // ruling: 1dce867e
+    // ruling: 0a2cf1a9
+    // Underworld Breach gives Hogaak escape ({5}{B/G}{B/G} and three other
+    // graveyard cards exiled, an alternative cost): the route is chosen (its
+    // own permission or escape). Escaping, its convoke and delve pay the
+    // escape cost's mana (neither is an alternative cost), and three other
+    // cards are exiled besides.
+    let mut g = scen()
+        .battlefield(0, &["Underworld Breach", GREEN, GREEN, RED, RED, RED])
+        .graveyard(0, &[HOGAAK, "Ponder", "Brainstorm", "Daze", "Island", "Swamp"])
+        .at(Step::Main1, 0)
+        .start();
+    let h = begin_hogaak(&mut g, 0, Zone::Graveyard);
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseRoute), "{}", opts(&g));
+    // NUMBER + route code: escape (2) and its own permission (10).
+    let mut routes: Vec<u8> = g.offered().into_iter().filter_map(|c| if let Choice::Number(k) = c { Some(k) } else { None }).collect();
+    routes.sort();
+    assert_eq!(routes, vec![2, 10], "{}", opts(&g));
+    g.choose(Choice::Number(2));
+    // Delve: with three cards kept for escape, two of the five may be delved.
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    assert_eq!(gyc.len(), 5);
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay_then_rest(&mut g, 0, &gyc[..2], &all);
+    assert!(gyc.iter().all(|&c| g.obj(c).zone == Zone::Exile), "two delved, three escape's: {}", log(&g));
+    assert_eq!(g.obj(h).zone, Zone::Stack);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK), "{}", log(&g));
+}
+
+/// `pay`, then the cost's other parts (escape's graveyard cards: the first
+/// offered each time) until priority.
+fn pay_then_rest(g: &mut Game, p: PlayerId, delve: &[CardIdx], convoke: &[CardIdx]) {
+    let gy_pos = |g: &Game, c: CardIdx| g.player(p).graveyard.iter().position(|&x| x == c).unwrap();
+    let mut delve = delve.to_vec();
+    delve.sort_by_key(|&c| gy_pos(g, c));
+    let mut convoke = convoke.to_vec();
+    convoke.sort_by_key(|&c| g.permanents_of(p).position(|x| x == c).unwrap());
+    let (mut d, mut k) = (0, 0);
+    for _ in 0..100 {
+        if at_priority(g) {
+            assert_eq!((d, k), (delve.len(), convoke.len()), "{}", log(g));
+            return;
+        }
+        if delving(g) && d < delve.len() + 1 && k == 0 && g.agenda_tail(1).contains("Delve") {
+            if d < delve.len() {
+                g.choose(Choice::Card(delve[d]));
+            } else {
+                g.pass();
+            }
+            d += 1;
+            if d > delve.len() {
+                d = delve.len();
+            }
+            continue;
+        }
+        if convoking(g) {
+            g.choose(Choice::Card(convoke[k]));
+            k += 1;
+            continue;
+        }
+        let c = g.offered()[0];
+        g.choose(c);
+    }
+    panic!("the payment doesn't end: {}\n{}", opts(g), log(g));
+}
+
+#[test]
+fn cr_702_81a_six_gives_it_retrace_and_the_discarded_land_may_be_delved() {
+    // Six: "During your turn, nonland permanent cards in your graveyard have
+    // retrace" (cast it by discarding a land card besides its other costs,
+    // CR 702.81a). The routes are its own permission and retrace; retraced,
+    // the land card the cost discards may be exiled by delve once discarded
+    // (CR 601.2h: the costs in any order; ENGINE.md 100.4.9).
+    let mut g = scen()
+        .battlefield(0, &["Six", GREEN, RED])
+        .graveyard(0, &[HOGAAK, "Ponder", "Brainstorm", "Daze"])
+        .hand(0, &["Island"])
+        .at(Step::Main1, 0)
+        .start();
+    // Own permission: three cards and three creatures, one short. Retrace:
+    // the Island too - the only route that completes, so no route is asked.
+    let h = begin_hogaak(&mut g, 0, Zone::Graveyard);
+    assert_ne!(g.kind(), Some(DecisionKind::ChooseRoute), "{}", opts(&g));
+    assert_eq!(g.stack().last().unwrap().from, engine::game::CastFrom::Retrace);
+    // Delve: the land in hand promised first (HAND id), then the graveyard.
+    let island = g.card(0, "Island", Zone::Hand);
+    assert!(delving(&g) && g.has_option(Choice::Card(island)), "{}", opts(&g));
+    g.choose(Choice::Card(island));
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    for &c in &gyc {
+        g.choose(Choice::Card(c));
+    }
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    until_priority(&mut g, &|g| {
+        if convoking(g) {
+            cards_offered(g).first().map(|&c| Choice::Card(c))
+        } else {
+            None
+        }
+    });
+    assert!(all.iter().all(|&c| g.obj(c).tapped), "{}", log(&g));
+    assert_eq!(g.obj(island).zone, Zone::Exile, "discarded, then exiled by delve: {}", log(&g));
+    assert_eq!(g.obj(h).zone, Zone::Stack);
+}
+
+// ---- the deck's interactions ----------------------------------------------------
+
+#[test]
+fn cr_118_12_daze_is_paid_with_mana_after_hogaak_is_cast() {
+    // Hogaak's restriction is on casting it: Daze's "counter target spell
+    // unless its controller pays {1}" is paid with a land's mana.
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY, "Swamp"])
+        .hand(0, &[HOGAAK])
+        .battlefield(1, &["Island"])
+        .hand(1, &["Daze"])
+        .at(Step::Main1, 0)
+        .start();
+    let h = cast_hogaak(&mut g, 0, Zone::Hand);
+    g.pass();
+    assert_eq!(g.to_move(), Some(1), "{}", opts(&g));
+    let daze = g.card(1, "Daze", Zone::Hand);
+    g.choose(Choice::Cast(daze));
+    until_priority(&mut g, &|g| match g.kind() {
+        // Its alternative cost: return the Island.
+        Some(DecisionKind::ChooseAltCost) => g.offered().into_iter().find(|c| *c != Choice::Number(0)),
+        Some(DecisionKind::Target) => Some(g.tgt(h)),
+        _ => None,
+    });
+    // Both pass: Daze resolves and P0 is asked to pay {1}: yes, with the Swamp.
+    g.pass_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    assert_eq!(g.kind(), Some(DecisionKind::YesNo), "{}\n{}", opts(&g), log(&g));
+    g.choose(Choice::Yes);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK), "paid: {}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Swamp")).tapped);
+}
+
+#[test]
+fn cr_601_3_force_of_will_counters_it_then_it_is_cast_again_from_the_graveyard() {
+    // Countered by Force of Will (pitching Brainstorm), Hogaak goes to its
+    // owner's graveyard; its owner casts it again from there with five cards
+    // delved and two more green creatures.
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY, GREEN, GREEN])
+        .graveyard(0, &["Ponder", "Daze", "Island", "Swamp", "Wasteland"])
+        .hand(0, &[HOGAAK])
+        .hand(1, &["Force of Will", "Brainstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    let first: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).take(7).collect();
+    let h = begin_hogaak(&mut g, 0, Zone::Hand);
+    pay(&mut g, 0, &[], &first);
+    g.pass();
+    let fow = g.card(1, "Force of Will", Zone::Hand);
+    g.choose(Choice::Cast(fow));
+    until_priority(&mut g, &|g| match g.kind() {
+        Some(DecisionKind::ChooseAltCost) => g.offered().into_iter().find(|c| *c != Choice::Number(0)),
+        Some(DecisionKind::Target) => Some(g.tgt(h)),
+        _ => None,
+    });
+    resolve(&mut g);
+    assert_eq!(g.obj(h).zone, Zone::Graveyard, "countered: {}", log(&g));
+    assert!(castable(&g, 0, Zone::Graveyard), "{}", opts(&g));
+    begin_hogaak(&mut g, 0, Zone::Graveyard);
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    assert_eq!(gyc.len(), 5);
+    let last: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c) && !g.obj(c).tapped).collect();
+    pay(&mut g, 0, &gyc, &last);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK), "{}", log(&g));
+}
+
+#[test]
+fn cr_205_4_karakas_returns_hogaak_to_its_owners_hand() {
+    let mut g = scen()
+        .battlefield(0, &[HOGAAK, GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .battlefield(1, &["Karakas"])
+        .at(Step::Main1, 0)
+        .start();
+    g.pass();
+    let k = bf(&g, 1, "Karakas");
+    let h = bf(&g, 0, HOGAAK);
+    let bounce = g.offered().into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == k)).expect("Karakas's ability");
+    g.choose(bounce);
+    until_priority(&mut g, &|g| (g.kind() == Some(DecisionKind::Target)).then(|| g.tgt(h)));
+    resolve(&mut g);
+    let h = g.card(0, HOGAAK, Zone::Hand);
+    // Back in hand: cast again by convoke.
+    assert!(castable(&g, 0, Zone::Hand) || g.to_move() != Some(0), "{}", opts(&g));
+    let _ = h;
+}
+
+#[test]
+fn cr_614_1a_dauthi_voidwalker_leaves_no_delve_fuel_and_exiles_a_countered_hogaak() {
+    // P1's Dauthi Voidwalker: a card that would go to P0's graveyard is exiled
+    // with a void counter instead. Ponder cast: exiled, no delve fuel. Hogaak
+    // countered: exiled, not castable from there by P0; P1 sacrifices the
+    // Voidwalker and casts it "without paying its mana cost" (an alternative
+    // cost of no mana: Hogaak's restriction is met).
+    let mut g = scen()
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY, "Island"])
+        .hand(0, &[HOGAAK, "Ponder"])
+        .battlefield(1, &["Dauthi Voidwalker", "Island", "Island"])
+        .hand(1, &["Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    let p = g.card(0, "Ponder", Zone::Hand);
+    g.choose(Choice::Cast(p));
+    until_priority(&mut g, &|_| None);
+    resolve(&mut g);
+    assert_eq!(g.obj(p).zone, Zone::Exile, "{}", log(&g));
+    let h = begin_hogaak(&mut g, 0, Zone::Hand);
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay(&mut g, 0, &[], &all);
+    g.pass();
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    until_priority(&mut g, &|g| (g.kind() == Some(DecisionKind::Target)).then(|| g.tgt(h)));
+    resolve(&mut g);
+    assert_eq!(g.obj(h).zone, Zone::Exile, "exiled with a void counter: {}", log(&g));
+    assert!(!g.has_option(Choice::Cast(h)), "{}", opts(&g));
+}
+
+#[test]
+fn cr_704_5j_the_legend_rule_for_a_second_hogaak() {
+    let mut g = scen()
+        .battlefield(0, &[HOGAAK, GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    let old = bf(&g, 0, HOGAAK);
+    let new = cast_hogaak(&mut g, 0, Zone::Hand);
+    resolve_with(&mut g, &|g| (g.kind() == Some(DecisionKind::LegendRule)).then_some(Choice::Card(new)));
+    assert_eq!(all_bf(&g, 0, HOGAAK), vec![new], "{}", log(&g));
+    assert_eq!(g.obj(old).zone, Zone::Graveyard);
+}
+
+#[test]
+fn cr_702_19b_hogaak_tramples_over_a_blocker() {
+    let mut g = scen().battlefield(0, &[HOGAAK]).battlefield(1, &[RED]).at(Step::DeclareAttackers, 0).start();
+    let h = bf(&g, 0, HOGAAK);
+    g.choose(Choice::Card(h));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers));
+    g.choose(Choice::Card(h));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::AssignDamage));
+    // Lethal (2) to the blocker, the rest (6) to the player.
+    g.choose(Choice::Number(2));
+    g.drive_until(|g| g.turn().step > Step::CombatDamage || g.is_over());
+    assert_eq!(g.life(1), 14, "{}", log(&g));
+}
+
+#[test]
+fn cr_702_51a_orcish_bowmasters_army_token_convokes() {
+    // Orcish Bowmasters (flash) enters: 1 damage, then amass Orcs 1 - a black
+    // 0/0 Orc Army token with a +1/+1 counter. Both black: they pay the pips.
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", RED, RED, RED, GREY, GREY])
+        .hand(0, &[BOWMASTERS, HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(!castable(&g, 0, Zone::Hand));
+    let b = g.card(0, BOWMASTERS, Zone::Hand);
+    g.choose(Choice::Cast(b));
+    until_priority(&mut g, &|_| None);
+    resolve_with(&mut g, &|g| (g.kind() == Some(DecisionKind::Target)).then_some(Choice::Target(engine::Target::Player(1))));
+    let army: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c).contains("Army")).collect();
+    assert_eq!(army.len(), 1, "{}", log(&g));
+    assert_eq!(g.colors_of(army[0]), 1 << 2, "a black token");
+    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    assert_eq!(all.len(), 7);
+    pay(&mut g, 0, &[], &all);
+    assert!(g.obj(army[0]).tapped);
+}
+
+#[test]
+fn cr_702_51a_kaito_a_creature_during_its_controllers_turn_convokes() {
+    // Kaito, Bane of Nightmares is a 3/4 Ninja creature during its
+    // controller's turn while it has a loyalty counter: blue and black, it
+    // pays a {B/G} pip.
+    let mut g = scen()
+        .battlefield(0, &["Kaito, Bane of Nightmares", GREEN, RED, RED, RED, GREY, GREY])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    let k = bf(&g, 0, "Kaito, Bane of Nightmares");
+    assert!(g.is_creature(k), "{}", log(&g));
+    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay(&mut g, 0, &[], &all);
+    assert!(g.obj(k).tapped);
+}
+
+#[test]
+fn cr_601_2g_a_lotus_petal_is_no_source_of_hogaak_but_floated_first_it_is_delve_fuel() {
+    // Hogaak's payment activates no mana ability (its mana can't be spent),
+    // so a Lotus Petal isn't offered in its delve; sacrificed for mana with
+    // priority first (CR 605.3a), the Petal is a graveyard card, delved, and
+    // its mana stays in the pool.
+    let mut g = scen()
+        .battlefield(0, &["Lotus Petal", GREEN, GREEN])
+        .graveyard(0, &["Ponder", "Brainstorm", "Daze", "Island"])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(!castable(&g, 0, Zone::Hand), "four cards and two creatures: {}", opts(&g));
+    g.choose(Choice::Yes);
+    let petal = bf(&g, 0, "Lotus Petal");
+    g.choose(Choice::Card(petal));
+    until_priority(&mut g, &|g| (g.kind() == Some(DecisionKind::ActivateMana)).then_some(Choice::Pass));
+    assert_eq!(g.obj(petal).zone, Zone::Graveyard, "{}", log(&g));
+    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    assert!(gyc.contains(&petal));
+    let greens = creatures(&g, 0, GREEN);
+    pay(&mut g, 0, &gyc, &greens);
+    assert_eq!(g.obj(petal).zone, Zone::Exile);
+    assert_eq!(g.player(0).pool.amt.iter().sum::<u8>(), 1, "the Petal's mana floats on: {}", log(&g));
+}
+
+#[test]
+fn cr_601_2f_elite_spellbinders_tax_on_hogaak_cast_from_exile() {
+    // P1's Elite Spellbinder exiles Hogaak from P0's hand: P0 may cast it
+    // from exile for {2} more ({7}{B/G}{B/G}), by convoke and delve.
+    let mut g = scen()
+        .battlefield(1, &["Plains", "Plains", "Plains"])
+        .hand(1, &["Elite Spellbinder"])
+        .battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY, GREY])
+        .graveyard(0, &["Ponder", "Brainstorm"])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 1)
+        .start();
+    let es = g.card(1, "Elite Spellbinder", Zone::Hand);
+    g.choose(Choice::Cast(es));
+    until_priority(&mut g, &|_| None);
+    resolve_with(&mut g, &|g| match g.kind() {
+        Some(DecisionKind::Target) => Some(Choice::Target(engine::Target::Player(0))),
+        Some(DecisionKind::ChooseDiscard) => g.offered().into_iter().find(|c| matches!(c, Choice::Card(x) if g.name(*x) == HOGAAK)),
+        _ => None,
+    });
+    let h = g.card(0, HOGAAK, Zone::Exile);
+    g.drive_until(|g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g) && g.to_move() == Some(0));
+    assert!(g.has_option(Choice::Cast(h)), "nine units for {{7}}{{B/G}}{{B/G}}: {}\n{}", opts(&g), log(&g));
+    g.choose(Choice::Cast(h));
+    let gyc: Vec<CardIdx> = g.player(0).graveyard.clone();
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    pay(&mut g, 0, &gyc, &all);
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK), "{}", log(&g));
+}
+
+#[test]
+fn cr_118_9_bolass_citadel_casts_hogaak_for_life_rather_than_its_mana_cost() {
+    // Bolas's Citadel: Hogaak on top of the library is cast for 7 life
+    // (rather than its mana cost, an alternative cost of no mana).
+    let mut g = scen()
+        .battlefield(0, &["Bolas's Citadel"])
+        .library(0, &[HOGAAK, "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let h = g.card(0, HOGAAK, Zone::Library);
+    assert!(g.has_option(Choice::Cast(h)), "{}", opts(&g));
+    g.choose(Choice::Cast(h));
+    until_priority(&mut g, &|_| None);
+    assert_eq!(g.life(0), 13, "{}", log(&g));
+    resolve(&mut g);
+    assert!(on_bf(&g, 0, HOGAAK));
+}
+
