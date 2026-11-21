@@ -277,6 +277,7 @@ def test_init_layout_and_specialist_settings(stew, tmp_path):
     assert [d['name'] for d in m2['decks']] == [DEL, DD] and m2['weights'] == [[0, 1], [1, 0]]
     assert all('sideboard' in d for d in m2['decks'])
     for k, v in {'eval_every': 100000, 'elo_anchors': '', 'eval_remote': '', 'yardsticks': {}, 'publish': {},
+                 'eval_games': 0, 'eval_random_games': 0, 'elo_games': 0,
                  'matchup_every': 0, 'games': 2444, 'lr': 1e-4,
                  'selfplay_remote': 'pool:tst-izzet-doomsday'}.items():
         assert cfg2[k] == v, k

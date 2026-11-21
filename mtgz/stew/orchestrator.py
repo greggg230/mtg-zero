@@ -160,7 +160,8 @@ class Stew:
             notes.append('matchup_every -> 0 (no matchup-model teacher)')
         fr = C.farm_run(self.cfg['name'], self.st.decks() if self.st else self.cfg['decks'], a, b)
         stew = {'spec': spec, 'eval_spec': spec, 'iters': 0, 'eval_every': 100000, 'elo_anchors': '',
-                'eval_remote': '', 'yardsticks': {}, 'publish': {}, 'matchup_every': 0, 'forced_find_schedule': {},
+                'eval_remote': '', 'eval_games': 0, 'eval_random_games': 0, 'elo_games': 0, 'yardsticks': {},
+                'publish': {}, 'matchup_every': 0, 'forced_find_schedule': {},
                 'selfplay_remote': ('pool:' + fr) if r['farm'] else ''}
         out = dict(src)
         out.update(stew)
