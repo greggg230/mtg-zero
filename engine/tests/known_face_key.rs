@@ -57,14 +57,34 @@ fn fuzz_seeds_466_and_4248_a_known_cards_face_choice_keeps_the_worlds_apart() {
         let deck = |k: &str| -> Vec<u16> { case[k].as_array().unwrap().iter().map(|n| id(n.as_str().unwrap())).collect() };
         let ids = |k: &str| -> Vec<u16> { case[k].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u16).collect() };
         let viewer = case["viewer"].as_u64().unwrap() as u8;
-        let s: u64 = case["s"].as_str().unwrap().parse().unwrap();
+        // (ENGINE.md 220.4: the K cached decks' key hashes the shown cards' definition ids, `DealCache::key`;
+        // Consign to Memory, ENGINE.md 122, and Dark Matter Manipulator sort before Disruptor Flute in the legacy
+        // IR, so the Flutes these games show have another id than when the cases were recorded, and the worlds of a
+        // recorded `s` may be other decks. Seed 466's recorded `s` still reaches its face choice; 4248's world seed
+        // is rescanned: 4, the first of 1..400 whose two worlds keep one node along the recorded path and name two
+        // known cards at its end - about one seed in four does.)
+        let s: u64 = if seed == 4248 { 4 } else { case["s"].as_str().unwrap().parse().unwrap() };
         let gspec = GameSpec { hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };
         let seat = |deck: Vec<u16>| Seat { deck, sideboard: Vec::new(), first_picks: Vec::new(), elsewhere: Vec::new() };
         // (The table's prior as the cases were recorded, before the Delver 75's five sideboard cards joined the
-        // constructed table, ENGINE.md 122, and Hogaak, Arisen Necropolis, 220.1: its draws depend on its whole
-        // support, and the worlds must be the recorded ones; ENGINE.md 129.1.)
-        let later: Vec<u16> =
-            ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble", "Hogaak, Arisen Necropolis"].map(id).to_vec();
+        // constructed table, ENGINE.md 122, and the Legacy Hogaak Tempo deck's seven, 220: its draws depend on its
+        // whole support, and the worlds must be the recorded ones; ENGINE.md 129.1.)
+        let later: Vec<u16> = [
+            "Consign to Memory",
+            "Hydroblast",
+            "Meltdown",
+            "Price of Progress",
+            "Rough // Tumble",
+            "Hogaak, Arisen Necropolis",
+            "Stitcher's Supplier",
+            "Mockingbird",
+            "Dark Matter Manipulator",
+            "Moonshadow",
+            "Dryad Arbor",
+            "Massacre",
+        ]
+        .map(id)
+        .to_vec();
         let prior: std::sync::Arc<dyn engine::az::hidden_decks::DeckPrior> =
             std::sync::Arc::new(engine::az::hidden_decks::TablePrior::new_without(db(), &later));
         let mut a = MtgAz::from_seats(db(), gspec, Format::Bo1, &[seat(deck("deck0")), seat(deck("deck1"))], seed, [Some(prior.clone()), Some(prior)])
