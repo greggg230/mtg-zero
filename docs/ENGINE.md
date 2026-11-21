@@ -41976,3 +41976,15 @@ change (it passes alone here).
   each), then given up loudly.
 * A backfill run of a released commit rewrites `releases/<sha12>/result.json` and `notes.txt` with its own record (any
   "released already" run rewrote result.json before too); the index entry keeps the original release's record.
+
+### 216.7 The merge of 214, 215 and 216 into main, and its gate
+
+The three branches (`feat/seat-settings`, `feat/campaign-alternates`, `feat/release-mac`) were merged on one branch
+(`integrate/farm-experiments`: 052d5e6b, then 969fc451) and moved onto main together. Conflicts only in the usage text
+and the `C.submit(...)` call of tools/farm_campaign.py (both sides kept: the per-side flags' `sides` in `meta` and the
+alternates arguments) and in this file (both sections kept). Lane B's `release_alternates` reads an entry's `mac` field
+as `mac.release` and so lists no macOS build for an entry whose macOS part failed (216.1's `mac: {failed, ...}`), with
+its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate: `GATE PASSED WITH SKIPS python
+969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
+placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
+the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
