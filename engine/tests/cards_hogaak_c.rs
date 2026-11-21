@@ -1119,3 +1119,114 @@ fn dryad_arbor_attacks_and_taps() {
     g.pass_until(|g| g.turn().step >= Step::EndCombat);
     assert_eq!(g.life(1), 19);
 }
+
+// ---- the encoding (layout v7: ENGINE.md 125, 142) ------------------------------------
+
+use engine::az::encode::{perm, squash, CODE};
+use engine::az::tail_encode::{ct, seg, Row};
+
+/// The viewer's permanents' tokens (`my_permanents`) whose descriptor has
+/// these card types (`x[32 + k]`: artifact, creature, enchantment, instant,
+/// land, sorcery).
+fn perm_tokens_typed(row: &Row, creature: bool, land: bool) -> Vec<Vec<f32>> {
+    row.tokens(seg::MY_PERM).into_iter().filter(|(_, x)| (x[33] > 0.5) == creature && (x[36] > 0.5) == land).map(|(_, x)| x.to_vec()).collect()
+}
+
+/// Dryad Arbor's dual nature reaches the input: its permanent's descriptor
+/// has both card types (land and creature, layer 4), and its summoning
+/// sickness is the status float (CR 302.6) the turn it is played, not the
+/// next.
+#[test]
+fn encoding_dryad_arbor_is_a_land_creature_and_sick() {
+    let mut g = bare().hand(0, &[ARBOR]).battlefield(0, &["Forest"]).library(0, &["Island"; 5]).library(1, &["Island"; 5]).start();
+    let a = hand(&g, 0, ARBOR);
+    g.choose(Choice::Play(a));
+    let row = Row::of(&g, 0);
+    let both = perm_tokens_typed(&row, true, true);
+    assert_eq!(both.len(), 1, "one land creature");
+    assert_eq!(both[0][CODE + perm::SICK], 1.0);
+    assert_eq!(perm_tokens_typed(&row, false, true).len(), 1, "the Forest: a land only");
+    pass_to(&mut g, |g| g.turn().number == 5 && g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
+    let both = perm_tokens_typed(&Row::of(&g, 0), true, true);
+    assert_eq!(both[0][CODE + perm::SICK], 0.0);
+}
+
+/// Dark Matter Manipulator's power is the permanent's status float, read
+/// through layer 7c: with six cards in the graveyard 1, with seven 3.
+#[test]
+fn encoding_dark_matter_manipulators_power() {
+    let power = |n: usize| {
+        let g = bare().battlefield(0, &[DMM]).graveyard(0, &vec!["Island"; n]).start();
+        let row = Row::of(&g, 0);
+        let t = perm_tokens_typed(&row, true, false);
+        assert_eq!(t.len(), 1);
+        t[0][CODE + perm::POWER]
+    };
+    assert_eq!(power(6), squash(1.0 / 8.0));
+    assert_eq!(power(7), squash(3.0 / 8.0));
+    assert_eq!(power(14), squash(5.0 / 8.0));
+}
+
+/// Moonshadow's -1/-1 counters are a `counters` token each count exactly
+/// (its kind, the count's binary digits; ENGINE.md 142.7), and its triggered
+/// ability waiting on the stack is a `stack` token.
+#[test]
+fn encoding_moonshadows_counters_and_its_trigger() {
+    let mut g = moon_with(bare(), 0, 6).battlefield(0, &["Misty Rainforest"]).library(0, &["Island", "Forest"]).start();
+    let count = |g: &Game| -> Vec<u64> {
+        Row::of(g, 1)
+            .tokens(seg::COUNTERS)
+            .into_iter()
+            .filter(|(_, x)| x[CODE + ct::KIND + 1] > 0.5)
+            .map(|(_, x)| (0..64).filter(|&b| x[CODE + ct::COUNT_BITS + b] > 0.5).map(|b| 1u64 << b).sum())
+            .collect()
+    };
+    assert_eq!(count(&g), vec![6]);
+    let stack_tokens = |g: &Game| Row::of(g, 1).tokens(seg::STACK).len();
+    assert_eq!(stack_tokens(&g), 0);
+    let f = bf(&g, 0, "Misty Rainforest");
+    let act = g.offered().into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == f)).unwrap();
+    g.choose(act);
+    pay(&mut g);
+    assert_eq!(moon_triggers(&g), 1);
+    assert_eq!(stack_tokens(&g), 2, "the fetch's ability and Moonshadow's trigger, for the other player too");
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::SearchLibrary)).then(|| Choice::Def(g.db().id("Forest").unwrap())));
+    assert_eq!(count(&g), vec![5]);
+}
+
+// ---- the deck's lines ---------------------------------------------------------------
+
+/// The deck's turns: Moonshadow (a 1/1), a fetch land cracked for Dryad Arbor
+/// (the fetch land's sacrifice shrinks Moonshadow; the Arbor enters untapped
+/// and can't tap for mana this turn), then Stitcher's Supplier milling three
+/// lands (one trigger): Moonshadow a 3/3. Next turn it attacks with menace
+/// beside the Arbor.
+#[test]
+fn the_decks_line_moonshadow_a_fetch_for_dryad_arbor_and_stitchers_supplier() {
+    let mut g = bare()
+        .battlefield(0, &["Underground Sea", "Verdant Catacombs"])
+        .hand(0, &[MOON, SUPPLIER])
+        .library(0, &[ARBOR, "Swamp", "Island", "Underground Sea", "Island", "Island", "Island"])
+        .library(1, &["Island"; 5])
+        .start();
+    cast_and_resolve(&mut g, 0, MOON);
+    let m = bf(&g, 0, MOON);
+    assert_eq!(pt(&g, m), (1, 1));
+    let vc = bf(&g, 0, "Verdant Catacombs");
+    let act = g.offered().into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == vc)).unwrap();
+    g.choose(act);
+    pay(&mut g);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::SearchLibrary)).then(|| Choice::Def(g.db().id(ARBOR).unwrap())));
+    let a = bf(&g, 0, ARBOR);
+    assert_eq!(m1(&g, m), 5, "{}", log(&g));
+    assert!(!g.obj(a).tapped && g.is_sick(a));
+    // Stitcher's Supplier: the Underground Sea pays (the Arbor can't).
+    let s = hand(&g, 0, SUPPLIER);
+    assert!(!g.has_option(Choice::Cast(s)), "the Sea is tapped for Moonshadow; the Arbor is sick: {}", opts(&g));
+    pass_to(&mut g, |g| g.turn().number == 5 && g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
+    cast_and_resolve(&mut g, 0, SUPPLIER);
+    assert_eq!(m1(&g, m), 4, "the mill of three cards, lands among them: one trigger\n{}", log(&g));
+    assert_eq!(pt(&g, m), (3, 3));
+    pass_to(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    assert!(g.has_option(Choice::Card(m)) && g.has_option(Choice::Card(a)), "{}", opts(&g));
+}
