@@ -35,7 +35,8 @@ def legacy():
 # lane B's three (test_legacy_stack.py), lane C's three
 # (test_doomsday_c_cards.py); then its Legacy Sneak and Show deck's six
 # (ENGINE.md 123; test_legacy_sneak.py); then the Delver 75's five sideboard
-# cards (ENGINE.md 122; test_legacy_delver_sb.py).
+# cards (ENGINE.md 122; test_legacy_delver_sb.py); then the Legacy Hogaak Tempo
+# deck's lane C four (ENGINE.md 220.3; test_legacy_hogaak_c.py).
 LEGACY_CARDS = {
     "Murktide Regent", "Prismari Charm",
     "Doomsday", "Pact of Negation", "Personal Tutor", "Flow State",
@@ -44,6 +45,7 @@ LEGACY_CARDS = {
     "Show and Tell", "Omniscience", "Mistrise Village",
     "Brotherhood's End", "Disruptor Flute", "Magus of the Moon",
     "Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble",
+    "Stitcher's Supplier", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor",
 }
 
 

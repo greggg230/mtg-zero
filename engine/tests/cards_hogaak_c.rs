@@ -161,10 +161,11 @@ fn the_four_cards_are_defined_as_printed() {
     assert_eq!(a.colors, 1 << engine::mana::G);
 }
 
-// ---- smoke ---------------------------------------------------------------------
+// ---- the first look ------------------------------------------------------------
 
+/// Stitcher's Supplier's mill shrinks a Moonshadow on the battlefield.
 #[test]
-fn smoke_supplier_mills_and_moonshadow_shrinks() {
+fn moonshadow_shrinks_as_stitchers_supplier_mills() {
     let mut g = bare()
         .library(0, &["Island", "Lightning Bolt", "Forest", "Island", "Island"])
         .hand(0, &[SUPPLIER])
@@ -176,8 +177,10 @@ fn smoke_supplier_mills_and_moonshadow_shrinks() {
     assert_eq!(m1(&g, bf(&g, 0, MOON)), 5, "{}", log(&g));
 }
 
+/// Dryad Arbor is played, never cast; on the battlefield a land and a creature
+/// whose mana ability is used in payments, not offered as a priority action.
 #[test]
-fn smoke_dryad_arbor_is_played_not_cast() {
+fn dryad_arbor_is_played_not_cast() {
     let mut g = bare().hand(0, &[ARBOR]).start();
     let a = hand(&g, 0, ARBOR);
     assert!(g.has_option(Choice::Play(a)) && !g.has_option(Choice::Cast(a)), "{}", opts(&g));
@@ -185,7 +188,6 @@ fn smoke_dryad_arbor_is_played_not_cast() {
     let a = bf(&g, 0, ARBOR);
     assert!(g.is_creature(a) && g.is_type(a, types::LAND));
     assert!(!g.offered().iter().any(|c| matches!(c, Choice::Ability(x, AbilitySlot::Activated(_)) if *x == a)), "{}", opts(&g));
-    let _ = Step::Main1;
 }
 
 fn player(p: PlayerId) -> Choice {
@@ -350,9 +352,6 @@ fn cr_611_3a_dark_matter_manipulator_mills_and_grows_at_once() {
     let d = bf(&g, 0, DMM);
     assert_eq!(g.player(0).graveyard.len(), 7, "{}", log(&g));
     assert_eq!(pt(&g, d), (3, 2));
-    // Cards leaving the graveyard shrink it again: a delve-free exile by
-    // Dauthi Voidwalker's? (No such effect needed: Lion's Eye Diamond's
-    // discard grows it; a reanimation shrinks it.)
 }
 
 /// Layer 7c adds the bonus to counters and other modifications (CR 613.4c,
@@ -434,7 +433,6 @@ fn cr_614_1c_moonshadow_enters_with_six_minus_one_counters() {
     assert_eq!(m1(&g, m), 6, "{}", log(&g));
     assert_eq!(pt(&g, m), (1, 1));
     assert!(g.has_kw(m, Kw::Menace));
-    assert!(!log(&g).contains("Moonshadow goes on the stack") || true);
     // Off the battlefield it is the printed 7/7 (counters exist only on it).
     let g = bare().hand(0, &[MOON]).start();
     assert_eq!(pt(&g, hand(&g, 0, MOON)), (7, 7));
