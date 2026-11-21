@@ -216,6 +216,13 @@ impl Lowerer<'_> {
     /// table whose copy exceptions name more than 64 subtypes is refused
     /// loudly (docs/shortcuts.md 26.11.5).
     pub fn exc_subtype(&mut self, s: u16) -> Option<u8> {
+        // (A creature or a land type: `Game::has_subtype` gives it only to a
+        // copy with the type it corresponds to, CR 205.3d; ENGINE.md 220.2.)
+        let name = self.subtypes[s as usize].clone();
+        if !crate::eoe_w1::is_creature_type(&name) && !crate::eoe_w2::LAND_TYPES.contains(&name.as_str()) {
+            self.unsupported(format!("copy exception subtypes({name}: neither a creature type nor a land type)"));
+            return None;
+        }
         match self.exc_subtypes.iter().position(|&x| x == s) {
             Some(k) => Some(k as u8),
             None if self.exc_subtypes.len() < 64 => {

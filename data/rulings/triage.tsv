@@ -1300,3 +1300,9 @@ cafea326	a	triggers	a nonbasic land entering under the Magus loses its enters tr
 5c226a47	a	copies	a copy of a spell must be countered on its own; countering the replicated spell leaves its copies (Consign to Memory)
 19831073	a	stack	triggered abilities ("when", "whenever", "at"; keyword triggers such as ward and storm) are targets for "counter target triggered ability"
 53e85191	a	stack	Hydroblast can target any spell or permanent; the colour is checked only on resolution
+4376972c	a	copies	a copy entering (Mockingbird) triggers the copied enters abilities; its "as enters" and "enters with" abilities apply (CR 707.5)
+f2b97e8c	a	copies	a copy of a token copies the token's original characteristics, with the exceptions; the copy is no token (CR 707.2, 111.3)
+5239ef09	a	copies	a copy of a creature that is copying something copies what it copied, with the exceptions (CR 707.3, 707.9b)
+de35ba2a	a	copies	Mockingbird copies printed values plus Bird and flying only: no tapped status, counters, attachments or noncopy effects (CR 707.2, 707.9b)
+5a1ea5ca	a	mana	"the amount of mana spent to cast" counts all mana paid for the spell, X, additional costs and increases included (CR 601.2h)
+f30367a6	a	copies	Mockingbird may decline to copy: a 1/1 flying Bird Bard (CR 707.5, 614.1c)
