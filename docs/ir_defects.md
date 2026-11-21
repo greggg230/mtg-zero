@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). Updated 2026-11-11 (branch `doomsday-a`, ENGINE.md 124.1, Legacy Doomsday lane A): entry 200 (Pact of Negation's colour indicator, section T), fixed in mtg-bot `feature/doomsday-a-ir`. Updated 2026-11-12 (branch `fix/eoe-station`, ENGINE.md 146, the Fable review's lane E): entries 340 (station striations, fixed in mtg-bot `feature/eoe-station-ir` 68b62ed3, local) and 341 (Warping Wail's {C}, read from the printed cost by the lowering), section X. The IR was exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). Updated 2026-11-11 (branch `doomsday-a`, ENGINE.md 124.1, Legacy Doomsday lane A): entry 200 (Pact of Negation's colour indicator, section T), fixed in mtg-bot `feature/doomsday-a-ir`. Updated 2026-11-12 (branch `fix/eoe-station`, ENGINE.md 146, the Fable review's lane E): entries 340 (station striations, fixed in mtg-bot `feature/eoe-station-ir` 68b62ed3, local) and 341 (Warping Wail's {C}, read from the printed cost by the lowering), section X. Updated 2026-11-21 (branch `hogaak-c`, ENGINE.md 220.3, Legacy Hogaak Tempo lane C): entry 440 (a land creature's land type, Dryad Arbor), fixed at the parser, section AA. The IR was exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`); since ENGINE.md 170 the same code is in this repo
 (`ir/mtgz_ir/cards/ir.py`, `ir/mtgz_ir/cards/parser/`, `ir/mtgz_ir/effects/`; `tools/card_ir.py export`),
@@ -101,6 +101,7 @@ permission) and a consumer can go wrong with it.
 | 191 | Chain of Smog (docs/shortcuts.md 26.11.9, ENGINE.md 100.6) | Python switch | `TargetPlayerMayCopyThisSpell` with `needs_target_with_cards_in_hand` at its default `true` (the copy offered only while a player it could target has cards in hand) | no condition ("That player may copy this spell") | `effects/generic/spell_copies.py::TargetPlayerMayCopyThisSpell` (the default) | supported; the field is ignored, the copy is always offered | confirmed |
 | 200 | Pact of Negation (Legacy Doomsday, lane A, ENGINE.md 124.1); every single-faced card with a colour indicator (the roto pool's Dryad Arbor) | colour dropped | no `color_indicator`: a colourless {0} instant | `color_indicator: [U]` (CR 204, 202.2e: blue; Force of Will and Force of Negation may exile it, Pyroblast counters it) | `cards/parser/source.py::build_card_record` (no single-faced builder read Scryfall's `color_indicator`; a back face's reached the IR as `face_colors`) | fixed (mtg-bot `feature/doomsday-a-ir`), supported | confirmed |
 | 340 | The Seriema, Debris Field Crusher, Entropic Battlecruiser, Infinite Guideline Station, Sledge-Class Seedship, Specimen Freighter (Edge of Eternities; the Fable review, ENGINE.md 146.1) | striation dropped | the ability printed on a line below an "N+ \| ..." line with `tier_threshold: 0` (always on) | `tier_threshold: N`: it is in the N+ striation (CR 722.2), the permanent has it only with N or more charge counters | `cards/parser/spacecraft_builder.py::_build_spacecraft_printing` (the arm for a line without its own "N+ \|" prefix) | fixed (mtg-bot `feature/eoe-station-ir` 68b62ed3), supported | confirmed |
+| 440 | Dryad Arbor (Legacy Hogaak Tempo, lane C, ENGINE.md 220.3); every land creature (the roto pool's Dryad Arbor) | card type dropped | `card_types: [Creature]`, `type_line: "Creature — Forest Dryad"`, no `produces`: a 1/1 creature spell of mana value 0 with no mana ability | `card_types: [Land, Creature]`, the printed type line, `produces: [G]` (its Forest's intrinsic "{T}: Add {G}", CR 305.6) with `mana_only_from_produces` | `cards/parser/creature_builder.py::_build_creature_printing` (`make_creature` knows only the artifact and enchantment card types beside creature) | fixed (`cards/parser/legacy_hogaak_c.py::as_land_creature`), supported | confirmed |
 | 341 | Warping Wail (EoE Special Guests; ENGINE.md 146.2); the same defect as entries 5 and 67 | lossy schema | `mana_cost: { generic: 2 }` for `mana_cost_str: "{1}{C}"` | `generic: 1, colored: [[C, 1]]` (CR 107.4c: payable only with colorless mana) | `cards/base.py::parse_mana_cost` (`colorless_pips=False`, the default every builder but Mirrorpool's uses) | read from `mana_cost_str` (every structured cost is now checked against its printed form, `lower_printed_cost`), supported | confirmed |
 
 ## Confirmed defects
@@ -1304,6 +1305,50 @@ Entries 340-349 are this lane's.
        pools' audit: 1,316 structured costs, all equal to their printed form but Warping Wail and Sowing Mycospawn
        ({C} as generic), the transform back faces (entry 9: the lowering already drops the copied cost) and the two
        split cards (the printed "{G} // {1}{B}" is the halves' costs combined, CR 709.4b).
+
+### AA. The Legacy Hogaak Tempo deck, lane C (ENGINE.md 220.3)
+
+Entries 440-459 are this lane's.
+
+440. **Dryad Arbor** (and any land creature: the roto pool's Dryad Arbor, the only other in the pools). Oracle:
+     "Land Creature — Forest Dryad", 1/1, a green colour indicator, "(This land isn't a spell, it's affected by
+     summoning sickness, and it has "{T}: Add {G}.")".
+     * IR (before the fix): `card_types: ["Creature"]`, `type_line: "Creature — Forest Dryad"`, no `produces`: the
+       engine would have lowered a creature spell with no mana cost (castable for nothing, never a land play, no
+       mana ability, not a land for Wasteland, a fetch land's search or "lands you control").
+     * Should be: `card_types: ["Land", "Creature"]` and the printed type line; `produces: ["G"]`,
+       `mana_only_from_produces: true`: CR 305.6, "an object with the land card type and a basic land type has the
+       intrinsic ability '{T}: Add [mana symbol]', even if the text box doesn't actually contain that text" (the
+       parenthesized text is reminder text, stripped). CR 305.9 (played only as a land) and 302.6 (summoning
+       sickness) are rules the engine applies to any land creature, not text.
+     * Source: `cards/parser/creature_builder.py::_build_creature_printing`: the creature builder claims the record
+       (it runs before the land builder) and rebuilds the type line through `cards/base.py::make_creature`, which
+       knows only "Artifact" and "Enchantment" beside "Creature".
+     * Fix (this branch): `cards/parser/legacy_hogaak_c.py::as_land_creature`, called by the creature builder for a
+       printed type line with "Land": the printed type line and card types (refused unless they are the printing's
+       plus Land), and each basic land type's colour as `produces`. The roto pool's Dryad Arbor changes the same way;
+       no cube or EoE printing has the land type and the creature type together (the cube's Witch Enchanter // Witch-
+       Blessed Meadow is a creature front face and a land back face), so `powerlsv.ir.json` and `eoe.ir.json` are
+       unchanged but for the schema hash. `tests/ir/test_legacy_hogaak_c.py`.
+     * Engine: supported; `cards_hogaak_c::cr_305_9_dryad_arbor_is_played_as_a_land_only` and the other Dryad Arbor
+       tests.
+
+Coverage gaps, not wrong data (each line had no grammar; the card wasn't claimed): Dark Matter Manipulator's "This
+creature gets +2/+0 for every seven cards in your graveyard" (the roto recognizer of Knight of the Reliquary's "for
+each <type> card" now takes "for every <N> [<type>] cards": `CardsInYourGraveyard.per`, a new field, 1 by default, so
+every existing printing encodes as before); Moonshadow's "This creature enters with six -1/-1 counters on it" (the
+creature builder's +1/+1-only recognizer, counting to five, now takes -1/-1 and counts to ten), "remove a -1/-1
+counter from this creature" (Dark Depths' `RemoveCountersFromSource` recognizer took word kinds only), "one or more
+permanent cards are put into your graveyard from anywhere" (a new event, `Event.CARD_PUT_INTO_GRAVEYARD`: subjects
+the graveyard's owner and the card) and "while this creature has a -1/-1 counter on it" (the intervening-"while"
+path's phrasebook had three literal gates; now also "this <permanent> has a <kind> counter on it" ->
+`Source(HasCounter(kind))`). Checked against their Oracle text and not defects: Stitcher's Supplier's "When this
+creature enters or dies, mill three cards" is two `TriggeredAbility` arms (`enters`, `dies`) sharing `SelfMill(3)`:
+the parser's compound-condition shape (Orcish Bowmasters' "when ... enters and whenever ..." is the same); one printed
+ability with two trigger events, the events disjoint, so two arms trigger exactly when the one ability does (no card of
+the tables counts abilities or makes one trigger an additional time). Dark Matter Manipulator's enters trigger
+`SelfMill(3)`; Moonshadow's menace. The roto pool's Knight of the Reliquary and Elvish Reclaimer gain the new field at
+its default (their IR is unchanged).
 
 ## Suspected defects (representational)
 
