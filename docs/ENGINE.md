@@ -41988,3 +41988,228 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
+
+### 220.1 Lane A: Hogaak, Arisen Necropolis (branch `hogaak-a`)
+
+**Why.** MTGGoldfish's Legacy Hogaak Tempo (paper, the archetype's representative list, deck 8027954, fetched
+2026-11-21: `E:/mtg-zero-scratch/hogaak/`, its PROVENANCE.md) has seven cards outside the cube and legacy IR; three
+lanes port them (A: Hogaak, Arisen Necropolis; B: Mockingbird, Massacre; C: Stitcher's Supplier, Dark Matter
+Manipulator, Moonshadow, Dryad Arbor), then the integration merges them (220.4). Branch `hogaak-a` from main
+e9ff0e24. The user's rules: no approximation of any class (docs/shortcuts.md unchanged), every public state the card
+creates in the network's input exactly (no gap, no guard: layout v7 unchanged, no spare used), every ruling tested,
+digests equal. New code in `engine/src/hogaak_a.rs` and `engine/src/lower/hogaak_a.rs`, additive hooks elsewhere.
+
+Hogaak, Arisen Necropolis {5}{B/G}{B/G}, Legendary Creature - Avatar 8/8: "You can't spend mana to cast this spell. /
+Convoke, delve / You may cast this card from your graveyard. / Trample".
+
+#### 220.1.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, sidecar), `ir/mtgz_ir/cards/parser/legacy_hogaak.py`, `cards/base.py`, `creature_builder.py`, `legacy_creatures.py`; `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | Hogaak's Scryfall record appended to the legacy pool; one parameterized recognizer and two literals; two new printing fields; 220.1.2 |
+| Identity | `engine/src/az/legacy_cards.txt` | appended after Rough // Tumble (the final number is the integration's; no test names one) |
+| Lowering | `lower/hogaak_a.rs`, `lower/printing.rs`, `lower/mod.rs` | `castable_from_graveyard` -> `CastingRules::own_gy_cast`, `cant_spend_mana_to_cast` -> `CastingRules::no_mana`; the combinations not played refused loudly (220.1.3) |
+| Rules | `hogaak_a.rs` (`Task::ConvokePay`, convoke's matching), `cast.rs` (`route::OWN`, castability of a spell of no mana, `cast_pay`, delve's need), `pay.rs` (`spell_pay_classes`, `spendable_classes`, the pool kept out), `doomsday_b.rs` (`Allow::no_mana`), `eoe_w2.rs` (`spend_allow_from`), `cost_order.rs` (`mana_writes`), `flow.rs`, `hidden.rs`, `rules_check.rs`, `az/bots.rs` | 220.1.3 |
+| Encoding | `az/encode.rs` (the context of `ConvokePay`), `az/tail_encode.rs` (`agenda_picks`), `public_state.rs` (the pick tasks) | 220.1.6 |
+| Tests | `engine/tests/cards_hogaak_a.rs` (38), `engine/src/hogaak_a.rs` (2 unit tests), `tests/az.rs` (`hogaak_positions`), `tests/support.rs`, `tests/ir/test_legacy_hogaak.py` (17), `test_legacy_creatures.py`, `test_fetch_cube.py` | 220.1.7 |
+| Fuzz | `engine/src/fuzz/games.rs`: `FUZZ_POOL=hogaak_a` (`HOGAAK_A_DECK`, `HOGAAK_A_SEEN`) | 220.1.7 |
+| Rulings | `data/rulings/legacy.rulings.json` (Hogaak's 9, fetched 2026-11-21; the other cards' entries not refetched), `triage.tsv` (6 new texts; the 3 delve texts were the cube's), `docs/rulings.md` regenerated | every ruling tested |
+| Docs | this section, docs/ir_defects.md section Y, docs/interactions.md (Hogaak's matrix) | |
+
+#### 220.1.2 The IR
+
+Hogaak did not parse: "Convoke, delve", "You can't spend mana to cast this spell." and "You may cast this card from your
+graveyard." had no creature grammar. `cards/parser/legacy_hogaak.py` (in this repo since ENGINE.md 170), tried for a
+creature's lines before `legacy_creatures`: a keyword line listing the casting keywords convoke and delve,
+comma-joined in any order -> `has_convoke` / `has_delve` (parameterized; Murktide Regent's lone "Delve" claims through
+it now, `legacy_creatures`' recognizer removed); the literal "You can't spend mana to cast this spell." -> the new
+`CardPrinting.cant_spend_mana_to_cast`; the literal "You may cast this card from your graveyard." -> the new
+`CardPrinting.castable_from_graveyard` (each the only card of the pools with its surface, the deferred generalization
+noted as the parser's AGENTS.md asks). `python tools/card_ir.py export`: schema **`fba2346e071e...`** (was
+`693d23a4a259...`; the two fields), `powerlsv.ir.json` and `eoe.ir.json` byte for byte but `schema_sha256`,
+`legacy.ir.json` 24 cards (the 23 others' IR unchanged, Murktide Regent's included); `check` identical, `roundtrip`
+ok (cube 546, legacy 24, eoe 483). No IR defect (docs/ir_defects.md section Y; entries 400-419 unused).
+
+#### 220.1.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| "You can't spend mana to cast this spell" | 113.6e, 601.2f-h, 106.1 | a static ability of the card, however it is cast (from a hand, a graveyard, exile, a library's top; by an opponent): `spend_allow_from` sets `doomsday_b::Allow::no_mana` for every payment of a cast of a card with `CastingRules::no_mana`. With it no mana pays any part of the total cost: `Game::spendable_classes` keeps only the payment's alternatives to mana (convoke's and improvise's taps, `IMPROVISE`) in `can_pay_with` / `can_pay_without`, `add_pool` adds none of the pool's mana, `PayMana`'s virtual pool is empty (`vgroups`), `spell_pay_classes` (`payment_classes`, `mana_writes`) gives convoke's creatures and improvise's artifacts each untapped one a source (no mana ability is activated, so none taps one first). Castability's entry points take those sources for such a spell (`no_mana_classes`: `hand_castable`, `route_payable`, `normal_payable`, `alt_payable`, `spell_payable`), so every route, alternative cost, reduction and increase is checked as for any spell, convoke and delve paying all of it |
+| ... the payment | 601.2h, 702.51a, 702.66a | delve's cards first (the existing `Task::Delve`, 54, 65: one decision a card up the graveyard, each set once), its need the fewest more cards that leave the rest payable by convoke alone (`delve_rest_payable`); then `Task::ConvokePay` (`hogaak_a.rs`): one `ChoosePermanent` decision a creature, by its own `MY_PERM` id, in increasing battlefield order after the last pick (each set once), a creature offered when it and the creatures after it can still pay the whole rest (convoke's matching, `convoke_covers`: a matching saturating the cost's mana symbols in symbols x creatures and one saturating the picks in picks x symbols give one saturating both, Mendelsohn-Dulmage); done when the picks are as many as the rest's symbols (each pays one; no mana pays the rest, so never fewer); then the creatures tapped, delve's cards exiled (`exile_delved`, Murktide-style records too), the life a cost takes after its mana paid (Bolas's Citadel's), and "the mana spent to cast it" noted 0 where a card reads it |
+| a convoke creature's unit | 702.51a, 107.4e, 302.6 | {1}, or a pip one of its colours meets: a black or a green creature a {B/G} pip, a multicoloured one either colour, a colourless one {1} only; any untapped creature its controller controls, summoning sick or not, tokens (the Orc Army), Kaito while a creature |
+| "Convoke, delve" together | 702.51b, 702.66b | both apply to the total cost once determined (601.2f): its mana cost or an alternative cost (Omniscience's free cast, Bolas's Citadel's life, Underworld Breach's escape, Elite Spellbinder's taxed cast) plus increases (Disruptor Flute's {3}) less reductions (Green Goblin's {2} from a graveyard); delve pays generic mana only, at most the generic part |
+| "You may cast this card from your graveyard" | 601.3, 113.6f, 109.5 | `CastingRules::own_gy_cast`: `gy_routes_esc` adds `route::OWN` (`CastFrom::Permission { free: false, any_mana: false }`, Yawgmoth's Will's: for its costs, its alternative costs allowed) for its owner, in their graveyard only ("your": the card's owner, 109.5); timing unchanged (a creature spell, 307.1); not when Yawgmoth's Will's route is there (the same cast, offered once: as warp's route, 99.4); with escape (Underworld Breach), retrace (Six) or mayhem the routes are asked (`ChooseRoute`, 601.2a-b) |
+| ... cast from the graveyard | 601.2a | on the stack while its costs are paid: delve's choices never offer it (castability's count excludes it, `delve_reduced_with`); another Hogaak in the graveyard is delve fuel |
+| Trample, legendary | 702.19b, 704.5j | the existing combat damage assignment and legend rule |
+
+Refused by the lowering (`lower/hogaak_a.rs`, unsupported, never approximated): either field on a land; no mana with
+{X}, a Phyrexian or a {C} pip in the mana cost, with costs of its own besides its mana cost (additional, alternative,
+kicker, buyback, flashback, escape, miracle, dash, warp, bestow, times paid), or with converge or sunburst. None of
+the pools' cards has one; a part that took permanents would compete with convoke's taps (`cast_pay` asserts the rest a
+route adds takes none: retrace's land card, escape's graveyard cards, a granted warp's life).
+
+#### 220.1.4 Readings taken
+
+* **Which pip a creature pays** (702.51a, ruling dbf4ec31): a choice the rules give, which leaves no trace in the game
+  (no mana is spent: no colour of it, no amount; nothing of the tables reads a convoked creature's pip, 702.51c's
+  "convoked" reads the creatures). The payment asks which creatures and which graveyard cards, every set that pays
+  being reachable (exhaustively: `cr_702_51a_every_set_of_creatures_and_graveyard_cards_that_pays_is_one_decision_path`
+  - 6 outcomes, 6 paths); the assignment is a matching, never a decision of equal outcomes (section 34's principle).
+* **Mana abilities while casting it** (601.2g, 117.1d, ruling 078779fc): its total cost has a mana payment, so its
+  caster may activate mana abilities as it is cast; their mana can't pay it and stays in the pool. The engine's payment
+  activates only mana abilities whose mana it spends (34, 13.12): for Hogaak none. A mana ability activated during the
+  cast and the same one activated with priority just before it (`ActivateMana`, 100.4.3) reach the same states unless
+  the activation triggers an ability: the cost is locked at 601.2f before 601.2g, the caster keeps priority between
+  (605.3b), and what a mana ability does that the cast reads (a creature tapped or sacrificed: no convoke candidate; a
+  Lotus Petal or a sacrificed creature in the graveyard: delve fuel) is the same either way. So delve offers no Lotus
+  Petal for Hogaak (it is offered for a spell whose mana its activation pays, 34.4); floated first, the Petal is a
+  graveyard card like any (`cr_601_2g_a_lotus_petal_is_no_source_of_hogaak_but_floated_first_it_is_delve_fuel`). An
+  activation that triggers an ability (Chromatic Star, Wizard's Rockets) is not the same: 220.1.5, open.
+* **Its own permission and Yawgmoth's Will's** allow the same cast (its costs, its alternative costs): one route.
+  Escape, retrace and mayhem are other casts (an alternative cost, an additional cost): asked.
+* **"Without paying its mana cost"** (Omniscience, Dauthi Voidwalker's, Bolas's Citadel's life) spends no mana: castable
+  with nothing to tap, increases still paid by convoke and delve (rulings 3719645d, 1dce867e).
+* **A creature tapped for convoke in combat** stays attacking or blocking and deals its damage (506.4b, ruling 7f0ee199).
+  Hogaak is cast only as a sorcery (no card of the tables gives a creature spell flash), so a flash test card of the
+  same payment shows it (`Test Flash Necropolis`).
+
+#### 220.1.5 Findings outside the card (reported, not changed: each would change cube or EoE games)
+
+* **Convoke through `PayMana` takes a class's members as interchangeable** (Vote Out, `convoke_classes`: one class a
+  definition and colours; the payment taps "the first free member whose pick leaves the payment payable"): two
+  creatures of one definition in different states (one summoning sick, one with counters) aren't a choice. Hogaak's
+  payment is `ConvokePay`, every creature by its own id. Fixing `PayMana`'s convoke changes EoE's games.
+* **`normal_payable` and castability's `alt_payable` leave convoke's and improvise's sources out** (100.4.10's "found,
+  not done": a convoke spell's mana cost under an alternative-cost permission is offered only when mana alone pays it).
+  Fixed for spells of no mana only (`no_mana_classes`).
+* **`PayMana`'s picks in progress** (`PayMana::chosen`, the sources picked before `finish_payment` activates them) are in
+  neither `Game::view_of` nor `tail_encode::agenda_picks`: the network reads them only through the options left. Every
+  mana payment has them (a payment's decisions are minor ones, 22); Hogaak's are `ConvokePay`'s, encoded (220.1.6).
+* **Delve's need (`can_pay_for`) counts no convoke or improvise source**: no delve spell had one before Hogaak, whose
+  need now counts its convoke (`delve_rest_payable`); a delve spell with convoke whose mana may be spent would still
+  miss them (none in the tables).
+* **A mana ability activated while a spell is cast beyond the payment's own sources** (601.2g, 117.1d): the engine's
+  payment activates the sources whose mana it spends (34) and offers floating with priority (`ActivateMana`, 100.4.3),
+  which is the same but where the activation triggers an ability: activated while casting, the trigger waits until the
+  spell is cast and goes on the stack above it (601.2i, 117.2); floated before, it goes on the stack first and a
+  sorcery-speed spell waits for it (a window for the other player). Chromatic Star and Wizard's Rockets (their draw on
+  going to the graveyard) are the tables' cards. For every spell the engine reaches the "during" line only with a source
+  whose mana the payment spends; for Hogaak, whose mana can't be spent, never: "Hogaak cast with Chromatic Star
+  activated during the cast (delved), its draw trigger above Hogaak" is a legal state the engine doesn't reach. **Open**
+  (220.1.9): a fix for every spell changes the cube's games (the user's decision); a fix for spells of no mana alone is
+  a 601.2g step before delve (each mana ability whose activation keeps the payment completable, its triggers waiting,
+  no state-based check).
+
+#### 220.1.6 The encoding
+
+No layout change, no spare float. `Task::ConvokePay` holds its picks as a task of `tail_encode::agenda_picks` (the
+innermost holder's: each picked creature's permanent row has `perm::PICK_RANK`, `PICKS_ME` / `PICKS_OPP`, 125, 142.10;
+`Game::view_of` shows them), its context the asking task's code 12 (a cost's picks, `PayCosts`'), the spell (Hogaak's
+card code), `ctx::PICKED` and the cost the creatures pay in the cost floats (its total cost less delve's cards, as a
+delve decision's). Delve's picks are 65's (`Mark::DelveExile`, the graveyard list's `list::CHOSEN`, the exile bag); the
+graveyard cast permission is the card's identity (a static ability of the card; Priority's graveyard cast and its
+`GraveyardCast` list, 100.5). The public-state gate gets Hogaak's positions (`tests/az.rs::hogaak_positions`:
+constructed play's table, the priority with Hogaak castable from the graveyard, its delve's decisions and its convoke's
+with picks) in the single pass, the pairwise pass and the hidden-information check of the fixed perturbations:
+**496 positions, 231 perturbations encoded, 2 deliberate limits, 0 known gaps, 0 gaps for the next layout**; "the
+asking task holding picks picks one more offered card" applied 10 times (6 before: Hogaak's convoke 4). Test
+`convokes_picks_and_cost_reach_both_players_inputs`.
+
+#### 220.1.7 Tests, the fuzz pool
+
+* **`engine/tests/cards_hogaak_a.rs`, 38 tests** (in `cards_suite`; every ruling of the card, `// ruling:`; the CR in
+  each name): the card's definition; no mana (convoke alone, lands and floating mana never a source, the floating mana
+  kept); convoke (hybrid pips, every pick leaving the rest payable, multicoloured and colourless creatures, summoning
+  sick Llanowar Elves, a creature tapped for mana first and one sacrificed for mana - a test card -, every set of
+  creatures and graveyard cards one decision path: 6 outcomes over 6 paths); delve with convoke (at most the generic
+  mana, delving more to keep creatures, the mana value still 7 - Fatal Push -, Disruptor Flute's {3}, Omniscience with
+  and without the Flute, Thalia not taxing it, Green Goblin's reduction, Elite Spellbinder's taxed cast from exile,
+  Bolas's Citadel's life); the graveyard permission (its owner's only, the creature timing, on the stack while delve is
+  paid, another Hogaak as fuel, Yawgmoth's Will one route, Underworld Breach's escape a second, Six's retrace with the
+  discarded land delved; escape's graveyard cards never fed by a Lotus Petal Hogaak doesn't activate - floated first, it is); the deck (Daze paid with mana, Force of Will then the graveyard cast, Karakas, Dauthi
+  Voidwalker, the legend rule, trample, the Orc Army token, Kaito as a creature, Lotus Petal); a blocker tapped for
+  convoke (506.4b, a flash test card); the encoding (convoke's picks in both players' rows, the context); castability
+  and the payment agreeing on 600 random boards (brute force over delve counts and creature sets; every path of every
+  castable board's payment, up to 400 a board, ends with the spell cast and no mana spent). `hogaak_a.rs`'s 2 unit
+  tests (convoke's matching). `docs/interactions.md` has the matrix.
+* **`tests/az.rs`**: `hogaak_positions` in the three gate passes (220.1.6). **`tests/support.rs`**: the legacy
+  registry's 24. `tools/untested_cards.py`: 570 supported (24 legacy), **0** named by no card test.
+  `docs/rulings.md` regenerated: 1,676 rulings (1,307 distinct), 1,299 class a, every one tested.
+* **`FUZZ_POOL=hogaak_a`** (`engine/src/fuzz/games.rs`): the deck's 60 with the other lanes' 16 cards swapped for
+  supported graveyard fillers and black creatures (`HOGAAK_A_DECK`: Hogaak 4, Orcish Bowmasters 3, Kaito 2, Brazen
+  Borrower, Thoughtseize 2, Force of Will 4, Ponder 3, Brainstorm 4, Daze 3, Wasteland 4, the deck's lands; Mishra's
+  Bauble 4, Street Wraith 4, Entomb 2, Dark Confidant 2, Deep-Cavern Bat 2, Barrowgoyf 2), against the Delver 60 in
+  either seat, one game in three the mirror; games only. With 200 games or more Hogaak must have been cast from a hand
+  and from a graveyard, paid by convoke, by delve and by both (`HOGAAK_A_SEEN`: counted at the priority after each
+  cast; convoke when the total cost less the cards delved is not zero - no mana pays it).
+
+#### 220.1.8 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/hogaak-a`, heavy commands through `tools/slotd.sh` (a training run
+live on the desktop); the fuzz on the Mac (`tools/mac.sh`, bit-identical to the desktop, ENGINE.md 44), at 41d278ef.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,766 passed, 0 failed, 37 ignored**.
+  `cards_hogaak_a` 38, `az` 57 (the gate with Hogaak's positions), `support` (the legacy list of 24).
+* **Behaviour digests (the cube's) EQUAL to main's**: full **44372545881ef768** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **a965c3fc8d3bba8a**, `DIGEST_ENCODING=v5` **9f4cb802bae20e3b**
+  (main e9ff0e24's, run in a baseline export of it: 9f4cb802bae20e3b).
+* **`digest_formats`**: EoE **c3a9c786030f42eb** and driver **6a03572828250b86** equal; constructed
+  16441662701e233d -> **b7414bbd3ae04c1f** and metagame 56ff52ffef1b1913 -> **9d3d2542e40d9042** (every line;
+  `DIGEST_ENCODING=0`: 7ef0ac60859b4739 -> 9369e91220891c6e, 72a8f90dd0e6b4f7 -> 540decb6643d1ee1), **not re-recorded**.
+  The cause is the constructed table holding one more card, not this branch's code: a scratch build with every change
+  but Hogaak filtered out of `CardDb::constructed` gives 16441662701e233d and 56ff52ffef1b1913 exactly (both tests pass);
+  leaving it in the table but out of the table prior's support changes nothing (b7414bbd3ae04c1f / 9d3d2542e40d9042);
+  lane C's branch shows the same. Likewise the dealt digests (`dealt_decks.rs`: a890c27da3c7d1a8 -> **33ea359103eb695b**;
+  `dealt_per_seat.rs`: 5fa30432bf8cd63f -> **5ce72627b36ed3fd**), equal to the recorded files with Hogaak out of the
+  table. `E:/mtg-zero-scratch/hogaak/digests_a.md`.
+* **The public-state gate** (`--test az`): 496 positions, 231 perturbations encoded, 2 deliberate limits, 0 known gaps,
+  0 next-layout gaps; "the asking task holding picks picks one more offered card" 10 applications (Hogaak's convoke 4).
+* **`FUZZ_POOL=hogaak_a`, 20,000 games** (`tools/fuzz_shards.py`, 8 shards, the Mac): **no failure**; wins 9,886 /
+  9,916, 198 drawn, none aborted, 31.1 turns and 308.1 decisions a game, 9,749,719 options completed; Hogaak cast from a
+  hand 8,196 and from a graveyard 4,332, paid by convoke 12,528, by delve 12,527, by both 12,527 (one cast by convoke
+  alone: every cast has the two {B/G} pips convoke pays); the fuzz binary's 16 other tests passed.
+* **Under the `fuzz` profile** (debug assertions), 1,000 games (4 x 250): no failure (500 / 493, 7 drawn; 788,178
+  options completed; Hogaak 647 casts, 242 from a graveyard). **`FUZZ_CHANCE=10`**, 600 games: no failure (17,946 chance
+  walks, 6,932 replays whose outcome the force changed; Hogaak 358 casts). **`FUZZ_BELIEF=2`**, 600 games: no failure
+  (8,796 weighted worlds; Hogaak 358 casts).
+* Every check of the default mode in each: invariants, clones, `determinize` for both viewers, every option completed in
+  the game and in the sampled worlds, the information-set walks, the rules checks (ENGINE.md 150), the encodings finite.
+* **IR**: `python tools/card_ir.py check` identical, `roundtrip` ok; `python -m pytest tests/ir -q`: **2,704 passed**
+  (2,688 at ENGINE.md 170, the legacy pool's and Hogaak's added).
+* `bash tools/build_py.sh`, `python -m pytest -q tests` (`tests/ir` included): **3,402 passed, 31 skipped, 1 failed** -
+  `test_mac_remote.py::test_the_macs_selfplay_settings`, a Mac-only test that fails on the desktop (Git Bash rewrites
+  `MTGZ_MAC_HOME`, ENGINE.md 170.6), unrelated. `python tools/rulings_doc.py --check`: current. `python tools/untested_cards.py`: 570 supported (24 legacy),
+  **0** named by no card test. `python tools/privacy_check.py`: 0 findings.
+* No docs/shortcuts.md entry; layout v7 unchanged (no spare float used); no zero-core change.
+
+#### 220.1.9 Limits, open items and the integration's merge points
+
+* **Open (rules): a mana ability activated while Hogaak is cast** (220.1.5's last finding): Chromatic Star or Wizard's
+  Rockets activated during its cast (delved, the draw trigger above Hogaak) is not reached; floated first, its trigger
+  goes on the stack before Hogaak can be cast. The user's decision: the general fix (every spell's payment may activate
+  a mana ability beyond its sources, the cube's games change) or the no-mana one (220.1.5).
+* **Constructed play's table holds one more card** (220.1.8): the constructed and metagame digests of `digest_formats`
+  change (every line), not re-recorded - the integration's decision (all seven cards in the table at once;
+  `E:/mtg-zero-scratch/hogaak/digests_a.md`). Two tests that pin seeds or recorded worlds of constructed games:
+  `tests/known_face_key.rs` (worlds dealt by the table's prior, whose draws depend on its whole support, ENGINE.md
+  129.1) excludes Hogaak as it does the Delver sideboard cards (`TablePrior::new_without`); `tests/fuzz.rs`'s
+  `a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game` (passing on main e9ff0e24, checked in a baseline
+  export) drops the two seeds that no longer reach the look (3,900,000,012 and 3,900,000,079; seven remain, as 192
+  rescanned it). The integration adds six more cards: all three again.
+* **The other lanes' cards** (Stitcher's Supplier, Mockingbird, Dark Matter Manipulator, Moonshadow, Dryad Arbor,
+  Massacre) aren't on this branch: `FUZZ_POOL=hogaak_a` plays supported stand-ins; the deck's real 60 and its
+  interactions (Mockingbird's "mana spent", Dryad Arbor a land creature that convokes, Stitcher's Supplier's mill)
+  are the integration's. Dryad Arbor: `convoke_sources` takes every untapped creature, a land creature too; its mana
+  ability never pays Hogaak.
+* **Merge points**: `legacy_cards.txt` (lane order A, B, C: Hogaak first), the legacy pool's data (`legacy_delver.json`
+  + sheet + sidecar: the union, Hogaak's record first), `cards/base.py` (two fields), `creature_builder.py` (one hook
+  before `legacy_creatures`; `legacy_creatures.py` without `_delve`), the export (re-export once: schema, the three IR
+  files, `generated.rs`), `tests/ir/test_legacy_creatures.py` / `test_fetch_cube.py` (the pinned list),
+  `lower/printing.rs` (two destructured fields, `hogaak_a::casting_rules`), `lower/mod.rs` (`pub mod hogaak_a`,
+  `check_def`), `db.rs` (`CastingRules::own_gy_cast`, `no_mana`), `doomsday_b.rs` (`Allow::no_mana`), `eoe_w2.rs`
+  (`spend_allow_from`), `cast.rs`, `pay.rs`, `activate.rs` (`exile_sources`, `cost_payable_with`), `cost_order.rs`,
+  `flow.rs` (`Task::ConvokePay`), `lib.rs` (`mod hogaak_a`), `hidden.rs`, `rules_check.rs`, `az/bots.rs`,
+  `az/encode.rs`, `az/tail_encode.rs`, `public_state.rs`, `fuzz/games.rs` (the pool beside `sns`), `tests/az.rs`
+  (`hogaak_positions`), `tests/support.rs` (the legacy list), `tests/cards_suite.rs`, `tests/known_face_key.rs`,
+  `tests/fuzz.rs`, `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/interactions.md`, `docs/ir_defects.md`.
+* No docs/shortcuts.md entry; layout v7 unchanged (no spare used); no zero-core change.

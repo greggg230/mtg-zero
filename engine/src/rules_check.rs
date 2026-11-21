@@ -227,6 +227,7 @@ fn task_item(t: &Task) -> Option<u32> {
         | Task::FinishResolve { id }
         | Task::ActPay { id }
         | Task::PayCosts { id, .. }
+        | Task::ConvokePay { id, .. }
         | Task::CastOption { id }
         | Task::CastAlt { id }
         | Task::Divide { id, .. }

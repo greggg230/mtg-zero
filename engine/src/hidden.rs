@@ -1867,7 +1867,14 @@ impl Game {
             // the ones offered counted on the player's mana sources in hand
             // (a Spirit Guide's, or one that pays another's mana cost).
             Task::ActivateMana { p, .. } => Some(*p),
-            Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } | Task::ChooseForCost { id, .. } => {
+            Task::CastPay { id }
+            | Task::ActPay { id }
+            | Task::PayCosts { id, .. }
+            | Task::CastDone { id }
+            | Task::ChooseForCost { id, .. }
+            // (A spell whose mana can't be spent, paid by convoke: ENGINE.md
+            // 220.1.)
+            | Task::ConvokePay { id, .. } => {
                 self.item_index(*id).map(|i| self.stack[i].controller)
             }
             // "Which face?" of a card being cast (CR 601.2a-b, 712.11b,

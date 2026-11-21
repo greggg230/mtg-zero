@@ -61,9 +61,10 @@ fn fuzz_seeds_466_and_4248_a_known_cards_face_choice_keeps_the_worlds_apart() {
         let gspec = GameSpec { hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };
         let seat = |deck: Vec<u16>| Seat { deck, sideboard: Vec::new(), first_picks: Vec::new(), elsewhere: Vec::new() };
         // (The table's prior as the cases were recorded, before the Delver 75's five sideboard cards joined the
-        // constructed table, ENGINE.md 122: its draws depend on its whole support, and the worlds must be the
-        // recorded ones; ENGINE.md 129.1.)
-        let later: Vec<u16> = ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble"].map(id).to_vec();
+        // constructed table, ENGINE.md 122, and Hogaak, Arisen Necropolis, 220.1: its draws depend on its whole
+        // support, and the worlds must be the recorded ones; ENGINE.md 129.1.)
+        let later: Vec<u16> =
+            ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble", "Hogaak, Arisen Necropolis"].map(id).to_vec();
         let prior: std::sync::Arc<dyn engine::az::hidden_decks::DeckPrior> =
             std::sync::Arc::new(engine::az::hidden_decks::TablePrior::new_without(db(), &later));
         let mut a = MtgAz::from_seats(db(), gspec, Format::Bo1, &[seat(deck("deck0")), seat(deck("deck1"))], seed, [Some(prior.clone()), Some(prior)])

@@ -1305,6 +1305,23 @@ Entries 340-349 are this lane's.
        ({C} as generic), the transform back faces (entry 9: the lowering already drops the copied cost) and the two
        split cards (the printed "{G} // {1}{B}" is the halves' costs combined, CR 709.4b).
 
+### Y. Legacy Hogaak Tempo, lane A: Hogaak, Arisen Necropolis (ENGINE.md 220.1)
+
+No defect (entries 400-419 are this lane's; none used). Hogaak had no IR: three of its four lines had no grammar
+(a coverage gap, not wrong data). `ir/mtgz_ir/cards/parser/legacy_hogaak.py` (this repo's parser, ENGINE.md 170)
+adds one parameterized recognizer and two literals, tried for creature lines before `legacy_creatures`: a keyword
+line listing the casting keywords convoke and delve, comma-joined in any order (CR 702.51, 702.66) ->
+`has_convoke` / `has_delve` (Murktide Regent's lone "Delve" now claims through it: `legacy_creatures`' own recognizer
+is gone, its IR byte for byte the same); "You can't spend mana to cast this spell." -> the new
+`CardPrinting.cant_spend_mana_to_cast` (CR 113.6e, 601.2f-h); "You may cast this card from your graveyard." -> the
+new `CardPrinting.castable_from_graveyard` (CR 601.3, 113.6f). The literals are the only cards of the pools with
+their surfaces (Timeline Culler's "... using its warp ability" is `printing_keywords`' own; Undead Sprinter's
+conditional "You may cast this card from your graveyard if ..." stays unclaimed); each notes the deferred
+generalization (the parser's AGENTS.md). Checked against the Oracle text and not defects: the mana cost
+(`generic: 5, hybrid: [[B, G], [B, G]]`, its colours black and green, CR 202.2), legendary, Avatar, 8/8, the keyword
+trample. Export: schema `fba2346e071e...` (the two fields); `powerlsv.ir.json` and `eoe.ir.json` byte for byte but
+`schema_sha256`; `legacy.ir.json` the 24 cards, the 23 others unchanged; `tests/ir/test_legacy_hogaak.py`.
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."
