@@ -430,5 +430,56 @@
     "text": "To cast a split card, choose one of its halves to cast. There's no way to cast both halves of this split card."
    }
   ]
+ },
+ {
+  "name": "Hogaak, Arisen Necropolis",
+  "oracle_id": "97acd977-164d-49d5-b3a1-72e0d75c9016",
+  "rulings": [
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Because delve isn't an alternative cost, it can be used in conjunction with alternative costs, such as flashback. It can also be used to pay for additional costs that include generic mana."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Delve doesn't change a spell's mana cost or mana value. For example, Treasure Cruise's mana value is 8 even if you exiled three cards to cast it."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "You can exile cards to pay only for generic mana, and you can't exile more cards than the generic mana requirement of a spell with delve. For example, you can't exile more than seven cards from your graveyard to cast Treasure Cruise unless an effect has increased its cost."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Because convoke isn't an alternative cost, it can be used in conjunction with alternative costs."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "If a creature you control has a mana ability with {T} in the cost, activating that ability while casting a spell with convoke will result in the creature being tapped before you pay the spell's costs. You won't be able to tap it again for convoke. Similarly, if you sacrifice a creature to activate a mana ability while casting a spell with convoke, that creature won't be on the battlefield when you pay the spell's costs, so you won't be able to tap it for convoke."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Tapping a multicolored creature using convoke will pay for {1} or one mana of your choice of any of that creature's colors."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Tapping an untapped creature that's attacking or blocking to convoke a spell won't cause that creature to stop attacking or blocking."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "When calculating a spell's total cost, include any alternative costs, additional costs, or anything else that increases or reduces the cost to cast the spell. Convoke applies after the total cost is calculated. Convoke doesn't change a spell's mana cost or mana value."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "You can tap any untapped creature you control to convoke a spell, even one you haven't controlled continuously since the beginning of your most recent turn."
+   }
+  ]
  }
 ]

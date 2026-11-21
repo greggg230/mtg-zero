@@ -417,13 +417,34 @@ fn cr_702_51a_a_creature_tapped_for_mana_first_cant_convoke_and_one_sacrificed_i
     assert!(g.obj(car).tapped, "{}", log(&g));
     assert_eq!(g.player(0).pool.amt.iter().sum::<u8>(), 1);
     assert!(!castable(&g, 0, Zone::Hand), "the Caryatid is tapped: six creatures left: {}", opts(&g));
-    // A creature sacrificed for mana is gone: Lotus Petal is no creature, so
-    // the sacrifice half of the ruling is shown by a creature that leaves -
-    // a creature that isn't on the battlefield is no candidate (here: the
-    // seventh creature is in the graveyard).
-    let g = scen().battlefield(0, &[GREEN, GREEN, RED, RED, RED, GREY]).graveyard(0, &[GREY]).hand(0, &[HOGAAK]).at(Step::Main1, 0).start();
-    // (The graveyard's card is delve fuel: one creature fewer, one card more.)
-    assert!(castable(&g, 0, Zone::Hand), "{}", opts(&g));
+    // A creature sacrificed for mana ("Test Blood Imp": "Sacrifice this
+    // creature: Add {B}.") is not on the battlefield when the cost is paid:
+    // no convoke candidate. (Its card, now in the graveyard, is delve fuel.)
+    let mut g = Scenario::new(flash_db())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+        .battlefield(0, &["Test Blood Imp", GREEN, GREEN, RED, RED, RED, GREY])
+        .hand(0, &[HOGAAK])
+        .at(Step::Main1, 0)
+        .start();
+    let imp = bf(&g, 0, "Test Blood Imp");
+    g.choose(Choice::Yes);
+    g.choose(Choice::Card(imp));
+    until_priority(&mut g, &|g| (g.kind() == Some(DecisionKind::ActivateMana)).then_some(Choice::Pass));
+    assert_eq!(g.obj(imp).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.player(0).pool.amt[2], 1);
+    begin_hogaak(&mut g, 0, Zone::Hand);
+    assert!(delving(&g) && g.has_option(Choice::Card(imp)), "{}", opts(&g));
+    g.choose(Choice::Card(imp));
+    g.pass(); // (no other card to delve)
+    assert!(convoking(&g), "{}", opts(&g));
+    assert!(!cards_offered(&g).contains(&imp));
+    let all: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.is_creature(c)).collect();
+    assert_eq!(all.len(), 6);
+    pay(&mut g, 0, &[], &all);
+    assert_eq!(g.obj(imp).zone, Zone::Exile);
+    assert_eq!(g.player(0).pool.amt[2], 1, "the Imp's {{B}} unspent: {}", log(&g));
 }
 
 #[test]
@@ -1179,7 +1200,9 @@ fn cr_118_9_bolass_citadel_casts_hogaak_for_life_rather_than_its_mana_cost() {
 
 /// Constructed play's table with "Test Flash Necropolis" (Creature - Avatar
 /// 1/1, {2}: "Flash. You can't spend mana to cast this spell. Convoke"): the
-/// payment of no mana at instant speed, which Hogaak (no flash) never has.
+/// payment of no mana at instant speed, which Hogaak (no flash) never has;
+/// and "Test Blood Imp" (black Creature - Imp 1/1, {B}: "Sacrifice this
+/// creature: Add {B}."), a creature sacrificed for mana.
 fn flash_db() -> &'static CardDb {
     use serde_json::json;
     static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
@@ -1189,11 +1212,19 @@ fn flash_db() -> &'static CardDb {
             "supertypes": [], "type_line": "Creature - Avatar", "power": 1, "toughness": 1,
             "mana_cost": {"$t": "ManaCost", "generic": 2}, "mana_cost_str": "{2}",
             "keywords": [{"$t": "Keyword", "kind": "flash"}], "has_convoke": true, "cant_spend_mana_to_cast": true}});
+        let imp = json!({"name": "Test Blood Imp", "custom": true, "printing": {
+            "$t": "CardPrinting", "name": "Test Blood Imp", "card_types": ["Creature"], "subtypes": ["Imp"],
+            "supertypes": [], "type_line": "Creature - Imp", "power": 1, "toughness": 1,
+            "mana_cost": {"$t": "ManaCost", "colored": [["B", 1]]}, "mana_cost_str": "{B}",
+            "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "sacrifice_self": true},
+                "effect": {"$t": "AddManaToPool", "produces": [["B", 1]]}, "is_mana_ability": true}]}});
         let mut cards = engine::db::load_cube_document().cards;
         cards.extend(engine::db::load_legacy_document().cards);
         cards.push(serde_json::from_value::<card_ir::Card>(card).expect("the test card's IR"));
+        cards.push(serde_json::from_value::<card_ir::Card>(imp).expect("the test card's IR"));
         let db = CardDb::from_cards(&cards);
         db.expect_id("Test Flash Necropolis").unwrap_or_else(|e| panic!("{e}"));
+        db.expect_id("Test Blood Imp").unwrap_or_else(|e| panic!("{e}"));
         db.leak()
     })
 }
@@ -1304,4 +1335,125 @@ fn convokes_picks_and_cost_reach_both_players_inputs() {
     for v in 0..2u8 {
         assert_ne!(Row::of(&g, v).head, Row::of(&other, v).head, "P{v}: which creature was picked");
     }
+}
+
+// ---- castability and the payment agree (ENGINE.md 49) ------------------------------
+
+#[test]
+fn cr_601_2h_castability_and_the_payment_agree_on_random_boards() {
+    // Random boards: creatures of every colour kind (green, black, red,
+    // colourless, black-green, green-white, blue-black), graveyard cards,
+    // Hogaak in the hand or the graveyard (another copy maybe in the
+    // graveyard), lands and floating mana (never a source), sometimes
+    // Underworld Breach (escape), Green Goblin (a reduction), Disruptor Flute
+    // naming Hogaak (+{3}) or Omniscience. Castability (the payment classes'
+    // matching) must agree with a brute force over delve counts and
+    // creature sets (convoke's matching), and from a castable board every
+    // option of every payment decision must lead to the cast's end with no
+    // mana spent.
+    use engine::rng::Rng;
+    // (No legendary creature: two of one would ask the legend rule first.)
+    let kinds = [GREEN, "Dark Confidant", RED, GREY, "Alpha Deathclaw", "Knight of Autumn", "Fallen Shinobi"];
+    let fillers = ["Ponder", "Brainstorm", "Daze", "Island", "Swamp", "Wasteland", "Force of Will"];
+    let mut rng = Rng::new(220);
+    let (mut castable_n, mut paths_n) = (0, 0usize);
+    for case in 0..600 {
+        let n_cre = rng.below(9) as usize;
+        let cre: Vec<&str> = (0..n_cre).map(|_| kinds[rng.below(kinds.len() as u32) as usize]).collect();
+        let n_gy = rng.below(7) as usize;
+        let mut gyv: Vec<&str> = (0..n_gy).map(|_| fillers[rng.below(fillers.len() as u32) as usize]).collect();
+        let from_gy = rng.below(2) == 0;
+        if from_gy || rng.below(4) == 0 {
+            let at = rng.below(gyv.len() as u32 + 1) as usize;
+            gyv.insert(at, HOGAAK);
+        }
+        let extra = rng.below(6);
+        let mut bf0: Vec<&str> = cre.clone();
+        bf0.extend(["Swamp", "Forest", "Bayou"]);
+        match extra {
+            0 => bf0.push("Underworld Breach"),
+            1 => bf0.push("Omniscience"),
+            _ => {}
+        }
+        let mut s = scen().battlefield(0, &bf0).graveyard(0, &gyv).pool(0, [0, 0, 1, 0, 1, 0], 0).at(Step::Main1, 0);
+        if !from_gy {
+            s = s.hand(0, &[HOGAAK]);
+        }
+        if extra == 2 {
+            s = s.battlefield(0, &["Norman Osborn // Green Goblin"]).transformed(0, "Norman Osborn // Green Goblin");
+        }
+        let g = s.start();
+        let zone = if from_gy { Zone::Graveyard } else { Zone::Hand };
+        let h = g.card(0, HOGAAK, zone);
+        let offered = g.has_option(Choice::Cast(h));
+        // Brute force: the needs of the cheapest route this board has, every
+        // delve count, convoke's matching over the creatures.
+        let creatures: Vec<u8> = g.permanents_of(0).filter(|&c| g.is_creature(c)).map(|c| g.colors_of(c) & 0x1f).collect();
+        let others = g.player(0).graveyard.iter().filter(|&&c| c != h).count() as u64;
+        let goblin = extra == 2 && from_gy;
+        let route_payable = |generic: u64, keep: u64| -> bool {
+            let gy = others.saturating_sub(keep);
+            (0..=generic.min(gy)).any(|d| {
+                let mut needs = vec![0u8; (generic - d) as usize];
+                needs.extend([(1u8 << 2) | (1 << 4); 2]);
+                needs.len() <= creatures.len() && {
+                    // (convoke's matching: generic 0 = any, else a colour of the mask)
+                    let mut used = vec![false; creatures.len()];
+                    fn place(i: usize, needs: &[u8], cs: &[u8], used: &mut [bool]) -> bool {
+                        if i == needs.len() {
+                            return true;
+                        }
+                        (0..cs.len()).any(|j| {
+                            if used[j] || (needs[i] != 0 && cs[j] & needs[i] == 0) {
+                                return false;
+                            }
+                            used[j] = true;
+                            let ok = place(i + 1, needs, cs, used);
+                            used[j] = false;
+                            ok
+                        })
+                    }
+                    place(0, &needs, &creatures, &mut used)
+                }
+            })
+        };
+        let generic = if goblin { 3 } else { 5 };
+        let free = extra == 1 && !from_gy;
+        let escape = extra == 0 && from_gy && others >= 3;
+        let brute = free || route_payable(generic, 0) || (escape && route_payable(generic, 3));
+        assert_eq!(offered, brute, "case {case}: offered {offered}, brute force {brute}: {cre:?} gy {gyv:?} extra {extra} from_gy {from_gy}\n{}", opts(&g));
+        if !offered {
+            continue;
+        }
+        castable_n += 1;
+        // Every path of the payment's decisions ends with Hogaak cast (a cap
+        // on the paths walked: the first 400).
+        let mut g0 = g.clone();
+        g0.choose(Choice::Cast(h));
+        let mut stack = vec![g0];
+        let mut leaves = 0;
+        while let Some(w) = stack.pop() {
+            if leaves >= 400 {
+                break;
+            }
+            if at_priority(&w) {
+                leaves += 1;
+                assert_eq!(w.obj(h).zone, Zone::Stack, "case {case}: cast\n{}", log(&w));
+                assert_eq!(w.player(0).pool.amt, [0, 0, 1, 0, 1, 0], "case {case}: no mana spent\n{}", log(&w));
+                for &c in w.permanents_of(0).filter(|&c| !w.is_creature(c)).collect::<Vec<_>>().iter() {
+                    assert!(!w.obj(c).tapped, "case {case}: {} tapped\n{}", w.name(c), log(&w));
+                }
+                continue;
+            }
+            let d = w.pending_decision().unwrap_or_else(|| panic!("case {case}: no decision\n{}", log(&w)));
+            assert!(!d.options.is_empty(), "case {case}: a decision without options\n{}", log(&w));
+            for o in &d.options {
+                let mut x = w.clone();
+                x.choose(o.choice);
+                stack.push(x);
+            }
+        }
+        paths_n += leaves;
+    }
+    assert!(castable_n >= 120 && paths_n >= 1200, "castable boards {castable_n}, payment paths {paths_n}");
 }

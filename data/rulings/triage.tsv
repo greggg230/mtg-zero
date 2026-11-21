@@ -1300,3 +1300,9 @@ cafea326	a	triggers	a nonbasic land entering under the Magus loses its enters tr
 5c226a47	a	copies	a copy of a spell must be countered on its own; countering the replicated spell leaves its copies (Consign to Memory)
 19831073	a	stack	triggered abilities ("when", "whenever", "at"; keyword triggers such as ward and storm) are targets for "counter target triggered ability"
 53e85191	a	stack	Hydroblast can target any spell or permanent; the colour is checked only on resolution
+dbf4ec31	a	mana	convoke: a multicoloured creature pays {1} or one mana of any one of its colours (a hybrid pip: either colour; CR 702.51a, 107.4e)
+3719645d	a	mana	convoke applies to the total cost: alternative and additional costs and increases included, after it is determined; the mana cost and mana value don't change (CR 601.2f, 702.51b)
+078779fc	a	mana	a creature tapped or sacrificed for a mana ability before the costs are paid can't also convoke (CR 601.2g before 601.2h)
+1dce867e	a	mana	convoke is no alternative cost: it pays an alternative cost too (CR 702.51b, 118.9)
+fbdd4f47	a	mana	any untapped creature its controller controls convokes, a summoning-sick one too (convoke isn't a {T} ability, CR 302.6, 702.51a)
+7f0ee199	a	combat	an attacking or blocking creature tapped for convoke stays in combat and deals its damage (CR 506.4b)

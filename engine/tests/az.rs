@@ -1350,10 +1350,9 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
             break;
         }
         out.push(("hogaak", wrap(&g)));
-        // One graveyard card delved, then PASS; then the creatures.
+        // As few graveyard cards delved as the payment needs (PASS once offered); then the creatures.
         let c = match d.kind {
-            DecisionKind::ChooseGraveyardCard if g.player(0).graveyard.len() == 3 => d.options.iter().map(|o| o.choice).find(|c| *c != Choice::Pass).unwrap(),
-            DecisionKind::ChooseGraveyardCard => Choice::Pass,
+            DecisionKind::ChooseGraveyardCard if d.options.iter().any(|o| o.choice == Choice::Pass) => Choice::Pass,
             _ => d.options[0].choice,
         };
         g.choose(c);

@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1667 | 1301 |
-| class a | 1290 | 1022 |
+| fetched | 1676 | 1307 |
+| class a | 1299 | 1028 |
 | class b | 195 | 147 |
 | class c | 182 | 132 |
-| a, tested (passing) | 1290 | 1022 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 945 | 781 |
-| a, tested only by an earlier test (Oracle or rules) | 345 | 241 |
+| a, tested (passing) | 1299 | 1028 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 948 | 781 |
+| a, tested only by an earlier test (Oracle or rules) | 351 | 247 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 178/178, stack 140/140, triggers 140/140, zones 130/130, other 106/106, copies 97/97, dfc 67/67, replacement 63/63, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 183/183, stack 140/140, triggers 140/140, zones 130/130, other 106/106, copies 97/97, dfc 67/67, replacement 63/63, combat 53/53, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -973,9 +973,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
-| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
-| `c6f70acd` | a | mana | delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled | `rulings_mana::delve_pays_only_generic_mana_cr_702_66a` |
+| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_hogaak_a::cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase`; `cards_hogaak_a::cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission`; `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | `cards_hogaak_a::cr_702_66a_delve_doesnt_change_hogaaks_mana_value`; `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
+| `c6f70acd` | a | mana | delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled | `cards_hogaak_a::cr_702_66a_delve_and_convoke_pay_one_cost_together`; `rulings_mana::delve_pays_only_generic_mana_cr_702_66a` |
 
 ### Gitaxian Probe
 
@@ -1058,9 +1058,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
-| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
-| `c6f70acd` | a | mana | delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled | `rulings_mana::delve_pays_only_generic_mana_cr_702_66a` |
+| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_hogaak_a::cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase`; `cards_hogaak_a::cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission`; `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | `cards_hogaak_a::cr_702_66a_delve_doesnt_change_hogaaks_mana_value`; `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
+| `c6f70acd` | a | mana | delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled | `cards_hogaak_a::cr_702_66a_delve_and_convoke_pay_one_cost_together`; `rulings_mana::delve_pays_only_generic_mana_cr_702_66a` |
 
 ### Does Machines
 
@@ -3519,7 +3519,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_hogaak_a::cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase`; `cards_hogaak_a::cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission`; `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
 | `87078369` | a | mana | delve does not change the mana cost or mana value (Murktide Regent stays 7) | `cards_legacy::delve_doesnt_change_its_mana_value_cr_702_66a` |
 | `05ce86bd` | a | mana | delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent) | `cards_legacy::delve_exiles_at_most_its_generic_mana_cr_702_66a` |
 
@@ -3659,6 +3659,20 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `ae909e09` | a | copies | a copy of one half of a split card remains that same half | `cards_delver_sb::cr_707_10_a_copy_of_rough_is_rough`; `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
 | `9fbd1525` | a | dfc | while a split card spell is on the stack, the characteristics of the half you didn't cast are ignored | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
 | `c622b600` | a | dfc | casting a split card means choosing and casting only one of its two halves | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
+
+### Hogaak, Arisen Necropolis (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_hogaak_a::cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase`; `cards_hogaak_a::cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission`; `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | `cards_hogaak_a::cr_702_66a_delve_doesnt_change_hogaaks_mana_value`; `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
+| `c6f70acd` | a | mana | delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled | `cards_hogaak_a::cr_702_66a_delve_and_convoke_pay_one_cost_together`; `rulings_mana::delve_pays_only_generic_mana_cr_702_66a` |
+| `1dce867e` | a | mana | convoke is no alternative cost: it pays an alternative cost too (CR 702.51b, 118.9) | `cards_hogaak_a::cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase`; `cards_hogaak_a::cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission` |
+| `078779fc` | a | mana | a creature tapped or sacrificed for a mana ability before the costs are paid can't also convoke (CR 601.2g before 601.2h) | `cards_hogaak_a::cr_702_51a_a_creature_tapped_for_mana_first_cant_convoke_and_one_sacrificed_is_gone` |
+| `dbf4ec31` | a | mana | convoke: a multicoloured creature pays {1} or one mana of any one of its colours (a hybrid pip: either colour; CR 702.51a, 107.4e) | `cards_hogaak_a::cr_702_51a_a_multicoloured_creature_pays_either_of_its_colours` |
+| `7f0ee199` | a | combat | an attacking or blocking creature tapped for convoke stays in combat and deals its damage (CR 506.4b) | `cards_hogaak_a::cr_506_4b_702_51a_a_blocking_creature_tapped_for_convoke_still_blocks_and_deals_damage` |
+| `3719645d` | a | mana | convoke applies to the total cost: alternative and additional costs and increases included, after it is determined; the mana cost and mana value don't change (CR 601.2f, 702.51b) | `cards_hogaak_a::cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase` |
+| `fbdd4f47` | a | mana | any untapped creature its controller controls convokes, a summoning-sick one too (convoke isn't a {T} ability, CR 302.6, 702.51a) | `cards_hogaak_a::cr_302_6_702_51a_summoning_sick_creatures_convoke` |
 
 ## Cards without rulings (177)
 
