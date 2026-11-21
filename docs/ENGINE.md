@@ -41634,3 +41634,56 @@ reads exit 3 as a failed head (not retried). So restart it right after the merge
 
 Nothing in release.json has to change: the macOS part is on by default (`mac_runtime` 040b1882 is already set there).
 To release without it: `"mac": false` in release.json.
+
+### 216.4 The backfill of main e9ff0e24's release (the build f22f63bb)
+
+With this branch's code (c943732b), from its own worktree, the zero-farm venv's Python: `farm_release.py release
+e9ff0e24` (the defaults: no flags). The release lock was free (the watcher idle, main at e9ff0e24). The run: "released
+already" -> "its entry has no complete macOS part: the macOS part only" -> mac-reach 0 s, checkout (the release worktree
+at e9ff0e24, its `built_at`) 1 s, modules 4 s (the artifact cache), **mac-build 29 s** (incremental on the Mac),
+**mac-gates 133 s**, publish-mac 6 s, mac-plan 1 s, recorded on the one index entry of build f22f63bb; exit 0.
+
+* **macOS build `48877dfd9c3e227a0ce997f0`** (`mtg-e9ff0e2-release-macos-arm64`): platform macos-arm64, engine_commit
+  e9ff0e24 (= the Windows build f22f63bb's), core 35a47a9a, profile release, min_agent 0.3.0, requires the macOS pack
+  040b1882; published and copied to `<builds>/48877dfd.../`.
+* **The Mac gates** (197.4 on the reference: legacy-meta3-r1's config and gen-206/207 export): (a) farm compat on the Mac
+  PASSED - gate 2 identical (6 games, 2,890 rows, 150 batches), gate 3 identical (6 games, 2,556 rows, 6 decks), the
+  feature `rolling` announced; (b) records across platforms PASSED - the Mac's 12 matches replayed there identical (710
+  rows, nets 206: 328, 207: 382, 20 arrays), replayed here **0 refused** of 12, the desktop's rows = the Mac's shards (710
+  rows, 20 arrays identical).
+* **mac-plan** (printed, not applied): legacy-meta3-r1 passes the libm check; its change would be `pool_alternates`
+  "768edc5e...,48877dfd..." (the run still lists c8e40f5a's b96e45a0: moving it is the run owner's call).
+* `farm_release.py lookup e9ff0e24`: `commit e9ff0e24708d: build f22f63bb0c461180b6260b3e (runtime d531424b..., CUDA
+  alternate cca21cdd... for 855d2162..., DirectML alternate 92041956..., macOS build 48877dfd9c3e227a0ce997f0)`; `--json`
+  has `mac.release` {build_id 48877dfd..., published}, `mac.runtime` 040b1882..., `mac.commit` e9ff0e24, the gates and the
+  plan. The index otherwise unchanged (compared with a copy taken before: only that entry's `mac`).
+* **Idempotent**: the same command again - "released already", no macOS step, exit 0.
+
+### 216.5 The gate
+
+On c943732b (216.1-216.3), in the warm worktree warm-1: **GATE PASSED WITH SKIPS python c943732bea40 in 382s** (with
+`--offload mac`) - privacy 0 findings; build and the release worker from the artifact cache; pytest on the Mac 1-of-4
+134 passed, 2-of-4 152 passed, 3-of-4 252 passed (tests/test_farm_release.py and tests/test_farm_speed.py among them);
+4-of-4 124 passed and the desktop part 48 passed on the desktop (throttled); the run-loop smoke 16 games, 0 unfinished -
+skipped: 3 live-run-hazard tests (fenced: a live run on this machine). The first run (auto placement) FAILED in pytest
+2-of-4 (2 failed, 197 passed): that shard ran on the desktop instead of the Mac, and both failures were the placement's -
+`tests/test_mac_remote.py::test_the_macs_selfplay_settings` saw `MTGZ_MAC_HOME` rewritten by Git Bash's path conversion
+to `C:/Program Files/Git/Users/...` (exported through slotd.sh's bash into a Windows Python), and
+`test_a_worker_plays_mtg[matches]` timed out at 600 s beside two live runs and another gate; neither test touches this
+change (it passes alone here).
+
+### 216.6 Open points
+
+* **Restart the watcher after the merge** (216.3): until then, a release by the old watcher runs the new
+  `farm_release.py` (the macOS part included) and reads exit 3 as a failed head, not retried.
+* **Runs do not take the macOS build by themselves.** `pool_settings` / `--pool-build published` leave it out of
+  `pool_alternates` (216.1); campaigns get it from the index (215, unmerged). legacy-meta3-r1 still lists c8e40f5a's
+  b96e45a0; the change to 48877dfd is the run owner's (mac-plan printed it).
+* **Older entries** (31ca5a49, 4c77c950 and before) have no macOS build; `farm_release.py release <commit>` backfills one
+  (not done: only e9ff0e24 was asked).
+* An entry that has its macOS build is not re-gated on the Mac; the speed gate's Mac windows stay off (`--speed-mac` on an
+  idle Mac only).
+* A Mac build that fails for a reason that does not go away is retried by the watcher 6 times (a Mac build at nice 15
+  each), then given up loudly.
+* A backfill run of a released commit rewrites `releases/<sha12>/result.json` and `notes.txt` with its own record (any
+  "released already" run rewrote result.json before too); the index entry keeps the original release's record.
