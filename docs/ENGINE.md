@@ -41989,7 +41989,7 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
 
-## 218. Farm guards: forks on their own farm runs, a refusing worker stops loudly, inert pool settings said, a reason to stay local; `pool_settings` with the GPU variants and the macOS alternate (zero-core pin c850a5d -> f93ec16, zero-core `feat/farm-guards`, docs/az.md 70; branch `feat/farm-guards`, 2026-11-21)
+## 218. Farm guards: forks on their own farm runs, a refusing worker stops loudly, inert pool settings said, a reason to stay local; `pool_settings` with the GPU variants and the macOS alternate (zero-core pin c850a5d -> 1694d97, zero-core `feat/farm-guards`, docs/az.md 70; branch `feat/farm-guards`, 2026-11-21)
 
 **Why.** The farm review of 2026-11-21 (the maintainer's notes; section C.2, C.7 and D.6-D.8) found experiments landing
 desktop-only, or worse, without a decision: a fork that kept `selfplay_remote pool:<parent>` published into the parent's
@@ -42006,7 +42006,8 @@ worker plays and encodes exactly as before - the farm-compat gate below):
   `selfplay_remotes` file) becomes the fork's OWN farm run, named after the fork's directory (`--farm own`, default) or
   `--farm NAME`; a farm evaluation of the source's becomes `pool:<name>-eval`; the source's pool settings kept;
   `--farm none` keeps the fork on this machine; a `--set` naming the source's farm run is refused. Printed as `FARM:`
-  lines. Every fork gets `fork.json` (`started` once its first start passed its checks).
+  lines. Every fork gets `fork.json` (`started` once its first start passed every start check, just before its
+  first iteration: a first start refused for any reason stays one).
 * The farm pool: a definitive refusal (`farm_pool.Refused`: the worker's check-config refusing the settings - the
   keys and their statuses named, not cut off -, no worker, the platform or rolling check, a manifest refusing an
   alternate) refuses the run's start (exit 78) when met by a new pool's settings check, or stops the pool loudly on
