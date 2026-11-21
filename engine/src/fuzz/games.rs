@@ -3994,6 +3994,7 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             "FUZZ_POOL=hogaak_b: {}",
             HOGAAK_B_NAMES.iter().zip(&n).map(|(k, c)| format!("{k} {c}")).collect::<Vec<_>>().join(", ")
         );
+    }
     if hogaak_c_mode() {
         let seen: Vec<u64> = HOGAAK_C_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
         let l = |x: &AtomicU64| x.load(Ordering::Relaxed);
