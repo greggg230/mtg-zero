@@ -70,6 +70,8 @@ mod cards_eoe_w6_granted;
 mod cards_eoe_w6_mana;
 #[path = "cards_eoe_w6_top.rs"]
 mod cards_eoe_w6_top;
+#[path = "cards_hogaak.rs"]
+mod cards_hogaak;
 #[path = "cards_hogaak_a.rs"]
 mod cards_hogaak_a;
 #[path = "cards_hogaak_c.rs"]

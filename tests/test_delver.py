@@ -3,7 +3,7 @@ loader (`mtgz.az.decklists`), the presets `delver-mirror` / `delver-smoke` (the 
 pinned 60, best-of-one, constructed; the evaluation spec is the spec), the game through the engine
 module (encode, determinize), the heuristic yardstick against random in the Rust driver, self-play
 records, and the cube's specs unchanged (the legacy cards unknown to them). Also the Legacy Doomsday
-deck's loader (ENGINE.md 124.4)."""
+deck's loader (ENGINE.md 124.4) and the Legacy Hogaak Tempo deck's (220)."""
 import json
 
 import numpy as np
@@ -39,6 +39,26 @@ def test_the_doomsday_deck_and_its_loader():
     assert main.count('Doomsday') == 4 and main.count('Cavern of Souls') == 1
     g = G.engine().Game('mtg', decklists.mirror_spec(decklists.LEGACY_DOOMSDAY), 2, 1)
     assert not g.over
+
+
+def test_the_hogaak_deck_and_its_loader():
+    # ENGINE.md 220: the Legacy Hogaak Tempo 75, by name in every spec helper: a best-of-one mirror, a
+    # best-of-three pairing with its sideboard, and a metagame with the three other 75s (no preset plays it).
+    d = decklists.load(decklists.LEGACY_HOGAAK)
+    assert (d['player'], d['event'], d['date']) == (
+        'Jonathan Canfield', 'North American Eternal Weekend - Legacy Championship', '2026-10-31')
+    assert d['source'] == 'https://www.mtggoldfish.com/deck/8027954'
+    main, side = decklists.names(d['main']), decklists.names(d['sideboard'])
+    assert len(main) == 60 and len(side) == 15
+    assert main.count('Hogaak, Arisen Necropolis') == 4 and side.count('Massacre') == 2
+    E = G.engine()
+    for spec in (decklists.mirror_spec(decklists.LEGACY_HOGAAK),
+                 decklists.pair_spec(decklists.LEGACY_HOGAAK, decklists.IZZET_DELVER, fmt='bo3'),
+                 decklists.metagame_spec(decks=decklists.META3 + (decklists.LEGACY_HOGAAK,), fmt='bo3')):
+        g = E.Game('mtg', spec, 2, 1)
+        assert not g.over
+    import mtgz.az as A
+    assert not any(decklists.LEGACY_HOGAAK in p.get('spec', '') for p in A.PRESETS.values())
 
 
 def test_the_presets():
