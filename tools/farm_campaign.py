@@ -6,6 +6,7 @@ Analysis campaigns:
     python tools/farm_campaign.py submit NAME --a CKPT [--b CKPT] --games N --build ID [--worker EXE] [--sims 64]
            [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
            [--games-per-lease auto|N] [--deadline-h 3] [--spot 0.05] [--ort-dll DLL] [--min-agent V] [--wait]
+           [--alternates release|ID[,ID...] | --no-alternates] [--variants 'gpu=fp16,dml=matmul@amd']
     python tools/farm_campaign.py submit NAME --a CKPT --samples [--set KEY=JSON ...] --games N --build ID ...
     python tools/farm_campaign.py status NAME
     python tools/farm_campaign.py collect NAME [--no-local] [--threads 4] [--wrap CMD ...] [--no-describe]
@@ -17,8 +18,12 @@ Analysis campaigns:
   A's run's evaluation spec) and `--tilts` (default the run's). `--samples`: a play job with search samples - A against
   itself with its run's self-play seat on its self-play settings, `--set` over them (e.g. --set 'selfplay_resign_t=0'
   --set 'spec="{...dealt_decks...}"'), unpaired. The build: a signed release worker that knows
-  eval_trace, found as for fuzz campaigns (or `--worker`); its runtime pack from its manifest. Prints the state
-  directory; `--wait` then collects.
+  eval_trace, found as for fuzz campaigns (or `--worker`); its runtime pack from its manifest. The farm's other routes
+  (docs/ENGINE.md 215): by default every alternate the release index holds for the build (its CUDA build, its
+  DirectML build for AMD GPUs, its published macOS build), the GPU ones playing `--variants` (each network's float16
+  graph on CUDA, its float32 MatMul form on AMD's DirectML) after each graph passed this machine's GPU self-test
+  through that alternate's own worker and pack; `--alternates ID,...` exactly those builds; `--no-alternates` the CPU
+  worker only. Prints the state directory; `--wait` then collects.
   status: coverage (done farm / local, failed with reasons, missing), the farm's progress, machines.
   collect: pull until done or the deadline, play what is missing here (the same worker; `--wrap`: a command prefix
   such as the slot throttle), check digests, replay the spot check, write games.jsonl and records.jsonl.gz; prints the
@@ -358,6 +363,12 @@ def analysis_main(argv, client=None):
     ap.add_argument('--spot', type=float, default=C.DEFAULT_SPOT)
     ap.add_argument('--ort-dll')
     ap.add_argument('--min-agent')
+    ap.add_argument('--alternates', default=C.RELEASE, help="the farm's other routes (docs/ENGINE.md 215): 'release' "
+                    "(default: every alternate the release index holds for --build - CUDA, DirectML for AMD, macOS), "
+                    "or worker build ids ID[,ID...]")
+    ap.add_argument('--no-alternates', action='store_true', help="no alternates: the build's CPU worker only")
+    ap.add_argument('--variants', default=C.DEFAULT_VARIANTS, help='the graphs the GPU alternates play, as the run '
+                    f"setting pool_variants (default {C.DEFAULT_VARIANTS!r}; '' = each gen's default graph)")
     ap.add_argument('--wait', action='store_true')
     ap.add_argument('--no-local', action='store_true')
     ap.add_argument('--threads', type=int, default=4)
@@ -417,7 +428,8 @@ def analysis_main(argv, client=None):
                 C.submit(a.name, a.a, a.games, settings, seats, a.seed, a.build, exe, man.get('requires_runtime'),
                          b=a.b, paired=not (a.unpaired or a.samples), share=a.share, samples=a.samples, priority=a.priority, games_per_lease=gpl,
                          deadline_s=a.deadline_h * 3600, spot=a.spot, ort_dll=a.ort_dll, min_agent=a.min_agent,
-                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1, 'set': a.set}, client=cl, root=a.state_root, opts=opts)
+                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1, 'set': a.set}, client=cl, root=a.state_root, opts=opts,
+                         alternates=None if a.no_alternates else a.alternates, variants=a.variants)
             print(d)
             if not a.wait:
                 return 0
