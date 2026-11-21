@@ -173,7 +173,7 @@
 //! been removed, a Dark Matter Manipulator seen at +2/+0 or more, a Dryad Arbor played and a Stitcher's Supplier
 //! trigger resolved (its mill). Matches: constructed best-of-three between the real 75s, the Hogaak 75 against each
 //! of the three in either seat and its mirror twice (`HOGAAK_PAIRS`, `seed % 8`; one match in four 12-turn games),
-//! then post-sideboard matches of its mirror, every check of `FUZZ_POOL=delver`'s matches; with 100 matches or more a
+//! then post-sideboard matches of its mirror, every check of `FUZZ_POOL=delver`'s matches; with 500 matches or more a
 //! Massacre (a sideboard card) must have resolved.
 //! `FUZZ_POOL=cross` (ENGINE.md 148): the deck pairs on main no other pool plays. Games: the real
 //! Legacy Doomsday 60 against the real Sneak and Show 60 (seats by seed), constructed play's table,
@@ -1197,8 +1197,10 @@ fn cross_bo3_spec_with(seed: u64, extra: serde_json::Value) -> crate::az::MtgSpe
     let pairs: &[(usize, usize)] = if hogaak_mode() { &HOGAAK_PAIRS } else { &CROSS_PAIRS };
     let (p0, p1) = pairs[(seed % pairs.len() as u64) as usize];
     // (A post-sideboard match is a mirror, ENGINE.md 147.4: `"start_game": 2` draws game 1 as a fair coin, exact for a
-    // mirror only; the pair's first 75 in both seats.)
-    let p1 = if extra.get("start_game").and_then(|x| x.as_u64()) == Some(2) { p0 } else { p1 };
+    // mirror only; the pair's first 75 in both seats - `FUZZ_POOL=hogaak`'s, the Hogaak 75's.)
+    let post = extra.get("start_game").and_then(|x| x.as_u64()) == Some(2);
+    let p0 = if post && hogaak_mode() { 3 } else { p0 };
+    let p1 = if post { p0 } else { p1 };
     let ((m0, s0), (m1, s1)) = (bo3_lists(&real_75(p0)), bo3_lists(&real_75(p1)));
     let max_turns = if (seed / pairs.len() as u64) % 4 == 3 { 12 } else { 60 };
     let mut v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
@@ -4463,8 +4465,9 @@ pub fn check_matches(n: u64, t: &Totals) {
         return;
     }
     let g = |k: &str| t.get(k);
-    if hogaak_mode() && n >= 100 {
-        // (ENGINE.md 220.4: Massacre is a sideboard card of the Hogaak 75)
+    if hogaak_mode() && n >= 500 {
+        // (ENGINE.md 220.4: Massacre is a sideboard card of the Hogaak 75: random sideboarding and random play cast
+        // it about once in 35 matches and resolve it about once in 70)
         assert!(g("hogaak_massacre") > 0, "FUZZ_POOL=hogaak: no Massacre resolved in {n} matches");
     }
     if dealt_mode() {
