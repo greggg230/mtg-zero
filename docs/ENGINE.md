@@ -41576,3 +41576,48 @@ them too). `--a CK --a-infoset-merge 1 --b-infoset-merge 0` without `--b` is the
 tests/test_farm_play.py `test_per_side_options_are_the_seats_sets` (no options: the settings and seats of before; a merge
 and a sims option give A against itself two sets, checked per side; refusals: a set with samples, other gens, a b with
 self-play seats, a merge without root-view values, B's run's cache; the readout's rules and simulations).
+
+**Measured** (2026-11-21, the desktop beside the live runs, CPU).
+
+* *The parity gate* (zero-core `tools/worker_eval_gate.py --seat-cases all`): the signed release worker of edc4a360
+  (build 1468c4d91730a4a045ae73a4, mtg-edc4a36-release, the CPU pack d531424b) against `zero.farm_eval.match_driver`,
+  iter_1040 on both seats, the ISMCTS campaign's eval settings (the Doomsday-vs-Delver spec, eval_sims 16, 'cq' guard 4
+  c_scale 0.3, root-view values, belief tilt 1 / mix 0.25, eval cache 8,192; groups 1, sparse rows, untraced), 8 paired
+  games per case: merge, sims (32 / 8), gumbel (m 4 / PUCT), belief (tilt 1 / 0) and select ('cq' guard 2 / 'visits')
+  each **8 of 8 rows byte-identical, 60 batches identical**.
+* *Farm gates* (`tools/farm_gates.py`, legacy-meta3-r1's config and iter_1040, that build): FARM GATES PASSED - gate 2: 8
+  games, 291 rows, 200 batches identical; gate 3: 12 games, 639 rows (210 value, 639 aux) identical, the switch to net
+  1041 included.
+* *check-config* refusals with that build: a set holding `lookahead` or `conc`, or an empty set, is an error (exit 2,
+  naming the key); a merge with `eval_leaf_value_view` 'mover' is refused naming the seat (exit 1).
+* *zero.h2h's seats on legacy-meta3-r1's config*, old main() against zero.seat_settings over 30 option sets: 19 the same
+  (every merge, belief, view, root-search and sims option); the rest the corners of zero-core docs/az.md 68 - on this
+  run the old `--select` / `--a-select` played its side with mover-view values (the run evaluates with root-view ones).
+* **End to end** (the build published to the coordinator, no coordinator deploy, no agent release): `python
+  tools/farm_campaign.py submit ismseat-test --a runs/legacy-meta3-r1/models/iter_1040.pt --games 32 --build
+  1468c4d91730a4a045ae73a4 --worker <its mtgz-worker.exe> --sims 16 --spec <spec_dd_vs_delver.json> --a-infoset-merge 1
+  --b-infoset-merge 0 --deadline-h 1.5` (share 0.25, the default): the farm run `cmp-ismseat-test` with gen 1 only, seats
+  `[{"net": 1, "set": {"eval_infoset_merge": 1}}, {"net": 1}]` in the signed definition. The farm's PCs were on fuzz and
+  rolling self-play leases; ~45 minutes after the submit one farm PC (agent 0.3.13) leased the batch and played **all 32
+  games** (two leases: 20 + 12; none local). `collect`: every digest its record's, the spot check (2 of 32) replayed
+  from seed + moves, games digest a386d8b74b02324f; the farm run paused. 6 of the farm's games (0-5) played again by
+  the desktop's worker (`local_cmd`): 6 of 6 rows and digests identical. The readout: A (merging) 0.4688 +- 0.0312 (pair
+  se; 15 split pairs, 1 both lost), Elo -21.7 (95%: -64.9 .. +20.8), `select_a` 'cq-n4-v50-s0.3-rv-b1m0.25-ism',
+  `select_b` 'cq-n4-v50-s0.3-rv-b1m0.25' - a test of the path at 16 simulations and 32 games, not a measurement of the
+  merge (the 2026-11-20 check: 64 simulations, 2,400 games a matchup). The campaign plays chance_k 2 (`match_settings`'
+  default, as the yardsticks); the local check of 11-20 played `--chance-k 0`.
+
+### 214.1 The gate of edc4a360; the pin ba607c2 -> c850a5d (docs only)
+
+On edc4a360 (the pin ba607c2 and 214 before its measurements), in the warm worktree warm-3,
+`MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`, `--baseline-root` warm-2 at e9ff0e24
+(main, built; held through the gate by `warm_pool.py acquire`): **GATE PASSED WITH SKIPS optin-core edc4a360de4a in
+3257s** - core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each); the digests as
+recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt
+a890c27da3c7d1a8); farm compat identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 6 games, 2,556 rows, 6 decks
+compared); cargo test --test az 57 and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero
+built against this core; core pytest 815 passed, 59 skipped - skipped: 17 live-run-hazard tests (fenced: a live run on
+this machine).
+
+This commit moves the pin to c850a5d, zero-core docs/az.md 68's measurements on top of ba607c2 (ba607c2..c850a5d:
+docs/az.md only, so the gate above stands for it), and adds the measurements above.
