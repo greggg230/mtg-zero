@@ -366,7 +366,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.deny("CardPrinting.miracle_cost_str(without miracle_cost)", miracle_cost_str);
         }
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
-        l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
         l.deny("CardPrinting.room_halves", room_halves);
         l.deny("CardPrinting.cast_from_top_of_library_kinds", cast_from_top_of_library_kinds);
@@ -1011,6 +1010,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             add_subtypes: enters_as_copy_add_subtypes,
             exiles_card: *enters_as_copy_exiles_card,
             add_keywords: enters_as_copy_add_keywords,
+            max_mv_mana_spent: *enters_as_copy_max_mv_mana_spent,
         },
         ty,
     );
@@ -1501,7 +1501,16 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         Some(cats::Condition::FirstSpellYouCastThisGame(_)) => {
             alt_costs.push(AltCost { only_if: Some(crate::db::Cond::FirstSpellThisGame), ..AltCost::default() });
         }
-        Some(other) => l.unsupported(format!("CardPrinting.free_cast_condition({})", other.tag())),
+        // "If an opponent controls a Plains and you control a Swamp, you may
+        // cast this spell without paying its mana cost" (Massacre; CR 118.9,
+        // 601.2b: the condition is checked as the cost is chosen, for the
+        // caster; ENGINE.md 220.2). Only conditions on the game the caster
+        // sees (no source of an ability to read).
+        Some(other) => match super::filter::lower_condition(l, other) {
+            Some(c) if !crate::db::cond_reads_source(&c) => alt_costs.push(AltCost { only_if: Some(c), ..AltCost::default() }),
+            Some(c) => l.unsupported(format!("CardPrinting.free_cast_condition({c:?}: reads an ability's source)")),
+            None => {}
+        },
     }
     // The cast pays an alternative cost's rest alone (`Game::alt_payable`,
     // `cast_pay`, `item_cost`), and a printed escape cost's exile alone
@@ -2120,6 +2129,9 @@ struct EnterCopyFields<'a> {
     add_subtypes: &'a [String],
     exiles_card: bool,
     add_keywords: &'a [cats::Keyword],
+    /// "... with mana value less than or equal to the amount of mana spent to
+    /// cast this creature" (Mockingbird).
+    max_mv_mana_spent: bool,
 }
 
 /// "You may have this enter as a copy of any <types> on the battlefield /
@@ -2137,6 +2149,7 @@ fn lower_enters_as_copy(l: &mut Lowerer, x: EnterCopyFields, card_types: u16) ->
         if !x.add_keywords.is_empty() {
             l.unsupported("CardPrinting.enters_as_copy_add_keywords");
         }
+        l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", &x.max_mv_mana_spent);
         return None;
     }
     if card_types & types::PERMANENT == 0 {
@@ -2189,7 +2202,18 @@ fn lower_enters_as_copy(l: &mut Lowerer, x: EnterCopyFields, card_types: u16) ->
     } else {
         None
     };
-    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k, tapped: false }))
+    // "... with mana value less than or equal to the amount of mana spent to
+    // cast this creature" (Mockingbird; CR 601.2h, 202.3: the candidate's
+    // mana value as it is, against the amount the entering permanent records,
+    // `Mark::ManaSpent`, 0 if it wasn't cast; ENGINE.md 220.2).
+    let mut filter = Filter::Type(bits);
+    if x.max_mv_mana_spent {
+        if from_graveyard {
+            l.unsupported("CardPrinting.enters_as_copy_max_mv_mana_spent(a graveyard card)");
+        }
+        filter = Filter::And(Box::new(filter), Box::new(Filter::MvAtMostManaSpent));
+    }
+    Some(Box::new(crate::db::EntersAsCopy { filter, from_graveyard, exc, keep_name: x.keep_name, exile_k, tapped: false }))
 }
 
 /// Replicate's triggered ability (CR 702.56a): "When you cast this spell,

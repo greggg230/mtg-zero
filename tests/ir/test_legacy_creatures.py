@@ -44,6 +44,7 @@ LEGACY_CARDS = {
     "Show and Tell", "Omniscience", "Mistrise Village",
     "Brotherhood's End", "Disruptor Flute", "Magus of the Moon",
     "Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble",
+    "Mockingbird", "Massacre",
 }
 
 
