@@ -196,7 +196,7 @@ def pool_settings(e, alternates=True):
     """A build entry -> the farm pool's run settings (zero-core docs/az.md 45): pool_build, pool_runtime, pool_worker
     (the desktop's copy of the signed executable) and, with `alternates`, pool_alternates (the CUDA alternate, then the
     DirectML one for AMD GPUs - zero-farm PROTOCOL rev 22; '' when there is none). An AMD PC plays the DirectML
-    alternate on the GPU only with the run's `pool_variants` naming a 'matmul-fp16@amd' variant (zero-core docs/az.md
+    alternate on the GPU only with the run's `pool_variants` naming a 'matmul@amd' variant (float32; zero-core docs/az.md
     46.10); without it the gen's default graph, which DirectML refuses, runs there on the CPU."""
     out = {'pool_build': e['build_id'], 'pool_runtime': e['runtime'], 'pool_worker': e['worker']}
     if alternates:

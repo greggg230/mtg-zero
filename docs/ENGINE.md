@@ -41519,3 +41519,14 @@ and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zer
 (`tests/test_remoteplay.py::test_cotrain_the_local_driver_is_never_starved`, not touched by the pin).
 
 Main fast-forwarded 31ca5a49 -> 376fb96f (main had not moved since the branch: the gate stands as run).
+
+### 213.2 zero-core pin bd681b7 -> 35a47a9: the AMD variant is float32 (`pool_variants` 'dml=matmul@amd')
+
+The first AMD GPU through the farm (2026-11-20, a farm PC on canary agent 0.3.11, a test run with gen 1000 of
+legacy-meta3-r1): the DirectML pack loads and passes the probe graph there, but the float16 MatMul variant failed the
+worker's self-test on determinism (max abs 8.1e-3, within the float16 tolerance; the two passes differed), so the PC
+played on its CPU; the float32 MatMul graph passed (max abs 4.4e-6, deterministic, 7,638 rows/s at 1,024 rows against
+its CPU's 1,609) and the PC played self-play on the AMD GPU, its records accepted. zero-core 35a47a9 adds the float32
+variant form 'matmul' (docs/az.md 46.10); a run's AMD PCs get it with `pool_variants` 'gpu=fp16,dml=matmul@amd'.
+`farm_release.py`'s dml-selftest now runs the float32 graph (what AMD PCs play); `farm_builds.pool_settings`' docstring
+names 'matmul@amd'. Python and docs only (no Rust input changed).

@@ -30,7 +30,8 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
 6b. **dml** (when release.json sets `dml_runtime`, the DirectML pack of `farm_build.py --runtime --pack dml`: AMD GPUs,
    zero-farm PROTOCOL rev 22): `farm_build.py --resign <that build> --runtime-id <DirectML pack> --min-agent
    <dml_min_agent>` (the DirectML alternate) and **dml-selftest**: the reference checkpoint exported as the graph
-   DirectML runs ('fast-matmul', float16: zero-core docs/az.md 46.10; the run's `pool_variants` 'dml=matmul-fp16@amd'),
+   AMD GPUs run through DirectML ('fast-matmul', float32: zero-core docs/az.md 46.10; the run's `pool_variants`
+   'dml=matmul@amd'),
    then `probe-providers --runtime-dir <DirectML pack> --providers dml,cpu --reps 2` on it: both must pass (this PC's
    GPU through DirectML, whatever its vendor). `--no-dml` skips it.
 7. **template**: zero.farm_pool.play_settings with the signed worker on the reference config (the farm pool's own path
@@ -295,19 +296,19 @@ class Release:
         return out
 
     def dml_selftest(self, dml_dir):
-        """Step 6b: the reference checkpoint as the DirectML variant's graph ('fast-matmul' + float16, exported by the
-        release worktree's zero-core) through the DirectML pack: dml and cpu must pass their self-test."""
+        """Step 6b: the reference checkpoint as the AMD DirectML variant's graph ('fast-matmul', float32 - pool_variants
+        'dml=matmul@amd'; exported by the release worktree's zero-core) through the DirectML pack: dml and cpu must pass
+        their self-test."""
         ref = self.s['reference']
         rt = self.runtime_dir(self.s['dml_runtime'], 'dml-selftest')
         out = os.path.join(self.log_dir, 'dml-export')
         os.makedirs(out, exist_ok=True)
-        m32, m16 = os.path.join(out, 'model_fm.onnx'), os.path.join(out, 'model_fm16.onnx')
+        m32 = os.path.join(out, 'model_fm.onnx')
         code = ('import sys; sys.path.insert(0, "."); import mtgz.az; from zero import onnx_export as OX\n'
-                'OX.export_checkpoint(sys.argv[1], sys.argv[2], attention="matmul", fast=True)\n'
-                'OX.to_float16(sys.argv[2], sys.argv[3])\n')
-        self.run('dml-selftest', [self.s['python'], '-c', code, ref['checkpoint'], m32, m16], cwd=self.wt)
+                'OX.export_checkpoint(sys.argv[1], sys.argv[2], attention="matmul", fast=True)\n')
+        self.run('dml-selftest', [self.s['python'], '-c', code, ref['checkpoint'], m32], cwd=self.wt)
         exe = os.path.join(dml_dir, 'mtgz-worker.exe')
-        cmd = [exe, 'probe-providers', '--runtime-dir', rt, '--model', m16, '--reference',
+        cmd = [exe, 'probe-providers', '--runtime-dir', rt, '--model', m32, '--reference',
                os.path.join(ref['export'], 'reference.npz'), '--providers', 'dml,cpu', '--reps', '2']
         self.say(f'dml-selftest: {subprocess.list2cmdline(cmd)}')
         p = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=900)
