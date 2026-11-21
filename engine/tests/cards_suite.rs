@@ -68,6 +68,8 @@ mod cards_eoe_w6_granted;
 mod cards_eoe_w6_mana;
 #[path = "cards_eoe_w6_top.rs"]
 mod cards_eoe_w6_top;
+#[path = "cards_hogaak_a.rs"]
+mod cards_hogaak_a;
 #[path = "cards_legacy.rs"]
 mod cards_legacy;
 #[path = "cards_m4b1.rs"]

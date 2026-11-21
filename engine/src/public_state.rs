@@ -2333,7 +2333,7 @@ fn pick_tasks(g: &Game) -> Vec<(usize, bool)> {
         .rev()
         .filter_map(|(i, t)| match t {
             Task::Run(f) => Some((i, !f.picked.is_empty() || !f.picked_defs.is_empty())),
-            Task::PayCosts { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => Some((i, !picked.is_empty())),
+            Task::PayCosts { picked, .. } | Task::ConvokePay { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => Some((i, !picked.is_empty())),
             _ => None,
         })
         .collect()
@@ -2344,7 +2344,7 @@ fn task_picked(t: &mut crate::flow::Task) -> &mut Vec<CardIdx> {
     use crate::flow::Task;
     match t {
         Task::Run(f) => &mut f.picked,
-        Task::PayCosts { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => picked,
+        Task::PayCosts { picked, .. } | Task::ConvokePay { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => picked,
         _ => unreachable!("not a task holding picks"),
     }
 }

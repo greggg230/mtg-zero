@@ -576,7 +576,9 @@ impl Game {
     pub(crate) fn mana_writes(&self, pm: &crate::pay::PayMana, delve: bool) -> Writes {
         use crate::pay::{is_sac_slot, IMPROVISE, POL_FOR, SQ_FOR, TAP_FOR};
         let mut w = Writes { zones: delve, life: pm.cost.has_phyrexian() || pm.life_after > 0, ..Writes::default() };
-        for cl in self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke) {
+        // (A payment of no mana: its convoke's and improvise's taps only,
+        // ENGINE.md 220.1.)
+        for cl in self.spell_pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke, pm.keep.allow) {
             if cl.dmg > 0 {
                 w.life = true;
             }

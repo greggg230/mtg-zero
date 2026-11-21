@@ -962,9 +962,19 @@ def _build_creature_printing(card: dict) -> CardPrinting | None:
         # U/B cube-creature grammar (``parser.cube_creatures_ub``):
         # draw replacements, Ninjutsu, ... Tried before the generic
         # clause dispatch; contributes abilities and printing fields.
-        # Legacy creatures outside the cube (Murktide Regent: delve, "enters
-        # with a +1/+1 counter for each ... card exiled with it", a card
-        # leaving your graveyard; ``legacy_creatures``).
+        # Hogaak, Arisen Necropolis's lines (``legacy_hogaak``): the casting
+        # keywords convoke and delve (Murktide Regent's "Delve" too), "You
+        # can't spend mana to cast this spell", "You may cast this card from
+        # your graveyard".
+        from mtgz_ir.cards.parser.legacy_hogaak import parse_legacy_hogaak_line
+
+        hogaak_line = parse_legacy_hogaak_line(line, card["name"])
+        if hogaak_line is not None:
+            ub_fields.update(hogaak_line.fields)
+            continue
+        # Legacy creatures outside the cube (Murktide Regent: "enters with a
+        # +1/+1 counter for each ... card exiled with it", a card leaving
+        # your graveyard; ``legacy_creatures``).
         from mtgz_ir.cards.parser.legacy_creatures import (
             parse_legacy_creature_line,
         )

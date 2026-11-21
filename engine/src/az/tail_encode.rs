@@ -900,7 +900,9 @@ pub(crate) fn agenda_picks(g: &Game, me: PlayerId) -> Picks {
                 let by: Box<dyn Fn(usize) -> PlayerId> = if voting { Box::new(move |k| if k == 0 { ctl } else { crate::ids::opp(ctl) }) } else { Box::new(move |_| ctl) };
                 (&f.picked, &f.picked_defs, by)
             }
-            Task::PayCosts { id, picked, .. } => {
+            // (Convoke's taps for a spell whose mana can't be spent: ENGINE.md
+            // 220.1.)
+            Task::PayCosts { id, picked, .. } | Task::ConvokePay { id, picked } => {
                 let p = g.stack.iter().find(|s| s.id == *id).map_or(g.pending.as_ref().unwrap().player, |s| s.controller);
                 (picked, &[], Box::new(move |_| p))
             }

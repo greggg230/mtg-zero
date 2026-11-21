@@ -1010,7 +1010,7 @@ impl Game {
     /// permanents a cost tapped already (`Keep::committed`: teamwork's
     /// creatures, docs/shortcuts.md 13.17).
     pub(crate) fn payment_classes(&self, pm: &PayMana) -> Vec<Class> {
-        let classes = self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke);
+        let classes = self.spell_pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke, pm.keep.allow);
         let classes = if pm.keep.committed.is_empty() { classes } else { self.classes_without(&classes, &pm.keep.committed) };
         // (And the source's own conflicting sources, `SelfUse`.)
         match self.classes_for_self_use(&classes, pm.keep.self_use) {
@@ -1508,6 +1508,36 @@ impl Game {
         classes
     }
 
+    /// The sources of a payment that satisfies `allow` (`pay_classes`): with
+    /// `Allow::no_mana` ("You can't spend mana to cast this spell", CR
+    /// 113.6e, 601.2g-h; Hogaak, ENGINE.md 220.1) no mana ability's mana nor
+    /// the pool's pays it, only convoke's creatures and improvise's
+    /// artifacts, each untapped one a source of its own (no mana ability is
+    /// activated, so none taps one first: Urza's artifacts convoke too).
+    pub(crate) fn spell_pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: u16, convoke: bool, allow: crate::doomsday_b::Allow) -> Vec<Class> {
+        if !allow.no_mana {
+            return self.pay_classes(p, exclude, improvise, convoke);
+        }
+        let mut classes = Vec::new();
+        if convoke {
+            classes.extend(self.convoke_classes(p, exclude));
+        }
+        if improvise != 0 {
+            classes.extend(self.improvise_classes(p, exclude, improvise));
+        }
+        classes
+    }
+
+    /// `classes` as a payment satisfying `allow` may use them: all of them,
+    /// or with `Allow::no_mana` only the alternatives to mana (convoke's and
+    /// improvise's taps, `IMPROVISE`; ENGINE.md 220.1).
+    pub(crate) fn spendable_classes<'a>(classes: &'a [Class], allow: crate::doomsday_b::Allow) -> std::borrow::Cow<'a, [Class]> {
+        if !allow.no_mana || classes.iter().all(|cl| cl.members.first().is_some_and(|s| s.slot == IMPROVISE)) {
+            return std::borrow::Cow::Borrowed(classes);
+        }
+        std::borrow::Cow::Owned(classes.iter().filter(|cl| cl.members.first().is_some_and(|s| s.slot == IMPROVISE)).cloned().collect())
+    }
+
     /// A card in hand with a mana ability (a Spirit Guide).
     pub(crate) fn hand_mana_source(&self, c: CardIdx) -> bool {
         self.objs[c.i()].zone == Zone::Hand && self.def_of(c).hand_abilities.iter().any(|a| a.mana().is_some())
@@ -1808,7 +1838,8 @@ impl Game {
     /// add, ENGINE.md 100.4.5).
     fn add_pool(&self, p: PlayerId, any: crate::doomsday_b::Allow, c: &mut Cands) {
         let pool = &self.players[p as usize].pool;
-        if pool.total() == 0 {
+        // (A payment of no mana spends none of the pool's: ENGINE.md 220.1.)
+        if pool.total() == 0 || any.no_mana {
             return;
         }
         // (Mana with a spending restriction: when this payment meets it,
@@ -1839,6 +1870,11 @@ impl Game {
     /// Cataracts' {5}, ENGINE.md 100.4.5); the pool's other restricted mana
     /// stays (ENGINE.md 99.12).
     fn vgroups(&self, pm: &PayMana) -> SVec<(Kind, u32), 12> {
+        // (A payment of no mana has no virtual pool: neither the pool's mana
+        // nor a mana ability's pays it, ENGINE.md 220.1.)
+        if pm.keep.allow.no_mana {
+            return SVec::new();
+        }
         let pool = &self.players[pm.payer as usize].pool;
         let kinds = self.pool_kinds(pm.payer);
         let any = pm.keep.allow | crate::eoe_w2::SPEND_ABILITIES;
@@ -1952,7 +1988,7 @@ impl Game {
     /// made with; a decision refreshed in another world, ENGINE.md 10, or a
     /// pool changed by a test, reads it again).
     fn vm_now(&self, pm: &PayMana, classes: &[Class]) -> Option<u32> {
-        if pm.marked.is_empty() && !pm.convert && pm.extra == [0; 6] && self.players[pm.payer as usize].pool.total() == 0 {
+        if pm.marked.is_empty() && !pm.convert && pm.extra == [0; 6] && (self.players[pm.payer as usize].pool.total() == 0 || pm.keep.allow.no_mana) {
             return Some(0);
         }
         let (budget, dmg) = self.budget(pm.payer, &pm.keep, pm.later_life());
@@ -1967,7 +2003,7 @@ impl Game {
     fn recount(&self, pm: &mut PayMana, classes: &[Class]) {
         // (An empty virtual pool spends nothing: whether single-mana
         // sources can pay is asked of each option, ENGINE.md 17.)
-        if pm.marked.is_empty() && !pm.convert && pm.extra == [0; 6] && self.players[pm.payer as usize].pool.total() == 0 {
+        if pm.marked.is_empty() && !pm.convert && pm.extra == [0; 6] && (self.players[pm.payer as usize].pool.total() == 0 || pm.keep.allow.no_mana) {
             pm.vm = Some(0);
             return;
         }
@@ -1979,7 +2015,9 @@ impl Game {
     /// Can `p` pay `cost` (Phyrexian pips included) from their pool and the
     /// sources in `classes`, leaving what `keep` needs?
     pub(crate) fn can_pay_with(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], keep: &Keep) -> bool {
-        let classes = self.classes_for_self_use(classes, keep.self_use);
+        // (A payment of no mana: its alternatives only, ENGINE.md 220.1.)
+        let classes = Self::spendable_classes(classes, keep.allow);
+        let classes = self.classes_for_self_use(&classes, keep.self_use);
         self.might_pay(p, cost, &classes, None) && self.phyrexian_feasible(p, cost, &classes, keep, keep.life as u64, None)
     }
 
@@ -2024,7 +2062,9 @@ impl Game {
         keep: &Keep,
         without: Option<CardIdx>,
     ) -> bool {
-        let classes = self.classes_excluding(p, classes, without);
+        // (A payment of no mana: its alternatives only, ENGINE.md 220.1.)
+        let classes = Self::spendable_classes(classes, keep.allow);
+        let classes = self.classes_excluding(p, &classes, without);
         let classes = self.classes_for_self_use(&classes, keep.self_use);
         self.might_pay(p, cost, &classes, without) && self.phyrexian_feasible(p, cost, &classes, keep, keep.life as u64, without)
     }

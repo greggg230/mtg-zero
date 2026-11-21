@@ -47,6 +47,10 @@ pub(crate) mod route {
     /// Its own "you may cast this card from your graveyard using its warp
     /// ability" (ENGINE.md 99.4): for its warp cost only.
     pub const WARP: u8 = 9;
+    /// Its own "you may cast this card from your graveyard" (CR 601.3,
+    /// 113.6f; Hogaak, ENGINE.md 220.1): for its costs, as Yawgmoth's Will's
+    /// permission (its alternative costs too, `alt_allowed`).
+    pub const OWN: u8 = 10;
 }
 
 /// A way to cast a graveyard card (`route::*`), with the permanent whose
@@ -334,7 +338,12 @@ impl Game {
         // Improvise (CR 702.126): the untapped artifacts help pay (not with
         // the shared plain candidates, which have none).
         let with_artifacts;
-        let cls = if def.improvise {
+        let cls = if def.casting.no_mana {
+            // "You can't spend mana to cast this spell": its convoke's and
+            // improvise's taps only (ENGINE.md 220.1).
+            with_artifacts = self.no_mana_classes(p, c);
+            &with_artifacts[..]
+        } else if def.improvise {
             with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
             &with_artifacts[..]
         } else if def.casting.convoke {
@@ -380,7 +389,9 @@ impl Game {
             // Mana that can only be spent on some spells (Mishra's
             // Workshop, Delighted Halfling): with what this spell allows.
             let allow = self.spend_allow(c);
-            if !allow.is_empty() && (cls.iter().any(|cl| cl.only != 0 && crate::eoe_w2::spendable(cl.only, allow)) || self.pool_restricted(p)) {
+            // (A payment of no mana: `Allow::no_mana` keeps the pool out,
+            // ENGINE.md 220.1.)
+            if allow.no_mana || !allow.is_empty() && (cls.iter().any(|cl| cl.only != 0 && crate::eoe_w2::spendable(cl.only, allow)) || self.pool_restricted(p)) {
                 let keep = crate::pay::Keep { allow, ..Default::default() };
                 return self.can_pay_without(p, &cost, cls, &keep, Some(c));
             }
@@ -635,6 +646,12 @@ impl Game {
         if def.casting.warp_from_graveyard && !out.iter().any(|x| x.code == route::WILL) {
             out.push(Route { code: route::WARP, granter: None });
         }
+        // Its own "you may cast this card from your graveyard" (ENGINE.md
+        // 220.1): for its costs, as Yawgmoth's Will's permission allows it
+        // (the same cast: offered once).
+        if def.casting.own_gy_cast && !out.iter().any(|x| x.code == route::WILL) {
+            out.push(Route { code: route::OWN, granter: None });
+        }
         if !fd.is(types::LAND) && fd.is_permanent_card() && { let m = *para.get_or_insert_with(|| self.paragon_mv(p)); m > 0 && fd.mana_value() <= m } {
             for g in self.paragons(p, fd.mana_value(), false) {
                 let code = if self.abilities(g).gy_play_k != crate::db::NO_GRANT { route::PARAGON } else { route::LURRUS };
@@ -671,7 +688,7 @@ impl Game {
         match r.code {
             route::FLASHBACK => CastFrom::Flashback,
             route::FLASHBACK_MANA => CastFrom::FlashbackMana,
-            route::WILL => CastFrom::Permission { free: false, any_mana: false },
+            route::WILL | route::OWN => CastFrom::Permission { free: false, any_mana: false },
             route::ESCAPE => CastFrom::Escape,
             route::RETRACE => CastFrom::Retrace,
             route::MAYHEM => CastFrom::Mayhem,
@@ -898,7 +915,12 @@ impl Game {
         let def = self.def_of(card);
         // Improvise (CR 702.126).
         let with_artifacts;
-        let classes = if def.improvise {
+        let classes = if def.casting.no_mana {
+            // (Its mana can't be spent: its convoke's and improvise's taps
+            // only, ENGINE.md 220.1.)
+            with_artifacts = self.no_mana_classes(p, card);
+            &with_artifacts[..]
+        } else if def.improvise {
             with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
             &with_artifacts[..]
         } else if def.casting.convoke {
@@ -1348,11 +1370,16 @@ impl Game {
         // made sure some number does).
         let allow = self.spend_allow_from(card, item.from);
         let gy_cards = self.graveyard_cards(p).count() as u64;
-        let need = (0..=cost.generic.min(gy_cards)).find(|&d| self.can_pay_for(p, &cost.less_generic(d), allow)).unwrap_or(cost.generic) as usize;
+        // (Of a spell whose mana can't be spent: what its convoke can pay,
+        // ENGINE.md 220.1.)
+        let need = (0..=cost.generic.min(gy_cards)).find(|&d| self.delve_rest_payable(p, card, &cost.less_generic(d), allow)).unwrap_or(cost.generic) as usize;
         let floor = item.delve_floor as usize;
         let keep = self.escape_exiles(card, item.from) as usize;
         let gy = &self.players[p as usize].graveyard;
-        let late = self.delve_sources(p);
+        // (A spell whose mana can't be spent: no mana source is activated for
+        // it, a Lotus Petal neither; its mana floated first, the Petal is a
+        // graveyard card like any, ENGINE.md 220.1.)
+        let late = if allow.no_mana { Vec::new() } else { self.delve_sources(p) };
         let committed: Vec<CardIdx> = late.iter().copied().filter(|&c| self.delve_late(c)).collect();
         // (Hand cards promised: not graveyard picks, ENGINE.md 100.4.9.)
         let promised = self.delve_promised(p);
@@ -1570,7 +1597,7 @@ impl Game {
             let mut all = set.clone();
             all.extend(runs[k + 1..].iter().map(|r| r.1));
             let later = self.discards_take(p, card, rest_cost, &all, left) - set.len();
-            if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.can_pay_for(p, &rest.less_generic(d), allow)) {
+            if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.delve_rest_payable(p, card, &rest.less_generic(d), allow)) {
                 opts.push(Opt { action: act::HAND + i as u16, choice: Choice::Card(c) });
             }
         }
@@ -2135,7 +2162,9 @@ impl Game {
     pub(crate) fn spell_payable(&self, card: CardIdx, item: &StackItem, mana: &crate::mana::ManaCost, rest: Option<&crate::db::Cost>) -> bool {
         let p = item.controller;
         let def = self.def_of(card);
-        let classes = self.pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke);
+        // (A spell whose mana can't be spent: its convoke's and improvise's
+        // taps only, ENGINE.md 220.1.)
+        let classes = self.spell_pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke, self.spend_allow_from(card, item.from));
         let classes = self.delve_classes(p, card, &classes).into_owned();
         let keep = self.escape_exiles(card, item.from);
         let life_later = self.life_later(card, item);
@@ -2314,6 +2343,15 @@ impl Game {
         if k >= self.def_of(card).alt_costs.len() && from != crate::game::CastFrom::Hand {
             return false;
         }
+        // (Its mana can't be spent: its convoke's and improvise's taps only,
+        // ENGINE.md 220.1.)
+        let own;
+        let classes = if self.def_of(card).casting.no_mana {
+            own = self.no_mana_classes(p, card);
+            &own[..]
+        } else {
+            classes
+        };
         let Some((a, _)) = self.alt_at(card, k) else { return false };
         if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
             return false;
@@ -2404,6 +2442,15 @@ impl Game {
     /// any)?
     pub(crate) fn normal_payable(&self, p: PlayerId, card: CardIdx, classes: &[crate::pay::Class]) -> bool {
         let def = self.def_of(card);
+        // (Its mana can't be spent: its convoke's and improvise's taps only,
+        // ENGINE.md 220.1.)
+        let own;
+        let classes = if def.casting.no_mana {
+            own = self.no_mana_classes(p, card);
+            &own[..]
+        } else {
+            classes
+        };
         let delved = self.delve_classes(p, card, classes);
         let classes = &delved[..];
         let cost = self.spell_cost(card, p);
@@ -2953,7 +3000,11 @@ impl Game {
                 }
             }
             self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: ordered });
-            if !pm.cost.is_zero() {
+            if def.casting.no_mana {
+                // Its mana can't be spent: its convoke pays the rest (CR
+                // 113.6e, 601.2h; ENGINE.md 220.1).
+                self.agenda.push(Task::ConvokePay { id, picked: Vec::new() });
+            } else if !pm.cost.is_zero() {
                 pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
                 pm.life_after = life_later;
                 self.agenda.push(Task::PayMana(Box::new(pm)));
@@ -3017,7 +3068,17 @@ impl Game {
         let _ = def;
         pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
         pm.life_after = life_later;
-        self.agenda.push(Task::PayMana(Box::new(pm)));
+        if self.def_of(card).casting.no_mana {
+            // Its mana can't be spent: its convoke pays the rest, delve's cards
+            // chosen (CR 113.6e, 601.2h; ENGINE.md 220.1). (No part of a
+            // reachable rest takes a permanent: retrace's land card, escape's
+            // graveyard cards, a granted warp's life; the lowering refuses
+            // the card's own costs.)
+            assert!(!taps_first && rest_cost.as_deref().is_none_or(|r| !crate::hogaak_a::rest_takes_permanents(r)), "a spell of no mana with a cost that takes permanents");
+            self.agenda.push(Task::ConvokePay { id, picked: Vec::new() });
+        } else {
+            self.agenda.push(Task::PayMana(Box::new(pm)));
+        }
         if taps_first {
             self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: None });
         }

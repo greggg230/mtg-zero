@@ -3075,6 +3075,26 @@
      "type_source": "annotation"
     },
     {
+     "annotation": "bool",
+     "default": false,
+     "name": "castable_from_graveyard",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "cant_spend_mana_to_cast",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
      "annotation": "ManaCost | None",
      "default": null,
      "name": "impending_cost",

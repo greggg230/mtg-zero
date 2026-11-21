@@ -638,6 +638,19 @@ class CardPrinting:
     # the graveyard, not just the hand. Matches Timeline Culler's
     # "You may cast this card from your graveyard using its warp ability."
     warp_castable_from_graveyard: bool = False
+    # "You may cast this card from your graveyard." (Hogaak, Arisen
+    # Necropolis): a static ability of the card that lets its owner cast it
+    # from their graveyard, for its costs, with the normal timing (CR
+    # 601.3, 113.6f: it modifies what zones the card can be cast from).
+    # Data for the card IR (mtg-zero's engine plays it, ENGINE.md 220.1).
+    castable_from_graveyard: bool = False
+    # "You can't spend mana to cast this spell." (Hogaak): a static ability
+    # restricting how the card can be cast (CR 113.6e: it functions in any
+    # zone it could be cast from and on the stack): no mana pays any part
+    # of the spell's total cost (601.2f-h); its convoke and delve, or an
+    # alternative cost of no mana, must pay it all. Data for the card IR
+    # (mtg-zero's engine plays it, ENGINE.md 220.1).
+    cant_spend_mana_to_cast: bool = False
     # Duskmourn "Impending N — {alt-cost}" alt-cost. If set, the card
     # may be cast from hand for ``impending_cost`` instead of its
     # normal cost; when cast that way, it enters with

@@ -1983,6 +1983,16 @@ pub struct CastingRules {
     /// 611.3a, 118.9): "Artifact cards and red creature cards in your hand
     /// have warp {2}{R}" (ENGINE.md 99.15).
     pub hand_alt_grants: Vec<HandAltGrant>,
+    /// Its own "You may cast this card from your graveyard" (CR 601.3,
+    /// 113.6f; Hogaak, Arisen Necropolis, ENGINE.md 220.1): its owner may cast
+    /// it from their graveyard for its costs, with its normal timing
+    /// (`cast::route::OWN`).
+    pub own_gy_cast: bool,
+    /// Its own "You can't spend mana to cast this spell" (CR 113.6e, 601.2f-h;
+    /// Hogaak, ENGINE.md 220.1): no mana pays any part of the total cost of
+    /// casting it, however it is cast - its convoke and delve do
+    /// (`doomsday_b::Allow::no_mana`, `Task::ConvokePay`).
+    pub no_mana: bool,
 }
 
 /// An alternative cost a permanent's static ability gives each card in its
