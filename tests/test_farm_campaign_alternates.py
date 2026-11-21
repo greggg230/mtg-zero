@@ -241,6 +241,13 @@ def test_refusals_put_nothing_and_none_is_said(tmp_path, farm, stubs, monkeypatc
     d, st = _state(tmp_path / 'm2', farm, alternates=[farm.cuda, farm.mac])
     with pytest.raises(C.CampaignError, match='replay differently'):
         C.prepare_alternates(cl, d, st, lambda m: None)
+    _index(farm, cuda=False, dml=False)                     # (a release whose only route is the refused Mac: none)
+    d, st = _state(tmp_path / 'm3', farm)
+    lines = []
+    C.prepare_alternates(cl, d, st, lines.append)
+    st = C.load_state(d)
+    assert st['alternates'] == [] and 'left out' in st['alternates_note'] and any('CPU worker only' in x for x in lines)
+    _index(farm)
     # a campaign made before alternates (no alt_want): its requests unchanged
     old = {k: v for k, v in st.items() if k not in ('alt_want', 'alternates', 'builds', 'alternates_ready',
                                                      'alternates_note', 'alt_routes', 'variants')}

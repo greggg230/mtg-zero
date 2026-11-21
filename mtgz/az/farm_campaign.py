@@ -469,6 +469,15 @@ def platform_check(st, d, platform, log):
     log(f'{platform}: the games replay exactly there (check-config --platform {platform})')
 
 
+def _no_alternates(d, st, notes, log):
+    """No alternates: the campaign plays on the build's CPU worker only - said in the log and the state."""
+    st.update(alternates=[], builds=[st['build_id']], alt_routes={}, variants={}, alternates_note='; '.join(notes),
+              alternates_ready=True)
+    st.pop('alternates_error', None)
+    save_state(d, st)
+    log('alternates: none - the campaign plays on the build\'s CPU worker only')
+
+
 def prepare_alternates(cl, d, st, log, cache=None):
     """The campaign's alternates from `alt_want` (alternates_want), once, before anything is put: the ids (the release
     index's for the build, or the caller's) checked as a run's (zero.farm_def.run_alternates: worker builds of the
@@ -496,12 +505,7 @@ def prepare_alternates(cl, d, st, log, cache=None):
         for n in notes:
             log(f'alternates: {n}')
         if not ids:
-            st.update(alternates=[], builds=[st['build_id']], alt_routes={}, variants={},
-                      alternates_note='; '.join(notes), alternates_ready=True)
-            st.pop('alternates_error', None)
-            save_state(d, st)
-            log('alternates: none - the campaign plays on the build\'s CPU worker only')
-            return
+            return _no_alternates(d, st, notes, log)
         try:
             alternates, builds = FD.run_alternates(cl, st['build_id'], st['runtime'], ids)
         except SystemExit as e:
@@ -527,6 +531,8 @@ def prepare_alternates(cl, d, st, log, cache=None):
                     mans.pop(b, None)
                 notes.append(f'the {p} alternate {",".join(gone)} is left out: {e}')
                 log(f'alternates: {notes[-1]}')
+        if not alternates:
+            return _no_alternates(d, st, notes, log)
         variants = FP.variant_setting(want['variants'])
         for x in alternates:
             if 'vendor' in x['when']:
