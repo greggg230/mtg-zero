@@ -1618,7 +1618,15 @@ _INTERVENING_WHILE_PHRASES: dict[str, Predicate] = {
 
 
 def _parse_intervening_while_phrase(phrase: str) -> Predicate | None:
-    return _INTERVENING_WHILE_PHRASES.get(phrase.strip())
+    hit = _INTERVENING_WHILE_PHRASES.get(phrase.strip())
+    if hit is not None:
+        return hit
+    # "this creature has a <kind> counter on it" (Moonshadow; the Legacy
+    # Hogaak lane C, ENGINE.md 220.3): the source's state as the event
+    # happens, part of the trigger event.
+    from mtgz_ir.cards.parser.legacy_hogaak_c import parse_source_has_counter_gate
+
+    return parse_source_has_counter_gate(phrase.strip())
 
 
 # Intervening-``while`` gates whose semantics are best expressed as an
@@ -1794,7 +1802,16 @@ def _parse_predicate_trigger_phrase(
         # Roto P6 conditions (becomes the target, ...).
         from mtgz_ir.cards.parser.roto_keywords import parse_p6_trigger_phrase
 
-        return parse_p6_trigger_phrase(phrase.strip())
+        p6 = parse_p6_trigger_phrase(phrase.strip())
+        if p6 is not None:
+            return p6
+        # "One or more <type> cards are put into your graveyard from
+        # anywhere" (Moonshadow; the Legacy Hogaak lane C, ENGINE.md 220.3).
+        from mtgz_ir.cards.parser.legacy_hogaak_c import (
+            parse_hogaak_c_trigger_phrase,
+        )
+
+        return parse_hogaak_c_trigger_phrase(phrase.strip())
     return raw[0], raw[1]
 
 

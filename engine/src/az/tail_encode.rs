@@ -1093,7 +1093,7 @@ pub fn mod_index(m: &crate::db::Mod) -> usize {
         M::ControlFrom(_) => 18,
         M::PreventCombatDamage => 19,
         M::MustAttackPlayer => 20,
-        M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
+        M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::PtPerGraveyardCards { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
             unreachable!("a static ability's mod {m:?} in an effect (Game::add_effect refuses it)")
         }
     }
@@ -1220,7 +1220,7 @@ fn write_effects(cx: &Cx, tail: &mut TailBuf) {
             | M::ExileIfLeaves
             | M::PreventCombatDamage
             | M::MustAttackPlayer => {}
-            M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
+            M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::PtPerGraveyardCards { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
                 unreachable!("a static ability's mod in an effect")
             }
         }

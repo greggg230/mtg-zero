@@ -325,6 +325,12 @@ impl Game {
         c
     }
 
+    /// The mana value of object `c` as the rules read it now (CR 202.3: X
+    /// on the stack, 202.3e; a copy of a back face, 202.3b; rules tests).
+    pub fn mana_value_now(&self, c: CardIdx) -> u64 {
+        self.mana_value_of(c)
+    }
+
     /// Does condition `c` hold for `p` now (rules tests)?
     pub fn holds(&self, c: &crate::db::Cond, p: PlayerId) -> bool {
         self.cond_holds(c, p)

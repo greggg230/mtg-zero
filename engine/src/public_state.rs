@@ -111,6 +111,7 @@ pub fn fields() -> Vec<Field> {
         first_token: Derived "a fast path: the first slot made as a token or a copy",
         batching: Derived "transient: a simultaneous move in progress",
         releasing: Derived "transient: during one simultaneous move",
+        gy_arrivals: Derived "transient: during one simultaneous move (its cards put into graveyards, matched at its end)",
         ev_seq: Derived "event-group bookkeeping",
         batch_fired: Derived "event-group bookkeeping (\"one or more\" triggers once per group)",
         entering_cast: Derived "transient: set and cleared around one move",
@@ -2630,9 +2631,10 @@ pub const MOD_PERTURBATIONS: [(&str, &str); 21] = [
 /// `StaticDef` only, and `Game::add_effect` refuses them loudly (`Mod::static_only`). A static
 /// ability is its source's printed text (its identity, encoded) applied to the encoded board, so
 /// what it does is a function of the row.
-pub const STATIC_ONLY_MODS: [(&str, &str); 4] = [
+pub const STATIC_ONLY_MODS: [(&str, &str); 5] = [
     ("PtPer", "an Equipment's or a static ability's \"+p/+t for each\" (lower/statics.rs, lower/printing.rs)"),
     ("PtPerSourceCounter", "\"+1/+1 for each +1/+1 counter on this Equipment\" (lower/printing.rs)"),
+    ("PtPerGraveyardCards", "Dark Matter Manipulator's \"+2/+0 for every seven cards in your graveyard\" (lower/statics.rs; the graveyard is encoded)"),
     ("AttackDespiteDefender", "\"can attack as though it didn't have defender\" (Mechan Shieldmate; lower/statics.rs)"),
     ("PowerPlusGreatestMv", "Emissary Escort's \"+X/+0\" (lower/eoe_a.rs)"),
 ];
@@ -2653,6 +2655,7 @@ pub fn mod_variant(m: &Mod) -> &'static str {
         Mod::ExileIfDies => "ExileIfDies",
         Mod::PtPer { .. } => "PtPer",
         Mod::PtPerSourceCounter { .. } => "PtPerSourceCounter",
+        Mod::PtPerGraveyardCards { .. } => "PtPerGraveyardCards",
         Mod::GainSacMana(_) => "GainSacMana",
         Mod::LoseAllAbilities => "LoseAllAbilities",
         Mod::AttackDespiteDefender => "AttackDespiteDefender",
@@ -2685,6 +2688,7 @@ pub fn mod_samples() -> Vec<Mod> {
         Mod::ExileIfDies,
         Mod::PtPer { filter: Filter::Any, p: 1, t: 1 },
         Mod::PtPerSourceCounter { counter: Counter::P1P1, p: 1, t: 1 },
+        Mod::PtPerGraveyardCards { filter: Filter::Any, per: 7, p: 2, t: 0 },
         Mod::GainSacMana(1),
         Mod::LoseAllAbilities,
         Mod::AttackDespiteDefender,

@@ -41541,6 +41541,481 @@ c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890
 
 Main fast-forwarded 4c77c950 -> 62b9a028 (main had not moved since the branch: the gate stands as run).
 
+## 214. zero-core pin 35a47a9 -> ba607c2: per-seat evaluation settings - an eval job seat's `set`, zero.h2h's per-side options for farm campaigns (zero-core `feat/seat-settings`, docs/az.md 68; zero-farm PROTOCOL.md 5.2; branch `feat/seat-settings`, 2026-11-21)
+
+**Why.** The 2026-11-20 ISMCTS check (legacy-meta3-r1 iter_1040 against itself, side A with information-set merging,
+side B without: `mtgz.az.h2h CK CK --paired --games 2400 --sims 64 --a-infoset-merge 1 --b-infoset-merge 0`, 4 x 2,400
+games) ran on the desktop beside the live runs, because a farm eval job had one settings block for both seats. The owner
+wants such head-to-heads and A/B tests on the farm by default.
+
+**The pin** (zero-core docs/az.md 68): an eval job's network seat may carry `"set"` - run settings that seat plays other
+than the job's (`{"net": 1, "set": {"eval_infoset_merge": 1}}`: Run.nn_seat of the job's settings with the set over
+them), keys only of what an evaluation seat reads (zero_worker `SEAT_READS`), refused otherwise by the worker and its
+check-config; the worker announces the feature `seat_settings`; `zero.seat_settings` is the one mapping of zero.h2h's
+per-side options to a seat's set, used by zero.h2h itself, zero.farm_h2h and the campaigns here. A seat without a set is
+the seat of before (rows, records, digests). The only Rust change is in the worker crate (`crates/worker`: the seat's
+parse and settings, the feature); play and the encoding are unchanged.
+
+**Farm campaigns** (`mtgz.az.farm_campaign`, ENGINE.md 165; `tools/farm_campaign.py submit`): zero.h2h's per-side
+options (zero.seat_settings.add_side_args without the local-only `--graphs` / `--lookahead`: `--{a,b}-sims`, `--select` /
+`--{a,b}-select`, `--select-min-visits` / `--{a,b}-select-min-visits`, `--cq-c-*` / `--{a,b}-cq-c-*`,
+`--{a,b}-leaf-value-view`, `--{a,b}-belief-tilt / -tilts / -clip / -mix / -fast`, `--infoset-merge` /
+`--{a,b}-infoset-merge`, `--{a,b}-root-search`, `--gumbel-m` / `--{a,b}-gumbel-m`, `--{a,b}-gumbel-scale`) give each
+side its set over the campaign's settings (`side_sets`, `campaign_seats`). `match_settings(..., sides=)` checks each side
+against the local match's seat of that side - the side's seat's rule (its options applied as zero.h2h applies them) with
+the side's own run's margin_w / redet / eval_cache - so B's run's own cache is still refused (no per-side option sets
+it); without options the settings and seats are those of before (the yardsticks call it so). `check_seats` (in `submit`)
+accepts [gen 1, gen 2] or [gen 1, gen 1] seats, each with a set in an eval campaign (never with `--samples`);
+`job_settings` runs the build's check-config with the seats (a build without `seat_settings` refused before anything is
+put). `readout` covers two seats of one network with their own settings (A = the job's seats[0] as a whole) and names
+each side's rule and simulations as zero.h2h does (`select_a` / `select_b`, `sims_a` / `sims_b`; the A-vs-B readout gains
+them too). `--a CK --a-infoset-merge 1 --b-infoset-merge 0` without `--b` is the farm's form of the ISMCTS check.
+
+**Tests.** zero-core: the worker's `seat_sets_parse_and_apply` and `seat_sets_play_their_own_settings`, the full
+`cargo test -p zero_worker`, tests/test_seat_settings.py, tests/test_farm_h2h.py (docs/az.md 68). Here:
+tests/test_farm_play.py `test_per_side_options_are_the_seats_sets` (no options: the settings and seats of before; a merge
+and a sims option give A against itself two sets, checked per side; refusals: a set with samples, other gens, a b with
+self-play seats, a merge without root-view values, B's run's cache; the readout's rules and simulations).
+
+**Measured** (2026-11-21, the desktop beside the live runs, CPU).
+
+* *The parity gate* (zero-core `tools/worker_eval_gate.py --seat-cases all`): the signed release worker of edc4a360
+  (build 1468c4d91730a4a045ae73a4, mtg-edc4a36-release, the CPU pack d531424b) against `zero.farm_eval.match_driver`,
+  iter_1040 on both seats, the ISMCTS campaign's eval settings (the Doomsday-vs-Delver spec, eval_sims 16, 'cq' guard 4
+  c_scale 0.3, root-view values, belief tilt 1 / mix 0.25, eval cache 8,192; groups 1, sparse rows, untraced), 8 paired
+  games per case: merge, sims (32 / 8), gumbel (m 4 / PUCT), belief (tilt 1 / 0) and select ('cq' guard 2 / 'visits')
+  each **8 of 8 rows byte-identical, 60 batches identical**.
+* *Farm gates* (`tools/farm_gates.py`, legacy-meta3-r1's config and iter_1040, that build): FARM GATES PASSED - gate 2: 8
+  games, 291 rows, 200 batches identical; gate 3: 12 games, 639 rows (210 value, 639 aux) identical, the switch to net
+  1041 included.
+* *check-config* refusals with that build: a set holding `lookahead` or `conc`, or an empty set, is an error (exit 2,
+  naming the key); a merge with `eval_leaf_value_view` 'mover' is refused naming the seat (exit 1).
+* *zero.h2h's seats on legacy-meta3-r1's config*, old main() against zero.seat_settings over 30 option sets: 19 the same
+  (every merge, belief, view, root-search and sims option); the rest the corners of zero-core docs/az.md 68 - on this
+  run the old `--select` / `--a-select` played its side with mover-view values (the run evaluates with root-view ones).
+* **End to end** (the build published to the coordinator, no coordinator deploy, no agent release): `python
+  tools/farm_campaign.py submit ismseat-test --a runs/legacy-meta3-r1/models/iter_1040.pt --games 32 --build
+  1468c4d91730a4a045ae73a4 --worker <its mtgz-worker.exe> --sims 16 --spec <spec_dd_vs_delver.json> --a-infoset-merge 1
+  --b-infoset-merge 0 --deadline-h 1.5` (share 0.25, the default): the farm run `cmp-ismseat-test` with gen 1 only, seats
+  `[{"net": 1, "set": {"eval_infoset_merge": 1}}, {"net": 1}]` in the signed definition. The farm's PCs were on fuzz and
+  rolling self-play leases; ~45 minutes after the submit one farm PC (agent 0.3.13) leased the batch and played **all 32
+  games** (two leases: 20 + 12; none local). `collect`: every digest its record's, the spot check (2 of 32) replayed
+  from seed + moves, games digest a386d8b74b02324f; the farm run paused. 6 of the farm's games (0-5) played again by
+  the desktop's worker (`local_cmd`): 6 of 6 rows and digests identical. The readout: A (merging) 0.4688 +- 0.0312 (pair
+  se; 15 split pairs, 1 both lost), Elo -21.7 (95%: -64.9 .. +20.8), `select_a` 'cq-n4-v50-s0.3-rv-b1m0.25-ism',
+  `select_b` 'cq-n4-v50-s0.3-rv-b1m0.25' - a test of the path at 16 simulations and 32 games, not a measurement of the
+  merge (the 2026-11-20 check: 64 simulations, 2,400 games a matchup). The campaign plays chance_k 2 (`match_settings`'
+  default, as the yardsticks); the local check of 11-20 played `--chance-k 0`.
+
+### 214.1 The gate of edc4a360; the pin ba607c2 -> c850a5d (docs only)
+
+On edc4a360 (the pin ba607c2 and 214 before its measurements), in the warm worktree warm-3,
+`MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`, `--offload local`, `--baseline-root` warm-2 at e9ff0e24
+(main, built; held through the gate by `warm_pool.py acquire`): **GATE PASSED WITH SKIPS optin-core edc4a360de4a in
+3257s** - core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each); the digests as
+recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt
+a890c27da3c7d1a8); farm compat identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3: 6 games, 2,556 rows, 6 decks
+compared); cargo test --test az 57 and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero
+built against this core; core pytest 815 passed, 59 skipped - skipped: 17 live-run-hazard tests (fenced: a live run on
+this machine).
+
+This commit moves the pin to c850a5d, zero-core docs/az.md 68's measurements on top of ba607c2 (ba607c2..c850a5d:
+docs/az.md only, so the gate above stands for it), and adds the measurements above.
+## 215. Match campaigns on the whole farm: every alternate of the build's release by default - CUDA, DirectML for AMD, macOS - with GPU variants per network and the GPU self-test (`farm_campaign.submit` `alternates` / `variants`, `--no-alternates`; branch `feat/campaign-alternates`, 2026-11-21)
+
+Branch `feat/campaign-alternates` from main e9ff0e24; Python and docs only (no Rust input, no zero-core change: the
+pin stays 35a47a9). Why: the user wants experiments that play many games - head-to-heads, A/B judges, the yardsticks -
+on zero-farm by default, and match campaigns (165) were slow there partly because they ran on Windows CPUs only:
+`submit` created the campaign's coordinator run with the build's CPU worker and no alternates, so an NVIDIA PC played
+its leases on its CPU, an AMD PC too, and the Macs never took one. The coordinator's leases table showed it: the
+legacy-meta3-r1 cells campaigns' leases (`cmp-legacy-meta3-r1-cellsbase-*`, 11-18 to 11-20) all on the CPU builds
+(5307720f, d5b6a787, f1fa951d), 32 games taking 45-60 minutes on one PC, while the same run's own evaluation batches
+(`legacy-meta3-r1-eval`, zero-core docs/az.md 65) go to its CUDA, DirectML and macOS alternates, a Mac playing 100
+games in ~5 minutes. Campaign runs are coordinator runs: a run's `alternates` (zero-farm PROTOCOL 9.4, 11.4) and model
+variants (14) apply to them unchanged.
+
+### 215.1 What a campaign lists now
+
+`mtgz.az.farm_campaign.submit(..., alternates='release', variants='gpu=fp16,dml=matmul@amd')` - the defaults, so the
+CLI (`tools/farm_campaign.py submit`), the yardsticks' farm path (`measure_bo1_farm`, `play_pair_farm`: the cells and
+`tools/ab.py judge`) and anything else that calls `submit` get them without a change. Before anything is put
+(`prepare_alternates`, once per campaign, its result in the state):
+
+1. **The ids.** `alternates='release'`: every alternate the release index (`mtgz.az.farm_builds`, written by
+   `tools/farm_release.py`, 196) holds for the campaign's worker build - its newest published entry whose `build_id` it
+   is: the CUDA alternate, the DirectML alternate for AMD GPUs (213), the macOS build when it was published
+   (`--mac-publish`, 197.6), in that order of preference. A route the release lacks is a note; a build the index has no
+   release of (a worker signed by hand) gets no alternates - **CPU only, said in the log and the state**
+   (`alternates_note`), never silently. `alternates=None` (`--no-alternates`): none, also noted. A list
+   (`--alternates ID,ID`): exactly those builds.
+2. **Checked as a run's** (`zero.farm_def.run_alternates`): worker builds of the build's game, each requiring its pack;
+   `when.vendor` from a GPU pack's `gpu.vendor`, `when.platform` for another platform's build (a CPU alternate). And
+   each must be the default build's engine (its signed manifest's `engine_commit`): a campaign's games are replayed
+   here by this engine, so an alternate of another commit is refused (the live run's macOS build b96e45a0 is c8e40f5a's,
+   its default f22f63bb e9ff0e24's: a campaign of f22f63bb does not list it).
+3. **A platform alternate** (macOS) only if the job's settings replay exactly there: the default worker's `check-config
+   --eval --platform macos-arm64` (zero-core docs/az.md 62, as the eval pool checks; without `--eval` for a samples
+   job). A libm refusal leaves the release's macOS route out with a note in the log and the state (the yardsticks have
+   no flag to drop it); a list that names it is refused.
+4. **Variants.** Each GPU alternate is named its variant (`zero.farm_pool.variant_of` over `variants`, the run
+   setting `pool_variants`' syntax: its vendor's, else the first without one) - by default the CUDA alternate 'gpu'
+   (`fp16`: `onnx_export.to_float16` of the network's graph) and AMD's DirectML alternate 'dml' (`matmul`: the
+   checkpoint exported again as graph 'fast-matmul' by `zero.farm_h2h.export_cached`, float32, the one zero-onnx/2
+   graph DirectML runs deterministically on AMD, zero-core docs/az.md 46.10). Every named variant is exported for
+   every network of the campaign (gen 1 = A, gen 2 = B) beside its graph in the export cache
+   (`~/.zero-farm/campaigns/_exports/<key>/model-<form>.onnx`; the fast-matmul weight-swap templates under
+   `_exports/templates/`), then signed in the definition (`checkpoints[gen].variants`, PROTOCOL 14.1), uploaded
+   (`ckpt/<run>/<gen>/model-<name>.onnx`) and registered with the gen (`PUT .../checkpoint/<gen>` `variants`, 14.2). A
+   variant no listed alternate names is not exported. `variants=''`: the GPU alternates play each gen's default graph.
+5. **The GPU self-test.** Every graph a GPU alternate will play - its variant, else the gen's default graph - is
+   self-tested on this machine's GPU through **that alternate's own signed worker and runtime pack** (the desktop's
+   copies under `$ZERO_BIG_DISK/zero-farm-builds/<id>/`, each checked against the coordinator's signed manifest: the
+   manifest's bytes are the id, the executable its sha256, the platform this machine's - another platform's executable
+   is never run here, 212): `probe-providers --runtime-dir <pack> --model <graph> --reference <the gen's reference set>
+   --providers <the pack's GPU provider>,cpu --reps 2`, both providers passing (the graph's tolerance - float16's for a
+   float16 graph, zero-core docs/az.md 67 - and the same answers twice): tools/farm_release.py's cuda-selftest /
+   dml-selftest on the campaign's own networks. Results kept beside the export by (graph sha256, alternate, pack), so a
+   network the yardsticks use again is not tested again. Without variants, AMD's DirectML alternate fails here (DirectML
+   refuses zero-onnx/2 default graphs, 46.10): the campaign is refused rather than playing AMD PCs on their CPU unsaid.
+6. **min_agent**: at least `farm_def.VARIANT_AGENT` (0.3.5) when a variant is named (a definition that signs one,
+   PROTOCOL 14.1; the coordinator counts it so anyway). Not the highest route's minimum: each alternate's own build
+   carries its agent minimum (the CUDA build 0.2.11, the DirectML build 0.3.11, the macOS build 0.3.0) and the
+   coordinator holds a route from an older agent per machine (PROTOCOL 9.4 condition 6, coordinator `choiceFor`),
+   whereas a run's `min_agent` gates every route: 0.3.11 would keep the macOS agents (0.3.10 today) from the whole
+   campaign. The routes' minima are in the state (`alt_routes`).
+
+Any failure - an alternate that is not the build's engine, an export, a self-test - raises `CampaignError` with the
+reason also in the state (`alternates_error`); nothing has been put on the farm, and `submit NAME` again resumes there.
+Then the run PUT carries `alternates` (each GPU one with its `model`) and the raised `min_agent` before the first
+definition (PROTOCOL 14.5); the definition's `builds` list the alternates' builds after the default; `gpu` stays 'any';
+GPU leases are sized by the coordinator (`games_per_lease` 'auto': `gpu_games_per_lease` absent = auto, PROTOCOL
+9.4). `status` and the collected result name the alternates and the note. A campaign created before this branch (no
+`alt_want` in its state) puts exactly what it put before - its PUT bodies and definitions have no `alternates` key and
+`builds` [the build] - so resuming one changes nothing.
+
+Flags (`tools/farm_campaign.py submit`): `--alternates release|ID[,ID...]`, `--no-alternates`, `--variants SPEC`
+('' = none). The yardsticks have no setting of their own for it (they inherit the default).
+
+### 215.2 Tests
+
+`tests/test_farm_campaign_alternates.py` (5; a fake coordinator and fake signed builds, no farm, GPU or network): the
+release index's routes and notes; the PUT's alternates with `when` and `model`, the definition's builds and signed
+variants (validated by `farm_def.prepare`), the variants uploaded and registered with each gen, the first PUT carrying
+the alternates before the definition, min_agent 0.3.5 and the routes' own minima, the self-test of every graph through
+each GPU route's own worker and pack (the Mac's never run here); the refusals (another engine, a failing self-test, a
+libm refusal of a named macOS build) with the reason in the state and nothing put; the release's macOS route left out
+on a libm refusal; none at all noted; a campaign from before the branch unchanged; a route of another platform never
+run here and a tampered executable refused; the self-test's reading of probe-providers (one passing adapter of two is a
+pass; a non-deterministic GPU, a crash); a release whose only route is a refused macOS build ends CPU only, noted.
+With tests/test_farm_play.py, test_cells_yardstick.py, test_farm_release.py, test_yardsticks.py and
+test_yardstick_cost.py: 56 passed, 4 skipped (live-run fence, no locally built worker); privacy check 0 findings.
+
+### 215.3 End to end on the farm (2026-11-21)
+
+`tools/farm_campaign.py submit alts-test --a <legacy-meta3-r1>/models/iter_1040.pt --b .../iter_1024.pt --games 64
+--build f22f63bb0c461180b6260b3e --sims 32 --bo1 --games-per-lease 16` from this branch (18e06f8b), under the slot
+throttle, then `collect alts-test`: the yardsticks' best-of-one of the run's evaluation spec at 32 simulations, paired,
+seed 0, the default share (0.25) and priority; the build of main e9ff0e24's release (CPU pack d531424b). The online farm
+then: four Windows PCs (three with an NVIDIA GPU, one with an AMD GPU, agents 0.3.13) and two Macs (0.3.10).
+`--games-per-lease 16` only to cut the 64 games into four leases (a set number sizes GPU leases too, PROTOCOL 9.4).
+
+* **Setup** (499 s on the desktop, nothing on the farm until it passed): the two exports 149.5 and 128.0 s; the release
+  note "no macOS build (tools/farm_release.py --mac): Macs take none of the leases"; variants: `matmul` 139.9 s for
+  gen 1 (the fast-matmul weight-swap template and its reference positions, once per architecture) and 2.2 s for gen 2
+  (a weight swap), `fp16` 0.3 and 1.6 s; the GPU self-tests on the desktop's GPU, all deterministic - CUDA alternate
+  cca21cdd on the `gpu` (float16) graphs: max abs 1.19e-2 and 7.65e-3 (its CPU 1.08e-2, 5.81e-3; float16's tolerance
+  5e-2), DirectML alternate 92041956 on the `dml` (float32 MatMul) graphs: 8.85e-6 and 5.13e-6 (CPU 4.89e-6, 5.99e-6);
+  min_agent none -> 0.3.5. The coordinator's view (GET run): both alternates with their `model`, `problems` [] and
+  `variant_notes` [] (the AMD one's `gpu_notes`: "amd GPUs run dml only; offered to agents from 0.3.11"); definition 1
+  with builds [f22f63bb, cca21cdd, 92041956], `needs_agent` 0.3.5, variants `dml` and `gpu` for gens 1 and 2.
+* **Leases** (the leases table, read only): none for 24 minutes after the batch was put (17:26:53 UTC): the GPU PCs
+  were playing the live run's self-play on their GPUs and deferred the batch, and the one PC routed as a CPU PC was in
+  a fuzz lease (215.6). Then four leases of 16 games, 17:51:03 to 17:58:31, **every one on an alternate with its
+  variant**: the CUDA alternate (variant `gpu`) 2 leases, 32 games, on two NVIDIA PCs - one played on CUDA (its
+  agent's bench: 705 rows/s CUDA against 512 CPU; the worker's CUDA self-test 1.6e-2 and 7.4e-3), the other's agent
+  measured its CPU faster at these 4-row batches (685 against 442) and played the float16 graph on the CPU (self-test
+  1.1e-2, 5.8e-3); the DirectML alternate (variant `dml`) 2 leases, 32 games, on the AMD PC, whose agent measured
+  its CPU faster at 4-row batches (654 against DirectML's 90: DirectML's fixed cost per call, zero-core docs/az.md
+  46.10) and played the float32 MatMul graph on the CPU. No lease on the default CPU build; no Mac (no macOS build).
+  Leases took 3.4 to 6.6 minutes for 16 games. Larger GPU leases (`games_per_lease` 'auto': at least 128 games a GPU
+  lease) are where the agents' benches choose the GPUs; the routing, the variants and their self-tests are what this
+  test shows.
+* **Collect**: 64 of 64 games from the farm, 0 local, 0 failed; every row's digest checked; the spot check 4 of 64 (the
+  campaign's 5%) equal, and all 64 replayed from seed + moves afterwards (by hand: `spot_check(frac=1.0)`), equal -
+  the CUDA-played lease's games among them; the games' digest 3938f0af409706e3; the farm run paused (the
+  coordinator: `state` paused). **Readout** gen 1040 vs gen 1024: score 0.406 +- 0.042 (32 pairs: 7 both lost, 24
+  split, 1 both won), Elo -65.9 +- 30.0 (95% -127 to -8.5), margin -3.19, 0 unfinished - the direction and size of
+  the run's own farm evaluation (its Elo pool: gen 1024 1042, gen 1040 980, each +- ~170).
+* **Wall time**: 40 minutes from the submit to the result - 8.3 setting up, 24 queued, 7.5 playing, 20 s collecting.
+
+### 215.4 The judges' lease-size sidecar is no longer needed
+
+A stopgap of 2026-11-18 (`judge_lease_size.py` in the maintainer's scratch, not in the repo) re-PUT every open batch of
+the legacy-meta3-r1 cells campaigns with `games_per_lease` 32: an 'auto' eval lease was sized to ~450 s of the
+machine's measured rate, and a PC that had played 1-7 games at once measured a low rate and kept getting 1-7 game
+leases (the 11-18 `cellsbase-01089b042b-c0` leases: 1 to 7 games each). The coordinator's CPU eval lease floor (zero-farm
+PROTOCOL rev 18, 12.3: an 'auto' eval lease that is not a GPU lease gets at least `eval_games_per_thread` (2) x the PC's
+threads, RAM-capped) does the same job: the 11-20 `cellsbase-db604a586e` campaigns ran with `games_per_lease` 'auto'
+(the sidecar was no longer running: its log's last action 11-18 15:53, no process) and got 12- to 40-game leases (40
+on a 20-thread PC, 32 on 16-thread PCs). The sidecar can stay retired; its hub todo can close. (It also re-PUT
+`alternates` as it found them, so it would not have undone this section's.)
+
+### 215.5 macOS in every release: what it would take (a proposal; nothing changed)
+
+The watcher (`tools/farm_release_watch.py`, 196.4) runs `farm_release.py release <head>` with no flags, so a release
+has no macOS build unless one is forced by hand with `--mac --mac-publish` (as for c8e40f5a's b96e45a0, which
+legacy-meta3-r1 still lists although its default build is e9ff0e24's: a campaign of e9ff0e24 refuses it, 215.1 point 2).
+For every release to carry one, so that campaigns list it by default:
+
+1. **Flags.** `release <head> --mac --mac-gates --mac-publish --no-speed-mac` from the watcher: a `--release-args`
+   pass-through (or those flags fixed) in farm_release_watch.py, then the watcher stopped (`--stop`) and started again
+   from a pinned worktree of a commit that has it (196.4). `release.json` already names `mac_runtime` (the macOS CPU
+   pack 040b1882, published), so `--mac` works today. `--mac-gates` (197.4: farm parity on the Mac, the records across
+   platforms) because a published macOS build is now played by default; `--no-speed-mac` because the speed gate's Mac
+   windows wait for an idle Mac (the bench booking `~/mtgz-macfarm/bench.lock`, the run's quiet lock
+   `~/mtgz-remote/.eval.lock`) and the Mac is itself a farm machine and the run's eval host - a release must not stall
+   or fail on "machine in use".
+2. **Reuse.** The release's reuse step (same Rust inputs: no build, 196.2 step 1) requires the source entry's CUDA and
+   DirectML routes to match what is wanted but not its macOS build: a commit reusing e9ff0e24's entry (`mac` null)
+   would get none even with `--mac`. The condition needs `bool(same.get('mac')) == want_mac` (and the macOS runtime
+   the same), or, better, a reused entry gets only the missing macOS part built and published (the Rust inputs are
+   equal, so the source commit's Mac build is this commit's).
+3. **The Mac build path** (197.2, farm_build.py `--platform macos-arm64`): the commit pushed to the Mac's mirror (the
+   `mac` remote, `refs/heads/farm-build-<sha12>`) and the zero-core pin to its core mirror (tools/mac.sh's), the Mac's
+   one farm checkout `~/mtg-zero-wt/farm-build` checked out forced and clean under its lock (`<checkout>.mac-lock`: one
+   build at a time, a second waits, a dead owner's lock is taken over), `cargo build --release -p mtgz_worker` at `nice
+   -n 15` in its own target dir with no RUSTFLAGS, copied back and checked (a thin arm64 Mach-O linking only
+   libSystem, `codesign --verify`, `info`), signed on the desktop (the key never leaves it), published (`--mac-publish`:
+   registered with the coordinator and copied to `$ZERO_BIG_DISK/zero-farm-builds/<id>/`), recorded in the entry's
+   `mac.release` - which is what `release_alternates` reads. No booking is needed for a build (only for speed windows);
+   it shares the Mac with the live run's evaluation, gate offloads (tools/mac.sh, at most two) and the Mac's own farm
+   agent, all at nice 15.
+4. **The Mach-O in the builds directory.** `--mac-publish` puts a Mach-O `mtgz-worker` in
+   `$ZERO_BIG_DISK/zero-farm-builds/<id>/`; a Windows process that runs every alternate's executable there broke the
+   farm pool once (212: WinError 193 every poll, no gen published). Fixed in zero-core 03686a1 (the pool reads the
+   manifest's platform first); this section's campaign code never runs another platform's executable (`local_build`
+   refuses by the manifest's platform; only the Windows GPU routes are self-tested). Any run whose `pool_alternates`
+   names a macOS build must be on a commit with zero-core >= 03686a1 before the watcher publishes macOS builds (the
+   live legacy-meta3-r1 is: core 35a47a9).
+5. **The coordinator** takes platforms already (rev 17, migration 0013; the Macs play legacy-meta3-r1's evaluation
+   on b96e45a0), and the macOS agents (0.3.10) meet the build's minimum (0.3.0) and the variants' (0.3.5).
+
+### 215.6 Open points
+
+* **The default graph on CPU and Mac.** A campaign's networks are exported as the default zero-onnx/2 graph (165:
+  `farm_h2h.export`), while the live run's pool and evaluation export the fast graph (`pool_export` 'fast', zero-core
+  docs/az.md 63: ~2.5x cheaper per batch on a CPU, the Mac's measurement). Exporting campaigns' graphs the fast way
+  (through `export_cached` with a template per architecture) would speed up their CPU and Mac leases too; not done
+  here (it changes every CPU lease's graph, not only the alternates').
+* **The coordinator's eval deferral counts the Macs as CPU capacity for a batch they cannot play** (zero-farm,
+  PROTOCOL 12.2, coordinator `cpuEvalRate`: every online PC with `gpu_play` 0, whatever its platform). A PC that plays
+  a run's self-play on its GPU defers an eval batch unless the CPU PCs' eval rates x `eval_horizon_s` fall short of its
+  unissued games; with the two Macs counted, a Windows-only campaign (no macOS build in its release) is never
+  "behind", so the GPU PCs take it only at a rolling renewal while the live run's generation has no headroom, and the
+  CPU PCs only when free. A coordinator change (count only PCs of a platform the batch has a build for); not made here.
+  A release with a macOS build sidesteps it: the Macs then play the campaign themselves.
+* **The yardsticks** have no setting to opt out of alternates (they inherit the default); the CLI has
+  `--no-alternates`.
+* A GPU self-test runs on this machine's GPU (seconds each, cached per graph and route); a machine without a GPU of a
+  listed route's provider refuses the campaign (by design: pass `--alternates` without it, or `--no-alternates`).
+
+### 215.7 The gate
+
+On 47c1eb75 (the code and 215), in the warm worktree warm-1, `--offload local`, with the system Python 3.13:
+**GATE PASSED WITH SKIPS python 47c1eb75b749 in 691s** - pytest 724 passed in four shards (153, 167, 261, 143), skipped:
+7 live-run-hazard tests (fenced: live runs on this machine); the run-loop smoke 16 games, 0 unfinished; privacy 0
+findings. Two earlier runs failed on tests this branch does not touch: on 37ba1cf8 with the zero-farm venv's Python,
+`tests/test_artifact_cache.py::test_an_acquired_lease_outlives_the_process_that_asked` (a venv's python.exe on Windows
+is a launcher whose child is the interpreter, so the Popen pid is not the pid the child records; it passes with the
+system Python, as in the gate above), and on 0c8ce0ef `tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`
+(its 300 s wait ran out while the shards ran two to three times slower than usual beside the live runs and this
+section's farm test; alone: 2 passed in 197 s).
+## 216. A macOS build in every farm release: on by default, the backfill of an entry without one, a Mac failure that keeps the release (branch `feat/release-mac`, 2026-11-21)
+
+Branch `feat/release-mac` from main e9ff0e24. **Why:** the user (2026-11-21) wants every zero-farm worker release to carry
+a published macOS build, so the Macs get farm work by default: match campaigns (215, branch `feat/campaign-alternates`)
+list a release entry's published macOS build (`mac.release`) as an alternate, and a run adds it to `pool_alternates`
+(after the pool's platform check, zero-core docs/az.md 62). The release watcher (196.4) ran `farm_release.py release
+<head>` with no flags, so no release since c8e40f5a's forced one (b96e45a0) had a macOS build: e9ff0e24's entry named
+CPU f22f63bb, CUDA cca21cdd and DirectML 92041956, `mac` null. This is 215.5's proposal, done. Python tools only: no
+rule, card, encoding, search, training or worker change; behaviour digests untouched.
+
+### 216.1 What changed
+
+* **On by default, as release.json settings** (`tools/farm_release.py` DEFAULTS, overridden by `<builds>/release.json`,
+  each by its flag for one run): `mac` true (`--mac` / `--no-mac`), `mac_gates` true (`--mac-gates` /
+  `--no-mac-gates`: 197.4's farm gates on the Mac, because a published macOS build is now played by default),
+  `mac_publish` true (`--mac-publish` / `--no-mac-publish`: what campaigns list), `mac_fuzz` false (`--mac-fuzz`),
+  `mac_speed` **false** (`--speed-mac` / `--no-speed-mac`: the speed gate's Mac windows need an idle Mac, and the Mac is a
+  farm machine and a run's evaluation host - a release must not stall or fail on "machine in use"). So the watcher and a
+  hand-run `release` both make the macOS part; `"mac": false` in release.json (or `--no-mac`) turns it off.
+* **After the index entry, never before it.** The macOS part used to run between the farm gates and the speed gate, so a
+  Mac that was asleep, a Mac build or a Mac gate failing stopped the release before anything was published. Now the
+  release publishes its Windows, CUDA and DirectML builds and writes the index entry first, then runs the macOS part
+  (module docs, steps 11-17): **mac-reach** (ssh `BatchMode`, `ConnectTimeout=20`: a sleeping Mac fails in seconds, not
+  after a TCP timeout), **mac-build** at the entry's `built_at` (the commit its Windows build was built at, so the macOS
+  manifest's engine_commit is the Windows build's - 215's campaigns require the same engine; `farm_build.py --platform
+  macos-arm64`: the Mac's one farm checkout under its lock, `nice -n 15`, signed on the desktop), **mac-gates**,
+  **speed-mac** (only with `mac_speed`; its own `releases/<sha12>/speed-mac/`), **publish-mac** (registered and copied to
+  `<builds>/<build_id>/`), **mac-plan** (advice: a plan that cannot be made is noted in the record, not a failure) and
+  **record**: the entry's `mac` field, in place (`mtgz.az.farm_builds.update`, under the index lock) on every published
+  entry of the same build that lacks a complete one - the commit's own release and the commits that reused it.
+* **The backfill** (the reuse and "already in the index" paths). An entry's macOS part is complete when `mac.release`
+  names a build, published when `mac_publish`, for the current `mac_runtime`, with a fuzz build when `mac_fuzz` (the Mac
+  gates are not re-run for an entry that has its build). A commit whose Rust inputs equal a published entry's still
+  reuses it (no Windows build), and a commit already in the index is still done - but an entry that is not complete gets
+  only the macOS part: another entry of the same build that has a complete one is copied (nothing built, the Mac not
+  reached), else steps 11-17 at its `built_at`. A complete entry: nothing; a second run builds nothing.
+* **A failed macOS part keeps the release, loudly.** Any failure in it (the Mac unreachable, no `mac_runtime`, a build,
+  a gate or the publish failing, anything raised) is caught there: the entry keeps its published builds and records
+  `mac: {"failed": <step>, "error", "at", "commit", "built"}` (no `release` key: campaigns list no macOS route and say
+  so), result.json gets `mac_failed`, notes.txt a `MACOS PART FAILED at <step>` line, the output's last line is
+  `farm_release: MACOS PART FAILED at <step>: ... (exit 3); the next farm_release.py release <sha12> backfills it`, and
+  the exit status is **3** (0: everything wanted; 1: failed, as before). `describe` (lookup, the final line) shows
+  `NO macOS build (failed at <step>)`; `list` a `mac` column.
+* **The watcher** (`tools/farm_release_watch.py`): exit 3 is a released head (in `done`, `"mac_failed": true`), logged as
+  `released <head> WITHOUT ITS MACOS BUILD`, with the state's `mac_pending` {head, attempts, last_try, line}; while that
+  head is main's newest, `farm_release.py release <head>` runs again - the macOS part only - every `--mac-retry-every`
+  seconds (3600), at most `--mac-retries` times (6), then `GIVING UP` (log, `mac_pending.gave_up`). A retry that works
+  logs `macOS part of <head> backfilled` and clears it; a newer head's release takes over (its entry gets its own
+  macOS part, or this one's when it reuses the build). `--status` prints `mac_pending`.
+* **`farm_builds`**: `update(build_id, fields, only)` (in place, under the lock), `mac_build(e)` (the published macOS
+  build id), `describe` names the macOS build. `pool_settings` (what `--pool-build published` and `lookup --pool-args`
+  give a run) does **not** add the macOS build to `pool_alternates`: a run's macOS alternate goes through the pool's
+  platform check, which stops the pool when the run's settings depend on the platform's libm (zero-core
+  `farm_pool.platform_check`), so adding it stays a run's own choice (mac-plan prints the change).
+* **The Mach-O in `<builds>/<build_id>/`** (215.5 point 4, 212): nothing on the release path runs it - the macOS
+  executable is checked by parsing its Mach-O header here and run only on the Mac (`info`, `fuzz-check`, the gates),
+  publishing verifies signatures only, and the speed gate's Mac windows run on the Mac. zero-core's farm pool reads a
+  build's platform from its manifest before running an alternate (03686a1; main's pin 35a47a9 has it), the campaigns'
+  `local_build` refuses another platform's build (215). A run whose `pool_alternates` names a macOS build must be on
+  a core at or after 03686a1.
+
+### 216.2 Tests
+
+tests/test_farm_release.py (15 passed; 8 new, the reuse test now runs `--no-mac`), with the steps that reach, build on
+or publish for the Mac replaced by recorders (no Mac, no network, no build):
+`test_the_macos_switches` (defaults on / gates / publish, no fuzz, no Mac speed; release.json and each flag),
+`test_when_an_entry_has_its_macos_part`, `test_index_update_and_the_macos_build_in_describe`,
+`test_release_backfills_the_macos_part_of_a_reused_entry_once` (built at `built_at`, recorded on both entries of the
+build, three more runs build nothing), `test_an_entry_gets_the_macos_build_another_entry_of_its_build_has` (copied, the
+Mac never reached), `test_a_failed_macos_part_keeps_the_published_builds_and_a_later_run_backfills_it` (unreachable, a
+build raising a RuntimeError, a failing Mac gate: each exit 3 with the entry intact and the failure in the entry,
+result.json, notes and the last line; then the backfill, with a failing mac-plan only noted),
+`test_no_macos_pack_is_a_loud_failure_not_a_silent_skip`, `test_a_new_build_is_published_before_its_macos_part` (the
+index holds the new entry when the Mac is first reached), `test_the_watcher_retries_a_failed_macos_part` (due / not due,
+given up after `--mac-retries`, a newer head, a retry that works). tests/test_farm_speed.py:
+`test_the_macos_parts_speed_windows_alone` (speed-mac: the Mac alone, its own directory, the desktop's result untouched).
+
+### 216.3 Restarting the watcher with the new behaviour
+
+The running watcher keeps its own code until restarted, but each release is a new `farm_release.py` process from the
+watcher's checkout: once main's checkout has this branch, releases make the macOS part even under the old watcher, which
+reads exit 3 as a failed head (not retried). So restart it right after the merge:
+
+1. `python tools/farm_release_watch.py --status` (note the pid; a release in progress shows in its log's tail);
+2. `python tools/farm_release_watch.py --stop` - it exits at its next sleep tick, i.e. **after** a release in progress
+   finishes (the STOP file is read between polls, never during a release); wait until `--status` says `not running`;
+3. start it again from the checkout of main that has this branch (as before, the zero-farm venv's Python):
+   `python tools/launch_hidden.py <builds>/release_watch.console.txt <zero-farm venv python> tools/farm_release_watch.py --python <same>`
+   (optional: `--mac-retry-every 3600 --mac-retries 6`, the defaults);
+4. `--status` again: running, `seen` = main's head; the log shows `watcher started`.
+
+Nothing in release.json has to change: the macOS part is on by default (`mac_runtime` 040b1882 is already set there).
+To release without it: `"mac": false` in release.json.
+
+### 216.4 The backfill of main e9ff0e24's release (the build f22f63bb)
+
+With this branch's code (c943732b), from its own worktree, the zero-farm venv's Python: `farm_release.py release
+e9ff0e24` (the defaults: no flags). The release lock was free (the watcher idle, main at e9ff0e24). The run: "released
+already" -> "its entry has no complete macOS part: the macOS part only" -> mac-reach 0 s, checkout (the release worktree
+at e9ff0e24, its `built_at`) 1 s, modules 4 s (the artifact cache), **mac-build 29 s** (incremental on the Mac),
+**mac-gates 133 s**, publish-mac 6 s, mac-plan 1 s, recorded on the one index entry of build f22f63bb; exit 0.
+
+* **macOS build `48877dfd9c3e227a0ce997f0`** (`mtg-e9ff0e2-release-macos-arm64`): platform macos-arm64, engine_commit
+  e9ff0e24 (= the Windows build f22f63bb's), core 35a47a9a, profile release, min_agent 0.3.0, requires the macOS pack
+  040b1882; published and copied to `<builds>/48877dfd.../`.
+* **The Mac gates** (197.4 on the reference: legacy-meta3-r1's config and gen-206/207 export): (a) farm compat on the Mac
+  PASSED - gate 2 identical (6 games, 2,890 rows, 150 batches), gate 3 identical (6 games, 2,556 rows, 6 decks), the
+  feature `rolling` announced; (b) records across platforms PASSED - the Mac's 12 matches replayed there identical (710
+  rows, nets 206: 328, 207: 382, 20 arrays), replayed here **0 refused** of 12, the desktop's rows = the Mac's shards (710
+  rows, 20 arrays identical).
+* **mac-plan** (printed, not applied): legacy-meta3-r1 passes the libm check; its change would be `pool_alternates`
+  "768edc5e...,48877dfd..." (the run still lists c8e40f5a's b96e45a0: moving it is the run owner's call).
+* `farm_release.py lookup e9ff0e24`: `commit e9ff0e24708d: build f22f63bb0c461180b6260b3e (runtime d531424b..., CUDA
+  alternate cca21cdd... for 855d2162..., DirectML alternate 92041956..., macOS build 48877dfd9c3e227a0ce997f0)`; `--json`
+  has `mac.release` {build_id 48877dfd..., published}, `mac.runtime` 040b1882..., `mac.commit` e9ff0e24, the gates and the
+  plan. The index otherwise unchanged (compared with a copy taken before: only that entry's `mac`).
+* **Idempotent**: the same command again - "released already", no macOS step, exit 0.
+
+### 216.5 The gate
+
+On c943732b (216.1-216.3), in the warm worktree warm-1: **GATE PASSED WITH SKIPS python c943732bea40 in 382s** (with
+`--offload mac`) - privacy 0 findings; build and the release worker from the artifact cache; pytest on the Mac 1-of-4
+134 passed, 2-of-4 152 passed, 3-of-4 252 passed (tests/test_farm_release.py and tests/test_farm_speed.py among them);
+4-of-4 124 passed and the desktop part 48 passed on the desktop (throttled); the run-loop smoke 16 games, 0 unfinished -
+skipped: 3 live-run-hazard tests (fenced: a live run on this machine). The first run (auto placement) FAILED in pytest
+2-of-4 (2 failed, 197 passed): that shard ran on the desktop instead of the Mac, and both failures were the placement's -
+`tests/test_mac_remote.py::test_the_macs_selfplay_settings` saw `MTGZ_MAC_HOME` rewritten by Git Bash's path conversion
+to `C:/Program Files/Git/Users/...` (exported through slotd.sh's bash into a Windows Python), and
+`test_a_worker_plays_mtg[matches]` timed out at 600 s beside two live runs and another gate; neither test touches this
+change (it passes alone here).
+
+### 216.6 Open points
+
+* **Restart the watcher after the merge** (216.3): until then, a release by the old watcher runs the new
+  `farm_release.py` (the macOS part included) and reads exit 3 as a failed head, not retried.
+* **Runs do not take the macOS build by themselves.** `pool_settings` / `--pool-build published` leave it out of
+  `pool_alternates` (216.1); campaigns get it from the index (215, unmerged). legacy-meta3-r1 still lists c8e40f5a's
+  b96e45a0; the change to 48877dfd is the run owner's (mac-plan printed it).
+* **Older entries** (31ca5a49, 4c77c950 and before) have no macOS build; `farm_release.py release <commit>` backfills one
+  (not done: only e9ff0e24 was asked).
+* An entry that has its macOS build is not re-gated on the Mac; the speed gate's Mac windows stay off (`--speed-mac` on an
+  idle Mac only).
+* A Mac build that fails for a reason that does not go away is retried by the watcher 6 times (a Mac build at nice 15
+  each), then given up loudly.
+* A backfill run of a released commit rewrites `releases/<sha12>/result.json` and `notes.txt` with its own record (any
+  "released already" run rewrote result.json before too); the index entry keeps the original release's record.
+
+### 216.7 The merge of 214, 215 and 216 into main, and its gate
+
+The three branches (`feat/seat-settings`, `feat/campaign-alternates`, `feat/release-mac`) were merged on one branch
+(`integrate/farm-experiments`: 052d5e6b, then 969fc451) and moved onto main together. Conflicts only in the usage text
+and the `C.submit(...)` call of tools/farm_campaign.py (both sides kept: the per-side flags' `sides` in `meta` and the
+alternates arguments) and in this file (both sections kept). Lane B's `release_alternates` reads an entry's `mac` field
+as `mac.release` and so lists no macOS build for an entry whose macOS part failed (216.1's `mac: {failed, ...}`), with
+its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate: `GATE PASSED WITH SKIPS python
+969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
+placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
+the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
+
+## 220. Legacy Hogaak Tempo: the deck's cards (lanes `hogaak-a`, `hogaak-b`, `hogaak-c`; integrated on `hogaak`, 2026-11-21)
+
+**Why.** The user asked on 2026-11-21 for every card of MTGGoldfish's Legacy Hogaak Tempo list that mtg-zero did not
+support yet, so the deck can be played - best-of-one and best-of-three with its sideboard - beside the Delver, Doomsday
+and Sneak and Show 75s. **The deck and its provenance**: the archetype page
+<https://www.mtggoldfish.com/archetype/legacy-hogaak-tempo#paper>, whose export field (`deck_input[deck]`) is the
+archetype's representative paper list, deck 8027954 (<https://www.mtggoldfish.com/deck/8027954>): "Dimir Hogaak" by
+Jonathan Canfield, North American Eternal Weekend - Legacy Championship, 2026-10-31, 5th place (12-3), deck source
+melee.gg; read with plain curl on 2026-11-21 (the download link `/deck/download/8027954` returns 403, Cloudflare), 60
+main and 15 sideboard, pinned verbatim as `data/decks/hogaak_tempo_8027954.txt` (220.4). **The seven new cards** (every
+other card of the 75 was supported: the cube's Kaito, Bane of Nightmares, Orcish Bowmasters, Brazen Borrower, Karakas,
+Dauthi Voidwalker, Fatal Push, Force of Negation, ...; the legacy table's Consign to Memory), ported by three lanes from
+main e9ff0e24 in parallel:
+
+| Lane | Branch | Cards | Section |
+|---|---|---|---|
+| A | `hogaak-a` | Hogaak, Arisen Necropolis (main 4) | 220.1 |
+| B | `hogaak-b` | Mockingbird (main 3), Massacre (sideboard 2) | 220.2 |
+| C | `hogaak-c` | Stitcher's Supplier (4), Dark Matter Manipulator (4), Moonshadow (4), Dryad Arbor (1) | 220.3 |
+
+then merged on `hogaak` (220.4: the identities, the deck, `FUZZ_POOL=hogaak`, the cross-lane tests, the digests).
+**The rules** (the user's, for every lane and the integration): no approximation of any class - every reachable state
+faithful to the Comprehensive Rules and the Oracle text, no new docs/shortcuts.md entry, a choice the action layout's
+slots can't hold decomposed rather than cut; no encoding gap - every public state the cards create reaches the
+network's input exactly (the public-state gate of `tests/az.rs`), layout v7 unchanged; every official ruling of the
+cards tested (`// ruling:`); the cube's behaviour digests equal.
+
 ### 220.1 Lane A: Hogaak, Arisen Necropolis (branch `hogaak-a`)
 
 **Why.** MTGGoldfish's Legacy Hogaak Tempo (paper, the archetype's representative list, deck 8027954, fetched
@@ -41765,3 +42240,689 @@ live on the desktop); the fuzz on the Mac (`tools/mac.sh`, bit-identical to the 
   (`hogaak_positions`), `tests/support.rs` (the legacy list), `tests/cards_suite.rs`, `tests/known_face_key.rs`,
   `tests/fuzz.rs`, `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/interactions.md`, `docs/ir_defects.md`.
 * No docs/shortcuts.md entry; layout v7 unchanged (no spare used); no zero-core change.
+
+### 220.2 Lane B: Mockingbird, Massacre (branch `hogaak-b`, 2026-11-21)
+
+**Why.** Lane B of MTGGoldfish's Legacy Hogaak Tempo (deck 8027954, `E:/mtg-zero-scratch/hogaak/`, its PROVENANCE.md):
+Mockingbird (3 main) and Massacre (2 side), each faithful to its Oracle text, the Comprehensive Rules and its official
+rulings in constructed play's table (`CardDb::constructed`). From main e9ff0e24; the IR pipeline is this repo's
+(ENGINE.md 170). Lanes A (Hogaak) and C (Stitcher's Supplier, Dark Matter Manipulator, Moonshadow, Dryad Arbor) are on
+their own branches; Mockingbird copying their cards and Massacre against them are the integration's tests (220.4).
+
+* Mockingbird {X}{U}, Creature - Bird Bard 1/1: "Flying / You may have this creature enter as a copy of any creature on
+  the battlefield with mana value less than or equal to the amount of mana spent to cast this creature, except it's a
+  Bird in addition to its other types and it has flying."
+* Massacre {2}{B}{B}, Sorcery: "If an opponent controls a Plains and you control a Swamp, you may cast this spell without
+  paying its mana cost. / All creatures get -2/-2 until end of turn."
+
+#### What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, meta: 25 cards), `ir/mtgz_ir/cards/parser/spell_builder.py`, `data/cards/*`, `card_ir/src/generated.rs` | the two Scryfall records appended (E:/mtg-zero-scratch/hogaak/raw); Massacre's free-cast line parsed (below); schema `693d23a4a259` -> **`c4383b8e06b9`** (`c4383b8e06b97a3d62f3e64fdea458865d489a84a2e8daaf1ef2417171a1842d`), 729 classes (`AndCondition` added); `powerlsv.ir.json` and `eoe.ir.json` the previous files but the hash |
+| Identities | `engine/src/az/legacy_cards.txt` | Mockingbird, Massacre appended after Rough // Tumble (final numbers at integration; no test names one) |
+| Lowering | `lower/printing.rs` (`lower_enters_as_copy`'s `max_mv_mana_spent`; `free_cast_condition` through `lower_condition`), `lower/filter.rs` (`OpponentsControlAtLeast`, `AndCondition` in `lower_condition!`), `db.rs` (`cond_reads_source`), `lower/mod.rs` (`exc_subtype`: creature or land types only) | every field named, the rest denied |
+| "The amount of mana spent to cast this creature" | `eoe_w3.rs` (`reads_mana_spent` sees an enters-as-copy filter) | **the existing general record reused**: the payment records `Mark::ManaSpent` on the spell (`pay.rs`, EoE W3: every unit paid, convoke's and improvise's taps excluded), the resolution carries it to the permanent (`W3State::entering_spent`, `w3_entered_spent`), `Filter::MvAtMostManaSpent` compares a candidate's mana value with the entering permanent's record (0 when it wasn't cast). Nothing new was needed but turning it on for Mockingbird |
+| Rules fixes | `cast.rs` (`mana_value_of`), `copies.rs` (`enter_as_copy`), `layers.rs` (`has_subtype`) | CR 202.3b, 107.3m, 205.3d (below: fixes outside the cards) |
+| Testkit | `testkit.rs` | `Game::mana_value_now` (rules tests read 202.3 directly) |
+| Tests | `engine/tests/cards_hogaak_b.rs` (41; `cards_suite`), `tests/ir/test_legacy_hogaak_b.py` (11), `tests/support.rs` (`SUPPORTED_LEGACY`), `tests/fuzz.rs` (one test's seeds, below), `tests/ir/test_fetch_cube.py` and `test_legacy_creatures.py` (the pinned pool lists) | below |
+| Fuzz | `engine/src/fuzz/games.rs` (`FUZZ_POOL=hogaak_b`, `HOGAAK_B_DECK`, `count_hogaak_b`) | below |
+| Rulings | `data/rulings/legacy.rulings.json` (the two cards' records appended: Mockingbird's 7, Massacre none), `triage.tsv` (6 rows; 602bf769 was the triage's already), `docs/rulings.md` | every ruling tested |
+| Docs | this subsection, `docs/ir_defects.md` section Z, `docs/interactions.md` | |
+
+#### The IR
+
+Mockingbird already parsed (the U/B cube's enter-as-copy grammar, from the roto pool): `enters_as_copy_types:
+[Creature]`, `enters_as_copy_max_mv_mana_spent`, `enters_as_copy_add_subtypes: [Bird]`, `enters_as_copy_add_keywords:
+[flying]`; the lowering denied the cap (no card of the tables had it). Massacre didn't: its first line had no grammar.
+`spell_builder._FREE_CAST_IF_LINE_RE` ("If <condition>, you may cast it without paying its mana cost.", Once Upon a
+Time's) now takes "cast this spell" too, and `_free_cast_condition` reads the condition as a fixed phrase or one or more
+control clauses joined by " and " ("an opponent controls a <Subtype>" -> `OpponentsControlAtLeast(HasSubtype, 1)`,
+"you control a <Subtype>" -> `ControlPermanent(HasSubtype)`; both -> `AndCondition`): a parameterized recognizer for the
+Nemesis cycle's shape (the parser's rule, its AGENTS.md). The second line is the existing `PumpAllCreaturesUEOT
+{ power: -2, toughness: -2 }` (Toxic Deluge's and Harvester of Misery's). No other printing of the three pools changes
+(`tools/card_ir.py export`, then `check` identical and `roundtrip` ok: cube 546, legacy 25, eoe 483). No IR defect
+(docs/ir_defects.md section Z; entries 420-439 unused).
+
+#### The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| "{X}{U}" | 202.3e, 107.3b | X on the stack only: mana value 1 + X there, 1 in hand, in the graveyard and on the battlefield; cast without paying its mana cost (Omniscience) X is 0 |
+| "Flying"; 1/1 Bird Bard | 702.9 | its printed values; declining the copy leaves them (ruling f30367a6) |
+| "You may have this creature enter as a copy of any creature on the battlefield" | 707.5, 614.1c, 614.12a, 616.1 | the existing `EntersAsCopy` (Phyrexian Metamorph's, ENGINE.md 26.3): as it is put onto the battlefield its `Enters` event waits; its controller chooses (`ChoosePermanent`, `PASS` = nothing, paged past any slot limit, ENGINE.md 100.2) among every creature of either player now - tokens, copies, face-down creatures, an animated land, Kaito in his controller's turn - but itself and not one entering at the same time (Show and Tell's other card); then what it entered as enters |
+| "with mana value less than or equal to the amount of mana spent to cast this creature" | 601.2h, 202.3 | `Filter::MvAtMostManaSpent` against the entering permanent's `Mark::ManaSpent`: X and {U} and any cost increase (Disruptor Flute's {3}; ruling 5a1ea5ca: "all mana spent ... additional costs as well"), from any source (Ancient Tomb's two, Lotus Petal), mana floating unspent not counted; 0 when cast without paying its mana cost or put onto the battlefield without being cast; the candidate's mana value as it is (X 0 on the battlefield, ruling 602bf769: Walking Ballista is 0; a copy of a back face 0, 202.3b) |
+| "except it's a Bird in addition to its other types and it has flying" | 707.9a-b, 707.3, 205.3d | the copy's exceptions (`Except::subtypes` Bird, `kws` flying), part of its copiable values: a copy of the copy (another Mockingbird, Phyrexian Metamorph) has them too (ruling 5239ef09); a Bird only while it is a creature (205.3d: copying an animated Creeping Tar Pit makes a land, not a Bird) |
+| what is copied | 707.2, 707.8, 708.2a, 111.3 | printed values and other copy effects only: no counters, tapped status, attachments or noncopy effects (ruling de35ba2a); a token's original characteristics, and the copy is no token (ruling f2b97e8c: copying an Orc Army makes a 0/0 that dies as the Mockingbird card); a transformed permanent's face up, and the copy can't transform (Revealing Eye); a face-down creature's face-down 2/2 (nothing of the hidden card) |
+| the copied "enters" abilities | 707.5, 603.6a, 614.1c, 614.12, 306.5b, 107.3m | its enter triggers trigger (Orcish Bowmasters, ruling 4376972c); its "enters with" and "as enters" replacements apply (Arwen's indestructible counter, True-Name Nemesis's player, Creeping Tar Pit enters tapped, Murktide Regent's counters for cards exiled with it - none); a planeswalker copy enters with its printed loyalty (Kaito); an "enters with X" replacement uses Mockingbird's X (107.3m: Walking Ballista with X 2 has two counters) |
+| legendary and land copies | 704.5j, 305.1 | copying its controller's own legend brings the legend rule (Ragavan, Kaito); a land copy is no land play |
+| "If an opponent controls a Plains and you control a Swamp, you may cast this spell without paying its mana cost" | 118.9, 118.9a, 118.9d, 601.2b, 601.2f, 205.3, 613.1d | an alternative cost (`AltCost` with no mana and `only_if` `Cond::All([OpponentsControlAtLeast(Subtype Plains, 1), ControlAtLeast(Subtype Swamp, 1)])`), offered by `ChooseAltCost` (`NUMBER` 1) beside the mana cost while the condition holds as the cost is chosen; the subtypes as they are (Tundra, Scrubland, a basic Plains; Underground Sea; not a nonbasic land under Magus of the Moon); cost increases still apply (Thalia's {1}); it is still a spell cast (Force of Will counters it) |
+| "All creatures get -2/-2 until end of turn" | 611.2c, 613.4c, 704.5f, 704.3, 514.2 | the existing `Ext::Apply` over `On::Each(creature)`: the set is the creatures as it resolves (a creature entering later or a land animated later is not affected); state-based actions then kill those at toughness 0 or less at once (dies triggers: Haywire Mite; Sanguine Evangelist's Bat enters after and is a 1/1); later modifications add up in layer 7c (Kaito's +1 emblem); it ends in the cleanup step |
+
+#### Readings taken
+
+* **107.3m and Mockingbird's X.** Ruling 602bf769 ("If the copied creature has {X} in its mana cost, X is 0") is the
+  copied mana cost's X: the candidate's mana value and the copy's own (202.3e, 107.3g). An "enters with X" replacement
+  of what Mockingbird enters as is another X: 107.3m gives it the X of the spell that became the object (Mockingbird
+  cast with X 2 entering as Walking Ballista has two +1/+1 counters; with X 0, none: it dies). Phyrexian Metamorph's
+  spell has no X, so its copies keep 0.
+* **Kaito.** "During your turn ... he's a 3/4 Ninja creature" sets his card types (the card's ruling: not a planeswalker
+  then) and his creature types (layer 4 over the copy's layer 1): Mockingbird copying Kaito in its controller's turn is
+  a 3/4 Ninja creature with flying and hexproof; it entered with Kaito's loyalty (306.5b: as it enters it is a
+  planeswalker); in the other player's turn it is a planeswalker, so not a Bird (205.3d).
+* **The condition is checked as the cost is chosen** (601.2b): paying Thalia's {1} by tapping the Swamp that allowed
+  the free cast is fine. Massacre moving to the stack (601.2a) changes neither side's lands.
+* **"An opponent controls a Plains"**: a permanent of the other player with the subtype now (phased-out permanents
+  don't exist, 702.26b; a Plains card in a hand or graveyard isn't controlled).
+* **The -2/-2 effects** are one effect per creature as the set is locked, each with its own timestamp: they modify
+  power and toughness only (layer 7c, summed), so their order among the creatures doesn't matter.
+
+#### Fixes and findings outside the two cards
+
+* **CR 202.3b** (`cast.rs::mana_value_of`): a copy of the back face of a nonmodal double-faced object (a permanent
+  copying a transformed Concealing Curtains; a token copy back face up, 707.8a; a copy of such a spell) has mana value
+  0; the engine gave the front face's. Reachable with Mockingbird (a cube creature with a creature back face; the
+  Delver deck's Tamiyo transforms into a planeswalker, which Mockingbird can't copy), Phyrexian Metamorph, Saheeli and
+  the cube's token copies. The cube digest is unchanged.
+* **CR 107.3m** (`copies.rs::enter_as_copy`): an entering copy's "enters with X" uses the X of the spell that became
+  it (its `Enters` note's X, `entered_counts`); the engine used 0 always. Only Mockingbird has an X among the cards that
+  enter as copies: digest unchanged.
+* **CR 205.3d** (`layers.rs::has_subtype`, `lower/mod.rs::exc_subtype`): a copy exception's subtype applies only while
+  the object has the card type it corresponds to (creature types: creature or kindred; land types: land); the lowering
+  refuses any other kind of exception subtype loudly. Superior Spider-Man copies creature cards and Echoing Deeps
+  lands, so the cube's and EoE's games are unchanged.
+* **Found, not changed (EoE only)**: EoE W3's `DamageEachSourceMv` reads a source that left the battlefield through
+  `lki_copy`'s definition, which doesn't remember whether the permanent was a copy (202.3b's 0 for a copy of a back
+  face); no EoE card makes such a source.
+
+#### The encoding
+
+No new state, no layout change, no gap. The copy: the permanent's identity is Mockingbird's, `perm::COPY` and
+`perm::COPY_OF` (the copied card's identity), its keywords as they are (flying), `perm::MANA_SPENT` (layout v6), and
+layout v7's `effects` token for the copy effect: the copied identity and the exceptions (subtype Bird by its stable
+name id, flying). The constructed table's copy exceptions name four subtypes in all (Superior Spider-Man's three,
+Bird), so any copy of copies fits the token's four (`ef::SUBS`; `every_tables_copy_exceptions_fit_the_effects_token`).
+Mockingbird's X on the stack (`stack::X`) and its record there (`stack::MANA_SPENT`); Massacre's alternative cost
+(`stack::ALT`, `ALT_INDEX`); the -2/-2 effects (`effects` tokens). The public-state gate (`--test az`, `public_state_reaches_the_encoding`): passes with no new gap (487 positions, 278
+fields, 243 perturbations; "a permanent becomes a copy of another" 475 applied, every view and encoding changed; "the
+mana spent to cast a permanent" 487 applied); the exceptions' encoding is checked by hand
+(`the_copy_its_identity_bird_flying_and_mana_spent_reach_the_encoding`).
+
+#### Tests, the fuzz pool
+
+* **`engine/tests/cards_hogaak_b.rs`, 41 tests** (every ruling: `// ruling:`; the CR in each name): Mockingbird's card
+  and mana value (202.3e), declining, the amount (X and {U}, mana value 3 with X 2, Disruptor Flute's {3}, Ancient
+  Tomb, floating mana, Lotus Petal, Omniscience's free cast, Show and Tell), every creature of both players and a token
+  over the pages, copying Orcish Bowmasters (its enter and draw triggers), Brazen Borrower, an Orc Army token, a tapped
+  creature with counters, a copy of a copy and Phyrexian Metamorph copying it, Walking Ballista with X 0 and 2
+  (107.3m), Arwen, True-Name Nemesis, Murktide Regent, Ragavan (the legend rule and none), Kaito, Tamiyo (712.11a), a
+  transformed Concealing Curtains (202.3b), an animated Creeping Tar Pit (205.3d), a face-down creature (708.2a, and P0's
+  worlds); the copy choice and the copy across `determinize`; the encoding (identity, copy flag, copied identity,
+  flying, mana spent; the `effects` token's Bird and flying; a declined one); the tables' copy exceptions against the
+  token. Massacre: the card, its free cast with and without other mana, the subtypes on either side, not free without
+  both (and a Plains in hand), Magus of the Moon, Thalia's {1}, Force of Will, both sides' creatures dying at once
+  with dies triggers and a later token, a creature entering and a land animated later, the cleanup, the Delver board
+  with Kaito's emblem. `docs/interactions.md` has the matrix. `tools/untested_cards.py`: 571 supported (25 legacy), 0
+  untested. `docs/rulings.md`: 1,674 rulings (1,307 distinct), untested 0.
+* **`tests/ir/test_legacy_hogaak_b.py`, 11 tests**: the two printings, the free-cast line's two wordings, the
+  parameterized condition and what it leaves unclaimed.
+* **`FUZZ_POOL=hogaak_b`**: `HOGAAK_B_DECK` (60): Mockingbird and Massacre four each; Orcish Bowmasters 4, Brazen
+  Borrower 2, Kaito 2, Concealing Curtains 2, Walking Ballista 2, True-Name Nemesis, Phyrexian Metamorph, Murktide
+  Regent (copy targets of mana value 0 to 7, back faces, X, as-enters choices, copies of copies); Force of Will 4,
+  Brainstorm 4, Ponder 3, Daze 3, Thoughtseize 2; Underground Sea 4, Scrubland 2, Tundra 2, Swamp 2, Island 2, Plains,
+  Verdant Catacombs 3, Polluted Delta 3, Wasteland 2. Against the Delver 60 in either seat, one game in three the
+  mirror (an opponent with a Plains: the free cast). With 200 games or more it requires Mockingbird cast, a copy made, a
+  copy declined, Massacre cast for free and Massacre resolving (and counts Massacre cast, copies of a back face, a
+  Mockingbird as Walking Ballista with counters).
+
+#### Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/hogaak-b`, release profile unless said; the 20k and the regression
+fuzz on the Mac with `tools/mac.sh` (bit-identical, ENGINE.md 44).
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,767
+  passed, 0 failed, 37 ignored** (`cards_suite` 1,432 with `cards_hogaak_b` 41, `az` 57, `misc_suite` 210, `rules_suite`
+  453, `rulings_suite` 397, `fuzz` 19, `support` 9, `hidden` 28, `limits` 13).
+* **Behaviour digests** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no `DIGEST_WRITE`): full
+  **44372545881ef768**, every one of the 2,500 games equal to `tests/data/digests.txt` (main's, 210.6), on each of the
+  branch's rules commits; `DIGEST_ENCODING=0` **a965c3fc8d3bba8a** (main's, 210.6); `DIGEST_ENCODING=v5`
+  **9f4cb802bae20e3b** (not recorded for main since 210; the full digest's games are main's line for line, and the v5
+  projection is a function of them). `--test digest_formats`: EoE **c3a9c786030f42eb** and driver **6a03572828250b86**
+  equal; constructed and metagame differ through the table prior (Limits), every digest equal with the two cards taken
+  out of the table.
+* **`FUZZ_POOL=hogaak_b FUZZ_GAMES=20000`** (the Mac, `tools/fuzz_shards.py`, 16 shards): PASSED, no failure; wins 9,693 /
+  9,738, 569 drawn at the turn cap, none aborted, 36.2 turns and 448.8 decisions a game, 16,664,101 options completed;
+  Mockingbird cast 20,937, copies made 7,033, declined 14,078, copies of a back face 966, a Mockingbird as Walking
+  Ballista with counters 4; Massacre cast 15,510, for free 9,582, resolved 7,582.
+* **The `fuzz` profile** (debug assertions), 1,000 games (4 shards): PASSED (wins 477 / 499, 24 drawn; 1,315,803 options
+  completed; Mockingbird 1,080, copies 351 / declined 700, Massacre free 501, resolved 402). **`FUZZ_CHANCE=10`** 600
+  games and **`FUZZ_BELIEF=2`** 600 games (the `fuzz` profile, one process each): both passed, with the end-of-run checks (`FUZZ_CHANCE=10`: 26,770 chance walks, 10,167 replays whose
+  outcome the force changed; `FUZZ_BELIEF=2`: 128,673 weighted worlds). (`tools/fuzz_shards.py` scrubs every `FUZZ_*`
+  variable of the caller, so these two run the test binary directly.).
+* **Regression fuzz** (the Mac): `FUZZ_POOL=delver` 4,000 games + 200 matches + 200 post-sideboard (Murktide Regent cast
+  2,030 times, its trigger 62, Prismari Charm 2,981), the default pool 2,000 games + 100 matches, `FUZZ_POOL=sns` 2,000:
+  all PASSED.
+* `python tools/card_ir.py check`: identical; `roundtrip` ok; `python -m pytest tests/ir` for the legacy pool, the
+  pipeline and the new file (166 passed). `python tools/rulings_doc.py`: current. `bash tools/build_py.sh`, `python -m
+  pytest -q tests`: 3,397 passed, 31 skipped, 1 failed:
+  `test_mac_remote.py::test_a_worker_plays_mtg[matches]` timed out (the desktop loaded by the live run and this lane's
+  fuzz) and passes alone (both parameters: 2 passed, 207 s).
+* No docs/shortcuts.md entry; no layout change; no zero-core change.
+
+#### Limits and merge points
+
+* **Other lanes' cards**: Mockingbird copying Hogaak (mana value 7; "you can't spend mana to cast this spell" and
+  convoke/delve are the spell's, not the copy's), Stitcher's Supplier and Dark Matter Manipulator (their enter
+  triggers), Moonshadow (its six -1/-1 counters), Dryad Arbor (a land creature: a land copy, no land play); Massacre
+  against them; the deck's `FUZZ_POOL=hogaak`. The integration's (220.4).
+* **The constructed and metagame digests and one fuzz test move with the table**: adding two cards to constructed play's
+  table changes `TablePrior`'s support, whose draws deal the best-of-three hidden decks (ENGINE.md 129.1): `--test
+  digest_formats` constructed 16441662701e233d and metagame 56ff52ffef1b1913 differ on this branch while every
+  best-of-one line of both is the same game (compared with the definitions hashed by name and without chance keys,
+  which carry definition ids), and with the two cards taken out of the table every digest is main's. Not re-recorded
+  (the integration adds seven cards: it re-records once, the maintainer's call). `tests/fuzz.rs::
+  a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game`'s seeds 3,900,000,012 and 079 no longer reach the
+  look: 3,900,000,019 and 087 replace them (a scan of its ranges, 46 seeds reach one); the integration rescans.
+* **Merge points**: `legacy_cards.txt` (lane order: A, B, C), the legacy pool files and the schema (re-export once),
+  `spell_builder.py` (the free-cast line), `lower/printing.rs` (the enters-as-copy cap, `free_cast_condition`),
+  `lower/filter.rs` (`lower_condition!`), `lower/mod.rs` (`exc_subtype`), `db.rs` (`cond_reads_source`), `cast.rs`
+  (`mana_value_of`), `copies.rs` (`enter_as_copy`), `layers.rs` (`has_subtype`), `eoe_w3.rs` (`reads_mana_spent`),
+  `testkit.rs`, `fuzz/games.rs` (the pool), `tests/support.rs`, `tests/fuzz.rs`, `tests/cards_suite.rs`, the pinned
+  pool lists of `tests/ir`, `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/interactions.md`. "Mana spent to
+  cast" needed nothing new: lane A's Hogaak ("you can't spend mana to cast this spell") reads the same record if it
+  needs one.
+
+### 220.3 Lane C: Stitcher's Supplier, Dark Matter Manipulator, Moonshadow, Dryad Arbor (branch `hogaak-c`)
+
+**Why.** Lane C of the Legacy Hogaak Tempo deck (MTGGoldfish archetype "Legacy Hogaak Tempo", paper, deck 8027954,
+fetched 2026-11-21: `E:/mtg-zero-scratch/hogaak/`, its PROVENANCE.md and BRIEF.md): four of its seven cards outside
+the cube and legacy IR, all main deck. Branch `hogaak-c` from main e9ff0e24. Lanes A (Hogaak, Arisen Necropolis) and
+B (Mockingbird, Massacre) are other branches; the integration merges the three. The user's rules: no approximation of
+any class (docs/shortcuts.md unchanged), no encoding gap (none was needed: no layout change, no new float), every
+ruling tested, the cube's behaviour digests equal. New code in `engine/src/lower/hogaak_c.rs`,
+`ir/mtgz_ir/cards/parser/legacy_hogaak_c.py`; generic machinery in the engine's event, layer and trigger code.
+
+* Stitcher's Supplier {B}, Creature — Zombie 1/1: "When this creature enters or dies, mill three cards."
+* Dark Matter Manipulator {B}, Creature — Human Warlock 1/2: "When this creature enters, mill three cards. / This
+  creature gets +2/+0 for every seven cards in your graveyard."
+* Moonshadow {B}, Creature — Elemental 7/7: "Menace / This creature enters with six -1/-1 counters on it. /
+  Whenever one or more permanent cards are put into your graveyard from anywhere while this creature has a -1/-1
+  counter on it, remove a -1/-1 counter from this creature."
+* Dryad Arbor, Land Creature — Forest Dryad 1/1, green (a colour indicator): "(This land isn't a spell, it's affected
+  by summoning sickness, and it has "{T}: Add {G}.")"
+
+#### 220.3.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, sidecar), `ir/mtgz_ir/cards/parser/legacy_hogaak_c.py` and widened recognizers (`creature_builder.py`, `roto_board.py`, `roto_mana.py`, `triggers.py`), `effects/predicates.py` (`Event.CARD_PUT_INTO_GRAVEYARD`), `effects/generic/roto_board.py` (`CardsInYourGraveyard.per`); `data/cards/*`, `card_ir/src/generated.rs` | 220.3.2; IR defect 440 (docs/ir_defects.md AA) |
+| Identities | `engine/src/az/legacy_cards.txt` | the four appended after Rough // Tumble (569-572 on this branch; the integration numbers the three lanes' seven in deck order); no test names a number |
+| Lowering | `lower/hogaak_c.rs` (`RemoveCountersFromSource`, the graveyard count's filter check), `lower/trigger.rs` (`CardPutIntoGraveyard`), `lower/statics.rs` (`CardsInYourGraveyard` as a count), `lower/effect.rs` (the chain) | every field named, the rest denied |
+| Rules | `db.rs` (`EventKind::PutIntoGraveyard`, `Mod::PtPerGraveyardCards`, the event in `SEEN_RARE_EVENTS`), `game.rs` (the event in `move_card`, `Game::gy_arrivals`), `triggers.rs` (matched at the end of a simultaneous move; a graveyard card as the subject), `layers.rs` (layer 7c), `cost_order.rs`, `az/tail_encode.rs`, `public_state.rs`, `az/build.rs` (the new field and mod classified) | 220.3.3 |
+| Tests | `engine/tests/cards_hogaak_c.rs` (47), `tests/ir/test_legacy_hogaak_c.py` (15), `support.rs` (`SUPPORTED_LEGACY`), `fuzz.rs` (a seed list, 220.3.5) | 220.3.6 |
+| Fuzz pool | `engine/src/fuzz/games.rs` (`FUZZ_POOL=hogaak_c`), `worker/src/fuzz.rs` (the pool list) | 220.3.6 |
+| Rulings | `data/rulings/legacy.rulings.json` (the four cards' 7 rulings, all Dryad Arbor's), `triage.tsv` (7 rows), `docs/rulings.md` | every one tested |
+
+#### 220.3.2 The IR
+
+The four Scryfall records (`raw/scryfall_hogaak_new.json`, the orchestrator's fetch of 2026-11-21) appended to the
+legacy pool. Stitcher's Supplier parsed as it was: two `TriggeredAbility` arms, `enters` and `dies`, each
+`SelfMill(3)` (the parser's compound-condition shape, 220.3.4). The other three didn't:
+
+* **Dryad Arbor** parsed wrong (IR defect 440, fixed at the parser): the creature builder claims it and rebuilt its
+  type line from the artifact and enchantment flags only, so it was a `Creature` with no `produces`.
+  `legacy_hogaak_c.as_land_creature` keeps the printed type line and card types (`Land`, `Creature`) and gives it its
+  basic land types' intrinsic mana (CR 305.6) as `produces: [G]`, `mana_only_from_produces`. The roto pool's Dryad
+  Arbor changes the same way; no cube or EoE printing is a land creature.
+* **Dark Matter Manipulator**'s "+2/+0 for every seven cards in your graveyard" had no grammar: the roto recognizer of
+  Knight of the Reliquary's "for each <type> card in your graveyard" takes "for every <N> [<type>] cards" too,
+  `CardsInYourGraveyard { card_filter: (any card), per: 7 }` (a new field, 1 by default: every existing printing
+  encodes as before).
+* **Moonshadow**: "enters with six -1/-1 counters" (the creature builder's recognizer took +1/+1 counters up to five;
+  now +1/+1 or -1/-1 up to ten: `enters_with_named_counters [("-1/-1", 6)]`); "remove a -1/-1 counter from this
+  creature" (Dark Depths' `RemoveCountersFromSource` recognizer took word kinds only); "one or more permanent cards are
+  put into your graveyard from anywhere" (`parse_hogaak_c_trigger_phrase`: the new event `CARD_PUT_INTO_GRAVEYARD`,
+  subjects the graveyard's owner and the card, with `Subject("card", IsPermanentCard()) & Controlled(you, "player") &
+  OneOrMoreBatch()`); "while this creature has a -1/-1 counter on it" (the intervening-"while" path, whose phrasebook
+  had three literal gates, now also "this <permanent> has a <kind> counter on it" -> `Source(HasCounter(kind))`).
+
+`python tools/card_ir.py export`: schema `693d23a4a259...` -> **`f6ceba400ce2...`** (730 classes: `CardsInYourGraveyard`
+and `RemoveCountersFromSource` reach the schema, the `Event` enum gains one member); `powerlsv.ir.json` and
+`eoe.ir.json` are main's byte for byte but `schema_sha256`; `legacy.ir.json` 27 cards. `check` passes (the five files
+are the regeneration), `roundtrip` passes (546, 27, 483). Every pool's claimed printings compared with main's
+(`PYTHONHASHSEED=0`, card by card): cube and EoE unchanged; the roto and all pools change Dryad Arbor (entry 440) and
+nothing else (Knight of the Reliquary and Elvish Reclaimer only gain the new field at its default in their Python
+reprs; their IR is equal).
+
+#### 220.3.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Supplier: "When this creature enters or dies, mill three cards" | 603.6a, 700.4, 603.6c, 603.10a, 701.17a-c | the existing `Enters` and `Dies` triggers (a dies trigger looks back: it triggers as the creature leaves, its source gone) and `Ext::Mill` (`Game::mill`: the top three, fewer if the library has fewer, none from an empty one: no draw, no loss) |
+| DMM: "When this creature enters, mill three cards" | 603.6a, 701.17a | the same |
+| DMM: "+2/+0 for every seven cards in your graveyard" | 613.4c, 611.3a, 108.2 | `Mod::PtPerGraveyardCards { filter: Any, per: 7, p: 2, t: 0 }`, a static ability's layer 7c modification: `p` per full group of seven cards (not tokens: `Game::graveyard_cards`) of the static's controller's graveyard, counted whenever power is read (combat damage, any effect reading it mid-resolution, the encoding); the cost analysis (`cost_order.rs`) counts a card put into or out of a graveyard as changing it |
+| Moonshadow: menace | 702.111b | the existing keyword |
+| "This creature enters with six -1/-1 counters on it" | 614.1c, 122.6 | `CardDef.enters_counters` (`Game::entering_abilities`): on the battlefield with them from the start, however it enters (a spell, Show and Tell, a reanimation; not with no abilities, CR 614.12) |
+| "Whenever one or more permanent cards are put into your graveyard from anywhere" | 603.2c, 110.4a, 400.2, 603.6c, 603.10 | `EventKind::PutIntoGraveyard` (subjects: the graveyard's owner, the card), recorded in `move_card` once a card (not a token) is in a graveyard, the replacement effects applied (614.1a: a card Leyline of the Void or Dauthi Voidwalker exiles instead never is); with `TrigPred::Batch` the ability triggers once per event (one instruction, one cost, one simultaneous move) however many permanent cards it puts there; "permanent card" read from the card in the graveyard (`Filter::Type(PERMANENT)`: an MDFC's front face, a split card's halves combined, an adventurer card a creature card) |
+| ... "from anywhere" doesn't look back | 603.6c, 603.10 | "an ability that triggers when a card is put into a certain zone 'from anywhere' is never treated as a leaves-the-battlefield ability, even if an object is put into that zone from the battlefield": matched with the objects that exist immediately after the event, so in a simultaneous move (SBAs, "destroy all", a cost sacrificing several) the events wait in `Game::gy_arrivals` and are matched as it ends (`end_batch`, in its event group): a Moonshadow put into the graveyard by the same event doesn't trigger, for itself or the others |
+| "while this creature has a -1/-1 counter on it" | 603.2, 603.4 | `TrigPred::Source(HasCounter(M1M1))`: part of the trigger condition, read as the event is matched; not an intervening "if" (603.4 is about "if" only), so not read again on resolution |
+| "remove a -1/-1 counter from this creature" | 122.8, 400.7 | `Ext::RemoveCounters { on: Source, counter: M1M1, n: 1 }`: from the source if it is still the same object on the battlefield, as many as it has up to one (none: nothing happens) |
+| +1/+1 and -1/-1 counters | 704.5q, 122.3 | the existing state-based action (before a simultaneous move's events are matched: the same check) |
+| Dryad Arbor: a land and a creature | 205.2a, 305.9, 302.6 | `CardDef.types` LAND and CREATURE; every check reads the type it needs (`is_type`, `is_creature`): played only (`priority_options_all` offers a land's play, never its cast; Omniscience casts spells only), a land play (305.2), not a spell (no stack, 305.1); put onto the battlefield by an effect it is no land play (305.4: Show and Tell, a fetch land) |
+| "{T}: Add {G}" | 305.6 | the IR's `produces` -> the intrinsic mana ability (`lower/printing.rs`) |
+| "it's affected by summoning sickness" | 302.6, 602.5a | `Game::activation_ready`: a {T} ability of a creature (mana abilities included, in payments and floating) needs it under its controller's control since their turn began; attacks likewise (`combat.rs`); blocking isn't restricted |
+| green | 204.1, 202.2e | `color_indicator` (in every zone); colour-changing effects apply (Painter's Servant) |
+| a Forest, a Dryad | 205.3i, 205.3m | subtypes; a fetch land's "Forest card" finds it, untapped and summoning sick |
+| under Magus of the Moon | 305.7, 613.1d | the existing "nonbasic lands are Mountains" (ENGINE.md 99.12): its land type Mountain only, a Mountain's mana ability ("{T}: Add {R}", still a creature's {T} ability: summoning sickness applies), still a green 1/1 Dryad creature |
+| everything else | 700.4, 704.5g | a creature for removal, damage, "creatures you control", attacks and blocks; a nonbasic land for Wasteland, "lands you control", landwalk (rules_check's forestwalk); not legendary (Karakas) |
+
+#### 220.3.4 Readings taken
+
+* **Moonshadow and the moment it is checked.** CR 603.6c's last sentence decides the case the brief asked about: a
+  Moonshadow leaving the battlefield at the same time as other permanent cards doesn't trigger (it isn't there after
+  the event), and dying alone it doesn't trigger for itself. The condition ("while it has a -1/-1 counter") is read
+  then too. No official ruling (Moonshadow has none); the CR text is explicit.
+* **The card's characteristics in the graveyard.** With no look back, "permanent card" is the card as it is there (CR
+  603.10): a face-down permanent turned face up as it left is its card (an instant manifested would not count); a
+  double-faced card has its front face's characteristics (712.8a), a split card both halves' (709.4), an adventurer
+  card is a creature card (715.4: Brazen Borrower, Petty Theft countered).
+* **"Your graveyard"** is the graveyard of Moonshadow's controller after the event: cards that player owns (a card
+  goes to its owner's graveyard, 400.3).
+* **Batching** is the engine's event groups (ENGINE.md 8, 33): one instruction of a resolution, one cost, one
+  simultaneous move. Two separate events before the first trigger resolves trigger it twice (each with the counter
+  still on it); the second does nothing if the first removed the last one. A Stitcher's Supplier dying (one event)
+  then milling on resolution (another) is two triggers. The cleanup step's discard to the maximum hand size is one
+  turn-based action (514.1): its discards share one group, one trigger.
+* **Stitcher's Supplier's two arms.** "When this creature enters or dies" is one ability with two trigger events; the
+  IR writes it as two `TriggeredAbility` arms sharing the effect (Orcish Bowmasters' "when ... enters and whenever
+  ..." too). The events can't happen together, so the two arms trigger exactly when the one ability would; no card of
+  the tables counts abilities or makes an ability trigger an additional time. Losing abilities, copying (Mockingbird)
+  and countering a triggered ability (Consign to Memory) treat both alike.
+* **Dark Matter Manipulator's seven** counts full groups ("for every seven": 6 cards +0, 7-13 +2, 14 +4); the
+  graveyard is its controller's (a stolen Manipulator reads the thief's).
+* **Dryad Arbor and its ruling c0965c9d** (flash): no card of the cube, legacy or EoE tables gives a land flash or lets
+  a land be played as though it had flash, so the ruling's premise is unreachable; its consequences that hold anyway
+  are tested (never on another player's turn, never without a land play left, never with an object on the stack).
+  Ruling 0dfaac8c's text-changing effects (Crystal Spray) are likewise in no table; its colour-changing half is tested.
+
+#### 220.3.5 Fixes and findings outside the four
+
+* **The engine needed no rules fix for a land creature.** Every check reads the characteristic it needs:
+  `priority_options_all` offers a land's play first (305.9), `Game::activation_ready` applies 302.6 to any creature's
+  {T} ability (mana abilities included), combat reads `is_creature`, the payment's "whenever you tap a creature / a
+  Forest for mana" bonuses (`tap_bonus_wide`) give a land creature both, Magus of the Moon keeps the creature type and
+  subtype (305.7). Audited: `cast.rs`, `pay.rs`, `activate.rs`, `combat.rs`, `rules_check.rs`, `layers.rs`,
+  `eoe_w2.rs` (the Magus), the encoders (`perm` descriptor bits from `types_of`, `SICK` for creatures, the per-player
+  summaries count it as a land and a creature), the bots (heuristics over legal actions), the deck checks and samplers
+  (a land card: the land / spell splits of `hidden_decks.rs` and `sample.rs` classify it as a land, consistently).
+  Convoke (a summoning-sick creature may convoke, 302.6) is Hogaak's, lane A's: no cube card has it.
+* **The constructed table's definition ids move.** The legacy IR is sorted by name, so Dark Matter Manipulator, Dryad
+  Arbor and Moonshadow renumber the legacy definitions after them (Murktide Regent, Street Wraith, ...) and the tokens
+  and faces after the cards. Identities (the registry) are unchanged, but chance keys name definitions and the
+  determinize checks consume random draws over them, so constructed games played at random diverge:
+  `digest_formats`' constructed and metagame digests and the dealt digests change (220.3.7), and
+  `tests/fuzz.rs::a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game` lost two of its positive-evidence
+  seeds (3,900,000,012 and 3,900,000,079; replaced by 3,900,000,019 and 3,900,000,087, found by a scan). **With the four
+  cards taken out of the table again (a local check, reverted) and all of this branch's code kept, every one of those
+  digests is main's** (constructed 16441662701e233d, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8, dealt per
+  seat 5fa30432bf8cd63f, EoE and driver unchanged) **and the two old seeds pass**: the code changes no game; adding
+  cards to constructed play's table does, as every legacy lane's. Not re-recorded here (the integration adds the other
+  lanes' cards too and records once).
+
+#### 220.3.6 The encoding
+
+No layout change, no new float, no gap: Moonshadow's -1/-1 counters are layout v7's `counters` tokens (kind and the
+count's 64 binary digits, ENGINE.md 142.7), its waiting trigger a `stack` token; Dark Matter Manipulator's power is
+the permanent's `POWER` float through layer 7c (and a `numbers` token past float16's range); Dryad Arbor's two card
+types are its descriptor's type bits (layer 4, `types_of`), its summoning sickness the `SICK` status. Tests read each
+back from the row (220.3.7). New fields classified for the public-state gate: `Game::gy_arrivals` (derived,
+transient: empty between decisions; `az/build.rs` refuses a described position with one) and the static-only
+`Mod::PtPerGraveyardCards` (`STATIC_ONLY_MODS`: a static ability's effect is its source's text applied to the encoded
+board; the graveyard is encoded). No encoding_needs file.
+
+#### 220.3.7 Tests, the fuzz pool
+
+* **`engine/tests/cards_hogaak_c.rs`, 47 tests** (the CR in each name; Dryad Arbor's seven rulings, `// ruling:`;
+  the other three cards have none): the definitions; Stitcher's Supplier (mills three as it enters and as it dies, a
+  look-back dies trigger; fewer than three cards, an empty library, no loss; bounced by Petty Theft or exiled instead
+  by Leyline of the Void: no mill, and its enters mill exiled); Dark Matter Manipulator (0, 6, 7, 13, 14, 20, 21 cards:
+  1, 1, 3, 3, 5, 5, 7 power, toughness 2; its controller's graveyard only, a token not counted; its own mill growing it
+  at once; with a +1/+1 or -1/-1 counter; combat damage with the power as it is when dealt, a Brainstorm resolving in
+  the declare-attackers step); Moonshadow (six -1/-1 counters as it enters, a 7/7 off the battlefield; menace against
+  one blocker; one trigger per mill of the Supplier and the Manipulator, none for instants and sorceries; a creature of
+  its controller dying, not the opponent's; discards by Thoughtseize and Hymn to Tourach (two cards, one trigger), not
+  an instant; the cleanup step's discard of two permanent cards, one trigger; a countered creature spell, not a
+  countered instant; a token dying, no trigger; Dryad Arbor destroyed by Wasteland; a fetch land's cost, the trigger
+  above the fetch's ability; the condition at the event: none without a counter, two events on one counter trigger
+  twice and the second does nothing; dying with others or alone, no trigger, a survivor triggers once for two deaths;
+  +1/+1 counters annihilating its -1/-1 ones; Leyline of the Void and Dauthi Voidwalker: no trigger; an adventurer
+  card, an MDFC's instant front, an MDFC's creature front and a split card discarded; Petty Theft countered; its trigger
+  countered by Consign to Memory; the Supplier's death then mill, two triggers); Dryad Arbor (played, never cast, a
+  land play, no stack, priority back at once; Omniscience doesn't cast it, Show and Tell's put is no land play and it is
+  sick; summoning sickness: no {G} for a Birds of Paradise and no attack the turn it is played, both the next turn; it
+  blocks while sick; green in hand, on the battlefield and in the graveyard, Painter's Servant's colour added; a Forest
+  and a Dryad, found by Misty Rainforest untapped and sick; under Magus of the Moon a Mountain Dryad creature tapping for
+  {R}; not on the other player's turn, not with no land play left, not with a spell on the stack; removal: Orcish Bowmasters'
+  ping kills it, Fatal Push and Wasteland destroy it; Karakas can't return it; counted as a land and a creature;
+  attacking taps it); the encoding (220.3.6: Dryad Arbor's two card types and its `SICK` status the turn it is played
+  and not the next; Dark Matter Manipulator's power float at 6, 7 and 14 cards; Moonshadow's counters token, 6 then 5,
+  and its trigger's stack token); the deck's line (Moonshadow, Verdant Catacombs for Dryad Arbor, the Supplier the next
+  turn: a 3/3 attacking beside the Arbor). `docs/interactions.md` has the matrix. `tools/untested_cards.py`: 573
+  supported (27 legacy), none named by no card test.
+* **`tests/ir/test_legacy_hogaak_c.py`, 15 tests**: the four printings; "for every N cards" (full groups: 0, 6, 7,
+  13, 14, 20, 21 cards give 0, 0, 1, 1, 2, 2, 3; "for every one" refused); the roto pool's Dryad Arbor; a land
+  creature's basic land types' colours, a non-basic land type giving none, types that don't add up refused; the new
+  trigger condition's four forms and three non-forms; the counter gate; the counter and remove-counter grammars.
+  `test_legacy_creatures.py` and `test_fetch_cube.py` pin the legacy pool's list (+4).
+* **`support.rs`** `SUPPORTED_LEGACY` +4; **`tests/fuzz.rs`** the look test's seeds (220.3.5).
+* **`FUZZ_POOL=hogaak_c`** (`engine/src/fuzz/games.rs`, `HOGAAK_C_DECK`): the Hogaak Tempo 60 with the other lanes'
+  Hogaak (4) and Mockingbird (3) out: Dryad Arbor 1 -> 4, a third Thoughtseize, a second Brazen Borrower and two Fatal
+  Push in (4 Stitcher's Supplier, 4 Dark Matter Manipulator, 4 Moonshadow, 4 Dryad Arbor, 3 Thoughtseize, 2 Kaito, 4
+  Force of Will, 3 Daze, 2 Fatal Push, 3 Orcish Bowmasters, 2 Brazen Borrower, 3 Ponder, 4 Brainstorm, 4 Underground
+  Sea, Swamp, Undercity Sewers, 4 Misty Rainforest, 4 Verdant Catacombs, 4 Wasteland; checked by
+  `az::constructed::check`), against the Delver 60 in either seat, one game in three the mirror (`seed % 3`);
+  constructed play's table; every check of the default mode. Counted: the three creature spells cast (each stack item
+  once), Dryad Arbor played as a land (`Choice::Play`), Moonshadow's triggers on the stack and its -1/-1 counters removed
+  (a count that went down on the same object), Dark Matter Manipulators seen at +2/+0 or more, Dryad Arbors attacking
+  (per object and turn) and chosen as a mana source (`PayMana`, `ActivateMana`). With 200 games or more each must be
+  non-zero. The worker's pool list (`worker/src/fuzz.rs`) has `hogaak_c` (games only).
+
+#### 220.3.8 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/hogaak-c`, through `tools/slotd.sh` (a training run live on the
+desktop); the fuzz on the Mac (`tools/mac.sh`, bit-identical to the desktop, ENGINE.md 44).
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`, on
+  fc4f2b31; the commits after it change two tests' names, docs and the IR tests' lists): **2,773 passed, 0 failed, 37
+  ignored** (27 binaries; `cards_suite` 1,438 with `cards_hogaak_c` 47, `az` 57 (the public-state gate with the new
+  field and mod classified, no new gap), `misc_suite` 210, `rules_suite` 453, `rulings_suite` 397, `fuzz` 19,
+  `support` 9, `hidden` 28, `limits` 13). `cards_hogaak_c` rerun on the final commit: 47 passed.
+* **The cube's behaviour digests equal** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no
+  `DIGEST_WRITE`): full **44372545881ef768** (every one of the 2,500 games equal to `tests/data/digests.txt`),
+  `DIGEST_ENCODING=0` **a965c3fc8d3bba8a** (210.6's), `DIGEST_ENCODING=v5` **9f4cb802bae20e3b** (main's v5 isn't
+  recorded since 130.7; the full digest hashes the whole layout v7 row at the same decisions, and the v5 projection's
+  code is unchanged). No v7-only full digest is printed separately (the full digest is v7's).
+* **`digest_formats`**: EoE **c3a9c786030f42eb** (`=0` 734841d8ae3dc2e4) and driver **6a03572828250b86** equal; the
+  constructed table's digests move with the four cards (220.3.5): constructed 16441662701e233d -> 8087e7d334f553d3
+  (570 of 570 lines; `=0` 1ad7c2120c8e5674), metagame 56ff52ffef1b1913 -> 3915dcf6cbb07271 (288 of 288; `=0`
+  22fb1ab86315c51d), dealt a890c27da3c7d1a8 -> b17f0dca92f9111d (79 of 80), dealt per seat 5fa30432bf8cd63f ->
+  d91a942badcfce62 (60 of 60). **Without the four cards in the table every one of them is main's** (the check of
+  220.3.5). Not re-recorded: the integration records them once, with all three lanes' cards.
+* **`FUZZ_POOL=hogaak_c FUZZ_GAMES=20000`** (the Mac, two shards of 10,000, `FUZZ_FIRST` 0 and 10000, on 80b99672,
+  the code of the final commit): **no failure**; 20,000 games (wins 9,871 / 9,977, 152 drawn at the turn cap, none
+  aborted), 32.3 turns and 309.8 decisions a game, 9,518,535 options completed; Stitcher's Supplier cast 13,930 times,
+  Dark Matter Manipulator 14,303, Moonshadow 14,064, Dryad Arbor played as a land 36,043; Moonshadow's triggers on the
+  stack 9,056, -1/-1 counters removed 44,909; Dark Matter Manipulators at +2/+0 or more 18,008; Dryad Arbors attacking
+  4,917, tapped for mana 176,327 (the counters are process-wide: the binary's replay test's games are included, 124.4).
+  Every check of the default mode: invariants, clones, `determinize` for both viewers (view, known cards, clouds, the
+  information-set walk), every option completed in the game and in the sampled worlds, the rows finite, the rules
+  checks (ENGINE.md 150).
+* **The `fuzz` profile** (debug assertions), 1,000 games (the Mac): no failure (471 / 518, 11 drawn).
+  **`FUZZ_CHANCE=10`**, 600 games: no failure in the games (18,694 chance walks, 7,527 replays whose outcome the force
+  changed); the binary's `the_murktide_trigger_is_asserted_over_enough_games` fails under any `FUZZ_CHANCE` (its
+  synthetic totals carry no chance walks and `check_games` asks for them past 100 games, games.rs's `chance_every`
+  check; main's too: not this branch's). **`FUZZ_BELIEF=2`**, 600 games: no failure (9,136 weighted worlds).
+* `FUZZ_POOL=hogaak_c FUZZ_GAMES=300` on the desktop: no failure (wins 140 / 156, 4 drawn).
+* `python tools/card_ir.py check` and `roundtrip`: pass. `python -m pytest tests/ir`: 2,699 passed, 4 failed (the
+  pinned legacy pool lists, then updated: rerun 59 passed with `test_legacy_hogaak_c.py` and `test_pipeline.py`).
+* `bash tools/build_py.sh`, `python -m pytest -q tests --ignore=tests/ir`: 698 passed, 31 skipped, 1 failed:
+  `test_mac_remote.py::test_a_worker_plays_mtg[matches]` timed out on the loaded desktop (its own deadline; a
+  training run beside it) and passes alone (both modes: 2 passed, 181 s).
+* `python tools/rulings_doc.py --check`: current (1,674 rulings, 1,307 distinct, 1,297 class a, every one tested).
+  `python tools/untested_cards.py`: 573 supported (27 legacy), 0 named by no card test.
+* No docs/shortcuts.md entry, no approximation; no layout or encoding change; no zero-core change.
+
+#### 220.3.9 Limits and merge points
+
+* **Other lanes' interactions** are the integration's: Hogaak convoking with Dryad Arbor (a summoning-sick Arbor may
+  tap for convoke, 302.6) and delving Moonshadow's fuel, Mockingbird copying the four (Moonshadow's "enters with" as a
+  copy, 614.12, 707.9), Massacre's -X/-X on them (Moonshadow and its counters).
+* **Merge points**: `legacy_cards.txt` (the four after Rough // Tumble; lane order A, B, C at integration), the legacy
+  pool (`ir/data/legacy_delver.*`) and the export (each lane exported its own: re-export once), the parser
+  (`creature_builder.py`'s end and its counter recognizer, `triggers.py`'s phrase chain end and
+  `_parse_intervening_while_phrase`, `roto_board.py`, `roto_mana.py`, `effects/predicates.py`'s `Event`,
+  `object_predicates.py`), `lower/effect.rs` (one more `lower_effect_*` in the chain), `lower/mod.rs`,
+  `lower/statics.rs`, `lower/trigger.rs`, `db.rs` (`EventKind`, `Mod`, `seen_bits`), `game.rs`, `triggers.rs`,
+  `layers.rs`, `cost_order.rs`, `tail_encode.rs`, `public_state.rs` (`STATIC_ONLY_MODS` 5, the field list),
+  `az/build.rs`, `fuzz/games.rs` (`PoolMode::HogaakC`, the deck, counters, report, checks), `worker/src/fuzz.rs`,
+  `tests/fuzz.rs` (the seed list: re-scan after the merge), `tests/support.rs`, `tests/cards_suite.rs`,
+  `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/ir_defects.md` (section AA), `docs/card_ir.md` ("Current
+  numbers": left to the integrated export).
+
+### 220.4 The lanes merged; the deck, `FUZZ_POOL=hogaak`, the digests (branch `hogaak`)
+
+Branch `hogaak` from main 1e7416c5 (e9ff0e24, the lanes' branch point, and 12 commits of farm and docs work: ENGINE.md
+214-216, zero-core pin ba607c2 -> c850a5d; no engine, card or IR file). The lanes merged in their order, each its own
+merge commit: A (`hogaak-a` 29ca2296: 3ee72ad1), B (`hogaak-b` c273ef11: f5c8f496), C (`hogaak-c` a05a399c: 3d5fd696).
+No layout or encoding change (layout v7 as on main, no spare float), no zero-core change, no docs/shortcuts.md entry.
+
+#### 220.4.1 The conflicts and how each was resolved
+
+No two lanes changed one rule differently: every conflict was additive, resolved by keeping every lane's behaviour,
+interleaved functions rebuilt whole (never spliced).
+
+| File | Resolution |
+|---|---|
+| `docs/ENGINE.md` | main's 214-216, then 220.1, 220.2, 220.3 (each lane's subsection whole); this section's header and 220.4 |
+| `engine/src/fuzz/games.rs` | `PoolMode` keeps `HogaakA`, `HogaakB`, `HogaakC` (pools `hogaak_a`, `hogaak_b`, `hogaak_c`); each lane's deck, counters, report line, totals and end-of-run checks rebuilt whole beside the others (the reports' and checks' blocks of two lanes shared their closing lines in git's hunks: re-closed, one missing brace found by the first build); `constructed_mode()` and the pool lists (module docs, the unknown-pool panic, the games-only message) name the three in lane order |
+| `engine/src/lower/mod.rs`, `engine/tests/cards_suite.rs` | every lane's module (`lower::hogaak_a`, `lower::hogaak_c`; `cards_hogaak_a`, `_b`, `_c`) |
+| `engine/tests/support.rs` | `SUPPORTED_LEGACY` the seven sorted in (30 legacy cards) |
+| `engine/src/az/legacy_cards.txt` | the lanes' lines, then (000b2c82) the seven in the deck's order (220.4.2) |
+| `engine/tests/fuzz.rs` | the hand-look test's seeds: lanes B and C had found the same replacements (3,900,000,019 and 087 for 012 and 079); rescanned on the merged table (220.4.6) |
+| `ir/data/legacy_delver.json` (+ `.sheet.json`, `.meta.json`) | the union of the lanes' Scryfall records as each fetched them (the orchestrator's fetch of 2026-11-21, `raw/scryfall_hogaak_new.json`), lane order: A's Hogaak, B's Mockingbird and Massacre, C's four; 30 cards (the sidecar's counts 30, its `fetched_at` the lanes' common one); built by script from main's file plus each lane's appended records (each lane's first 23 equal main's) |
+| `data/rulings/legacy.rulings.json`, `triage.tsv` | the union in the legacy pool's order (Hogaak's 9 rulings, Mockingbird's 7, Dryad Arbor's 7; the other four none), 18 new triage rows. Lane C had added a second row for 0dfaac8c, a ruling text Pact of Negation's row already had (the triage is one row per distinct text; `rulings_doc.py` let the later win): folded into the one row, naming both cards |
+| `tests/ir/test_fetch_cube.py`, `test_legacy_creatures.py` | the pinned legacy pool list: the seven by lane, 30 cards |
+| `docs/ir_defects.md`, `docs/interactions.md` | the lanes' sections Y, Z, AA and their matrices, in lane order; a short merge note in AA and this section's matrix |
+| `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs`, `docs/rulings.md` | not merged by hand: regenerated from the merged inputs at each merge (`python tools/card_ir.py export`, `tools/rulings_doc.py`; 220.4.3) |
+
+Files git merged without a conflict, read where two lanes touched the same code: `db.rs` (A's `CastingRules::own_gy_cast`
+/ `no_mana`, B's `cond_reads_source`, C's `EventKind::PutIntoGraveyard`, `Mod::PtPerGraveyardCards` and the rare event
+bit), `cast.rs` (A's routes and castability of a spell of no mana, B's `mana_value_of` for 202.3b), `lower/printing.rs`
+(A's two casting fields, B's enters-as-copy cap and free-cast condition), `layers.rs` (B's 205.3d `has_subtype`, C's
+layer 7c graveyard count), `cost_order.rs`, `public_state.rs`, `az/tail_encode.rs` (A's convoke picks, C's new field and
+mod classified), `creature_builder.py` (A's casting-keyword hook before `legacy_creatures`, C's land creature and
+counter grammars). The workspace builds without an error or a warning.
+
+#### 220.4.2 The IR, the identities
+
+* **The export** (`python tools/card_ir.py export` from the merged parser over the 30-card legacy pool): schema
+  **`180659137eceef5a707ad7ebcd2ba8ce66fd302aa3f841ea3b67301393915752`** (main `693d23a4a259...`), 731 classes: exactly
+  the union of the lanes' additions (A's two printing fields, B's `AndCondition`, C's `CardsInYourGraveyard`,
+  `RemoveCountersFromSource`, the `Event` member and `CardsInYourGraveyard.per`). `powerlsv.ir.json` (sha256
+  `3119ab6e427caf38`) and `eoe.ir.json` (`caee0949bce52b30`) are main's files byte for byte once the schema hash is
+  replaced (compared card by card and as bytes); `legacy.ir.json` (30 cards, `b0fd711f9ec8c95d`): each card's IR equal to
+  its lane's export, the 23 others main's. `powerlsv.schema.json` `a0bf3784208d6a65`, `generated.rs` `2dbfa3cede8bca1a`.
+  `check`: identical; `roundtrip`: cube 546, legacy 30, eoe 483 cards ok. docs/card_ir.md, "Current numbers".
+* **Identities** (`engine/src/az/legacy_cards.txt`, after Rough // Tumble = 568), in the deck's order: Hogaak, Arisen
+  Necropolis **569**, Stitcher's Supplier **570**, Mockingbird **571**, Dark Matter Manipulator **572**, Moonshadow
+  **573**, Dryad Arbor **574**, Massacre **575**. No test names a number (`constructed.rs` checks every registry line
+  at `LEGACY_BASE` + its line and `the_hogaak_75_and_its_provenance` the last seven lines by name).
+
+#### 220.4.3 The deck and where it is registered
+
+* **The files**: `data/decks/hogaak_tempo_8027954.txt`, the scratch pin byte for byte (MTGGoldfish's export field, a
+  `sideboard` line before the 15), and `.json` in the Doomsday file's format: "Dimir Hogaak", archetype "Legacy Hogaak
+  Tempo", Jonathan Canfield, North American Eternal Weekend - Legacy Championship, 2026-10-31, "5th place, 12-3", paper,
+  deck source melee.gg, the deck, archetype-page and download URLs, how it was fetched (the export field via plain curl
+  on 2026-11-21, the download link 403); `export_names` Brazen Borrower -> "Brazen Borrower // Petty Theft" (the only
+  name that differs from the card table's).
+* **Registered (done)**: `az::constructed::{LEGACY_HOGAAK, LEGACY_HOGAAK_EXPORT}`, `Decklist::legacy_hogaak()` (beside
+  the Delver and Doomsday decks); `mtgz.az.decklists.LEGACY_HOGAAK` - every spec helper takes it by name
+  (`mirror_spec`, `mirror_bo3_spec`, `pair_spec`, `metagame_spec(decks=META3 + (LEGACY_HOGAAK,))`, so a metagame spec
+  with it in its deck names is one call); `FUZZ_POOL=cross` plays its best-of-three pairs (220.4.4); the fuzz's real 75s
+  (`real_75`, `REAL_75_NAMES`). Tests: `constructed.rs::the_hogaak_75_and_its_provenance` (the export equals the JSON;
+  every card of the 75 supported; CR 100.2a / 100.4a over both - Brazen Borrower's one and one, three more make five,
+  refused; at most `MAX_DECK`; the legacy cards in the registry's order: main the six, sideboard-only Consign to Memory
+  and Massacre; the registry's last seven lines) and `the_hogaak_75_plays_best_of_one_and_best_of_three` (best-of-one
+  of its main against the Delver, Doomsday and Sneak and Show 60s and itself, and constructed best-of-three with its
+  sideboard against each 75, both seats, random play to the end, the row finite at every decision);
+  `tests/test_delver.py::test_the_hogaak_deck_and_its_loader` (the loader; a mirror, a best-of-three pairing and a
+  four-deck metagame built and started through the bindings; no preset names it).
+* **Left for the user (not done)**: no run preset or live spec plays it - `legacy-meta3` and its digest spec
+  (`digest_specs.json`'s `meta3`), `FUZZ_POOL=meta`'s three 75s (which mirror that preset), the cells yardstick's
+  `CELL_DECKS`, delverai's deck labels and `combo_stats`' short names stay the three-deck metagame's: adding the deck to
+  a run's metagame is the user's call. The constructed digest's best-of-one lines still pair the three main 60s (220.4.7).
+
+#### 220.4.4 `FUZZ_POOL=hogaak`, and the Hogaak 75 in `FUZZ_POOL=cross`
+
+* **Games**: the real Hogaak 60 (`hogaak_decks`) against the real Delver, Doomsday and Sneak and Show 60s in either seat,
+  one game in four the mirror (`seed % 8`); best-of-one, constructed play's table, every check of the default mode. The
+  lanes' counters run in it (`count_hogaak_a`, `_b`, `_c`) beside its own `HOGAAK_SEEN`: with 200 games or more it
+  requires **Hogaak cast from a graveyard paid by convoke and delve together**, **a Mockingbird entered as a copy**, **a
+  Moonshadow -1/-1 counter removed**, **a Dark Matter Manipulator at +2/+0 or more**, **a Dryad Arbor played** and **a
+  Stitcher's Supplier trigger resolved** (its mill).
+* **Matches**: constructed best-of-three between the real 75s - the Hogaak 75 against each of the three in either seat
+  and its mirror twice (`HOGAAK_PAIRS`, `seed % 8`), one match in four 12-turn games - then post-sideboard matches of
+  its mirror; every check of `FUZZ_POOL=delver`'s matches (the constructed worlds, the deck-tilted deals, the
+  information sets, the hidden 60s). **Massacre** is a sideboard card: random sideboarding and random play cast it about
+  once in 35 matches and resolve it about once in 70, so its counter (`hogaak_massacre`, a Massacre spell resolved) is
+  required with 500 matches or more. `FUZZ_HIDDEN_DECKS=1` is refused with it (Show and Tell's pick, 129.3).
+* **`FUZZ_POOL=cross`**: `CROSS_PAIRS` now every pair with Doomsday, Sneak and Show or Hogaak, both seats, and the three
+  mirrors (15, `seed % 15`; its games unchanged: Doomsday against Sneak and Show).
+* The release worker knows `hogaak_a`, `hogaak_b` (games only, beside lane C's `hogaak_c`) and `hogaak` (games and
+  matches; `FUZZ_DECK_TILT` allowed in its matches) (`worker/src/fuzz.rs`).
+
+#### 220.4.5 The cross-lane tests (`engine/tests/cards_hogaak.rs`, 16)
+
+The CR rule in each name, rulings cited (`// ruling:`): Mockingbird copying Hogaak - only with seven mana spent (six
+not), a legendary 8/8 Avatar Bird with trample and flying, black and green, the Mockingbird card, mana value 7
+(5a1ea5ca, de35ba2a); copying its controller's own Hogaak - the legend rule, and in the graveyard the card is
+Mockingbird, mana value 1, without Hogaak's graveyard permission; copying Moonshadow - the copied "enters with six
+-1/-1 counters" applies (a 1/1), menace and flying, and its trigger works (P0's Wasteland sacrificed: the copy loses a
+counter; the Sea it destroys: P1's Moonshadow) (4376972c); copying Dryad Arbor - mana value 0, a Land Creature - Forest
+Dryad Bird, green by the copied colour indicator, flying, no land play (a Forest still playable), summoning sick for its
+mana ability, tapping for {G} the next turn (1df01b0e, 9da0e7ba); copying Stitcher's Supplier - mills three as it enters
+and, bolted, three more as it dies, the card in the graveyard Mockingbird; copying Dark Matter Manipulator - its mill
+and the +2/+0 per seven cards of its controller's graveyard; declining with the four offered at X 1 and Hogaak not
+(f30367a6); Hogaak convoked by a summoning-sick Dryad Arbor paying a {B/G} pip as green (fbdd4f47, dbf4ec31); the deck's
+turn-three Hogaak - Stitcher's Supplier's and Dark Matter Manipulator's mills and a Verdant Catacombs as delve fuel,
+the two, Orcish Bowmasters and its Orc Army as convoke (c6f70acd); Moonshadow beside Hogaak cast from the graveyard -
+delve's exile and the graveyard-to-stack move trigger nothing, the legend rule's Hogaak does once (4029cc96); Massacre
+killing Stitcher's Supplier, Dryad Arbor and Dark Matter Manipulator at once - one Moonshadow trigger for the batch
+(603.2c) beside the Supplier's dies trigger, then one for its mill, Hogaak a 6/6; a Moonshadow dying in the same event
+doesn't trigger (603.6c); Massacre against Moonshadow's counters (four live, five and six die); Massacre's free cast
+with each of the Hogaak 75's Swamps (Underground Sea, Swamp, Undercity Sewers) against a Tundra, and never against a land
+of the Delver, Doomsday or Sneak and Show 75s (no Plains among them: in the deck's real matchups it is hard-cast), then
+free against a Delver board; Hogaak countered by Force of Will and cast again from the graveyard (the deck's mills as
+fuel, Orcish Bowmasters and Dryad Arbor as convoke); Karakas saving Hogaak from Swords to Plowshares (cast again from
+hand), and returning a Mockingbird copying Hogaak to its owner's hand as Mockingbird. docs/interactions.md has the matrix.
+
+#### 220.4.6 Seed-pinned tests the lanes touched, rescanned on the merged table
+
+* `tests/fuzz.rs::a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game` (`delver_dealt2` matches that must
+  reach a look at the viewer's hand in a step that begins the next game): the scan of seeds 0..300 and
+  3,900,000,000..300 finds 41 on the merged table; the nine pinned seeds (30, 55, 95, 135, 3,900,000,015, 019, 026, 087,
+  151 - lanes B's and C's list) are all among them.
+* `tests/known_face_key.rs` (two fuzz cases replayed with recorded world seeds): the table prior now leaves out all
+  twelve legacy cards that joined after the cases were recorded (the Delver sideboard's five and the seven), the
+  recorded support. That alone does not bring the recorded worlds back: the K cached decks are drawn from a key that
+  hashes the shown cards' definition ids (`DealCache::key`), and Dark Matter Manipulator (like Consign to Memory at 122)
+  sorts before Disruptor Flute in the legacy IR, so the Flutes these games show have another id - which exclusion list
+  passed was luck (each lane's passed; on the merged table neither lane A's list nor all twelve did). Seed 466's
+  recorded world seed still reaches its face choice; seed 4248's is rescanned to 4 (the first of 1..400 whose two
+  worlds keep one node along the recorded path and name two different known cards at its end; about one in four do).
+
+#### 220.4.7 Digests
+
+The cube's digests **EQUAL** to main's (`--test digest`): full **44372545881ef768** (every one of the 2,500 games equal
+to `tests/data/digests.txt`), `DIGEST_ENCODING=0` **a965c3fc8d3bba8a**, `DIGEST_ENCODING=v5` **9f4cb802bae20e3b**; EoE
+**c3a9c786030f42eb** and the driver **6a03572828250b86** equal. The constructed family moves - constructed play's table
+holds seven more cards (the table prior's support, the legacy definition ids) - and is re-recorded with `DIGEST_WRITE=1`
+(f067b5e8; recorded on the Mac, bit-identical to the desktop, ENGINE.md 44):
+
+| digest | main | `hogaak` | lines |
+|---|---|---|---|
+| constructed (`digests_constructed.txt`) | 16441662701e233d | **91b6cf60576961a7** | 570 of 570 |
+| metagame (`digests_metagame.txt`) | 56ff52ffef1b1913 | **be3766d1f943c95c** | 288 of 288 |
+| dealt (`dealt_decks.rs`, `digests_dealt.txt`) | a890c27da3c7d1a8 | **f0bfffd26a70a753** | 79 of 80 |
+| dealt per seat (`dealt_per_seat.rs`, `digests_dealt_per_seat.txt`) | 5fa30432bf8cd63f | **c67b186ba7d00e51** | 60 of 60 |
+
+**The proof** (once, on the merged code; each lane had shown it for its cards, `E:/mtg-zero-scratch/hogaak/digests_a.md`):
+the scratch branch `hogaak-proof` (never merged; its own Mac checkout and target dir) = `hogaak` at 83459964 with the
+seven filtered out of `CardDb::constructed` (one line in `db.rs`): constructed **16441662701e233d**, metagame
+**56ff52ffef1b1913**, dealt **a890c27da3c7d1a8**, dealt per seat **5fa30432bf8cd63f**, EoE and driver unchanged -
+exactly main's recorded files (every test passes against them). So no rule, payment, encoding or fuzz change of the
+three lanes and the merge alters a game of those specs: the digests move only because the table holds seven more
+cards. (The commits after 83459964 change tests, digests and docs only.)
+
+#### 220.4.8 Checks
+
+Code at 1052673b (the commits after it are docs only); the heavy runs on the Mac (`tools/mac.sh`, bit-identical,
+ENGINE.md 44), the desktop throttled beside the live run.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary, at 04650c87, the same code):
+  **2,872 passed, 0 failed, 37 ignored** - `cards_suite` 1,533 (`cards_hogaak` 16 and the lanes' 38, 41, 47), `misc_suite`
+  212 (`constructed` with the Hogaak 75's two), `rules_suite` 453, `rulings_suite` 397, `az` 57, `hidden` 28, `fuzz` 19,
+  `limits` 13, `support` 9 (the legacy list of 30).
+* **The public-state gate** (`--test az`): 496 positions, 279 fields (134 public, 12 hidden, 133 derived), 243
+  perturbations: **231 encoded, 2 deliberate limits, 0 known gaps, 0 gaps for the next layout**; 120 hidden-decklist
+  perturbations reach only their owner; the pairwise pass 140,239 states, 0 panicked. No encoding gap.
+* **Digests**: 220.4.7.
+* **`FUZZ_POOL=hogaak`, 20,000 games, 1,000 matches and 1,000 post-sideboard matches** (`tools/fuzz_shards.py`, 16
+  shards a loop): **PASSED**, no failure; games wins 9,972 / 9,950, 78 drawn, none aborted, 26.3 turns and 244.5
+  decisions a game, 7,905,421 options completed. Seen: Hogaak cast from a hand 6,966 and from a graveyard 7,119, by
+  convoke 14,085, by delve 13,942, by both 13,942, **from a graveyard by convoke and delve 6,987**; Mockingbird cast 6,264,
+  **copies made 3,299**, declined 3,525; Stitcher's Supplier cast 10,012, its triggers 2,880, **resolved 1,553**; Dark Matter
+  Manipulator cast 10,073, **at +2/+0 or more 13,437**; Moonshadow cast 9,899, its triggers 6,763, **-1/-1 counters removed
+  41,175**; **Dryad Arbor played 6,168**, attacking 1,336, tapped for mana 53,348; Massacre (sideboard) in the matches
+  cast 25, **resolved 12**, in the post-sideboard matches cast 43, resolved 17. The fuzz binary's 16 other tests passed.
+* **The `fuzz` profile** (debug assertions), `FUZZ_POOL=hogaak` 1,000 games, 50 matches + 50 post-sideboard (16 shards):
+  PASSED. **`FUZZ_CHANCE=10`**, 600 games (the `fuzz` profile, the test binary's `fuzz_random_games` directly:
+  `tools/fuzz_shards.py` scrubs the caller's `FUZZ_*`): passed - 14,783 chance walks, 5,173 replays whose outcome the
+  force changed; `the_murktide_trigger_is_asserted_over_enough_games` fails whenever `FUZZ_CHANCE` is set (its
+  synthetic totals carry no chance walks, a pre-existing artefact, 220.3.8), so it was not run. **`FUZZ_BELIEF=2`**,
+  600 games, 30 matches + 30 post-sideboard (the `fuzz` profile, the whole binary but the Murktide and hand-look tests):
+  passed - 71,353 weighted worlds.
+* **Regression fuzz, 2,000 games each** (12 shards): `delver` (and 100 matches + 100 post-sideboard), `doomsday`,
+  `sneak_show`, `cross` (and 100 + 100: the Hogaak pairs among them), `hogaak_a`, `hogaak_b`, `hogaak_c`: all PASSED.
+* **IR**: `python tools/card_ir.py check` identical, `roundtrip` ok (220.4.2); `python -m pytest tests/ir`: **2,730 passed**.
+* `bash tools/build_py.sh`, `python -m pytest -q tests --ignore=tests/ir` on the Mac: 665 passed, 31 skipped, 2 failed
+  and 1 deselected - the three of the gate's `PYTEST_DESKTOP_ONLY` that fail on macOS by design
+  (`test_deck_scorer.py::test_the_engines_fixtures_are_reproducible`, platform floating point;
+  `test_run_publisher.py::test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished`;
+  `test_artifact_cache.py::test_check_scope_reads_cargo_dep_info`); the engine gate runs them on the desktop.
+* `python tools/rulings_doc.py --check`: current - 1,690 rulings (1,319 distinct), 1,313 class a, every one tested, 0
+  untested. `python tools/untested_cards.py`: 576 supported (30 legacy), **0** named by no card test.
+  `python tools/privacy_check.py`: 0 findings.
+* **The suite gate** on 1052673b (`python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,hogaak,cross`,
+  in this worktree, every step on the Mac beside the live legacy-meta3-r1): **GATE PASSED suite 1052673bd712** - privacy,
+  the test build, the full engine suite (2,867 passed, 24 binaries), the sharded 2,000-game fuzz of the default pool (and
+  100 matches), the default pool with hidden decklists, `delver_dealt`, `hogaak` and `cross` (each with 100 matches + 100
+  post-sideboard), the checkout unchanged (`gates/1052673bd712-suite.json`). The engine tier: 220.4.10.
+
+#### 220.4.9 Findings, limits and follow-ups
+
+* **Pre-existing on main, found by this pool's first probe**: an information-set divergence in a Doomsday-mirror
+  post-sideboard match - `play_match_spec(163, <the Doomsday 75 mirror, best-of-three, "start_game": 2,
+  "game_episodes": true>)` fails `check_match_information_set` ("same keys, different encodings of P1 at 57219 (0.03125 /
+  0.015625)", game 2, a tail token of P1's row). It fails identically on main 1e7416c5 (scratch branch `hogaak-mainref`,
+  only the repro test added), on the merged code and on the proof branch: not the Hogaak cards'. This pool reached it
+  only through a mistake of its own post-sideboard pairing (the pair's first 75, here Doomsday, instead of the Hogaak
+  mirror; fixed in 83459964); main's `FUZZ_POOL=cross` plays Doomsday-mirror post-sideboard matches on other seeds.
+  Repro and details: `E:/mtg-zero-scratch/hogaak/finding_dd_mirror_post_163.md`. Left for a follow-up.
+* **Follow-up (the lanes' reported engine gaps outside their cards, not changed here)**: mana abilities activated
+  while a spell is cast beyond the payment's sources (601.2g before 601.2h: Chromatic Star or Wizard's Rockets during
+  Hogaak's cast, 220.1.5, 220.1.9); convoke through `PayMana` taking a class's creatures as interchangeable (two of one
+  definition in different states); `normal_payable` and castability's `alt_payable` leaving convoke's and improvise's
+  sources out; the payment's partway picks (`PayMana::chosen`) missing from `Game::view_of` and the encoding; delve's
+  remaining-cards check ignoring convoke for a delve spell other than Hogaak; EoE W3's `DamageEachSourceMv` and a
+  copy's 202.3b mana value (220.2).
+* Massacre's free cast is reachable in no real matchup of the four 75s (none has a Plains-typed land); its
+  cards_hogaak and lane B tests cover it against Tundra, Scrubland and Plains.
+* Scratch branches left in the repository (never merged, local and on the Mac only): `hogaak-proof` (the digest
+  proof), `hogaak-mainref` and `hogaak-scratch` (the repro and the seed scans).
+
+#### 220.4.10 The engine gate
+
+On 93513ea8 (220.4's commit; docs after the tested code), in this worktree, its steps on the Mac and the desktop's
+throttled beside the live legacy-meta3-r1: `python tools/gate.py engine --tested-sha 1052673bd712 --expect-digest
+44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine 93513ea86b60 in 1893s** (skipped:
+one live-run-hazard test of the desktop's pytest, fenced by the live run here): privacy (0 findings); the build and the
+release worker; the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (= expected); the digest formats
+constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame be3766d1f943c95c and dealt
+f0bfffd26a70a753 (each = the checkout's recorded file); `az` 57, `limits` 13, `hidden` 28 passed; pytest on the Mac 1,260
++ 721 + 651 + 738 passed and its desktop part 48 passed (5 skipped); the desktop smoke config; **farm compat identical**
+on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows, 6 decks
+compared); the suite evidence of 1052673bd712 (`gates/1052673bd712-suite.json`); the Mac's full-suite recheck not
+needed (the tested sha differs in docs only); the checkout unchanged (`gates/93513ea86b60-engine.json`). The next
+commit adds this paragraph only (docs).
