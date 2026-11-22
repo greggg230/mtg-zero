@@ -45645,3 +45645,40 @@ ran).
 Left: more desktop slots for the single-threaded pytest shards (the owner's call); the durations of shards that ran on
 the Mac are still not recorded (167.10), so beside a live run this repo's shards stay as balanced as the last desktop
 run left them; `check_checkpoint_compat` is one ~22 min step.
+
+## 239. zero-core pin 688e753 -> c36a566: a saved config read back resolves its games (the farm release's gate 2 after layout v8; zero-core `fix/remote-worker-alias` c36a566, docs/az.md 73.2; 2026-11-22)
+
+**Why.** The farm release of c8dd218d (the first after section 237's fix) passed its DirectML self-test and failed at
+its farm gates (`tools/farm_release.py` step 8, `tools/farm_gates.py`): gate 3 passed (the native worker resolved the
+reference config's game to `mtg_v7`), gate 2 failed - the Python remote worker refused the checkpoint, `a network of
+another encoding than this build's (game 'mtg_v7' -> 'mtg'; ... token layout version 7 -> 8)`, exit 78. The farm's
+reference config is a run's config of before layout v8 (`"game": "mtg"`, no layout record), and gate 2
+(zero-core `tools/worker_parity.py`) copies it as it is into the remote worker's mirror. zero-core's
+`remoteplay.Worker` read its mirror's config.json without resolving the alias (`mtg` without a record = `mtg_v7`,
+zero-core docs/az.md 73), so it played `mtg` (layout 8) while the checkpoint loaded as `mtg_v7`. Runs never met it (the
+run resolves its config before it writes a mirror), but every farm release since layout v8 would fail the same way, and
+any other reader of a saved config with the same gap would play the wrong layout.
+
+**What.** zero-core: `package.resolve_saved_games(cfg, where)` resolves a saved config's games in place as a resumed
+run's are resolved (`game` with its `game_layout`, a co-training `resolver` with `resolver_cfg`'s record; a config
+written resolved reads back unchanged), and every reader that skipped it now calls it: `remoteplay.Worker` (the mirror's
+config.json; a layout record the checkout has no game for is refused as an `encoding` error, exit 78), the remote
+evaluation commands (`remote.evaluate_mirror`, `evaluate_net_mirror`: REFUSED on a bad record) and
+`farm_eval.match_driver` (an eval job's settings, as the native worker's `game_of` resolves them;
+`tools/worker_eval_gate.py`'s Python side). The other readers were audited and already resolved (the list is in
+docs/az.md 73.2). This repo's farm gates and worker are unchanged; no engine, encoding, search or self-play change.
+
+**Reproduced and fixed** (copies of the farm's reference config and checkpoint, the release's CPU runtime pack and its
+`mtgz-worker` under a scratch directory; nothing written under the farm builds directory): `python tools/farm_gates.py
+--config <copy> --checkpoint <copy> --worker <the release's worker> --runtime-dir <copy>` as the release runs it - with
+this checkout's core at the old Python (the fix stashed): `FARM GATES FAILED: gate 2 (plumbing) FAILED, gate 3 (records)
+passed`, gate 2's worker log the release's message (`game 'mtg_v7' -> 'mtg'`, exit 78); with this pin: `FARM GATES
+PASSED` - gate 2 8 games, 534 rows, 200 network batches, every shard array identical; gate 3 12 games, `mtg_v7`,
+identical.
+
+**Tests.** zero-core `tests/test_game_alias.py` (the stand-in alias `toy_match` rev 1 / before `toy`):
+`resolve_saved_games`; a remote Worker in-process on a mirror naming `toy_match` with `game_layout` null plays `toy` and
+loads a `toy` checkpoint (fails before the fix with the release's refusal), `toy_match` with its record plays it and
+refuses a `toy` checkpoint, a record 4 is refused as `encoding`; the remote evaluation's mirror (both commands); an eval
+job's match driver; `tests/test_worker_settings.py`: an eval match's reads are the worker's `EVAL_READS` whole, `game_layout`
+included.
