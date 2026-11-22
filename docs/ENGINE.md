@@ -43931,12 +43931,11 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
 
 ### 221.9 Checks
 
-* **Full engine suite** on the Mac (`cargo test --release -p engine -p card_ir --no-fail-fast`, incl. `az`'s
-  public-state gate: no new gap - the payment's classes are not part of the input), after the fixes of 221.2 / 221.6:
-  every binary passed (`rules_suite` 469 with the 16 new tests, `cards_suite` 1,533, `az` 57, `misc_suite` 212, `fuzz`
-  19, ...). Pytest on the Mac: the canary library and `test_build` 40 passed after the re-record; the only other
-  failures of the full run are the Mac's known three (`test_artifact_cache`'s cargo dep-info check, `test_deck_scorer`'s
-  fixture reproducibility, `test_run_publisher`'s supervisor test - each failing the same way on main's integration run).
+* **Full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast` on the Mac, incl. `az`'s public-state
+  gate: no new gap - a payment's classes are not part of the input): its first run on the merged code found the stale
+  `leaving_card` name and the three moved tests of 221.6; after them, every binary passed. On the final engine (94b2b780,
+  main 52d0bf9b merged) the suite gate's run: **2,886 passed**, 24 binaries (16 new). Pytest: the engine gate's
+  (below), 740 passed.
 * **Fuzz** on the Mac (`tools/fuzz_shards.py`, 24 shards, 12 at once; 0c2482fe, the tested engine), 20,000 games each,
   every one **PASSED**: default (+1,000 matches) 200 s, eoe 544 s, delver (+1,000 matches, +1,000 post-sideboard) 158 s,
   doomsday 169 s, hogaak_a 111 s, sneak_show 99 s, cross (+1,000 matches, +1,000 post-sideboard) 171 s, hogaak (+1,000
@@ -43945,6 +43944,20 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
   matches: 26,849 chance walks, 14,494 replays whose outcome the force changed; 18 passed, the Murktide-count unit test
   failing as it does whenever `FUZZ_CHANCE` is set (the known artefact). `FUZZ_BELIEF=2`, 600 games + 30 matches:
   15,804 belief worlds; 19 passed.
+  (These 20,000-game runs are of 0c2482fe, before main's 223 was merged; the merged engine's are the suite gate's.)
+* **The gates** (this worktree, its Mac steps on the Mac, the desktop's throttled beside the live legacy-meta3 runs;
+  the system Python): `python tools/gate.py suite --fuzz-pools default,eoe,delver_dealt,hogaak,cross` - **GATE PASSED
+  suite 94b2b780df17 in 631s** (privacy 0 findings; the full engine suite 2,886 passed; the sharded 2,000-game fuzz of
+  each pool, with 100 matches + 100 post-sideboard where the pool has them; the checkout unchanged;
+  `gates/94b2b780df17-suite.json`); `python tools/gate.py engine --tested-sha 94b2b780df17 --expect-digest
+  14e6735d8eb9cb4a --expect-digest0 5674f63cc335d204` - **GATE PASSED WITH SKIPS engine 94b2b780df17 in 1261s**
+  (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live run here): the digests full
+  14e6735d8eb9cb4a and encoding-free 5674f63cc335d204 (= expected), the formats constructed 498c263f7048e81d, EoE
+  7e45b554b95820ed, driver 6a03572828250b86, metagame 0d13940b6d659a83 and dealt fb7532e8a30a63f4 (each = the recorded
+  file); `az` 57, `limits` 13, `hidden` 28; pytest on the Mac 124 + 197 + 181 + 189 passed and its desktop part 49
+  passed (5 skipped); the smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,452
+  rows, 150 batches; gate 3: 6 games, 2,598 rows, 6 decks); `gates/94b2b780df17-engine.json`. The next commit adds
+  this paragraph only (docs).
 
 ### 221.10 For the merge with agent M (222) and open items
 
