@@ -44830,3 +44830,24 @@ post-sideboard - the dropped-loop-record check in each); **GATE PASSED WITH SKIP
 formats constructed, EoE, driver, metagame and dealt (= the recorded files), `az` 57, `limits` 13, `hidden` 28, pytest 233 +
 153 + 173 + 229 passed, the desktop smoke config, farm compat identical on `delver-mirror-bo3-dealt` (gate 2: 6 games,
 2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows), the suite evidence. The next commit adds this paragraph only (docs).
+
+### 232.8 Main's 601.2g step (merge 02488f43, origin/main e445ba27; zero-core 56fda50 = main's 899e0eb plus the branch rule)
+
+Main's payment fixes (229, 231) add game state and a decision kind. **The key:** `Game::cast_lock` (a spell's total cost
+locked by a mana ability during its cast) is refused by `describe` and checked by the key too; `Game::pool_wild` (the
+payment search's transient, (0, 0) at every decision) must be (0, 0), else no key. Nothing else main added is read by
+the key; a `CastMana` decision is not a built decision, so it has no key (as every decision inside a cast). **The
+alternative check:** `CastMana` (the 601.2g step: a mana ability while the spell is cast) is a mana detail, as
+`ActivateMana`, and so is a `ChooseMode` that the mana-ability window, the 601.2g step or a mana ability's X asks (which
+of a permanent's mana abilities, how much); `CostPart` and `ChooseColorsSpent` stay real decisions (the order of a
+cost's parts and the colours spent can change what happens). Test: `branch_alt_ok_excludes_the_cast_mana_step_and_its_mana_ability_modes`
+(random cube games: 7 `CastMana` decisions and 15 mana-ability modes, every pair false).
+
+**Checks on the merge** (desktop, CPU, below-normal priority, beside the live runs): `az` 57, `misc_suite` 224 passed;
+the digests equal main's re-recorded files (the feature is off by default): the cube 9473f7debc4bceb3, encoding-free
+d3c144b6cc2977e5, constructed 4a03293608edeba2, EoE 5ffb850dd963bad0, driver 6a03572828250b86, metagame d72ae0c904a0ffbd,
+dealt f858b1880091d94f; the game database's tests 56 passed. **The dropped-loop-record check**, 2,000 games per pool (and
+the pool's matches), 0 recurrences: default 45,472 record-steps (+ 3,205 in matches), default with hidden decklists
+42,883, delver_dealt 133,162 (+ 11,616), delver 133,162 (+ 11,824), doomsday 82,272, cross 38,443 (+ 5,642), hogaak 55,757
+(+ 5,539). **The meta3 smoke again** (232.7's command): eligible decisions 69.8 / 25.7 / 24.6 a game, branches 2 / 3 / 8,
+merged 1 / 0 / 0 (2 decisions); every record replays (the game database ingested all 96).

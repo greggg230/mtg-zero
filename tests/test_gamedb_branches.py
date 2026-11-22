@@ -131,7 +131,8 @@ def test_branch_games_carry_their_columns_and_a_merged_one_its_games_result(bran
     games = table(con, 'SELECT * FROM games ORDER BY game_id')
     assert sum(1 for g in games if g['is_branch']) == 2 + len(made['more'])
     assert all(g['branch_from'] is None for g in games if not g['is_branch'])
-    played = next(g for g in games if g['is_branch'] and g['branch_merged'] is None)
+    pa = made['parents'][0]
+    played = next(g for g in games if g['is_branch'] and g['gid'] == pa['gid'] and g['branch_from'] == made['played']['branch']['from'])
     merged = next(g for g in games if g['branch_merged'] is not None)
     pb = made['played']['branch']
     assert (played['branch_from'], played['branch_alt'], played['branch_tag']) == (pb['from'], pb['alt'], 1)
