@@ -833,7 +833,7 @@ pub(crate) fn payment_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
     let place = |c: CardIdx| -> u64 {
         // (A hand card: hidden unless the viewer knows it - its owner's place only.)
         match g.objs[c.i()].zone {
-            Zone::Hand => 4000 + g.objs[c.i()].owner as u64 * 100 + if g.knows(viewer, c) { 1 + g.objs[c.i()].def as u64 * 4 } else { 0 },
+            Zone::Hand => h64(&("a hand card", g.objs[c.i()].owner, g.knows(viewer, c).then_some(g.objs[c.i()].def))),
             _ => g.view_place(c),
         }
     };
