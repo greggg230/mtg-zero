@@ -44765,4 +44765,14 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
 
 ### 232.8 Checks
 
-CHECKS
+* The engine suite on the Mac (`cargo test --release -p engine -p card_ir --no-fail-fast`): passed but the two build
+  round trips, whose described positions lost the new public last known information (fixed: 232.3's `"lki"`; both pass).
+  `az` 58 passed (+ `layout_v8_cost` ignored), `hidden` 28, the engine's unit tests with `mtg_v8_is_mtg_in_layout_v8`.
+* Fuzz on the Mac (`tools/fuzz_shards.py`, 2,000 games each, every decision's v8 row checked against its v7 row and its
+  payment pointers): default (+100 matches), delver (+100 matches, +100 post-sideboard), doomsday, hogaak (+100, +100),
+  cross (+100, +100): **all PASSED**. Found on the way and fixed: the hidden-decklist information-set walk's leak of
+  `lki_damage`'s presence (232.3).
+* pytest on the Mac (`bash tools/build_py.sh && python -m pytest -q tests`): 3,453 passed, 32 skipped; failed only the
+  three tests gate.py runs on the desktop (`PYTEST_DESKTOP_ONLY`: the artifact cache's Windows paths, the deck scorer's
+  bit-for-bit fixtures, the run publisher's supervisor) and `test_presets_leave_shard_sparse_off`, which now names
+  `mtg_v8`'s preset as a game with tails (fixed).
