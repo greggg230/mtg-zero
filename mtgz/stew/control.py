@@ -19,6 +19,7 @@ A long process is polled; `stop()` true (the stew's STOP or PAUSE) kills it with
 distill resumes from its partial file, a judge job is played again.
 """
 import json
+import shutil
 import os
 import subprocess
 import sys
@@ -123,8 +124,23 @@ class Ops:
                     raise Interrupted(self.cmdline(cmd))
 
     # ---------------------------------------------------------------- runs
-    def fork_new_run(self, seed, run_dir, log_path):
-        self.run([self.py, 'tools/fork_run.py', seed, run_dir], log_path)
+    def fork_new_run(self, seed, run_dir, log_path, game=None):
+        """tools/fork_run.py <seed> <run> [--game G]: a NEW run whose iteration 0 is the seed widened onto game G's
+        layout (exact on rows without the new tokens; an older layout's network - layout v7's `mtg_v7` - moves onto
+        the current one, docs/ENGINE.md 236)."""
+        self.run([self.py, 'tools/fork_run.py', seed, run_dir] + (['--game', game] if game else []), log_path)
+
+    def widen(self, ckpt, dst, game, log_path):
+        """Network `ckpt` on game `game`'s layout as the file `dst`: fork_run's new-run path into `dst`.fork (kept,
+        the provenance) and its iteration 0 copied to `dst` - the stew's gen-0 main stew from a source of an older
+        layout (the meta3 run's v7 checkpoint onto v8: the user, 2026-11-22)."""
+        fork = dst + '.fork'
+        ck0 = os.path.join(fork, 'models', 'iter_0000.pt')
+        if not os.path.exists(ck0):
+            self.fork_new_run(ckpt, fork, log_path, game)
+        tmp = dst + '.part'
+        shutil.copyfile(ck0, tmp)
+        os.replace(tmp, dst)
 
     def resolve(self, run_dir, saved):
         """The config a run of `saved` resolves to at its start (zero.run: DEFAULTS < preset < saved < flags; no flags)."""

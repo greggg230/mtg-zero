@@ -199,7 +199,8 @@ def test_an_undecidable_row_fails_the_selection(tmp_path):
 def selfplay_shards(run, spec, iters=2, matches=2):
     """Best-of-three self-play shards of `spec` (uniform priors, value-only samples on) in `run`/data, its config.json."""
     info = G.info('mtg')
-    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions'],
+    from zero import package          # (`mtg` = layout v8: written with its game_layout, docs/ENGINE.md 236.9)
+    meta = {'game': 'mtg', **package.layout_stamp('mtg'), 'features': info['num_features'], 'actions': info['num_actions'],
             **data.shard_format({'shard_sparse': 1}, info)}
     for k in range(iters):
         seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10, leaf_value_view='root',
@@ -210,7 +211,7 @@ def selfplay_shards(run, spec, iters=2, matches=2):
         drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: w.add(drv.take_samples()))
         w.add(drv.take_samples())
         w.close()
-    (run / 'config.json').write_text(json.dumps({'game': 'mtg', 'spec': spec}))
+    (run / 'config.json').write_text(json.dumps({'game': 'mtg', **package.layout_stamp('mtg'), 'spec': spec}))
 
 
 def test_distill_sources_on_a_specialists_best_of_three_rows(tmp_path):

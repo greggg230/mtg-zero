@@ -179,6 +179,9 @@ class Stew:
         for k in ('spec', 'eval_spec', 'iters', 'selfplay_remote'):
             out[k] = stew[k]
         out.pop('run', None)
+        # (the stew's game with its layout record: the source's config names `mtg` without one = layout v7's mtg_v7)
+        from zero import package
+        package.set_game(out, r['game'])
         if r['farm'] and not out.get('pool_build'):
             raise Refused(f'specialist {a}|{b}: recipe.farm but no pool_build (code.farm or the source\'s settings)')
         return out, notes
@@ -241,8 +244,12 @@ class Stew:
         st = self.st
         if st.version('main', 0) is None:
             dst = self.net_path('main', 0)
-            self._copy(ck, dst)
+            # (the stew's game, recipe.game: its gen-0 main stew is the source checkpoint widened onto that game's
+            # layout - the meta3 run's v7 network onto v8, docs/ENGINE.md 236; every net below descends from it)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            self.ops.widen(ck, dst, cfg['recipe']['game'], self.p('logs', 'init.log'))
             st.add_version('main', {'gen': 0, 'path': st.rel(dst), 'sha256': sha256(dst), 'time': now(),
+                                    'game': cfg['recipe']['game'], 'source_sha256': sha256(ck),
                                     'from': {'run': src.replace('\\', '/'), 'iter': it}})
             st.d['source']['sha256'] = st.version('main', 0)['sha256']
             st.save()
@@ -303,7 +310,7 @@ class Stew:
         ck0 = os.path.join(run, 'models', 'iter_0000.pt')
         if not os.path.exists(ck0):
             self.say(f'{sn}: fork_run {seed} -> {run}')
-            self.ops.fork_new_run(seed, run, self.p('logs', 'init.log'))
+            self.ops.fork_new_run(seed, run, self.p('logs', 'init.log'), self.cfg['recipe']['game'])
         settings, notes = self.specialist_settings(a, b)
         self.ops.check_spec(settings.get('game', 'mtg'), settings['spec'])
         cfgp = os.path.join(run, 'config.json')

@@ -41,10 +41,16 @@ class FakeOps:
     def check_code(self, sha=None):
         return 'f' * 40
 
-    def fork_new_run(self, seed, run, log):
+    def fork_new_run(self, seed, run, log, game=None):
         self.calls.append(('fork', seed, run))
+        self.games = getattr(self, 'games', []) + [game]
         os.makedirs(os.path.join(run, 'models'), exist_ok=True)
         with open(seed, 'rb') as f, open(os.path.join(run, 'models', 'iter_0000.pt'), 'wb') as g:
+            g.write(f.read())
+
+    def widen(self, ckpt, dst, game, log):
+        self.calls.append(('widen', ckpt, game))
+        with open(ckpt, 'rb') as f, open(dst, 'wb') as g:
             g.write(f.read())
 
     def resolve(self, run, saved):
@@ -276,6 +282,11 @@ def test_init_layout_and_specialist_settings(stew, tmp_path):
     cfg = jload(os.path.join(st.abs(mirror['run']), 'config.json'))
     spec = json.loads(cfg['spec'])
     assert spec['format'] == 'bo3' and spec['game_episodes'] is True and 'start_game' not in spec
+    # layout v8 (the user, 2026-11-22): the gen-0 main stew is the source widened onto game `mtg` (fork_run's new-run
+    # path), every specialist forked onto it, its config naming `mtg` with game_layout 8 (the source's names none: v7)
+    assert ('widen', os.path.join(str(tmp_path), 'source', 'models', 'iter_0007.pt'), 'mtg') in stew.ops.calls
+    assert st.version('main', 0)['game'] == 'mtg' and stew.ops.games == ['mtg'] * 3
+    assert cfg['game'] == 'mtg' and cfg['game_layout'] == 8
     assert [d['name'] for d in spec['metagame']['decks']] == [DEL] and spec['metagame']['weights'] == [[1]]
     assert 'forced_find' not in spec and cfg['forced_find_schedule'] == {}
     assert cfg['eval_spec'] == cfg['spec']

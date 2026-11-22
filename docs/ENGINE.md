@@ -46119,6 +46119,18 @@ touches it).
   `live_run_hazard` tests fenced off beside the live runs; 2,432 s). With lane 3 merged, `test_spec_extras_and_matchup_
   settings_come_from_the_recipe` changed: the engine now parses dealt decks per seat in the best-of-three metagame at
   init, so its check refuses the test's unknown per-deck key instead, and passes without it.
+* *Layout v8* (the user, 2026-11-22: "Definitely need to move the stew to v8"; main's layout v8 section): `recipe.game`
+  (default `mtg` = layout v8). `init` widens the source checkpoint onto it - `Ops.widen`: fork_run's new-run path into
+  `nets/main/gen_000.pt.fork` (kept: the provenance), its iteration 0 copied to `nets/main/gen_000.pt`, the version
+  recording `game` and `source_sha256` - so every net descends from a v8 network; each specialist is forked with
+  `--game` (the Delver mirror's seed pb1@262 too) and its config names `mtg` with `game_layout` 8 (`package.set_game`;
+  the source's config names `mtg` without a layout record, i.e. `mtg_v7`). Probe on the real nets (read-only):
+  the meta3 run's iteration 1234 widened across the token layout change, new segments payment, pay_options, lki,
+  lki_spells, lki_relations, find_groups each gated at exactly 0; pb1@262 (44,212 features) onto 56,384 with tails and
+  twenty new gated segments - both computing what they did on every row without the new tokens. The judge reads a
+  net's game through `package.record_game`. The retention archive (the source's v7 shards) cannot train a v8 net as
+  it is: the main stew's first distillation (after generation 0's hold) needs them replayed as v8 rows or another
+  retention source - decided at the hold.
 
 ## 223. pb3's sideboarding for every stew specialist: dealt decks from each seat's own 75, the per-pairing matchup model and one choice table per deck, in the best-of-three metagame restricted to a pairing (branch `feat/pair-sideboarding`, 2026-11-21)
 
@@ -46296,8 +46308,10 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   Doomsday-mirror leak fix (its section: a search's finds by place, an encoding change that re-recorded the metagame
   digest, be3766d1f943c95c -> 4039d04b7971975e), the pair digest moved with it: f82ab8148a4870a9 -> **b0e1c7c5dbcce38e**,
   re-recorded; its encoding-free digest (`DIGEST_ENCODING=0`) is b1e9aa24fa89b2fb on both sides of that merge - play
-  unchanged, only the encoding. The cube's (44372545881ef768 / encoding-free a965c3fc8d3bba8a) and the dealt digests
-  (f0bfffd26a70a753, per seat c67b186ba7d00e51): the engine gate.
+  unchanged, only the encoding. Merged with main's 227-238 (the Hogaak payment fixes changed play: main's cube
+  encoding-free 5674f63cc335d204 -> d3c144b6cc2977e5; layout v8 hashes v8 rows by default): the pair digest **80562a6aa452b765**
+  (v8 rows; `DIGEST_ENCODING=v7` 11b7a5f3f2dc7d9e, encoding-free 719f834f0766cbed), re-recorded; every other
+  digest_formats digest as main recorded it. The cube's and the dealt digests: the engine gate.
 * **Farm compatibility on the specialists' preset** (`tools/farm_compat.py --preset legacy-pair-bo3-varied`, the
   branch's release worker; the gate's own farm-compat step runs the Delver preset): PASSED - gate 2 (worker vs the
   Python remote worker) identical, 6 matches, 3,056 rows, 150 batches; gate 3 (records -> trainer rows) identical, 3,349

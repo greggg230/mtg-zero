@@ -142,7 +142,8 @@ def play_job(job):
         raise SystemExit(f"stew judge: job version {job.get('v')!r}, this checkout reads {JOB_V}")
     p = job['play']
     ma, _ = load(job['a'], p['device'])
-    game = ma.config.get('game', 'mtg')
+    from zero import package
+    game = package.record_game(ma.config, f'the judge net {job["a"]}', default='mtg')
     mb, _ = load(job['b'], p['device'], game=game)
     seats = {}
     for key, m, path in (('a', ma, job['a']), ('b', mb, job['b'])):

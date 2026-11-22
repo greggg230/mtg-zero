@@ -41,7 +41,7 @@ DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims':
                  'groups': 1, 'procs': 1, 'seed': 0, 'chance_k': 2, 'precision': None, 'gen_over_gen': True,
                  'main_arms': True, 'est_s_per_match': 3.5}
 JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend per comparison)
-DEFAULT_RECIPE = {'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
+DEFAULT_RECIPE = {'game': 'mtg', 'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
                   'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
                   'distill_iters': 6, 'retention_share': 'field', 'judge': DEFAULT_JUDGE, 'hold_after': [], 'env': {},
                   'archive': 'copy'}
