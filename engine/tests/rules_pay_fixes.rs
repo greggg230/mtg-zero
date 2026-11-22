@@ -469,7 +469,8 @@ fn cr_601_2f_702_51a_702_126a_castability_and_the_payment_agree_on_random_boards
         let mut g = s.start();
         // (A damaged creature now and then: a twin told apart.)
         if vote && rng.below(3) == 0 {
-            if let Some(c) = g.permanents_of(0).find(|&c| g.is_creature(c) && g.name(c) == GREEN) {
+            let hurt = g.permanents_of(0).find(|&c| g.is_creature(c) && g.name(c) == GREEN);
+            if let Some(c) = hurt {
                 g.set_damage(c, 1);
             }
         }
