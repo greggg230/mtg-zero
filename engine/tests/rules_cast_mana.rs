@@ -641,3 +641,41 @@ fn cr_601_2g_castability_and_the_cast_agree_with_mana_abilities_that_feed_the_gr
     println!("castable boards {castable_n}, castable only through a Star {through_star}, cast paths {paths_n}");
     assert!(castable_n >= 100 && through_star >= 10 && paths_n >= 1000, "castable boards {castable_n}, through a Star {through_star}, paths {paths_n}");
 }
+
+#[test]
+fn cr_702_66a_a_source_delved_isnt_also_tapped_by_another_ability() {
+    // Dig Through Time ({6}{U}{U}): two Islands, Urza, Lord High Artificer ("tap an untapped artifact you control: add
+    // {U}") and Wizard's Rockets, five graveyard cards. Urza tapping the Rockets for {U} pays one mana; the Rockets
+    // delved (sacrificed by their own ability as the payment begins, CR 601.2g-h) is one card - not both. With the
+    // Rockets chosen in delve, the rest needs all five graveyard cards: `PASS` is never offered after four (before,
+    // delve counted Urza's tap of the Rockets and the payment then had no way to pay; ENGINE.md 228, cube board 2213).
+    let mut g = cube()
+        .battlefield(0, &["Island", "Island", "Urza, Lord High Artificer", "Wizard's Rockets"])
+        .graveyard(0, &["Ponder", "Brainstorm", "Lightning Bolt", "Mountain", "Swamp"])
+        .hand(0, &["Dig Through Time"])
+        .at(Step::Main1, 0)
+        .start();
+    let dig = g.card(0, "Dig Through Time", Zone::Hand);
+    let rockets = bf(&g, 0, "Wizard's Rockets");
+    assert!(g.has_option(Choice::Cast(dig)), "{}", opts(&g));
+    g.choose(Choice::Cast(dig));
+    g.pass_cast_mana();
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard), "{}", opts(&g));
+    assert!(g.has_option(Choice::Card(rockets)), "the Rockets may be delved: {}", opts(&g));
+    g.choose(Choice::Card(rockets));
+    let mut picks = 0;
+    while g.kind() == Some(DecisionKind::ChooseGraveyardCard) {
+        let cards = cards_offered(&g);
+        if picks < 5 {
+            assert!(!g.has_option(Choice::Pass), "after {picks} graveyard cards: {}", opts(&g));
+        }
+        match cards.first() {
+            Some(&c) => g.choose(Choice::Card(c)),
+            None => g.choose(Choice::Pass),
+        };
+        picks += 1;
+    }
+    until_priority(&mut g, &|_| None);
+    assert_eq!(g.obj(dig).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(rockets).zone, Zone::Exile, "{}", log(&g));
+}

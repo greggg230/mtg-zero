@@ -1402,15 +1402,17 @@ impl Game {
         let gy_cards = self.graveyard_cards(p).count() as u64;
         // (Of a spell whose mana can't be spent: what its convoke can pay,
         // ENGINE.md 220.1.)
-        let need = (0..=cost.generic.min(gy_cards)).find(|&d| self.delve_rest_payable(p, card, &cost.less_generic(d), allow)).unwrap_or(cost.generic) as usize;
-        let floor = item.delve_floor as usize;
-        let keep = self.escape_exiles(card, item.from) as usize;
-        let gy = &self.players[p as usize].graveyard;
         // (A spell whose mana can't be spent: no mana source is activated for
         // it, a Lotus Petal neither; its mana floated first, the Petal is a
         // graveyard card like any, ENGINE.md 220.1.)
         let late = if allow.no_mana { Vec::new() } else { self.delve_sources(p) };
         let committed: Vec<CardIdx> = late.iter().copied().filter(|&c| self.delve_late(c)).collect();
+        // (The sources committed to delve are activated by their own ability: no other use of their cards pays the
+        // rest, `delve_rest_payable_using`; ENGINE.md 228.)
+        let need = (0..=cost.generic.min(gy_cards)).find(|&d| self.delve_rest_payable_using(p, card, &cost.less_generic(d), allow, &committed)).unwrap_or(cost.generic) as usize;
+        let floor = item.delve_floor as usize;
+        let keep = self.escape_exiles(card, item.from) as usize;
+        let gy = &self.players[p as usize].graveyard;
         // (Hand cards promised: not graveyard picks, ENGINE.md 100.4.9.)
         let promised = self.delve_promised(p);
         // Picks go up the graveyard (each set once), leaving enough cards
@@ -1436,7 +1438,18 @@ impl Game {
                 // (The sources after it may be delved as well: castability
                 // counted each, `delve_classes`; ENGINE.md 49.)
                 let later = late.len() - j - 1;
-                if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.can_pay_for(p, &rest.less_generic(d), allow)) {
+                // (Each source delved is activated by its own ability: this one, the committed ones, and the later
+                // ones a count past the graveyard's takes - each set of them, ENGINE.md 228.)
+                let pays = |d: u64| {
+                    let extra = (d as usize).saturating_sub(gy_left);
+                    crate::cast_mana::subsets(&late[j + 1..], extra).into_iter().any(|more| {
+                        let mut used = committed.clone();
+                        used.push(c);
+                        used.extend(more);
+                        self.delve_rest_payable_using(p, card, &rest.less_generic(d), allow, &used)
+                    })
+                };
+                if (0..=((gy_left + later) as u64).min(rest.generic)).any(pays) {
                     opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
                 }
             }

@@ -31,6 +31,21 @@ use crate::ids::{CardIdx, PlayerId, Zone};
 use crate::mana::ManaCost;
 use crate::pay::Src;
 
+/// Every subset of `v` of `k` elements (in order; none when `k` > `v.len()`).
+pub(crate) fn subsets(v: &[CardIdx], k: usize) -> Vec<Vec<CardIdx>> {
+    if k == 0 {
+        return vec![Vec::new()];
+    }
+    let mut out = Vec::new();
+    for i in 0..v.len() {
+        for mut rest in subsets(&v[i + 1..], k - 1) {
+            rest.insert(0, v[i]);
+            out.push(rest);
+        }
+    }
+    out
+}
+
 /// What the collapse of a pure mana ability reads once per step (`Game::cast_mana_collapsed`).
 struct Collapse {
     /// The checks that do not depend on the ability's permanent: the caster receives priority right after the cast,
@@ -379,6 +394,31 @@ impl Game {
             });
         }
         out
+    }
+
+    /// Delve's question (CR 702.66a, 601.2h; `delve_rest_payable`) with the mana sources `used` delved (a Lotus Petal,
+    /// Wizard's Rockets chosen in delve, `Mark::DelveLate`, or about to be): each is activated by its own ability as
+    /// the payment begins (`PayMana::forced`) and its card exiled, so no other use of its card pays the rest - another
+    /// permanent's ability tapping or sacrificing it (Urza, Lord High Artificer's "tap an untapped artifact you
+    /// control"). The payment's sources (`mana_classes`, as `can_pay_for` reads them) less those other uses: its own
+    /// ability stays a source (activated anyway, its mana is the payment's, used or floating). Before, the rest was
+    /// asked with the other uses counted - castability and the payment disagreed (ENGINE.md 228: cube board 2213, Dig
+    /// Through Time with Urza and Wizard's Rockets).
+    pub(crate) fn delve_rest_payable_using(&self, p: PlayerId, card: CardIdx, cost: &ManaCost, allow: crate::doomsday_b::Allow, used: &[CardIdx]) -> bool {
+        if used.is_empty() {
+            return self.delve_rest_payable(p, card, cost, allow);
+        }
+        let classes: Vec<crate::pay::Class> = self
+            .mana_classes(p, None)
+            .into_iter()
+            .filter_map(|mut cl| {
+                let own = crate::pay::delve_source(&cl);
+                cl.members.retain(|m| own || !used.contains(&m.card));
+                cl.actors.retain(|a| !used.contains(a));
+                (!cl.members.is_empty() && !(cl.pool > 0 && cl.actors.is_empty())).then_some(cl)
+            })
+            .collect();
+        self.can_pay_with(p, cost, &classes, &crate::pay::Keep { allow, ..Default::default() })
     }
 
     /// The combinations of the payment search's mana of no chosen type (`Game::pool_wild`) of `p`: each production of
