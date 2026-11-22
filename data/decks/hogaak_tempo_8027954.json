@@ -1,0 +1,50 @@
+{
+ "name": "Dimir Hogaak",
+ "archetype": "Legacy Hogaak Tempo",
+ "format": "Legacy",
+ "player": "Jonathan Canfield",
+ "event": "North American Eternal Weekend - Legacy Championship",
+ "date": "2026-10-31",
+ "result": "5th place, 12-3",
+ "platform": "paper",
+ "deck_source": "melee.gg",
+ "source": "https://www.mtggoldfish.com/deck/8027954",
+ "archetype_page": "https://www.mtggoldfish.com/archetype/legacy-hogaak-tempo#paper",
+ "download": "https://www.mtggoldfish.com/deck/download/8027954",
+ "fetched": "2026-11-21, from the archetype page's export field (deck_input[deck]) via plain curl: the archetype's representative paper list, deck 8027954; its download link returns 403 (Cloudflare)",
+ "export": "hogaak_tempo_8027954.txt",
+ "export_names": {
+  "Brazen Borrower": "Brazen Borrower // Petty Theft"
+ },
+ "main": [
+  [4, "Stitcher's Supplier"],
+  [1, "Swamp"],
+  [2, "Thoughtseize"],
+  [2, "Kaito, Bane of Nightmares"],
+  [4, "Force of Will"],
+  [4, "Underground Sea"],
+  [3, "Mockingbird"],
+  [1, "Dryad Arbor"],
+  [4, "Misty Rainforest"],
+  [3, "Ponder"],
+  [4, "Wasteland"],
+  [3, "Orcish Bowmasters"],
+  [4, "Dark Matter Manipulator"],
+  [1, "Undercity Sewers"],
+  [4, "Moonshadow"],
+  [4, "Verdant Catacombs"],
+  [1, "Brazen Borrower // Petty Theft"],
+  [4, "Brainstorm"],
+  [4, "Hogaak, Arisen Necropolis"],
+  [3, "Daze"]
+ ],
+ "sideboard": [
+  [2, "Dauthi Voidwalker"],
+  [4, "Fatal Push"],
+  [2, "Karakas"],
+  [2, "Force of Negation"],
+  [2, "Consign to Memory"],
+  [2, "Massacre"],
+  [1, "Brazen Borrower // Petty Theft"]
+ ]
+}

@@ -260,7 +260,13 @@ impl Change {
 fn mod_change(m: &Mod) -> u8 {
     use kind::*;
     match m {
-        Mod::SetPt(..) | Mod::Pt(..) | Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::SwitchPt | Mod::PowerPlusGreatestMv { .. } => PT,
+        Mod::SetPt(..)
+        | Mod::Pt(..)
+        | Mod::PtPer { .. }
+        | Mod::PtPerSourceCounter { .. }
+        | Mod::PtPerGraveyardCards { .. }
+        | Mod::SwitchPt
+        | Mod::PowerPlusGreatestMv { .. } => PT,
         Mod::Types { .. } | Mod::AllCreatureTypes | Mod::BecomeTypes { .. } => TYPES,
         Mod::Colors(_) => COLORS,
         Mod::Keywords(_) | Mod::Protection(_) | Mod::GainSacMana(_) | Mod::GainLatent(_) => ABILITIES,
@@ -714,6 +720,10 @@ impl Game {
                         let amount = match m {
                             Mod::PtPer { filter, .. } => !w.leave.is_empty() || reads_w(filter),
                             Mod::PtPerSourceCounter { .. } => w.counters.contains(&s),
+                            // (A card put into or taken from a graveyard, a
+                            // permanent sacrificed into one: Dark Matter
+                            // Manipulator's count.)
+                            Mod::PtPerGraveyardCards { .. } => w.zones || !w.leave.is_empty(),
                             Mod::PowerPlusGreatestMv { .. } => !w.leave.is_empty(),
                             _ => false,
                         };

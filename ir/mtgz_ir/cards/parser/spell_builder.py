@@ -666,11 +666,13 @@ _SPELL_CASTING_KEYWORD_LINE_RE = re.compile(
 )
 
 
-# "If <condition>, you may cast it without paying its mana cost." — a
-# conditional alternative (free) cast (Once Upon a Time) ->
-# ``free_cast_condition``.
+# "If <condition>, you may cast it / this spell without paying its mana
+# cost." — a conditional alternative (free) cast (CR 118.9: Once Upon a
+# Time; Massacre's "If an opponent controls a Plains and you control a
+# Swamp") -> ``free_cast_condition``.
 _FREE_CAST_IF_LINE_RE = re.compile(
-    r"^If (?P<cond>.+), you may cast it without paying its mana cost\.$"
+    r"^If (?P<cond>.+), you may cast (?:it|this spell) without paying its "
+    r"mana cost\.$"
 )
 
 
@@ -679,6 +681,41 @@ _FREE_CAST_CONDITIONS = {
         FirstSpellYouCastThisGame()
     ),
 }
+
+
+# One clause of a control condition: "an opponent controls a[n] <Subtype>"
+# / "you control a[n] <Subtype>" (Massacre and its Nemesis cycle: Submerge,
+# Pulverize, Thwart ...). The subtype is a permanent's as it is (CR 205.3,
+# 613.1d: ``HasSubtype`` reads the effective subtypes).
+_CONTROL_SUBTYPE_CLAUSE_RE = re.compile(
+    r"^(?P<who>an opponent controls|you control) an? (?P<sub>[A-Z][a-z]+)$"
+)
+
+
+def _free_cast_condition(text: str):
+    """The condition of a free-cast line: a fixed phrase of
+    ``_FREE_CAST_CONDITIONS``, or one or more control clauses joined by
+    " and " (each ``_CONTROL_SUBTYPE_CLAUSE_RE``; all must hold)."""
+    cond = _FREE_CAST_CONDITIONS.get(text)
+    if cond is not None:
+        return cond
+    from mtgz_ir.effects.conditions import ControlPermanent, OpponentsControlAtLeast
+    from mtgz_ir.effects.object_predicates import HasSubtype
+
+    parts = []
+    for clause in text.split(" and "):
+        m = _CONTROL_SUBTYPE_CLAUSE_RE.match(clause)
+        if m is None:
+            return None
+        pred = HasSubtype(m.group("sub"))
+        if m.group("who") == "you control":
+            parts.append(ControlPermanent(pred))
+        else:
+            parts.append(OpponentsControlAtLeast(pred, 1))
+    out = parts[0]
+    for p in parts[1:]:
+        out = out & p
+    return out
 
 
 # "You may exile a <filter> card from your hand rather than pay this
@@ -750,7 +787,7 @@ def _casting_keyword_fields(clause: str) -> dict | None:
 
     m = _FREE_CAST_IF_LINE_RE.match(clause.strip())
     if m is not None:
-        cond = _FREE_CAST_CONDITIONS.get(m.group("cond"))
+        cond = _free_cast_condition(m.group("cond"))
         if cond is None:
             return None
         return {"free_cast_condition": cond}

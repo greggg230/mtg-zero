@@ -1178,11 +1178,14 @@ def _equipped_it_trigger(line: str) -> BoardLine | None:
 
 # "This creature gets +P/+T as long as there are N or more <type> cards
 # in your graveyard." (Elvish Reclaimer) / "This creature gets +P/+T for
-# each <type> card in your graveyard." (Knight of the Reliquary).
+# each <type> card in your graveyard." (Knight of the Reliquary) / "This
+# creature gets +P/+T for every <N> [<type>] cards in your graveyard."
+# (Dark Matter Manipulator: +2/+0 for every seven cards).
 _SELF_GETS_PER_GRAVEYARD = re.compile(
     r"^[Tt]his creature gets \+(?P<p>\d+)/\+(?P<t>\d+) (?:as long as there "
     r"are (?P<n>\w+) or more (?P<desc>[a-z]+) cards in your graveyard|for "
-    r"each (?P<each>[a-z]+) card in your graveyard)\.$"
+    r"each (?P<each>[a-z]+) card in your graveyard|for every (?P<per>\w+) "
+    r"(?:(?P<pdesc>[a-z]+) )?cards in your graveyard)\.$"
 )
 # "Each other creature you control that's a <T1>, <T2>, or <T3> gets
 # +P/+T and has <keyword>." (Kaheera, the Orphanguard).
@@ -1202,8 +1205,8 @@ def _graveyard_pt_static(line: str) -> BoardLine | None:
     m = _SELF_GETS_PER_GRAVEYARD.match(line)
     if m is None:
         return None
-    desc = m.group("desc") or m.group("each")
-    card_filter = parse_card_descriptor(f"a {desc} card")
+    desc = m.group("desc") or m.group("each") or m.group("pdesc")
+    card_filter = parse_card_descriptor(f"a {desc} card" if desc else "a card")
     if card_filter is None:
         return None
     p, t = int(m.group("p")), int(m.group("t"))
@@ -1212,6 +1215,17 @@ def _graveyard_pt_static(line: str) -> BoardLine | None:
             scope=StaticScope.SELF, power_bonus=p, toughness_bonus=t,
             bonus_per_condition_count=True,
             condition=rb.CardsInYourGraveyard(card_filter=card_filter),
+        ),))
+    per = m.group("per")
+    if per is not None:
+        # "For every <per> cards": one bonus per full group of <per>
+        # (Dark Matter Manipulator: 6 cards +0, 7-13 +2, 14 +4).
+        if not (per.isdigit() or per in _NUMBER_WORDS) or _n(per) < 2:
+            return None
+        return BoardLine(statics=(StaticAbility(
+            scope=StaticScope.SELF, power_bonus=p, toughness_bonus=t,
+            bonus_per_condition_count=True,
+            condition=rb.CardsInYourGraveyard(card_filter=card_filter, per=_n(per)),
         ),))
     n = m.group("n")
     if not (n.isdigit() or n in _NUMBER_WORDS):

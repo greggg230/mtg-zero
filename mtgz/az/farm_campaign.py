@@ -22,7 +22,10 @@ A campaign is a farm run of its own (`cmp-<name>`) holding one such job:
                digest; `match_settings` builds them so the seats are zero.h2h's (`h2h.match`: the yardsticks'),
                checked dict for dict
   * seats      [{"net": 1}, {"net": 2}] (A vs B; paired: games 2k, 2k + 1 share the deal, seats swapped) or
-               [{"net": 1}, {"net": 1}] (self-play of A; with `samples` the only form, unpaired)
+               [{"net": 1}, {"net": 1}] (self-play of A; with `samples` the only form, unpaired); in an eval campaign a
+               seat may carry its own settings, `{"net": 1, "set": {...}}` (zero-core docs/az.md 68: zero.h2h's per-side
+               options as run settings, zero.seat_settings; `match_settings(sides=...)`, `campaign_seats`) - e.g. A
+               against itself with A merging its trees and B not, an evaluation-only A/B on one network
   * seed       the batch's base seed (the run's job `seed`: game g's seed is game_seed(seed, g, paired), the seed a
                local zero.h2h match of the same games uses)
   * games      ids [0, games); `games_per_lease` ('auto' = ~7.5 min of a machine)
@@ -30,6 +33,16 @@ A campaign is a farm run of its own (`cmp-<name>`) holding one such job:
                (PROTOCOL rev 13; default 0.25; a coordinator before rev 13 ignores it: evaluation goes first)
   * deadline   seconds after which the games the farm has not delivered are played here (`local`), by the same
                worker executable on the same graphs (so they are the same games)
+  * alternates the routes beside the build's CPU worker (zero-farm PROTOCOL 9.4, 11.4, 14; docs/ENGINE.md 215): by
+               default every alternate the release index holds for the build (mtgz.az.farm_builds: its CUDA build,
+               its DirectML build for AMD GPUs, its published macOS build - the same engine), each GPU alternate
+               playing its model variant (`variants`, DEFAULT_VARIANTS 'gpu=fp16,dml=matmul@amd': zero.farm_pool's
+               forms, exported per network beside its graph, signed and registered with it) once the graph it plays
+               passed this machine's GPU self-test through that alternate's own signed worker and runtime pack, a
+               macOS alternate once the settings replay exactly there (check-config --platform); min_agent raised
+               to the variants' agent. Any failure refuses the campaign before anything is put. `alternates` None:
+               none (CPU only - said in the log and the state, as is a build the index has no release of); a list:
+               exactly those build ids
 
 Collecting (`collect`): every result file the coordinator lists is downloaded (sha256 checked), each credited row's
 digest checked against its record (zero.farm_eval.check_digest), then `spot` (default 5%) of the games - a random
@@ -68,6 +81,10 @@ DEFAULT_DEADLINE_S = 3 * 3600
 EXPIRES_DAYS = 30
 SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,62}$')
 GAME = 'mtg'
+RELEASE = 'release'                     # `alternates`: the release index's for the build (docs/ENGINE.md 215)
+# the live runs' variants (zero-core docs/az.md 46.10, 67): NVIDIA's CUDA alternate the float16 graph, AMD's DirectML
+# alternate the float32 MatMul form (the one zero-onnx/2 graph DirectML runs deterministically there)
+DEFAULT_VARIANTS = 'gpu=fp16,dml=matmul@amd'
 
 
 class CampaignError(RuntimeError):
@@ -143,7 +160,8 @@ def match_seat(ckpt, sims, rule, chance_k=2, c_puct=1.0):
 
 
 def farm_seats(settings, seats):
-    """The driver seats an eval job plays at `settings` (zero.farm_eval.seat_dicts: Run.nn_seat), without keys."""
+    """The driver seats an eval job plays at `settings` (zero.farm_eval.seat_dicts: Run.nn_seat - of the settings with a
+    seat's set over them for a seat with one), without keys."""
     from zero import farm_eval as FE
     out = []
     for s in FE.seat_dicts(settings, seats):
@@ -153,14 +171,65 @@ def farm_seats(settings, seats):
     return out
 
 
-def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_puct=1.0, max_steps=5000):
+# the keys of an evaluation seat a local zero.h2h match takes from each side's own run or its own arguments
+# (h2h._seats: games.nn_seat's base with h2h.run_seat_keys), not from the move rule
+SEAT_BASE = ('key', 'sims', 'c_puct', 'selfplay', 'alpha', 'eps', 'temp_moves', 'sims_fast', 'p_full', 'chance_k',
+             'margin_w', 'redet', 'eval_cache')
+
+
+def side_sets(cfg, sides=None):
+    """Each side's set over a campaign's settings `cfg` (zero.seat_settings.sets_of: zero.h2h's per-side options in
+    `sides`, a namespace of zero.seat_settings.add_side_args, e.g. tools/farm_campaign.py submit's; None: none) -> [set_a,
+    set_b] ({}: the side plays the settings' seat). A combination zero.h2h refuses: CampaignError."""
+    if sides is None:
+        return [{}, {}]
+    from zero import seat_settings as SS
+    try:
+        return SS.sets_of(sides, cfg)
+    except ValueError as e:
+        raise CampaignError(str(e)) from None
+
+
+def campaign_seats(sets, b):
+    """An eval campaign's seats: gen 1 (A) and gen 2 (B, `b` true) or gen 1 again (A against itself), each with its set
+    when it has one (zero-core docs/az.md 68) - the seats of before when neither has."""
+    from zero import seat_settings as SS
+    return [SS.net_seat(1, sets[0] or None), SS.net_seat(2 if b else 1, sets[1] or None)]
+
+
+def check_seats(seats, b, samples=False):
+    """A campaign's seats (`submit`): [gen 1, gen 2] (A vs B: `b` given) or [gen 1, gen 1] (self-play of A), a seat's set
+    only in an eval campaign (a play job with samples plays self-play seats) -> the seats as the worker writes them back
+    (zero.farm_eval.check_seats); CampaignError otherwise."""
+    from zero import farm_eval as FE
+    try:
+        seats = FE.check_seats(seats)
+    except ValueError as e:
+        raise CampaignError(str(e)) from None
+    gens = [s.get('net') for s in seats]
+    if gens not in ([1, 2], [1, 1]):
+        raise CampaignError(f'seats {seats}: [{{"net": 1}}, {{"net": 2}}] or [{{"net": 1}}, {{"net": 1}}] (each may '
+                            f'carry a set)')
+    if (b is None) != (gens[1] == 1):
+        raise CampaignError('a second network b goes with seats [{"net": 1}, {"net": 2}], none with self-play')
+    if samples and any('set' in x for x in seats):
+        raise CampaignError('a play job with samples plays its run\'s self-play seat: no per-seat settings')
+    return seats
+
+
+def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_puct=1.0, max_steps=5000, sides=None):
     """The eval job's settings of zero.h2h.match(ckpt_a, ckpt_b, sims=sims, chance_k, c_puct, spec=spec,
     seat_a=seat_b=<A's run's rule with root belief tilts `tilts`>, paired) - the yardsticks' best-of-one
     (mtgz.az.yardsticks.bo1_seat: tilts = the run's without 'deck'): A's run's settings resolved, then eval_sims,
     c_puct, chance_k, max_steps, eval_spec, the belief tilts, sparse 0 (h2h's dense batches), eval_trace 1. Checked:
     the farm's seats (Run.nn_seat) are exactly the match's for both sides (B with its own run's margin_w / redet /
     eval_cache), else CampaignError naming the difference (e.g. an opponent whose run evaluates with another cache:
-    an eval job has one seat setting for both sides) -> (settings, rule)."""
+    no per-side option sets it) -> (settings, rule).
+
+    `sides` (zero-core docs/az.md 68): zero.h2h's per-side options (`side_sets`; None: none, the match above). A side
+    with options plays the settings with its set over them - the seat zero.h2h gives those options; the local match's
+    seat of that side is that seat's rule with the side's own run's margin_w / redet / eval_cache, checked per side as
+    above. The job's seats are then `campaign_seats(side_sets(settings, sides), ckpt_b)`."""
     from zero import games as G, h2h
     cfg = dict(h2h.run_settings(ckpt_a))
     if not cfg:
@@ -171,14 +240,21 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
         cfg['eval_belief_tilts'] = {k: float(v) for k, v in sorted(dict(tilts).items()) if v}
     cfg.update(eval_sims=int(sims), c_puct=float(c_puct), chance_k=int(chance_k), max_steps=int(max_steps),
                eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=GAME)
-    want = [match_seat(ckpt_a, sims, rule, chance_k, c_puct),
-            match_seat(ckpt_b or ckpt_a, sims, rule, chance_k, c_puct)]
-    got = farm_seats(cfg, [{'net': 1}, {'net': 2}])
+    if sides is None:
+        want = [match_seat(ckpt_a, sims, rule, chance_k, c_puct),
+                match_seat(ckpt_b or ckpt_a, sims, rule, chance_k, c_puct)]
+        got = farm_seats(cfg, [{'net': 1}, {'net': 2}])
+    else:
+        got = farm_seats(cfg, campaign_seats(side_sets(cfg, sides), True))
+        # (each side's rule: its seat's, the per-side options applied as zero.h2h applies them; its base its own run's)
+        want = [match_seat(ck, g['sims'], {k: v for k, v in g.items() if k not in SEAT_BASE}, chance_k, c_puct)
+                for ck, g in zip((ckpt_a, ckpt_b or ckpt_a), got)]
     for side, (w, g) in enumerate(zip(want, got)):
         if w != g:
             diff = {k: (w.get(k), g.get(k)) for k in sorted(set(w) | set(g)) if w.get(k) != g.get(k)}
             raise CampaignError(f'seat {"AB"[side]}: the farm would play {diff} (match vs farm): not the local '
-                                f'match\'s seat - an eval job has one seat setting for both sides')
+                                f'match\'s seat - an eval job seats both sides from one run\'s settings (a per-side '
+                                f'option changes only what zero.h2h\'s per-side options set)')
     return cfg, rule
 
 
@@ -204,16 +280,17 @@ def worker_info(worker):
     return info
 
 
-def job_settings(worker, build_id, cfg, d, log, samples=False):
+def job_settings(worker, build_id, cfg, d, log, samples=False, seats=None):
     """The template's settings: the keys the worker build calls `play` for an eval job (zero.farm_h2h.play_settings:
     the seats checked the same as the full settings'; `eval_trace` must be among them - a build before it refuses or
     drops it: CampaignError) or, with `samples`, for its self-play job (zero.farm_pool.play_settings: the driver checked
-    the same as the full settings')."""
+    the same as the full settings'). `seats`: the eval job's (checked by the worker's check-config with the settings; a
+    seat with a set needs a build that announces `seat_settings`, zero-core docs/az.md 68)."""
     from zero import farm_h2h as FH, farm_pool as FP
     try:
         if samples:
             return FP.play_settings(worker, build_id, cfg, d, log)
-        play = FH.play_settings(worker, build_id, cfg, d, log)
+        play = FH.play_settings(worker, build_id, cfg, d, log, seats=seats)
     except SystemExit as e:
         raise CampaignError(str(e)) from None
     if not play.get('eval_trace'):
@@ -256,6 +333,325 @@ def export_gen(ckpt, gen, game, spec, run, log, cache=None):
     return info
 
 
+# ------------------------------------------------------------------------------------------------ alternates, variants
+def alternates_want(alternates, variants):
+    """submit's `alternates` and `variants` -> the state's `alt_want` {"alternates": RELEASE | [ids], "variants": the
+    pool_variants text}: RELEASE (the default) = the release index's alternates for the build; None / [] / '' / 'none'
+    = none; a list (or comma-separated text) of worker build ids = exactly those, in that order. CampaignError for a bad
+    id or variant setting."""
+    from zero import farm_def as FD, farm_pool as FP
+    if alternates is None or (isinstance(alternates, str) and alternates.strip().lower() in ('', 'none')):
+        ids = []
+    elif isinstance(alternates, str) and alternates.strip() == RELEASE:
+        ids = RELEASE
+    else:
+        ids = FP.alternate_ids(alternates)
+        if any(not FD.BUILD_RE.match(b) for b in ids) or len(ids) > FD.MAX_ALTERNATES or len(set(ids)) != len(ids):
+            raise CampaignError(f'alternates {alternates!r}: up to {FD.MAX_ALTERNATES} distinct worker build ids (24 hex)')
+    v = '' if variants is None or str(variants).strip().lower() in ('', 'none') else str(variants).strip()
+    try:
+        FP.variant_setting(v)
+    except ValueError as e:
+        raise CampaignError(f'variants: {e}') from None
+    return {'alternates': ids, 'variants': v}
+
+
+def release_alternates(build_id, path=None):
+    """The alternates the release index (mtgz.az.farm_builds; tools/farm_release.py writes it) holds for worker build
+    `build_id`: its newest published entry whose build it is -> (ids, notes): ids in order of preference - the CUDA
+    alternate, the DirectML alternate for AMD GPUs, the published macOS build (each the same engine, signed for its
+    pack); notes: each route the release lacks, or all of them when the index has no release of the build."""
+    from . import farm_builds as FB
+    hit = [e for e in FB.load(path)['builds'] if e.get('published') and e.get('build_id') == build_id]
+    if not hit:
+        return [], [f'build {build_id} has no published release in the release index '
+                    f'({path or FB.index_path()}; tools/farm_release.py): no alternates, CPU only']
+    e = hit[-1]
+    rel = f'release of {e["commit"][:12]}'
+    ids, notes = [], []
+    for route, what in (('cuda', 'CUDA'), ('dml', 'DirectML (AMD GPUs)')):
+        b = (e.get(route) or {}).get('build_id')
+        if b:
+            ids.append(b)
+        else:
+            notes.append(f'the {rel} has no {what} alternate')
+    mac = (e.get('mac') or {}).get('release') or {}
+    if mac.get('build_id') and mac.get('published'):
+        ids.append(mac['build_id'])
+    elif mac.get('build_id'):
+        notes.append(f'the {rel} has a macOS build {mac["build_id"]} that is signed but not published '
+                     f'(tools/farm_release.py --mac-publish): not listed, Macs take none of the leases')
+    else:
+        notes.append(f'the {rel} has no macOS build (tools/farm_release.py --mac): Macs take none of the leases')
+    return ids, notes
+
+
+def local_build(cl, build_id, kind):
+    """A registered build's signed directory on this machine (mtgz.az.farm_builds.builds_dir()/<id>/: the desktop's
+    copies of published builds) checked against the coordinator's signed manifest (the local manifest's bytes are its
+    id; a worker's executable its manifest's sha256; its platform this machine's - another platform's executable is
+    never run here) -> (dir, manifest). CampaignError when it is not here."""
+    from zero import farm_def as FD
+    from . import farm_builds as FB
+    base = FB.builds_dir()
+    d = os.path.join(base, build_id) if base else None
+    mp = os.path.join(d, 'manifest.json') if d else None
+    if not mp or not os.path.exists(mp):
+        raise CampaignError(f'{kind} build {build_id}: no copy of it on this machine ({d}): the self-test of the graph '
+                            f'its alternate plays needs its signed directory (tools/farm_release.py publishes it there)')
+    with open(mp, 'rb') as f:
+        b = f.read()
+    if hashlib.sha256(b).hexdigest()[:24] != build_id:
+        raise CampaignError(f'{mp}: not the manifest of build {build_id} (sha256)')
+    man = json.loads(b)
+    if man.get('kind') != kind:
+        raise CampaignError(f'build {build_id} is a {man.get("kind")!r} build, not a {kind}')
+    plat = man.get('platform') or FD.PLATFORM_DEFAULT
+    if plat != FD.host_platform():
+        raise CampaignError(f'build {build_id} is a {plat} build: this machine ({FD.host_platform()}) cannot run it')
+    if kind == 'worker':
+        fe = next((x for x in man.get('files') or [] if x.get('path') == man.get('entry')), None)
+        exe = os.path.join(d, man.get('entry') or '')
+        if fe is None or not os.path.isfile(exe) or file_sha256(exe) != fe['sha256']:
+            raise CampaignError(f'build {build_id}: {exe} is not the executable its manifest signs')
+    return d, man
+
+
+def gpu_selftest(exe, pack_dir, provider, model, reference, timeout=900):
+    """The worker's self-test of graph `model` on this machine's GPU through `provider` (the alternate's pack's) and on
+    the CPU, against the gen's reference set (`probe-providers --providers <provider>,cpu --reps 2`: within the
+    graph's tolerance - float16's for a float16 graph - and the same answers twice; tools/farm_release.py's
+    cuda-selftest / dml-selftest) -> {provider: {max_abs, deterministic, rows_per_s, gpu}, 'cpu': {...}}; CampaignError
+    unless both pass."""
+    env = dict(os.environ, PATH=pack_dir + os.pathsep + os.environ.get('PATH', ''))   # (cuDNN loads its parts by name)
+    cmd = [exe, 'probe-providers', '--runtime-dir', pack_dir, '--model', model, '--reference', reference,
+           '--providers', f'{provider},cpu', '--reps', '2']
+    kw = {'creationflags': 0x08000000 | 0x00004000} if os.name == 'nt' else {}
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', env=env,
+                           stdin=subprocess.DEVNULL, timeout=timeout, **kw)
+    except subprocess.TimeoutExpired:
+        raise CampaignError(f'{os.path.basename(model)}: the {provider} self-test took over {timeout} s') from None
+    try:
+        probe = json.loads(p.stdout)
+    except ValueError:
+        raise CampaignError(f'{os.path.basename(model)}: the {provider} self-test answered no JSON (exit '
+                            f'{p.returncode}): {p.stderr.strip()[-800:]}') from None
+    ok = {}
+    for r in probe.get('results') or []:                    # (a provider passes when any adapter of it passed)
+        if r.get('ok') or r.get('provider') not in ok:
+            ok[r.get('provider')] = r
+    if p.returncode or probe.get('providers') != [provider, 'cpu'] or not all(ok.get(x, {}).get('ok') for x in (provider, 'cpu')):
+        why = {k: (v.get('ok'), v.get('why'), (v.get('selftest') or {}).get('max_abs')) for k, v in ok.items()}
+        raise CampaignError(f'{os.path.basename(model)}: the self-test on {provider} and cpu did not pass (providers '
+                            f'{probe.get("providers")}: {why}) {p.stderr.strip()[-600:]}')
+    out = {}
+    for x in (provider, 'cpu'):
+        s = ok[x].get('selftest') or {}
+        out[x] = {'max_abs': s.get('max_abs'), 'deterministic': s.get('deterministic'),
+                  'rows_per_s': ok[x].get('rows_per_s'), 'gpu': (ok[x].get('gpu') or {}).get('vendor')}
+    return out
+
+
+def export_variant(form, g, gen, spec, log, cache=None):
+    """Gen `gen`'s graph again in variant form `form` (zero.farm_pool.VARIANT_FORMS, the pool's per-gen variants:
+    'fp16' = onnx_export.to_float16 of the gen's graph; 'matmul' / 'matmul-fp16' = its checkpoint exported again as
+    graph 'fast-matmul' by zero.farm_h2h.export_cached - its weight-swap template under <cache>/templates/, checked
+    against torch there -, float16 for 'matmul-fp16'), beside the gen's export (cached there: one file per checkpoint,
+    spec and form) -> {form, model, sha256, model_size}. The gen's reference set serves it (zero-farm PROTOCOL 14.1)."""
+    from zero import farm_h2h as FH, farm_pool as FP, games as G
+    from zero.onnx_export import to_float16
+    if form not in FP.VARIANT_FORMS:
+        raise CampaignError(f'variant form {form!r}: one of {FP.VARIANT_FORMS}')
+    d = os.path.dirname(g['model'])
+    meta = os.path.join(d, f'variant-{form}.json')
+    if os.path.exists(meta):
+        with open(meta, encoding='utf-8') as f:
+            info = json.load(f)
+        if os.path.exists(info['model']) and file_sha256(info['model']) == info['sha256']:
+            log(f'gen {gen}: the cached {form} variant ({info["sha256"][:12]})')
+            return info
+    dst = os.path.join(d, f'model-{form}.onnx')
+    t0 = time.time()
+    try:
+        if form == 'fp16':
+            to_float16(g['model'], dst)
+        else:
+            ex = FH.export_cached(g['checkpoint'], gen, os.path.join(d, f'v-{form}'), GAME, G.spec_json(spec),
+                                  os.path.join(cache or EXPORT_CACHE, 'templates'), f'ckpt-{g["checkpoint_sha256"][:12]}',
+                                  checkpoint_iter=gen, graph='fast-matmul')
+            if form == 'matmul':
+                import shutil
+                shutil.copyfile(ex['model'], dst)
+            else:
+                to_float16(ex['model'], dst)
+    except (SystemExit, ValueError, RuntimeError, OSError) as e:
+        raise CampaignError(f'gen {gen}: its {form} variant could not be exported: {e}') from None
+    info = {'form': form, 'model': dst, 'sha256': file_sha256(dst), 'model_size': os.path.getsize(dst),
+            'export_s': round(time.time() - t0, 1)}
+    with open(meta, 'w', encoding='utf-8') as f:
+        json.dump(info, f, indent=1)
+    log(f'gen {gen}: its {form} variant exported in {info["export_s"]} s ({info["sha256"][:12]})')
+    return info
+
+
+def _selftest_cached(g, key, run):
+    """A self-test result kept beside the gen's export by (graph sha256, alternate build, pack): run once."""
+    p = os.path.join(os.path.dirname(g['model']), 'selftests.json')
+    have = {}
+    if os.path.exists(p):
+        with open(p, encoding='utf-8') as f:
+            have = json.load(f)
+    if key in have:
+        return have[key], True
+    have[key] = run()
+    tmp = f'{p}.{os.getpid()}.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(have, f, indent=1)
+    os.replace(tmp, p)
+    return have[key], False
+
+
+def platform_check(st, d, platform, log):
+    """A platform alternate (a macOS build) plays the games only if they replay exactly there: the default build's
+    worker judges the job's settings as a `platform` worker would (`check-config --platform`, with `--eval` for an
+    eval job: zero.eval_pool's check, zero-core docs/az.md 62) - CampaignError on a libm refusal or a build too old to
+    judge."""
+    from zero.farm_h2h import worker_json
+    path = os.path.join(d, f'settings-{platform}.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(st['settings'], f)
+    args = ['check-config', path, '--json'] + ([] if samples_job(st) else ['--eval']) + ['--platform', platform]
+    rc, out, text = worker_json(st['worker'], *args)
+    if not isinstance(out, dict) or out.get('platform') != platform:
+        raise CampaignError(f'{st["worker"]} cannot judge the settings for {platform} (a build before zero-core docs/az.md '
+                            f'62): no {platform} alternate without that check ({text.strip()[-300:]})')
+    if out.get('libm_refusals'):
+        raise CampaignError(f'the games would replay differently on {platform} (its libm, zero-core docs/az.md 62): '
+                            f'{"; ".join(out["libm_refusals"])} - leave its alternate out')
+    log(f'{platform}: the games replay exactly there (check-config --platform {platform})')
+
+
+def _no_alternates(d, st, notes, log):
+    """No alternates: the campaign plays on the build's CPU worker only - said in the log and the state."""
+    st.update(alternates=[], builds=[st['build_id']], alt_routes={}, variants={}, alternates_note='; '.join(notes),
+              alternates_ready=True)
+    st.pop('alternates_error', None)
+    save_state(d, st)
+    log('alternates: none - the campaign plays on the build\'s CPU worker only')
+
+
+def prepare_alternates(cl, d, st, log, cache=None):
+    """The campaign's alternates from `alt_want` (alternates_want), once, before anything is put: the ids (the release
+    index's for the build, or the caller's) checked as a run's (zero.farm_def.run_alternates: worker builds of the
+    build's game, each requiring its pack; `when.vendor` from a GPU pack, `when.platform` for another platform's build)
+    and each the default build's engine (its manifest's engine_commit); a platform alternate's settings checked to
+    replay there (platform_check: a refusal leaves the release's platform route out with a note, and refuses a caller's
+    list); each GPU alternate named its variant (zero.farm_pool.variant_of: its vendor's, else
+    the first without one; none: the gen's default graph), each named variant exported per gen (export_variant), and
+    every graph a GPU alternate will play self-tested on this machine's GPU through that alternate's own worker and pack
+    (gpu_selftest). min_agent: at least farm_def.VARIANT_AGENT when a variant is named (zero-farm PROTOCOL 14.1); each
+    alternate's own agent minimum stays its build's (the coordinator holds a route from older agents per machine,
+    PROTOCOL 9.4 condition 6 - a run-wide minimum would keep them from every route). Any failure: CampaignError, the
+    reason in the state (`alternates_error`), nothing put; none at all: said in the log and the state
+    (`alternates_note`)."""
+    from zero import farm_def as FD, farm_pool as FP
+    want = st['alt_want']
+    notes = []
+    try:
+        if want['alternates'] == RELEASE:
+            ids, notes = release_alternates(st['build_id'])
+        else:
+            ids = list(want['alternates'])
+            if not ids:
+                notes = ['no alternates asked for (--no-alternates): CPU only']
+        for n in notes:
+            log(f'alternates: {n}')
+        if not ids:
+            return _no_alternates(d, st, notes, log)
+        try:
+            alternates, builds = FD.run_alternates(cl, st['build_id'], st['runtime'], ids)
+        except SystemExit as e:
+            raise CampaignError(f'alternates {ids}: {e}') from None
+        base = FD.build_manifest(cl, st['build_id'])
+        mans = {x['build_id']: FD.build_manifest(cl, x['build_id']) for x in alternates}
+        for b, m in mans.items():
+            if not base.get('engine_commit') or m.get('engine_commit') != base['engine_commit']:
+                raise CampaignError(f'alternate {b} is the engine of commit {str(m.get("engine_commit"))[:12]}, the build '
+                                    f'{st["build_id"]} of {str(base.get("engine_commit"))[:12]}: not the same games')
+        for p in sorted({x['when'].get('platform') for x in alternates} - {None}):
+            try:
+                platform_check(st, d, p, log)
+            except CampaignError as e:
+                if want['alternates'] != RELEASE:
+                    raise
+                # (the release's default list: these settings cannot be played exactly on that platform - its route is
+                # left out, said in the log and the state; an alternate the caller named refuses instead)
+                gone = [x['build_id'] for x in alternates if x['when'].get('platform') == p]
+                alternates = [x for x in alternates if x['build_id'] not in gone]
+                builds = [b for b in builds if b not in gone]
+                for b in gone:
+                    mans.pop(b, None)
+                notes.append(f'the {p} alternate {",".join(gone)} is left out: {e}')
+                log(f'alternates: {notes[-1]}')
+        if not alternates:
+            return _no_alternates(d, st, notes, log)
+        variants = FP.variant_setting(want['variants'])
+        for x in alternates:
+            if 'vendor' in x['when']:
+                n = FP.variant_of(variants, x['when']['vendor'])
+                if n:
+                    x['model'] = n
+        used = {x['model'] for x in alternates if x.get('model')}
+        forms = {n: f for n, f, _ in variants if n in used}
+        for n, _, _ in variants:
+            if n not in used:
+                log(f'variants: {n} is named by no listed GPU alternate: not exported')
+        for gen, g in sorted(st['gens'].items()):
+            vs = {}
+            for n, f in sorted(forms.items()):
+                vs[n] = dict(export_variant(f, g, int(gen), st['spec'], log, cache), name=n)
+            g['variants'] = vs or None
+            save_state(d, st)
+        selftests = {}
+        for x in alternates:
+            if 'vendor' not in x['when']:
+                continue
+            exe_dir, man = local_build(cl, x['build_id'], 'worker')
+            pack_dir, pack = local_build(cl, x['runtime'], 'runtime')
+            provs = ((pack.get('gpu') or {}).get('providers') or [])
+            if len(provs) != 1:
+                raise CampaignError(f'alternate {x["build_id"]}: its pack {x["runtime"]} names GPU providers {provs}, '
+                                    f'not one: which one to self-test is not clear')
+            exe = os.path.join(exe_dir, man['entry'])
+            for gen, g in sorted(st['gens'].items()):
+                gm = (g.get('variants') or {}).get(x.get('model')) or g
+                what = f'gen {gen} {x.get("model") or "default graph"} on {provs[0]} ({x["build_id"]})'
+                key = f'{gm["sha256"]}|{x["build_id"]}|{x["runtime"]}'
+                res, cached = _selftest_cached(g, key, lambda: gpu_selftest(exe, pack_dir, provs[0], gm['model'], g['reference']))
+                selftests.setdefault(gen, {})[x['build_id']] = dict(res, model=x.get('model'), sha256=gm['sha256'])
+                log(f'self-test {what}: {provs[0]} max abs {res[provs[0]]["max_abs"]:.3g}, cpu '
+                    f'{res["cpu"]["max_abs"]:.3g}, deterministic{" (cached)" if cached else ""}')
+        need = FD.VARIANT_AGENT if used else None
+        if need and FP.version_tuple(st.get('min_agent')) < FP.version_tuple(need):
+            log(f'min_agent {st.get("min_agent") or "none"} -> {need} (a definition that signs a variant)')
+            st['min_agent'] = need
+        st.update(alternates=alternates, builds=builds, variants=forms, selftests=selftests,
+                  alt_routes={b: {'when': next(x['when'] for x in alternates if x['build_id'] == b),
+                                  'min_agent': m.get('min_agent'), 'version': m.get('version')} for b, m in mans.items()},
+                  alternates_note='; '.join(notes) or None, alternates_ready=True)
+        st.pop('alternates_error', None)
+        save_state(d, st)
+        log('alternates: ' + ', '.join(f'{x["build_id"]} ({" ".join(str(v) for v in x["when"].values())}'
+                                         f'{", variant " + x["model"] if x.get("model") else ""}, agents from '
+                                         f'{st["alt_routes"][x["build_id"]]["min_agent"]})' for x in alternates)
+            + f'; run min_agent {st.get("min_agent") or "none"}')
+    except CampaignError as e:
+        st['alternates_error'] = str(e)
+        save_state(d, st)
+        raise
+
+
 # ------------------------------------------------------------------------------------------------ the farm's side
 def samples_job(st):
     return bool((st.get('job') or {}).get('samples'))
@@ -273,6 +669,8 @@ def run_body(st, eval_on=True, state=None):
     b = {'game': st['build_game'], 'build_id': st['build_id'], 'runtime': st['runtime'], 'priority': st['priority']}
     if st.get('min_agent'):
         b['min_agent'] = st['min_agent']
+    if st.get('alternates'):                    # (PROTOCOL 9.4, 11.4, 14.3; none - a campaign before them: no key)
+        b['alternates'] = st['alternates']
     b.update(selfplay=None, eval=None, state=state or st.get('run_state', 'active'))
     if eval_on and samples_job(st):
         # (the ids [0, games): the quota with no slack - the coordinator never issues more than accepted + in flight
@@ -295,7 +693,12 @@ def run_body(st, eval_on=True, state=None):
 def definition_fields(st):
     cks = {g: {'model_sha256': x['sha256'], 'model_size': x['model_size'], 'reference_sha256': x['reference_sha256'],
                'reference_size': x['reference_size']} for g, x in sorted(st['gens'].items())}
-    return {'game': st['build_game'], 'builds': [st['build_id']], 'runtime': st['runtime'], 'checkpoints': cks,
+    for g, x in st['gens'].items():             # (PROTOCOL 14.1: each gen's variants; none: no key)
+        if x.get('variants'):
+            cks[g]['variants'] = {n: {'model_sha256': v['sha256'], 'model_size': v['model_size']}
+                                  for n, v in sorted(x['variants'].items())}
+    # (the alternates' builds after the default one: a definition authorizes an alternate by listing it, PROTOCOL 7)
+    return {'game': st['build_game'], 'builds': st.get('builds') or [st['build_id']], 'runtime': st['runtime'], 'checkpoints': cks,
             'jobs': {'selfplay': eval_template(st), 'eval': None, 'fuzz': None} if samples_job(st) else
                     {'selfplay': None, 'eval': eval_template(st), 'fuzz': None}}
 
@@ -312,7 +715,10 @@ def setup_farm(cl, d, st, log, opts):
         cl.call('PUT', f'/v1/admin/run/{run}', body=run_body(st, eval_on=False))
         st['run_put'] = True
         save_state(d, st)
-        log(f'farm run {run} created (worker build {st["build_id"]}, runtime {st["runtime"]})')
+        alts = ''.join(f', alternate {x["build_id"]} ({" ".join(str(v) for v in x["when"].values())}'
+                       f'{", variant " + x["model"] if x.get("model") else ""})' for x in st.get('alternates') or [])
+        log(f'farm run {run} created (worker build {st["build_id"]}, runtime {st["runtime"]}{alts}, min_agent '
+            f'{st.get("min_agent") or "none"})')
     info = st.get('definition')
     if not (info and info.get('published')):
         if not info:
@@ -328,12 +734,20 @@ def setup_farm(cl, d, st, log, opts):
         keys = {'model': f'ckpt/{run}/{gen}/model.onnx', 'reference': f'ckpt/{run}/{gen}/reference.npz'}
         cl.put_artifact(keys['model'], g['model'], g['sha256'])
         cl.put_artifact(keys['reference'], g['reference'], g['reference_sha256'])
-        cl.call('PUT', f'/v1/admin/run/{run}/checkpoint/{gen}',
-                body={'model': keys['model'], 'sha256': g['sha256'], 'reference': keys['reference'],
-                      'reference_sha256': g['reference_sha256']})
+        body = {'model': keys['model'], 'sha256': g['sha256'], 'reference': keys['reference'],
+                'reference_sha256': g['reference_sha256']}
+        if g.get('variants'):                   # (PROTOCOL 14.2: each variant uploaded, then registered with the gen)
+            body['variants'] = {}
+            for n, v in sorted(g['variants'].items()):
+                k = f'ckpt/{run}/{gen}/model-{n}.onnx'
+                cl.put_artifact(k, v['model'], v['sha256'])
+                body['variants'][n] = {'model': k, 'sha256': v['sha256']}
+        cl.call('PUT', f'/v1/admin/run/{run}/checkpoint/{gen}', body=body)
         g['registered'] = True
         save_state(d, st)
-        log(f'gen {gen} uploaded and registered ({os.path.basename(g["checkpoint"])}, {g["sha256"][:12]})')
+        log(f'gen {gen} uploaded and registered ({os.path.basename(g["checkpoint"])}, {g["sha256"][:12]}'
+            + (f'; variants {", ".join(f"{n} {v["sha256"][:12]}" for n, v in sorted(g["variants"].items()))}'
+               if g.get('variants') else '') + ')')
     if not st.get('eval_put'):
         cl.call('PUT', f'/v1/admin/run/{run}', body=run_body(st))
         st['eval_put'] = True
@@ -344,13 +758,18 @@ def setup_farm(cl, d, st, log, opts):
 
 def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=None, paired=True, share=DEFAULT_SHARE,
            priority=0.5, games_per_lease='auto', deadline_s=DEFAULT_DEADLINE_S, spot=DEFAULT_SPOT, ort_dll=None,
-           min_agent=None, needs=None, meta=None, client=None, root=None, log=log_stderr, opts=None, samples=False):
+           min_agent=None, needs=None, meta=None, client=None, root=None, log=log_stderr, opts=None, samples=False,
+           alternates=RELEASE, variants=DEFAULT_VARIANTS):
     """A new campaign (or the existing one of that name, resumed where it stopped) -> its state directory. `settings`:
     a run's evaluation settings (match_settings); `seats` [{"net": 1}, {"net": 2}] (A vs B, `b` given) or
-    [{"net": 1}, {"net": 1}] (self-play of A); `seed`: the batch's base seed; `worker`: the build's executable
+    [{"net": 1}, {"net": 1}] (self-play of A), each network seat with its set when it has one (`campaign_seats`,
+    `check_seats`); `seed`: the batch's base seed; `worker`: the build's executable
     (`ort_dll`: an ONNX Runtime the local fallback loads; default the runtime pack next to the build); `meta`: the
     caller's notes (kept in the state). `samples`: a play job with the search's samples (self-play seats of
-    `settings` = selfplay_settings; seats [{"net": 1}, {"net": 1}], unpaired)."""
+    `settings` = selfplay_settings; seats [{"net": 1}, {"net": 1}], unpaired). `alternates` / `variants`: the farm's
+    other routes and the graphs their GPUs play (module docstring; prepare_alternates): RELEASE (the default) the
+    release index's for the build, None none, or a list of build ids; `variants` a pool_variants text ('' none: the GPU
+    alternates play each gen's default graph). A resumed campaign keeps what it was created with."""
     run = slug(name)
     d = state_dir(run, root)
     opts = opts or {}
@@ -358,16 +777,14 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
         st = load_state(d)
         log(f'campaign {run}: resuming ({len(st.get("have", []))}/{st["games"]} games in)')
     else:
-        if seats not in ([{'net': 1}, {'net': 2}], [{'net': 1}, {'net': 1}]):
-            raise CampaignError(f'seats {seats}: [{{"net": 1}}, {{"net": 2}}] or [{{"net": 1}}, {{"net": 1}}]')
-        if (b is None) != (seats[1] == {'net': 1}):
-            raise CampaignError('a second network b goes with seats [{"net": 1}, {"net": 2}], none with self-play')
+        seats = check_seats(seats, b, samples)
         if samples and (b is not None or paired):
             raise CampaignError('a play job with samples is self-play of one network, unpaired')
         if games < 1 or (paired and games % 2):
             raise CampaignError(f'games {games}: >= 1 (and even when paired)')
         if not (share is None or 0 < float(share) <= 1):
             raise CampaignError(f'share {share}: in (0, 1]')
+        want = alternates_want(alternates, variants)
         info = worker_info(worker)
         if info.get('build_id') != build_id or 'eval' not in (info.get('kinds') or []):
             raise CampaignError(f'{worker} is build {info.get("build_id")} ({info.get("kinds")}), not the eval worker '
@@ -378,9 +795,10 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
               'priority': float(priority), 'build_id': build_id, 'runtime': runtime, 'worker': os.path.abspath(worker),
               'ort_dll': ort_dll, 'min_agent': min_agent, 'needs': needs, 'deadline_s': float(deadline_s),
               'spot': float(spot), 'created': time.time(), 'meta': meta or {}, 'have': [], 'failed': {},
-              'machines': {}, 'leases': {}, 'cursor': 0, 'job': {'kind': 'play', 'trace': True, 'samples': bool(samples)}}
+              'machines': {}, 'leases': {}, 'cursor': 0, 'job': {'kind': 'play', 'trace': True, 'samples': bool(samples)},
+              'alt_want': want}
         os.makedirs(d, exist_ok=True)
-        st['settings'] = job_settings(worker, build_id, settings, d, log, samples)
+        st['settings'] = job_settings(worker, build_id, settings, d, log, samples, seats=seats)
         st['spec'] = st['settings']['spec' if samples else 'eval_spec']
         save_state(d, st)
     return _setup(d, st, client, opts, log)
@@ -400,6 +818,9 @@ def _setup(d, st, client, opts, log):
         st['gens'] = gens
         save_state(d, st)
     cl = client or FD.Client(opts.get('url', FD.URL))
+    if st.get('alt_want') is not None and not st.get('alternates_ready'):
+        # (a campaign made before alternates has no alt_want: every request exactly as before)
+        prepare_alternates(cl, d, st, log, opts.get('export_cache'))
     setup_farm(cl, d, st, log, opts)
     return d
 
@@ -568,7 +989,8 @@ def status(d, client=None, opts=None):
     cl = client or FD.Client((opts or {}).get('url', FD.URL))
     out = {'run': st['run'], 'coverage': coverage(st), 'farm': farm_state(cl, st), 'machines': st.get('machines'),
            'deadline': (st.get('submitted') or st['created']) + st['deadline_s'], 'refused': st.get('refused'),
-           'result': st.get('result')}
+           'alternates': st.get('alternates'), 'alternates_note': st.get('alternates_note'),
+           'alternates_error': st.get('alternates_error'), 'min_agent': st.get('min_agent'), 'result': st.get('result')}
     return out
 
 
@@ -786,13 +1208,25 @@ def read_records(d):
 
 # ------------------------------------------------------------------------------------------------ collect
 def readout(d, st):
-    """A vs B (seats [{"net": 1}, {"net": 2}]): zero.h2h's summary of the games (zero.farm_eval.summary, A = gen 1) -
-    the fields a local zero.h2h.match prints; self-play: None."""
+    """A vs B (seats [{"net": 1}, {"net": 2}]) or two seats of one network with their own settings: zero.h2h's summary
+    of the games (zero.farm_eval.summary, A = the job's seats[0] as a whole), each side's move rule (`select_a`,
+    `select_b`: zero.h2h's names, e.g. '-ism' for a merged side) and, when they differ, simulations (`sims_a`, `sims_b`)
+    - the fields a local zero.h2h.match prints; self-play (two equal seats, or samples): None."""
     from zero import farm_eval as FE
-    if st['seats'][1] != {'net': 2}:
+    seats = st['seats']
+    if samples_job(st) or seats[0] == seats[1]:
         return None
     rows = [{k: v for k, v in r.items() if k not in ('rec', 'by', 'digest', 'aux')} for r in rows_of(d).values()]
-    return FE.summary(rows, st['paired'], {'net': 1}) if rows else None
+    if not rows:
+        return None
+    out = FE.summary(rows, st['paired'], seats[0])
+    if st.get('settings'):
+        tags = FE.seat_tags(st['settings'], seats)
+        out.update(select_a=tags[0], select_b=tags[1])
+        sims = [c['eval_sims'] for c in FE.seat_cfgs(st['settings'], seats)]
+        if sims[0] != sims[1]:
+            out.update(sims_a=sims[0], sims_b=sims[1])
+    return out
 
 
 def stop_farm(cl, st, log):
@@ -871,6 +1305,7 @@ def collect(d, client=None, poll=60, local=True, threads=4, wrap=None, describe_
     res = {'run': st['run'], 'games': len(rows), 'coverage': cov, 'digest': FE.games_digest(list(rows.values())),
            'lease_digests': {k: FE.games_digest(v) for k, v in sorted(leases.items())}, 'spot': spot,
            'machines': st.get('machines'), 'seed': st['seed'], 'paired': st['paired'], 'build_id': st['build_id'],
+           'alternates': st.get('alternates'), 'alternates_note': st.get('alternates_note'),
            'job': st.get('job') or {'kind': 'play', 'trace': True, 'samples': False},
            'gens': {g: {'checkpoint': x['checkpoint'], 'sha256': x['sha256']} for g, x in st['gens'].items()},
            'seconds': round(time.time() - (st.get('submitted') or st['created']), 1), 'readout': readout(d, st)}

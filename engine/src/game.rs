@@ -711,6 +711,11 @@ pub struct Game {
     /// second one-shot effect is created immediately after the specified
     /// event"; `end_batch`).
     pub(crate) releasing: Vec<ObjRef>,
+    /// The `PutIntoGraveyard` events of the simultaneous move in progress,
+    /// matched once it is over (`end_batch`): "from anywhere" checks the
+    /// objects that exist immediately after the event (CR 603.6c, 603.10;
+    /// ENGINE.md 220.3).
+    pub(crate) gy_arrivals: Vec<crate::triggers::Event>,
     /// The current event group (CR 603.2c, 700.1: one instruction of a
     /// resolving spell or ability, one simultaneous move, one cost is one
     /// event however many objects it touches): bumped as an instruction ends,
@@ -1028,7 +1033,8 @@ pub(crate) const SEEN_DRAW_REPL: u16 = 128;
 /// A triggered ability that functions in a graveyard (Sword of the Meek).
 pub(crate) const SEEN_GY_TRIGGER: u16 = 256;
 /// Triggers on +1/+1 counters put on, cards put into a library, attackers
-/// unblocked (Emperor of Bones, Wan Shi Tong, Coveted Jewel).
+/// unblocked, cards put into a graveyard (Emperor of Bones, Wan Shi Tong,
+/// Coveted Jewel, Moonshadow).
 pub(crate) const SEEN_RARE_EVENTS: u16 = 512;
 /// "If a card would be put into an opponent's graveyard from anywhere,
 /// instead exile it with a void counter on it" (Dauthi Voidwalker; M7d).
@@ -1422,6 +1428,7 @@ impl Game {
             known_pools: [None, None],
             batching: false,
             releasing: Vec::new(),
+            gy_arrivals: Vec::new(),
             ev_seq: 0,
             batch_fired: Vec::new(),
             entering_cast: false,
@@ -2792,6 +2799,20 @@ impl Game {
         // ability, from the graveyard).
         if to == Zone::Graveyard && self.db.def(self.objs[idx.i()].def).trig_mask & (1u64 << EventKind::ToGraveyard as u32) != 0 {
             self.event(Event::obj(EventKind::ToGraveyard, new));
+        }
+        // "Whenever one or more <cards> are put into your graveyard from
+        // anywhere" (Moonshadow): a card (a token isn't one, CR 108.2) that
+        // got there, the replacement effects applied (614.1a: one exiled
+        // instead never does). No look back (CR 603.6c, 603.10): matched with
+        // the objects that exist immediately after the event, so in a
+        // simultaneous move once it is over (`end_batch`; ENGINE.md 220.3).
+        if to == Zone::Graveyard && self.seen & SEEN_RARE_EVENTS != 0 && !self.is_token(idx) {
+            let ev = Event { kind: EventKind::PutIntoGraveyard, a: crate::triggers::Subj::Player(owner), b: crate::triggers::Subj::Obj(new), amount: 0 };
+            if self.batching {
+                self.gy_arrivals.push(ev);
+            } else {
+                self.event(ev);
+            }
         }
         // "Whenever one or more cards are put into exile from your library
         // and/or your graveyard" (Laelia).

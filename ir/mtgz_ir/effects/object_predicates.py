@@ -481,6 +481,7 @@ class HasKeyword(ObjectPredicate):
 # this table when they get added engine-side.
 _COUNTER_ATTRS: dict[str, str] = {
     "+1/+1": "plus_one_counters",
+    "-1/-1": "minus_one_counters",
     "charge": "charge_counters",
     "stun": "stun_counters",
     "silver": "silver_counters",

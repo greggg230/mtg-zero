@@ -296,14 +296,18 @@ def _parse_modal_trigger_block(
 
 
 # "This creature enters with a +1/+1 counter on it." / "... with N
-# +1/+1 counters on it." (Dockworker Drone): the count, else None. A
-# count that depends on the board ("for each ...") is not this shape.
-_ENTERS_WITH_PLUS_ONE_COUNTERS_LINE = re.compile(
-    r"^This creature enters with (a|one|two|three|four|five|\d+) "
-    r"\+1/\+1 counters? on it\.$"
+# +1/+1 counters on it." (Dockworker Drone) / "... with N -1/-1 counters on
+# it." (Moonshadow's six): the kind and the count, else None. A count that
+# depends on the board ("for each ...") or a condition ("if you cast it
+# from your hand") is not this shape.
+_ENTERS_WITH_PT_COUNTERS_LINE = re.compile(
+    r"^This creature enters with "
+    r"(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+) "
+    r"(\+1/\+1|-1/-1) counters? on it\.$"
 )
 _ENTERS_WITH_COUNT_WORDS = {
     "a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 # "This creature enters with a +1/+1 counter on it for each <noun> you
 # control." (Luxknight Breacher): the counted permanents, as an
@@ -335,12 +339,15 @@ def _enters_with_per_noun(noun: str):
     return pred & ~IsSource() if other else pred
 
 
-def _parse_enters_with_plus_one_counters_line(line: str) -> int | None:
-    m = _ENTERS_WITH_PLUS_ONE_COUNTERS_LINE.match(line)
+def _parse_enters_with_pt_counters_line(line: str) -> tuple[str, int] | None:
+    """``(kind, n)`` of "This creature enters with <n> <+1/+1 | -1/-1>
+    counter(s) on it.", else ``None``."""
+    m = _ENTERS_WITH_PT_COUNTERS_LINE.match(line)
     if m is None:
         return None
     word = m.group(1)
-    return int(word) if word.isdigit() else _ENTERS_WITH_COUNT_WORDS[word]
+    n = int(word) if word.isdigit() else _ENTERS_WITH_COUNT_WORDS[word]
+    return (m.group(2), n)
 
 
 def _build_creature_printing(card: dict) -> CardPrinting | None:
@@ -616,12 +623,13 @@ def _build_creature_printing(card: dict) -> CardPrinting | None:
             # one +1/+1 counter when positive (Cackling Slasher).
             enters_with_plus_one_counter_if_creature_died_this_turn = True
             continue
-        n_plus = _parse_enters_with_plus_one_counters_line(line)
-        if n_plus is not None:
-            # ``This creature enters with a +1/+1 counter on it.`` — the
-            # permanent is on the battlefield with the counter from the
-            # start (CR 614.1c, 122.6): ``enters_with_named_counters``.
-            enters_with_named_counters.append(("+1/+1", n_plus))
+        pt_counters = _parse_enters_with_pt_counters_line(line)
+        if pt_counters is not None:
+            # ``This creature enters with a +1/+1 counter on it.`` (or N
+            # -1/-1 counters, Moonshadow) — the permanent is on the
+            # battlefield with the counters from the start (CR 614.1c,
+            # 122.6): ``enters_with_named_counters``.
+            enters_with_named_counters.append(pt_counters)
             continue
         m_per = _ENTERS_WITH_PLUS_ONE_COUNTER_PER_LINE.match(line)
         if m_per is not None:
@@ -1199,4 +1207,12 @@ def _build_creature_printing(card: dict) -> CardPrinting | None:
         printing = replace(printing, **ub_fields)
     from mtgz_ir.cards.parser.cube_creatures_ub import link_exiled_with_recall
 
-    return link_exiled_with_recall(printing)
+    printing = link_exiled_with_recall(printing)
+    if "Land" in card_types:
+        # A land creature (Dryad Arbor): its land type and the intrinsic
+        # mana ability of its basic land types (CR 305.6; docs/ir_defects.md
+        # 440).
+        from mtgz_ir.cards.parser.legacy_hogaak_c import as_land_creature
+
+        return as_land_creature(printing, card)
+    return printing

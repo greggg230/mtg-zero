@@ -634,6 +634,35 @@ def test_the_release_speed_step(builds, tmp_path, monkeypatch):
     assert notes[-1].startswith('FAILED at speed')
 
 
+def test_the_macos_parts_speed_windows_alone(builds, tmp_path, monkeypatch):
+    """The macOS part's step speed-mac (docs/ENGINE.md 216): the Mac's windows alone, no slot, into speed-mac/ (the
+    desktop's speed/ untouched); slower -> Failed('speed-mac')."""
+    FR, R = release_for(tmp_path, builds)
+    cmds = []
+
+    def run(step, cmd, cwd=None, env=None, slot=False, log=None, timeout=None, check=True):
+        cmds.append((step, cmd, slot, log))
+        with open(os.path.join(cmd[cmd.index('--out') + 1], 'result.json'), 'w') as f:
+            json.dump({'passed': passed, 'line': f'SPEED GATE {"PASSED" if passed else "FAILED"}: mac ...',
+                       'machines': {'mac': {'passed': passed}}, 'network': {'checkpoint': 'run/206', 'same_graph': True}}, f)
+        return ''
+    monkeypatch.setattr(FR.Release, 'run', lambda self, *a, **k: run(*a, **k))
+    os.makedirs(os.path.join(R.log_dir, 'speed'))
+    with open(os.path.join(R.log_dir, 'speed', 'result.json'), 'w') as f:
+        f.write('{"desktop": true}')
+    passed = True
+    rec = R.speed('X:/builds/n', None, {'dir': 'X:/dist/mac', 'build_id': 'm' * 24}, None, desktop=False)
+    [(step, cmd, slot, log)] = cmds
+    assert (step, slot, log) == ('speed-mac', False, 'speed-mac') and cmd[cmd.index('--machines') + 1] == 'mac'
+    assert os.path.basename(cmd[cmd.index('--out') + 1]) == 'speed-mac' and cmd[cmd.index('--mac-new') + 1] == 'X:/dist/mac'
+    assert rec['passed'] and R.result['steps']['speed-mac'] == rec and 'speed' not in R.result['steps']
+    assert open(os.path.join(R.log_dir, 'speed', 'result.json')).read() == '{"desktop": true}'
+    passed = False
+    with pytest.raises(FR.Failed, match='SPEED GATE FAILED') as x:
+        R.speed('X:/builds/n', None, {'dir': 'X:/dist/mac', 'build_id': 'm' * 24}, None, desktop=False)
+    assert x.value.step == 'speed-mac'
+
+
 def test_farm_gates_hands_speed_over(monkeypatch):
     import farm_gates
     got = []

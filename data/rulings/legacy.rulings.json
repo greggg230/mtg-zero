@@ -481,5 +481,107 @@
     "text": "You can tap any untapped creature you control to convoke a spell, even one you haven't controlled continuously since the beginning of your most recent turn."
    }
   ]
+ },
+ {
+  "name": "Mockingbird",
+  "oracle_id": "b9df2cdf-397c-458d-89cf-911568737ffa",
+  "rulings": [
+   {
+    "date": "2024-07-26",
+    "source": "wotc",
+    "text": "Any “enters” abilities of the copied creature will trigger when Mockingbird enters. Any “as [this creature] enters” or “[this creature] enters with” abilities of the copied creature will also work."
+   },
+   {
+    "date": "2024-07-26",
+    "source": "wotc",
+    "text": "If the copied creature has {X} in its mana cost, X is 0."
+   },
+   {
+    "date": "2024-07-26",
+    "source": "wotc",
+    "text": "If the copied creature is a token, Mockingbird copies the original characteristics of that token as stated by the effect that created that token, with the noted exceptions."
+   },
+   {
+    "date": "2024-07-26",
+    "source": "wotc",
+    "text": "If the copied creature is copying something else, then Mockingbird enters as whatever that creature copied, with the noted exceptions."
+   },
+   {
+    "date": "2024-07-26",
+    "source": "wotc",
+    "text": "Mockingbird copies exactly what was printed on the original creature, except it’s a Bird in addition to its other types and it has flying, and nothing else (unless that creature is copying something else or is a token; see below). It doesn’t copy whether that creature is tapped or untapped, whether it has any counters on it or Auras and Equipment attached to it, or any non-copy effects that have changed its power, toughness, types, color, and so on."
+   },
+   {
+    "date": "2024-07-26",
+    "source": "wotc",
+    "text": "Mockingbird’s second ability counts all mana spent to cast Mockingbird, not just mana spent on {X}. If there are any additional costs to cast it, the mana spent to pay those costs counts as well."
+   },
+   {
+    "date": "2024-07-26",
+    "source": "wotc",
+    "text": "You can choose not to have Mockingbird enter as a copy of another creature. If you do, it will just be a 1/1 Bird Bard creature with flying, an ability that didn’t do anything, and the opportunity for a good self-deprecating joke or two."
+   }
+  ]
+ },
+ {
+  "name": "Massacre",
+  "oracle_id": "ce1866e9-28de-4bcc-9999-11958e6c13a6",
+  "rulings": []
+ },
+ {
+  "name": "Stitcher's Supplier",
+  "oracle_id": "7fd61a18-6e4f-40c5-aa00-3d101ec1ec82",
+  "rulings": []
+ },
+ {
+  "name": "Dark Matter Manipulator",
+  "oracle_id": "6a3862f0-8dfc-4ac9-8eb9-faefcad685d4",
+  "rulings": []
+ },
+ {
+  "name": "Moonshadow",
+  "oracle_id": "a3635b3f-839c-4fe5-83a5-7c70e8630184",
+  "rulings": []
+ },
+ {
+  "name": "Dryad Arbor",
+  "oracle_id": "e996cd67-739c-40f4-b276-0042acf26c71",
+  "rulings": [
+   {
+    "date": "2011-09-22",
+    "source": "wotc",
+    "text": "If Dryad Arbor is changed into another basic land type (such as by Sea's Claim), it continues to be a creature and a Dryad."
+   },
+   {
+    "date": "2013-06-07",
+    "source": "wotc",
+    "text": "Although originally printed with a characteristic-defining ability that defined its color, this card now has a color indicator. This color indicator can't be affected by text-changing effects (such as the one created by Crystal Spray), although color-changing effects can still overwrite it."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Dryad Arbor is played as a land. It doesn't use the stack, it's not a spell, it can't be responded to, it has no mana cost, and it counts as your land play for the turn."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Due to its color indicator (appearing to the left of its type line), Dryad Arbor is green. Color indicators apply in all zones, not just the battlefield."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Forest is a land type and Dryad is a creature type."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If Dryad Arbor is changed into another basic land type, it continues to be a green Dryad creature."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If a Dryad Arbor gains flash, or you have the ability to play Dryad Arbor as though it had flash (due to Teferi, Mage of Zhalfir or Scout's Warning, for example), you can ignore the normal timing rules for when during your turn you can play a land, but not any other restrictions. You can't play Dryad Arbor during another player's turn, and you can't play Dryad Arbor if you don't have any land plays remaining."
+   }
+  ]
  }
 ]

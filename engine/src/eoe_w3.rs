@@ -138,7 +138,10 @@ pub(crate) fn reads_mana_spent(d: &crate::db::CardDef) -> bool {
             _ => false,
         }
     }
-    abilities_of(d).any(|ab| ab.targets.iter().any(|t| has(&t.filter)))
+    // (And what it may enter as a copy of: Mockingbird's "with mana value less
+    // than or equal to the amount of mana spent to cast this creature";
+    // ENGINE.md 220.2.)
+    abilities_of(d).any(|ab| ab.targets.iter().any(|t| has(&t.filter))) || d.enters_as_copy.as_ref().is_some_and(|e| has(&e.filter))
 }
 
 /// `W3State::seen`: a card reads its host as it last existed.

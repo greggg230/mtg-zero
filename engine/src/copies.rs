@@ -717,7 +717,13 @@ impl Game {
         let tapped = copied_tapped || self.enters_tapped(card, p);
         // (Its "enters with" counters: EoE W6, `W6State::entering`.)
         let entering_before = self.w6.entering.replace((card, since));
-        self.entering(card, tapped, 0);
+        // An "enters with X ..." replacement of what it entered as uses the X
+        // of the spell that became it (CR 107.3m: Mockingbird cast with X 2
+        // entering as a copy of Walking Ballista has two counters; the
+        // permanent's own X is 0, 202.3e); 0 if that spell had none or it
+        // wasn't cast (its `Enters` note's X; ENGINE.md 220.2).
+        let (_, x) = self.entered_counts(note as u64, Some(r));
+        self.entering(card, tapped, x);
         self.w6.entering = entering_before;
         // (Matched with the others of its entry, CR 603.6a: this task runs
         // while its entry waits, `Task::EntersTogether` under it.)
