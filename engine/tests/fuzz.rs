@@ -494,3 +494,57 @@ fn same_seed_and_actions_replay_matches_identically() {
         }
     }
 }
+
+/// ENGINE.md 228: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
+/// games (a new decision draws from each game's random stream). Ignored; `SCAN_KIND` = `left_look` (hidden-decklist
+/// default games with a look at a card that left the viewer's hand in its step), `entered_look` (default games with a
+/// look at a card that came into the hand and left it in its step), `etali` (interactions games whose rows carry an
+/// enclosing task's pick tokens for both viewers), `ocelot` (default games that end aborted at the permanents a row can
+/// show: an exponential token run); `SCAN_FROM`, `SCAN_N`. Each kind under its test's checkpoint denominator, every
+/// check on (the games the tests replay). Prints each matching seed.
+#[test]
+#[ignore]
+fn scan_seeds_for_the_seed_pinned_tests() {
+    use engine::az::encode::CODE;
+    use engine::az::tail_encode::{lk, seg, Row};
+    use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENTERED_HAND_LOOKS, PK_LEFT_HAND_LOOKS};
+    use std::sync::atomic::Ordering::Relaxed;
+    let kind = std::env::var("SCAN_KIND").expect("SCAN_KIND");
+    let from: u64 = std::env::var("SCAN_FROM").ok().and_then(|s| s.parse().ok()).unwrap_or(100_000_000);
+    let n: u64 = std::env::var("SCAN_N").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);
+    let pool = if kind == "etali" { PoolMode::Interactions } else { PoolMode::Default };
+    POOL_OVERRIDE.with(|c| c.set(Some(pool)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(if kind == "etali" { 40 } else { 4 })));
+    for seed in from..from + n {
+        let (e0, l0) = (PK_ENTERED_HAND_LOOKS.load(Relaxed), PK_LEFT_HAND_LOOKS.load(Relaxed));
+        let hit = match kind.as_str() {
+            "left_look" => std::panic::catch_unwind(|| play_hidden(seed)).is_ok() && PK_LEFT_HAND_LOOKS.load(Relaxed) > l0,
+            "entered_look" => std::panic::catch_unwind(|| play(seed, true)).is_ok() && PK_ENTERED_HAND_LOOKS.load(Relaxed) > e0 && PK_LEFT_HAND_LOOKS.load(Relaxed) > l0,
+            "ocelot" => std::panic::catch_unwind(|| play(seed, true)).is_ok_and(|p| p.outcome.reason == engine::game::EndReason::Aborted),
+            "etali" => std::panic::catch_unwind(|| {
+                let p = play(seed, true);
+                let mut g = new_game(seed);
+                let mut keys = Vec::new();
+                let mut deep = [0u32; 2];
+                for &x in &p.actions {
+                    for v in 0..2u8 {
+                        deep[v as usize] += Row::of(&g, v)
+                            .tokens(seg::LINKS)
+                            .iter()
+                            .filter(|(_, t)| (t[CODE + lk::KIND + lk::K_PICKED] == 1.0 || t[CODE + lk::KIND + lk::K_PICKED_DEF] == 1.0) && t[CODE + lk::DEPTH] > 0.0)
+                            .count() as u32;
+                    }
+                    g.apply(x, &mut keys).unwrap();
+                }
+                deep[0] > 0 && deep[1] > 0
+            })
+            .unwrap_or(false),
+            other => panic!("SCAN_KIND={other}"),
+        };
+        if hit {
+            println!("SCAN {kind} seed {seed}");
+        }
+    }
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+}
