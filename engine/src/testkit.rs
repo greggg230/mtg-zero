@@ -660,6 +660,8 @@ impl Game {
             // division, splices, a ninjutsu attack, a trigger's event and
             // noted permanents (objects by place, a stack item by position).
             v.extend([s.cost_option as u64, s.alt as u64, h64(&s.from), s.delved as u64, s.x as u64, s.origin as u64]);
+            // (Its total cost locked by a mana ability activated while it is cast, CR 601.2f-g: ENGINE.md 222.)
+            v.push(self.locked_cost(s.id).map_or(u64::MAX, |c| h64(&c)));
             v.extend(s.division.iter().map(|&n| n as u64));
             v.extend(s.spliced.iter().map(|&d| d as u64));
             v.push(s.attack_as.map_or(u64::MAX, |a| a.map_or(u64::MAX - 1, live_place)));
