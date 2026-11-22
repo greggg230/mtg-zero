@@ -43062,8 +43062,8 @@ equal but for the graveyard's order and the waiting triggers' order, which the s
 completed) never reads - the payment's exiles and delve's picks are sets, the triggers wait - and each stays legal in
 the other order, their costs taking disjoint permanents and cards (the same choices) and a mana cost one paid by the
 other's mana being paid by activating that ability within its own payment (605.3a); a condition could be made true
-or false by the other activation, so then every order is searched (a cube digest game: five hand cards with
-discard-for-mana abilities and an escaped Phlage, every order of them searched, 2,000,000 copies). A spell whose total
+or false by the other activation, so then every order is searched (a cube digest game, an escaped Phlage with up to six feeding mana abilities in its caster's hand: every order searched,
+past 2,000,000 copies). A spell whose total
 cost has no mana has no step: the search asks its payment as it is.
 
 ### 229.5 Found and fixed on the way
