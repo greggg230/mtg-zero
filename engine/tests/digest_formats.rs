@@ -32,8 +32,9 @@
 //!
 //! Per game or match the first two hash, decision by decision: the decider, the pending decision's
 //! kind and player (a sideboarding's decider and kind, a deck choice), the legal actions, the action
-//! taken and the chance keys; every 10th decision the decider's encoding (`mtg`: the whole layout v7
-//! row - head, tail tokens, pointer overrides; `mtg_eoe`: its layout v6 floats); every 20th the
+//! taken and the chance keys; every 10th decision the decider's encoding (`mtg`: the whole layout v8
+//! row - head, tail tokens, pointer overrides, ENGINE.md 232; `DIGEST_ENCODING=v7`: layout v7's, the
+//! combined digests printed only; `mtg_eoe`: its layout v6 floats); every 20th the
 //! decider's auxiliary targets and a world `determinize` deals it (its decision, both players' hand
 //! and library identities in order, both decks, the other player's encoding there, five random
 //! actions played in it); every 40th a world dealt by a random belief (`determinize_with`: the hand's
@@ -108,10 +109,17 @@ fn encodings_on() -> bool {
     !std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0")
 }
 
+/// `DIGEST_ENCODING=v7` (ENGINE.md 232): `mtg`'s layout v7 rows hashed instead of layout v8's, the combined
+/// digests printed only (layout v7's recorded files of main e445ba27 while v8 only adds segments).
+fn layout_v7() -> bool {
+    std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7")
+}
+
 /// A game of the `MtgAz` family, as the digests read it.
 trait Digested: SearchGame + Clone {
     fn az(&self) -> &MtgAz;
-    /// `viewer`'s encoding hashed: `mtg`'s whole layout v7 row, `mtg_eoe`'s layout v6 floats.
+    /// `viewer`'s encoding hashed: `mtg`'s whole layout v8 row (`mtg_v8`'s; v7's with `DIGEST_ENCODING=v7`),
+    /// `mtg_eoe`'s layout v6 floats.
     fn hash_encoding(&self, viewer: usize, h: &mut H);
 }
 
@@ -120,7 +128,7 @@ impl Digested for MtgAz {
         self
     }
     fn hash_encoding(&self, viewer: usize, h: &mut H) {
-        let row = engine::az::tail_encode::Row::of_az(self, viewer);
+        let row = engine::az::tail_encode::Row::of_az_layout(self, viewer, !layout_v7());
         let mut x = H::new();
         x.f32s(&row.head);
         x.u64(row.tail.len() as u64);
@@ -318,7 +326,7 @@ fn finish(name: &str, file: &str, what: &str, lines: &[String], t: std::time::In
     if let Ok(dir) = std::env::var("DIGEST_LINES") {
         std::fs::write(std::path::Path::new(&dir).join(file), lines.join("\n") + "\n").unwrap();
     }
-    if !encodings_on() && name != "driver" {
+    if (!encodings_on() || layout_v7()) && name != "driver" {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(file);

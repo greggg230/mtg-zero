@@ -33,8 +33,9 @@
 //! hashes the layout v6 part (`encode::v6_projection`: where each of layout
 //! v6's 44,212 floats is in the v7 head): layout v6's recorded full digest
 //! (b63f643e97a30a61, main c3abdb8a and 64c86cc2) while every v6 float of layout v7 is
-//! v6's (ENGINE.md 125). The recorded file is layout v7's full digest
-//! (438164c0429d7fa3, ENGINE.md 125.12).
+//! v6's (ENGINE.md 125). `DIGEST_ENCODING=v7` hashes layout v7's whole row (the game `mtg`'s:
+//! head, tail tokens, overrides): layout v7's recorded full digest (9473f7debc4bceb3, main e445ba27)
+//! while v8 only adds segments (ENGINE.md 232). The recorded file is layout v8's full digest (ENGINE.md 232).
 //!
 //! `DIGEST_IDS=choices` (ENGINE.md 65.11): an id-agnostic trace of the same
 //! games, to compare across a change that renames action ids and nothing
@@ -201,8 +202,10 @@ fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
         return;
     }
     let Some(viewer) = g.to_move() else { return };
-    // Layout v7's whole row (ENGINE.md 125): the head, the tail, the overrides.
-    let row = engine::az::tail_encode::Row::of(g, viewer);
+    // Layout v8's whole row (ENGINE.md 232: v7's, ENGINE.md 125, and v8's segments): the head, the tail, the
+    // overrides; `DIGEST_ENCODING=v7` (and the projections below): layout v7's row (the game `mtg`'s).
+    let v8 = std::env::var("DIGEST_ENCODING").is_err();
+    let row = engine::az::tail_encode::Row::of_layout(g, viewer, v8);
     buf.copy_from_slice(&row.head);
     let mut x = H::new();
     // `DIGEST_ENCODING=v4`: hash the layout v4 part of each encoding (the
@@ -350,7 +353,7 @@ fn behaviour_digests() {
     if let Ok(p) = std::env::var("DIGEST_LINES") {
         std::fs::write(&p, lines.join("\n") + "\n").unwrap();
     }
-    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4" || v == "v5" || v == "v6") || by_choice() {
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4" || v == "v5" || v == "v6" || v == "v7") || by_choice() {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/digests.txt");
