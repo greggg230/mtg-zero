@@ -1,6 +1,6 @@
 """Results to delverai's Head-to-heads tab (#/h2h; docs/ENGINE.md 193): the `--publish EXPERIMENT` option of
 `python -m mtgz.az.h2h`, `python -m mtgz.az.keep_h2h`, `tools/run_yardsticks.py cells-match`, `tools/ab.py`'s
-judge and `tools/farm_campaign.py collect` (the last two by default: docs/ENGINE.md 2XX). The site's own uploader
+judge and `tools/farm_campaign.py collect` (the last two by default: docs/ENGINE.md 225). The site's own uploader
 does the posting (delverai's tools/upload_h2h.py: the record's shape, the sides' labels, the path check, the merge into
 the experiment's record); this module finds it, checks before a long measurement starts that the post can work, saves
 the result and runs the uploader on it when the measurement ends.

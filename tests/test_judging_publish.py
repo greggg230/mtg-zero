@@ -1,4 +1,4 @@
-"""Judging publishes by default (docs/ENGINE.md 2XX): tools/ab.py's outside reference (a single-arm experiment judged
+"""Judging publishes by default (docs/ENGINE.md 225): tools/ab.py's outside reference (a single-arm experiment judged
 against a fixed network; its matches in the Head-to-heads manifest; PUBLISH OFF loud at the judge) and
 tools/farm_campaign.py collect's head-to-head posted to the Head-to-heads tab through mtgz.az.site_h2h (checked before
 any waiting; --no-publish loud; self-play / unpaired campaigns skipped loudly; a failed post exit 3). No runs, no

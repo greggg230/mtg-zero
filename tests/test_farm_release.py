@@ -83,7 +83,7 @@ def test_rust_key_lookup_and_pool_settings(tmp_path, fbx):
     assert not e2['exact'] and e2['commit'] == c1 and e2['asked'] == c2, 'the same Rust inputs: the build of c1'
     assert FB.lookup(c3, root) is None
     assert FB.pool_settings(e) == {'pool_build': 'a' * 24, 'pool_runtime': 'r' * 24, 'pool_worker': 'X:/builds/' + 'a' * 24 +
-                                   '/mtgz-worker.exe', 'pool_alternates': 'c' * 24}
+                                   '/mtgz-worker.exe', 'pool_alternates': 'c' * 24, 'pool_variants': 'gpu=fp16'}
     FB.add(dict(_entry(c3, k3, bid='b' * 24, cuda=None)))
     assert FB.pool_settings(FB.lookup(c3, root))['pool_alternates'] == ''
     # the DirectML alternate (AMD GPUs, zero-farm PROTOCOL rev 22) after the CUDA one; alone when there is no CUDA one
@@ -105,7 +105,7 @@ def test_pool_build_published_in_a_run_command_line(tmp_path, fbx):
     FB.add(_entry(c1, FB.rust_key(c1, root)))
     out = FB.published_pool(argv, root)
     assert out == ['--preset', 'x', '--pool-build', 'a' * 24, '--pool-alternates', '', '--pool-runtime', 'r' * 24,
-                   '--pool-worker', 'X:/builds/' + 'a' * 24 + '/mtgz-worker.exe']
+                   '--pool-worker', 'X:/builds/' + 'a' * 24 + '/mtgz-worker.exe', '--pool-variants', 'gpu=fp16']
     assert FB.published_pool([f'--pool-build=published:{c1[:10]}'], root)[0] == '--pool-build=' + 'a' * 24
     assert FB.published_pool(['--pool-build', 'e' * 24], root) == ['--pool-build', 'e' * 24]
     with pytest.raises(SystemExit):
@@ -167,7 +167,7 @@ def test_ab_pool_build_published(tmp_path, fbx, monkeypatch):
     s = {'code': {'worktree': root, 'sha': c2[:10]}}
     o = ab.published_build(s, {'pool_build': 'published', 'pool_alternates': '', 'lr': 1})
     assert o == {'pool_build': 'a' * 24, 'pool_alternates': '', 'lr': 1, 'pool_runtime': 'r' * 24,
-                 'pool_worker': 'X:/builds/' + 'a' * 24 + '/mtgz-worker.exe'}
+                 'pool_worker': 'X:/builds/' + 'a' * 24 + '/mtgz-worker.exe', 'pool_variants': 'gpu=fp16'}
     assert ab.published_build(s, {'lr': 1}) == {'lr': 1}
     with pytest.raises(SystemExit, match='no published farm build'):
         ab.published_build(s, {'pool_build': f'published:{c3}'})
@@ -191,7 +191,9 @@ def _mac_env(tmp_path, fbx, monkeypatch, release_json=None):
     FB.add(_entry(cs[0], FB.rust_key(cs[0], root), cuda=None))
     b = FB.builds_dir()
     with open(os.path.join(b, 'release.json'), 'w') as f:
-        json.dump(dict({'cpu_runtime': 'r' * 24, 'mac_runtime': MAC_RT}, **(release_json or {})), f)
+        # (mac_fuzz off unless a test turns it on: these tests are about the macOS part's release build; the default -
+        # on since docs/ENGINE.md 219 - is test_the_macos_switches')
+        json.dump(dict({'cpu_runtime': 'r' * 24, 'mac_runtime': MAC_RT, 'mac_fuzz': False}, **(release_json or {})), f)
     os.makedirs(os.path.join(b, MAC_RT))
     with open(os.path.join(b, MAC_RT, 'manifest.json'), 'w') as f:
         json.dump({'platform': 'macos-arm64', 'version': 'ort-mac'}, f)
@@ -242,17 +244,17 @@ def _mac_env(tmp_path, fbx, monkeypatch, release_json=None):
 
 
 def test_the_macos_switches():
-    """On by default with its gates and publish, without the fuzz build and the Mac's speed windows; release.json turns
-    each off (or on), a flag wins for one run."""
+    """On by default with its gates, publish and the fuzz build (docs/ENGINE.md 219), without the Mac's speed windows;
+    release.json turns each off (or on), a flag wins for one run."""
     import farm_release as FR
     s = dict(FR.DEFAULTS)
     sw = lambda argv, s: (lambda a: (a.mac, a.mac_gates, a.mac_publish, a.mac_fuzz, a.speed_mac))(  # noqa: E731
         FR.mac_switches(FR.parser().parse_args(['release', 'x', *argv]), s))
-    assert sw([], s) == (True, True, True, False, False)
-    assert sw(['--no-mac-gates', '--speed-mac', '--mac-fuzz'], s) == (True, False, True, True, True)
-    assert sw(['--no-mac'], s)[0] is False and sw(['--no-mac-publish', '--no-speed-mac'], s)[2:] == (False, False, False)
-    off = dict(s, mac=False, mac_speed=True)
-    assert sw([], off) == (False, True, True, False, True) and sw(['--mac'], off)[0] is True
+    assert sw([], s) == (True, True, True, True, False)
+    assert sw(['--no-mac-gates', '--speed-mac', '--no-mac-fuzz'], s) == (True, False, True, False, True)
+    assert sw(['--no-mac'], s)[0] is False and sw(['--no-mac-publish', '--no-speed-mac'], s)[2:] == (False, True, False)
+    off = dict(s, mac=False, mac_speed=True, mac_fuzz=False)
+    assert sw([], off) == (False, True, True, False, True) and sw(['--mac', '--mac-fuzz'], off)[::3] == (True, True)
 
 
 def test_when_an_entry_has_its_macos_part():
@@ -449,3 +451,104 @@ def test_the_watcher_retries_a_failed_macos_part(tmp_path, fbx, monkeypatch):
     W.poll(P, st, a)
     assert 'mac_pending' not in st and st['done'][c3]['mac_failed'] is False and ran[-2:] == [c3, c3]
     assert 'macOS part of ' + c3[:12] + ' backfilled' in open(P['log'], encoding='utf-8').read()
+
+
+# ------------------------------------------------------------------ docs/ENGINE.md 218: pool_settings' variants and macOS
+def test_pool_settings_variants_and_the_macos_alternate(tmp_path, fbx, monkeypatch):
+    """pool_settings names the variant each GPU alternate plays (CUDA 'gpu=fp16', DirectML 'dml=matmul@amd', none
+    without them) and lists the release's macOS build last - only when it is published and the run's settings pass the
+    pool's own platform check (zero.farm_pool.platform_check, run by the release worker here); left out, it says why."""
+    from zero import farm_pool as FP
+    FB = fbx
+    worker = tmp_path / 'mtgz-worker.exe'
+    worker.write_bytes(b'stand-in')
+    mac = 'f' * 24
+    e = dict(_entry('c' * 40, 'k'), worker=str(worker), dml={'build_id': 'm' * 24},
+             mac={'release': {'build_id': mac, 'published': True}})
+    cfg = {'game': 'mtg', 'sims': 64}
+    seen = []
+
+    def check(w, c, d, platform, log=None):
+        seen.append((w, c, platform, os.path.isdir(d)))
+    monkeypatch.setattr(FP, 'platform_check', check)
+    notes = []
+    ps = FB.pool_settings(e, cfg=cfg, log=notes.append)
+    assert ps['pool_alternates'] == ','.join(['c' * 24, 'm' * 24, mac]) and ps['pool_variants'] == 'gpu=fp16,dml=matmul@amd'
+    assert seen == [(str(worker), cfg, 'macos-arm64', True)] and notes == []
+    # no run settings (lookup --pool-args, a launcher that has none): no macOS alternate, said
+    ps = FB.pool_settings(e, log=notes.append)
+    assert ps['pool_alternates'] == 'c' * 24 + ',' + 'm' * 24 and 'no run settings' in notes[-1]
+
+    def refuse(w, c, d, platform, log=None):
+        raise FP.Refused(f'the run\'s settings would replay differently on {platform} (the platform\'s libm): exp in x',
+                         'leave the macos-arm64 alternate out of pool_alternates')
+    monkeypatch.setattr(FP, 'platform_check', refuse)
+    ps = FB.pool_settings(e, cfg=cfg, log=notes.append)
+    assert mac not in ps['pool_alternates'] and 'replay differently on macos-arm64' in notes[-1]
+    monkeypatch.setattr(FP, 'platform_check', check)
+    # not published / failed / no worker here: left out, said
+    for m, why in (({'release': {'build_id': mac, 'published': False}}, 'signed, not published'),
+                   ({'failed': 'mac-reach'}, 'failed at mac-reach'), (None, 'no published macOS build')):
+        ps = FB.pool_settings(dict(e, mac=m), cfg=cfg, log=notes.append)
+        assert mac not in ps['pool_alternates'] and why in notes[-1], (m, notes[-1])
+    ps = FB.pool_settings(dict(e, worker=str(tmp_path / 'nowhere.exe')), cfg=cfg, log=notes.append)
+    assert mac not in ps['pool_alternates'] and 'is not on this machine' in notes[-1]
+    # the variants follow the GPU alternates
+    assert FB.pool_settings(dict(e, dml=None, mac=None))['pool_variants'] == 'gpu=fp16'
+    assert FB.pool_settings(dict(e, cuda=None, mac=None))['pool_variants'] == 'dml=matmul@amd'
+    assert 'pool_variants' not in FB.pool_settings(dict(e, cuda=None, dml=None, mac=None))
+    assert set(FB.pool_settings(e, alternates=False)) == {'pool_build', 'pool_runtime', 'pool_worker'}
+
+
+def test_pool_build_published_checks_the_runs_settings_for_macos(tmp_path, fbx, monkeypatch, capsys):
+    """`--pool-build published` resolves the run's settings as zero.run will (its config.json < the flags) for the
+    macOS platform check, and adds the macOS build only when they pass; the variants and the reason are printed."""
+    from zero import farm_pool as FP
+    FB = fbx
+    root, (c1, c2, c3), g = _repo(tmp_path)
+    worker = tmp_path / 'w.exe'
+    worker.write_bytes(b'x')
+    FB.add(dict(_entry(c3, FB.rust_key(c3, root)), worker=str(worker), mac={'release': {'build_id': 'f' * 24,
+                                                                                         'published': True}}))
+    run = tmp_path / 'run'
+    run.mkdir()
+    (run / 'config.json').write_text(json.dumps({'preset': 'mtg-smoke', 'sims': 12}))
+    seen = []
+    monkeypatch.setattr(FP, 'platform_check', lambda w, c, d, p, log=None: seen.append(c))
+    out = FB.published_pool(['--run', str(run), '--pool-build', 'published', '--eval-sims', '6'], root)
+    assert seen and seen[0]['sims'] == 12 and seen[0]['eval_sims'] == 6 and seen[0]['preset'] == 'mtg-smoke'
+    alts = out[out.index('--pool-alternates') + 1]
+    assert alts == 'c' * 24 + ',' + 'f' * 24 and out[out.index('--pool-variants') + 1] == 'gpu=fp16'
+
+    def refuse(w, c, d, p, log=None):
+        raise FP.Refused('the run\'s settings would replay differently on macos-arm64: exp', 'leave it out')
+    monkeypatch.setattr(FP, 'platform_check', refuse)
+    out = FB.published_pool(['--run', str(run), '--pool-build', 'published'], root)
+    assert out[out.index('--pool-alternates') + 1] == 'c' * 24
+    assert 'no macOS alternate - macOS build ' + 'f' * 24 + ": the run's settings would replay differently" in \
+        capsys.readouterr().out
+
+
+def test_the_farm_build_hook_and_the_runs_start(tmp_path, fbx, monkeypatch):
+    """mtgz's `farm_build` hook (zero-core docs/az.md 70): the published build of this checkout's commit, described with
+    how to use it, else None; a fresh start without a farm pool and without a reason is then refused, a resumed one
+    warns, a reason (or $ZERO_SELFPLAY_LOCAL_REASON, which the test suite sets) lets it start."""
+    from zero import package, run as R
+    FB = fbx
+    root, (c1, c2, c3), g = _repo(tmp_path)
+    monkeypatch.setattr(FB, 'ROOT', root)
+    assert FB.published_for_run(str(tmp_path), {}) is None
+    FB.add(_entry(c3, FB.rust_key(c3, root)))
+    d = FB.published_for_run(str(tmp_path), {})
+    assert d.startswith(f'commit {c3[:12]}: build ' + 'a' * 24) and '--pool-build published' in d
+    assert package.active().published_farm_build(str(tmp_path), {}) == d
+    monkeypatch.delenv(R.LOCAL_REASON_ENV, raising=False)
+    cfg = dict(R.DEFAULTS, game='mtg')
+    with pytest.raises(R.FarmUseRefused, match='build ' + 'a' * 24):
+        R.check_farm_use(str(tmp_path), cfg, True, lambda m: None)
+    lines = []
+    R.check_farm_use(str(tmp_path), cfg, False, lines.append)
+    assert lines[-1].startswith('WARNING: a published farm build exists for this commit')
+    R.check_farm_use(str(tmp_path), dict(cfg, selfplay_local_reason='a timing A/B'), True, lines.append)
+    assert ': a timing A/B - beside a published farm build of this commit (commit ' in lines[-1]
+    assert R.PRESETS['mtg-smoke']['selfplay_local_reason'] and R.PRESETS['delver-smoke']['selfplay_local_reason']

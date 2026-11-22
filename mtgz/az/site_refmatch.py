@@ -1,4 +1,4 @@
-"""Reference matches on delverai (docs/ENGINE.md 2XX): a run's checkpoints against a fixed checkpoint from OUTSIDE the
+"""Reference matches on delverai (docs/ENGINE.md 225): a run's checkpoints against a fixed checkpoint from OUTSIDE the
 run (e.g. pb1@262, generation 262 of delver-bo3-pb1) in one deck's mirror, measured by the cells yardstick
 (`tools/run_yardsticks.py one <run> --kind cells --ref LABEL --pair X,X`, or the run's watcher with that reference in
 its ladder), shown on the run's page as the record `refmatch.<run>` (kind 'refmatch'; delverai worker/index.js
@@ -423,4 +423,4 @@ def publish(run, extra=(), url=None, key_file=None, dry_run=False, log=None, row
 def published_off(run, why):
     """The loud line of a reference match that is not posted."""
     return (f'PUBLISH OFF: {record_name(run)} is not posted ({why}) - this measurement will not appear on the Delver '
-            f'AI site until `python tools/run_yardsticks.py refmatch {run}` posts it (docs/ENGINE.md 2XX)')
+            f'AI site until `python tools/run_yardsticks.py refmatch {run}` posts it (docs/ENGINE.md 225)')

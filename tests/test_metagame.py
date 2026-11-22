@@ -56,7 +56,7 @@ def test_the_presets():
     for k in ('sims', 'sims_fast', 'p_full', 'sims_minor', 'hidden', 'blocks', 'heads', 'ff', 'arch', 'games', 'batch',
               'lr', 'window', 'yardstick', 'eval_games', 'elo_games', 'policy_target', 'infer_device', 'shard_sparse'):
         assert p[k] == m[k], k
-    # the metagame publisher on (META3_PUBLISH, docs/ENGINE.md 221), the Delver mirror's standing yardsticks off
+    # the metagame publisher on (META3_PUBLISH, docs/ENGINE.md 224), the Delver mirror's standing yardsticks off
     assert p['publish'] == META3_PUBLISH and p['yardsticks'] == {}
     s = A.PRESETS['mtg-smoke']
     assert (smoke['hidden'], smoke['blocks'], smoke['sims'], smoke['iters']) == (s['hidden'], s['blocks'], s['sims'], s['iters'])

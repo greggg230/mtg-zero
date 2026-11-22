@@ -1,4 +1,4 @@
-"""Reference matches on delverai by default (docs/ENGINE.md 2XX; mtgz.az.site_refmatch): which cells references are
+"""Reference matches on delverai by default (docs/ENGINE.md 225; mtgz.az.site_refmatch): which cells references are
 from outside the run, the record `refmatch.<run>` rebuilt from every row on disk (mirror cells of a registered network
 only, the newest row of a generation, delverai's upload_refmatch.py's fields), a record with no row refused, and the
 three ways it is posted - `run_yardsticks.py one` by hand (default on; --no-publish loud; refused before any game when

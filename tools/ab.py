@@ -36,7 +36,8 @@ THE SPEC (JSON):
     "env": {"ZERO_TOKEN_GRAPHS": "1"},        # extra environment of the arms' supervisors
     "require_source_idle": true,              # go refuses while the source's supervisor is live (the one GPU)
     "judge": {"games": 200, "device": "cuda", "sims": null, "seed": null, "decks": null, "yardsticks": null,
-              "vs_start": true},              # cells-match's options; vs_start: each arm against the start too
+              "vs_start": true,               # cells-match's options; vs_start: each arm against the start too
+              "backend": null, "reuse_control": false},   # where it plays (THE JUDGE below; docs/ENGINE.md 217)
     "publish": {"h2h": true,                  # the judge publishes (go / judge; --no-publish skips it)
                 "live": true,                 # each arm's supervisor runs the run-owned publisher as a SIDE run
                 "live_options": {"every": 8, "games": 6},   # the arm's `publish` dict (mtgz.az.publish KEYS)
@@ -56,8 +57,16 @@ THE JUDGE (<out>/judge/): for each treatment T, cells-match T's last checkpoint 
 .json: {summary, rows}); with judge.vs_start, every arm's last checkpoint against the common start (<arm>_vs_start
 .json; the start copied to judge/start_iter_KKKK.pt); then report.json / report.md (the matches' summaries, each arm's
 metrics over its iterations). One baseline cache (judge/cells_base) for all of them.
+Where the judge plays (docs/ENGINE.md 217): one backend per experiment. judge.backend 'auto' | 'farm' | 'local' fixes
+it; null (the default) decides it once - an experiment judged before (any match's result or a cached baseline in
+judge/) stays 'local' (every judge before ENGINE.md 217 played here); a new one asks cells-match for 'auto' on its first
+match (the farm when it can play exactly those games: a clean, released checkout, ...) - and keeps what that match was
+played on in judge/backend.json, passing it explicitly to every later match (which then refuses rather than mixes).
+Each match plays its control - the pair's baseline, the control or the start against itself - on the same backend
+(cells-match's one backend per comparison); judge.reuse_control true (cells-match --reuse-control) reuses a cached
+baseline of another backend instead, said in the log and the rows.
 
-AN OUTSIDE REFERENCE (docs/ENGINE.md 2XX; "reference" in the spec, or `--ref CKPT --ref-label LABEL` on judge / go /
+AN OUTSIDE REFERENCE (docs/ENGINE.md 225; "reference" in the spec, or `--ref CKPT --ref-label LABEL` on judge / go /
 check / publish, kept in ab_state.json for a later `publish`): a fixed checkpoint from outside the experiment - e.g.
 pb1@262, generation 262 of delver-bo3-pb1 - that every arm's last checkpoint is also judged against (<arm>_vs_ref
 .json: the arm pilots each deck against the reference piloting each deck; label default: its run and generation). With
@@ -77,7 +86,8 @@ FAILED with the retry command (`ab.py publish SPEC`), exit 3; the judge's files 
 
 THE FARM BUILD: an override `"pool_build": "published"` (in `common` or an arm) is the published farm build of the
 code's commit (`code.sha`, else its worktree's HEAD; "published:<rev>" another commit) with its pool_runtime,
-pool_worker and pool_alternates unless the overrides give them (tools/farm_release.py lookup; docs/ENGINE.md 196).
+pool_worker, pool_alternates (its macOS build only when the arm's settings pass the platform check) and pool_variants
+unless the overrides give them (tools/farm_release.py lookup; docs/ENGINE.md 196, 218).
 
 PER-ARM CODE (code.arms): an arm whose engine differs (an A/B of an engine change) trains from its own pinned
 worktree: its supervisor, fork_run, pause_run and farm gates run there (`check` checks each worktree's sha and engine
@@ -86,7 +96,8 @@ build). The judge runs in the common code's worktree (`code.worktree`): the chec
 THE FARM (opt-in, "farm": {...}): an arm self-plays on the farm when its settings name a pool (`selfplay_remote`
 'pool:<farm run>' with pool_build / pool_worker / pool_runtime / pool_alternates ...: setting overrides like any other,
 in `common` or per arm - the same lease settings for every arm unless the A/B is about them; the worker build must play
-the arm's engine: one build per engine, published with tools/farm_build.py beforehand). With "gates" (default true),
+the arm's engine: one build per engine, published with tools/farm_release.py release <sha> beforehand). With "gates"
+(default true),
 `farm-gates` runs tools/farm_gates.py on each farm arm's forked config.json and checkpoint K with its pool_worker
 (<out>/farm_gates/<arm>/summary.json), and `launch` refuses a farm arm without a passed summary for that worker
 (AGENTS.md: farm compatibility is required; `go` runs the missing gates first). The coordinator's farm run is created
@@ -96,6 +107,16 @@ returns it minus alternates[].problems) when the arm ends, so the farm stops ser
 
 STOP: `ab.py stop SPEC`; `go` exits when an arm stops before its last iteration (resume: `ab.py launch SPEC ARM`, or
 `go` again: complete arms are skipped). ROLLBACK: stop; delete the arms' run directories; the source was never touched.
+
+FARM GUARDS (docs/ENGINE.md 218, zero-core docs/az.md 70): an arm never self-plays or evaluates in the source's farm
+runs - tools/fork_run.py gives an arm that does not override selfplay_remote / eval_remote its own farm runs, named after
+the arm's run directory (the source's pool_* settings kept), and refuses an override naming the source's. `check`,
+`fork` and the farm gates judge each arm by its EFFECTIVE settings (`effective`: its forked config.json, else the
+source's config + the overrides + fork_run's farm rule), so an arm that inherits the source's farm needs the spec's
+"farm" too. `farm-pause` (and `go` after an arm) pauses only the arm's OWN farm run: one that the source, another arm or
+any other run directory under runs_dir also names is refused (FARM PAUSE REFUSED), never paused. An arm that stays on
+this machine beside a published farm build needs `selfplay_local_reason` (in common or the arm) at its first start -
+the run refuses it otherwise (exit 78).
 """
 import argparse
 import json
@@ -112,7 +133,7 @@ from mtgz.az import site_h2h as S  # noqa: E402
 RESERVED = ('publish', 'iters')
 LIVE_DEFAULTS = {'every': 8, 'games': 6, 'device': 'cpu', 'threads': 4, 'census': 0}
 JUDGE_DEFAULTS = {'games': 200, 'device': 'cuda', 'sims': None, 'seed': None, 'decks': None, 'yardsticks': None,
-                  'vs_start': True}
+                  'vs_start': True, 'backend': None, 'reuse_control': False}
 TERMINAL = ('done', 'stopped', 'refused', 'gave_up', 'paused')
 
 
@@ -178,6 +199,8 @@ def normalize(spec, base='.', ref_given=False):
     s['judge'] = dict(JUDGE_DEFAULTS, **(s.get('judge') or {}))
     if s['judge']['games'] % 2:
         raise SystemExit('spec: judge.games - an even number (games per cell)')
+    if s['judge']['backend'] not in (None, 'auto', 'farm', 'local'):
+        raise SystemExit("spec: judge.backend - 'auto', 'farm', 'local' or null (docs/ENGINE.md 217)")
     pub = dict({'h2h': True, 'live': True, 'live_options': {}, 'link': None, 'url': None}, **(s.get('publish') or {}))
     pub['link'] = pub['link'] or os.path.basename(os.path.normpath(src['run']))
     s['publish'] = pub
@@ -185,7 +208,7 @@ def normalize(spec, base='.', ref_given=False):
 
 
 def reference_of(r):
-    """The spec's outside reference -> {'path', 'label'} or None; SystemExit for a bad one (docs/ENGINE.md 2XX)."""
+    """The spec's outside reference -> {'path', 'label'} or None; SystemExit for a bad one (docs/ENGINE.md 225)."""
     if r is None:
         return None
     if not isinstance(r, dict) or not isinstance(r.get('path'), str) or not r['path'] or set(r) - {'path', 'label'}:
@@ -214,7 +237,7 @@ def with_reference(s, path=None, label=None):
 def publish_off(s, why):
     """The loud line of a judge that will not post (stderr)."""
     print(f"PUBLISH OFF: h2h.{s['id']} ({why}) - the judge's results will NOT appear on the Delver AI site's "
-          f"Head-to-heads tab; post them later: python tools/ab.py publish SPEC (docs/ENGINE.md 193, 2XX)",
+          f"Head-to-heads tab; post them later: python tools/ab.py publish SPEC (docs/ENGINE.md 193, 225)",
           file=sys.stderr, flush=True)
 
 
@@ -241,6 +264,50 @@ def farm_run(cfg):
 
 def run_dir(s, arm):
     return os.path.join(s['runs_dir'], s['run_prefix'] + arm).replace('\\', '/')
+
+
+def effective(s, arm, k, ov=None):
+    """The settings the arm runs with (docs/ENGINE.md 218): its forked config.json once forked (fork_run applied the
+    overrides and its farm rule), else the source's config.json + the overrides (`ov`, default `overrides`) + the farm
+    changes fork_run will make (zero.tools.fork_run.fork_farm: its own farm runs; SystemExit for an override naming the
+    source's) -> (settings, the farm notes)."""
+    d = run_dir(s, arm)
+    cfg = jload(os.path.join(d, 'config.json'))
+    if isinstance(cfg, dict):
+        return cfg, []
+    src = jload(os.path.join(s['source']['run'], 'config.json'), {}) or {}
+    ov = overrides(s, arm, k) if ov is None else ov
+    from zero.tools.fork_run import fork_farm
+    changes, notes = fork_farm(src, ov, d, source=s['source']['run'])
+    return dict(src, **ov, **changes), notes
+
+
+class FarmNotOwn(RuntimeError):
+    """`farm_pause`: the arm's farm run is not its own (another run directory names it too): not paused."""
+
+
+def farm_owners(s, arm, fr):
+    """Every other run directory whose settings name farm run `fr` (selfplay_remote or eval_remote `pool:<fr>`, or its
+    selfplay_remotes file; zero.tools.fork_run.farm_runs): the source run, the other arms, every run under runs_dir ->
+    [directory]."""
+    from zero.tools.fork_run import farm_runs
+    norm = lambda p: os.path.normcase(os.path.abspath(p))  # noqa: E731
+    me = norm(run_dir(s, arm))
+    dirs = [s['source']['run']] + [run_dir(s, a) for a in s['arms']]
+    if os.path.isdir(s['runs_dir']):
+        dirs += [os.path.join(s['runs_dir'], x) for x in sorted(os.listdir(s['runs_dir']))]
+    out, seen = [], {me}
+    for d in dirs:
+        if norm(d) in seen:
+            continue
+        seen.add(norm(d))
+        cfg = jload(os.path.join(d, 'config.json'))
+        if not isinstance(cfg, dict):
+            continue
+        f = farm_runs(cfg, d)
+        if fr in f['selfplay'] or fr == f['eval']:
+            out.append(d.replace('\\', '/'))
+    return out
 
 
 def judge_dir(s):
@@ -286,7 +353,10 @@ def published_build(s, o, arm=None):
     if e is None:
         raise SystemExit(f'pool_build {v!r}: no published farm build for {rev} of {wt} (python tools/farm_release.py release {rev})')
     out = dict(o)
-    for key, val in FB.pool_settings(e).items():
+    # (the macOS alternate only when the arm's settings - the source's with the overrides - pass the platform check)
+    src = (s.get('source') or {}).get('run')
+    src = (jload(os.path.join(src, 'config.json'), {}) or {}) if src else {}
+    for key, val in FB.pool_settings(e, cfg=dict(src, **o), log=print).items():
         if key == 'pool_build' or key not in o:
             out[key] = val
     return out
@@ -377,8 +447,16 @@ def check(s):
         ov = overrides(s, arm, k)
         print(f"  {arm} ({role}, {s['labels'][arm]!r}): {run_dir(s, arm)} iters {k + 1}..{k + s['iterations']}: "
               f"{json.dumps(ov)}")
-        if farm_run(ov) and s['farm'] is None:
-            raise SystemExit(f'{arm} self-plays on the farm ({farm_run(ov)}): the spec needs "farm": {{...}} (the gates)')
+        # (the arm's EFFECTIVE settings, docs/ENGINE.md 218: an arm that inherits the source's farm self-plays on its
+        # own farm run - fork_run's rule - and needs the gates as much as one whose overrides name a pool)
+        eff, notes = effective(s, arm, k, ov)
+        fr = farm_run(eff)
+        print(f"     self-play: {'farm run ' + fr if fr else 'this machine only'}"
+              + (f"; evaluation: {eff['eval_remote']}" if str(eff.get('eval_remote') or '').startswith('pool:') else ''))
+        for n in notes:
+            print(f'     {n}')
+        if fr and s['farm'] is None:
+            raise SystemExit(f'{arm} self-plays on the farm ({fr}): the spec needs "farm": {{...}} (the gates)')
     print(f"code: {wt} at {head[:12]}; python {python(s)}; out {s['out']}")
     if s['reference']:
         ok = os.path.isfile(s['reference']['path'])
@@ -528,6 +606,23 @@ def judge_matches(s, k):
     return out
 
 
+def judge_backend(s, out):
+    """The experiment's judge backend (THE JUDGE, docs/ENGINE.md 217) -> (backend for the next match, why, fixed): the
+    spec's judge.backend; else judge/backend.json's (decided by its first match); else 'local' for an experiment judged
+    before (a match's result or a cached baseline in judge/: every judge before 217 played here); else 'auto' (the first
+    match decides). `fixed`: it is the experiment's already."""
+    if s['judge'].get('backend'):
+        return s['judge']['backend'], 'judge.backend', True
+    rec = jload(os.path.join(out, 'backend.json'), None)
+    if isinstance(rec, dict) and rec.get('backend') in ('farm', 'local'):
+        return rec['backend'], f"judge/backend.json ({rec.get('why')})", True
+    done = [k for k, _, _ in judge_matches(s, fork_k(s)) if os.path.exists(os.path.join(out, k + '.json'))]
+    base = os.path.join(out, 'cells_base')
+    if done or (os.path.isdir(base) and any(f.endswith('.json') for f in os.listdir(base))):
+        return 'local', 'judged before docs/ENGINE.md 217 (its results and baselines were played here)', False
+    return 'auto', 'a new experiment: its first match decides', False
+
+
 def judge(s, publish=True):
     out = judge_dir(s)
     os.makedirs(out, exist_ok=True)
@@ -553,12 +648,16 @@ def judge(s, publish=True):
     env.pop('CUDA_VISIBLE_DEVICES', None)
     j = s['judge']
     res = {}
+    backend, why, fixed = judge_backend(s, out)
+    print(f'judge: backend {backend} - {why}', flush=True)
     for key, a, b in judge_matches(s, k):
         jp = os.path.join(out, key + '.json')
         if not os.path.exists(jp):
             cmd = [python(s), 'tools/run_yardsticks.py', 'cells-match', fin[a], '--ref', fin[b], '--ref-label', b,
                    '--games', str(j['games']), '--cache', os.path.join(out, 'cells_base'),
-                   '--out', os.path.join(out, key + '.rows.jsonl'), '--json']
+                   '--out', os.path.join(out, key + '.rows.jsonl'), '--json', '--backend', backend]
+            if j.get('reuse_control'):
+                cmd.append('--reuse-control')
             for opt in ('sims', 'seed', 'device'):
                 if j.get(opt) is not None:
                     cmd += [f'--{opt}', str(j[opt])]
@@ -576,6 +675,11 @@ def judge(s, publish=True):
             r = json.loads(p.stdout)
             r['seconds'] = round(time.time() - t0, 1)
             jsave(jp, r)
+            if not fixed:                      # (the experiment's backend: its first match's, kept for every later one)
+                backend, fixed = r.get('backend') or 'local', True
+                jsave(os.path.join(out, 'backend.json'), {'backend': backend, 'why': f'the first match ({key}) was '
+                                                          f'played there ({why})', 'time': round(time.time())})
+                print(f'judge: backend {backend} for every later match (judge/backend.json)', flush=True)
         res[key] = (jload(jp) or {})['summary']
     rep = {'id': s['id'], 'k': k, 'iters': s['iterations'], 'control': s['control'], 'matches': res,
            'arms': {a: summarize(s, a, k) for a in s['arms']}}
@@ -748,6 +852,11 @@ def farm_pause(s, arm, client=None):
     fr = farm_run(jload(os.path.join(run_dir(s, arm), 'config.json'), {}) or {})
     if not fr:
         return None
+    # (only the arm's own farm run, docs/ENGINE.md 218: an arm forked before fork_run's farm rule may name the source's
+    # - pausing it would stop the source's farm self-play)
+    others = farm_owners(s, arm, fr)
+    if others:
+        raise FarmNotOwn(f'{arm}: farm run {fr} is not the arm\'s own - {", ".join(others)} name(s) it too: NOT paused')
     if client is None:
         from zero import farm_def as FD
         client = FD.Client()
@@ -786,6 +895,8 @@ def go(s, publish=True, judge_too=True):
         if s['farm'] and s['farm']['pause_when_done']:
             try:
                 farm_pause(s, arm)
+            except FarmNotOwn as e:        # (never another run's farm run; the arm's result stands)
+                print(f'{arm}: FARM PAUSE REFUSED: {e}', flush=True)
             except Exception as e:  # noqa: BLE001  (the arm's result stands; retried by hand)
                 print(f'{arm}: FARM PAUSE FAILED ({e}): ab.py farm-pause SPEC {arm}', flush=True)
         if not ok:
@@ -805,7 +916,7 @@ def main(argv=None):
     ap.add_argument('--dry-run', action='store_true', help='publish: print the record, post nothing')
     ap.add_argument('--replace', action='store_true', help='publish: replace matches already on the site')
     ap.add_argument('--ref', default=None, metavar='CKPT', help='judge / go / check / publish: an outside reference '
-                    'every arm is judged against too (docs/ENGINE.md 2XX; kept for a later publish)')
+                    'every arm is judged against too (docs/ENGINE.md 225; kept for a later publish)')
     ap.add_argument('--ref-label', default=None, help="--ref's name on the site (default: its run and generation)")
     a = ap.parse_args(argv)
     try:
@@ -836,7 +947,10 @@ def main(argv=None):
     elif a.cmd == 'farm-pause':
         if a.arm not in s['arms']:
             ap.error(f'farm-pause: an arm ({", ".join(s["arms"])})')
-        farm_pause(s, a.arm)
+        try:
+            farm_pause(s, a.arm)
+        except FarmNotOwn as e:
+            raise SystemExit(f'FARM PAUSE REFUSED: {e}') from None
     elif a.cmd == 'status':
         status(s)
     elif a.cmd == 'stop':

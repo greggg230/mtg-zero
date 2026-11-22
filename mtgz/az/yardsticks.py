@@ -108,7 +108,11 @@ other, against the reference piloting both on the same seeds (common random numb
   cells_boot       bootstrap resamples of each cell's paired seeds (1000; 0 = the delta method only)
   refmatch_publish a mirror cells result against a reference from OUTSIDE the run (a cells_refs 'LABEL=PATH' that is
                    no file of the run) posts the run's reference-match record refmatch.<run> on delverai
-                   (mtgz.az.site_refmatch, docs/ENGINE.md 2XX; true; false: PUBLISH OFF, said at each such result)
+                   (mtgz.az.site_refmatch, docs/ENGINE.md 225; true; false: PUBLISH OFF, said at each such result)
+  cells_reuse_base a cell's control - its pair's reference-vs-reference baseline - is played on the cells' own backend
+                   (docs/ENGINE.md 217: one backend per comparison; 'local' and 'mac' are one, torch's): a cached
+                   baseline of another backend is not reused but played again and kept beside it (`resolve_base`).
+                   true: reuse it (said in the log and in the row's `base_backend`) - the opt-out (false)
 
 The reference pool and the joint fit (docs/ENGINE.md 186; mtgz.az.cells_fit; off unless cells_mode is 'pool'):
 
@@ -181,6 +185,7 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             'cells_games': 0, 'cells_gen_games': 0, 'cells_decks': None, 'cells_refs': [], 'cells_sims': None,
             'cells_seed': 0, 'cells_device': None, 'cells_backend': None, 'cells_format': 'bo1', 'cells_max_turns': 60,
             'cells_promote': 0.80, 'cells_base_elo': 1000.0, 'cells_cache': None, 'cells_boot': 1000,
+            'cells_reuse_base': False,
             # the cost settings (docs/ENGINE.md 182): cadences, sequential stopping, sparse rows
             'bo1_every': None, 'blunders_every': None, 'cells_every': None, 'cells_gen_every': None,
             'bo1_target_se': None, 'bo1_sprt': None, 'bo1_batch': 100, 'cells_target_se': None, 'cells_batch': 100,
@@ -193,7 +198,7 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             'cells_mac_nice': 10,
             # the cells' local games in parallel (docs/ENGINE.md 199)
             'cells_local_jobs': 1, 'cells_local_split': False,
-            # cells against an outside reference posted as the run's reference-match record (docs/ENGINE.md 2XX)
+            # cells against an outside reference posted as the run's reference-match record (docs/ENGINE.md 225)
             'refmatch_publish': True}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)
@@ -206,7 +211,7 @@ KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': 
         'from': int, 'settle': _NUM, 'retry_s': _NUM, 'retry_max_s': _NUM, 'timeout_s': _NUM, 'poll': _NUM,
         'cells_games': int, 'cells_gen_games': int, 'cells_decks': list, 'cells_refs': list, 'cells_sims': int,
         'cells_seed': int, 'cells_device': str, 'cells_backend': str, 'cells_format': str, 'cells_max_turns': int,
-        'cells_promote': _NUM, 'cells_base_elo': _NUM, 'cells_cache': str, 'cells_boot': int,
+        'cells_promote': _NUM, 'cells_base_elo': _NUM, 'cells_cache': str, 'cells_boot': int, 'cells_reuse_base': bool,
         'bo1_every': int, 'blunders_every': int, 'cells_every': int, 'cells_gen_every': int, 'bo1_target_se': _NUM,
         'bo1_sprt': list, 'bo1_batch': int, 'cells_target_se': _NUM, 'cells_batch': int, 'sparse': bool,
         'cells_mode': str, 'cells_pool_active': int, 'cells_promote_every': int, 'cells_auto_promote': bool,
@@ -908,7 +913,9 @@ def measure_bo1_farm(run, it, o, cfg, ys, client=None, opts=None, log=None):
                  pool['worker'], pool['runtime'], b=o['path'], paired=True, share=ys['bo1_farm_share'],
                  deadline_s=wait, min_agent=pool['min_agent'], meta={'yardstick': 'bo1', 'run': run, 'iter': int(it),
                                                                       'opp': o['name']}, client=client, opts=opts, **kw)
-    res = C.collect(d, client=client, threads=ys['bo1_threads'], describe_games=False, opts=opts, **kw)
+    from . import h2h_farm as HF
+    res = C.collect(d, client=client, threads=ys['bo1_threads'], wrap=HF.topup_wrap, describe_games=False, opts=opts,
+                    **kw)
     out = res['readout']
     if out is None or out.get('games') != ys['bo1_games']:
         raise RuntimeError(f"best-of-one {it} vs {o['name']} (farm): {out and out.get('games')} games of {ys['bo1_games']}")
@@ -1174,6 +1181,29 @@ def load_base(cdir, key):
         return None
 
 
+def backend_family(backend):
+    """A baseline's backend as the same-backend rule reads it: 'farm', or 'local' (this machine's torch and the Mac's:
+    the 'mac' backend plays play_pair_local's matches there, docs/ENGINE.md 198; a baseline without one: 'local')."""
+    return 'farm' if backend == 'farm' else 'local'
+
+
+def resolve_base(cdir, key, backend, reuse=False):
+    """The cache key of a pair's baseline for cells played on `backend` (docs/ENGINE.md 217: one backend per
+    comparison) -> (key, note): the baseline's own key (`base_key`) when its file is absent (the first writer's) or holds
+    a baseline of the same backend family (`backend_family`), else the key beside it for this backend (`key` + the
+    family, hashed) - a baseline of another backend is never this comparison's control. `reuse` (cells_reuse_base, the
+    opt-out): the own key whatever played it, `note` naming the other backend."""
+    data = load_base(cdir, key)
+    if data is None:
+        return key, None
+    have = backend_family(data.get('backend'))
+    if have == backend_family(backend):
+        return key, None
+    if reuse:
+        return key, f"reusing the control's baseline {key} played on {data.get('backend') or 'local'} (cells_reuse_base)"
+    return hashlib.sha256(f'{key}|{backend_family(backend)}'.encode()).hexdigest()[:16], None
+
+
 def item_done(run, ys, item):
     """A baseline is done when its cache file exists (whoever computed it); every other measurement by its row."""
     return item['kind'] == 'cells_base' and bool(item.get('base')) and os.path.exists(
@@ -1283,7 +1313,7 @@ class CellsWant:
         for pair in cell_pairs(self.ys):
             key = None
             if pair[0] != pair[1]:
-                key = self._key(path, pair, games)
+                key = self._key(path, pair, games, cells_backend(self.run, self.cfg, self.ys, path))
                 if key and key not in self.seen:
                     self.seen.add(key)
                     out.append({'lane': lane, 'kind': 'cells_base', 'ref': label, 'pair': list(pair), 'games': games,
@@ -1296,15 +1326,17 @@ class CellsWant:
             self._res = tally(read_rows(self.run) if self.rows is None else self.rows)[0]
         return self._res
 
-    def _key(self, path, pair, games):
+    def _key(self, path, pair, games, backend='local'):
         try:
             if path not in self._shas:
                 self._shas[path] = sha12(path)
             if self._eng is None:
                 self._eng = [engine_sha()]
-            return base_key(path, pair, games, self.ys, self.seat(), sha=self._shas[path], eng=self._eng[0])[0]
+            key = base_key(path, pair, games, self.ys, self.seat(), sha=self._shas[path], eng=self._eng[0])[0]
         except OSError:                         # (no reference file: the measurement fails loudly, retried)
             return None
+        # (the baseline of the cells' own backend, docs/ENGINE.md 217)
+        return resolve_base(cache_dir(self.run, self.ys), key, backend, self.ys.get('cells_reuse_base'))[0]
 
     def fits(self):
         """The point fit of every recorded game (memoized by the rows: every lane looks each poll)."""
@@ -1648,16 +1680,20 @@ def _play_pair_batches(a, b, pair, games, ys, seat, log, stop):
     return out
 
 
-def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, client=None, opts=None):
+def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, client=None, opts=None, pool=None,
+                   own_base=False):
     """The pair's two matches as farm play jobs (docs/ENGINE.md 165; mtgz.az.farm_campaign): the run's pool worker
-    build, the seats of play_pair_local checked dict for dict (match_settings of `rule_ck`, the run's checkpoint whose
-    rule both sides play, against the reference), unpaired, each its own campaign `name`-c<chooser> (a retry resumes
-    it), its games traced, spot-replayed here, the missing ones played here after bo1_farm_wait_s. A baseline (`a` is
-    `b`): self seats [net 1, net 1] of the reference. -> play_pair_local's dict + 'farm' {chooser: digest, spot,
-    local}."""
+    build (`pool`: another - the release index's build of the checkout, a standalone cells-match's, docs/ENGINE.md 217),
+    the seats of play_pair_local checked dict for dict (match_settings of `rule_ck`, the run's checkpoint whose rule
+    both sides play, against the reference; `own_base`: each side's own run's margin_w / redet / eval_cache as its
+    seat's set, farm_campaign.match_job - a reference without a run config, e.g. an A/B's copied start), unpaired, each
+    its own campaign `name`-c<chooser> (a retry resumes it), its games traced, spot-replayed here, the missing ones played
+    here after bo1_farm_wait_s (each piece holding a slot of the heavy-command throttle while a run is live here:
+    h2h_farm.topup_wrap). A baseline (`a` is `b`): self seats [net 1, net 1] of the reference. -> play_pair_local's dict
+    + 'farm' {chooser: digest, spot, local, by_route}."""
     from zero import farm_eval as FE, gamerec as GR, h2h
-    from . import farm_campaign as C
-    pool = C.run_pool(cfg)
+    from . import farm_campaign as C, h2h_farm as HF
+    pool = pool or C.run_pool(cfg)
     if pool is None:
         raise RuntimeError('cells_backend farm: the run has no farm pool (pool:<farm run> with pool_build, pool_worker)')
     same = os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
@@ -1666,14 +1702,18 @@ def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, cli
     kw = {'log': log} if log else {}
     out = {'results': {}, 'unfinished': 0, 'select': None, 'farm': {}}
     for j in pair_jobs(pair, games, ys):
-        settings, rule = C.match_settings(rule_ck, ys['cells_sims'], j['spec'], tilts=bo1_tilts(cfg), ckpt_b=ref)
-        seats = [{'net': 1}, {'net': 1}] if same else [{'net': 1}, {'net': 2}]
+        if own_base:
+            settings, rule, seats = C.match_job(rule_ck, a, b, ys['cells_sims'], j['spec'], tilts=bo1_tilts(cfg))
+        else:
+            settings, rule = C.match_settings(rule_ck, ys['cells_sims'], j['spec'], tilts=bo1_tilts(cfg), ckpt_b=ref)
+            seats = [{'net': 1}, {'net': 1}] if same else [{'net': 1}, {'net': 2}]
         d = C.submit(f"{name}-c{j['chooser']}", a, j['games'], settings, seats, j['seed'], pool['build_id'],
                      pool['worker'], pool['runtime'], b=None if same else b, paired=False, share=ys['bo1_farm_share'],
-                     deadline_s=wait, min_agent=pool['min_agent'],
+                     deadline_s=wait, min_agent=pool.get('min_agent'),
                      meta={'yardstick': 'cells', 'run': run, 'pair': list(pair), 'chooser': j['chooser']},
                      client=client, opts=opts, **kw)
-        res = C.collect(d, client=client, threads=ys['bo1_threads'], describe_games=False, opts=opts, **kw)
+        res = C.collect(d, client=client, threads=ys['bo1_threads'], wrap=HF.topup_wrap, describe_games=False, opts=opts,
+                        **kw)
         rows = sorted(C.games(d), key=lambda r: r['gid'])
         FE.a_seat_of(rows, {'net': 1})
         if [r['gid'] for r in rows] != list(range(j['games'])):
@@ -1688,14 +1728,16 @@ def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, cli
         out['select'] = h2h._tag(C.match_seat(rule_ck, ys['cells_sims'], rule))
         out['farm'][str(j['chooser'])] = {'run': res['run'], 'digest': res['digest'],
                                           'spot': {k: res['spot'][k] for k in ('checked', 'ok', 'of')},
-                                          'local': res['coverage']['local'], 'seconds': res['seconds']}
+                                          'local': res['coverage']['local'], 'seconds': res['seconds'],
+                                          'by_route': res.get('by_route')}
     return out
 
 
 def _play(backend, a, b, pair, games, ys, seat, farm, log, stop=None):
     if backend == 'farm':
         return play_pair_farm(farm['run'], farm['cfg'], farm['rule_ck'], a, b, pair, games, ys, farm['name'],
-                              log=farm.get('log'), client=farm.get('client'), opts=farm.get('opts'))
+                              log=farm.get('log'), client=farm.get('client'), opts=farm.get('opts'),
+                              pool=farm.get('pool'), own_base=farm.get('own_base', False))
     if backend == 'mac':                       # (docs/ENGINE.md 198: play_pair_local's matches on the MacBook)
         from . import mac_judge as MJ
         return MJ.play_pair_mac(a, b, pair, games, ys, seat, log=log)
@@ -1719,6 +1761,9 @@ def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', 
     if pair[0] == pair[1]:
         raise ValueError(f'cells: a mirror ({pair[0]}) has no baseline games (0.5 exactly)')
     key, kd = base_key(ref, pair, games, ys, seat)
+    key, note = resolve_base(cdir, key, backend, ys.get('cells_reuse_base'))   # (the control on this backend: 217)
+    if note:
+        log(f'cells {pair[0]} / {pair[1]}: {note}')
     data = load_base(cdir, key)
     t0 = time.time()
     cached = data is not None
@@ -1739,7 +1784,8 @@ def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', 
             'games': games, 'scores': {c: round(_mean([(x + y) / 2 for x, y in us]), 4) for c, us in units.items()},
             'unfinished': data.get('unfinished', 0), 'sims': ys['cells_sims'], 'select': data.get('select'),
             'backend': data.get('backend'), 'cached': cached, 'seconds': round(time.time() - t0, 1),
-            'time': round(time.time())}
+            'time': round(time.time()), **({'base_backend': data.get('backend') or 'local', 'for_backend': backend}
+                                           if note else {})}
 
 
 def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print,
@@ -1756,11 +1802,17 @@ def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, ba
     if games > base_games or games % 2:
         raise ValueError(f'cells {pair}: {games} games against a baseline of {base_games}')
     key, bunits, bres = None, None, None
+    base_backend = None
     if pair[0] != pair[1]:
         key, _ = base_key(ref, pair, base_games, ys, seat)
+        key, note = resolve_base(cdir, key, backend, ys.get('cells_reuse_base'))   # (the control on this backend: 217)
         data = load_base(cdir, key)
         if data is None:
-            raise RuntimeError(f'cells {pair}: no baseline {key} in {cdir} (measured first: kind cells_base)')
+            raise RuntimeError(f'cells {pair}: no baseline {key} in {cdir} for the {backend_family(backend)} backend '
+                               f'(measured first: kind cells_base)')
+        if note:
+            log(f'cells {pair[0]} / {pair[1]}: {note}')
+            base_backend = data.get('backend') or 'local'
         bres = {int(c): res_decode(r) for c, r in data['results'].items()}
     stop = None
     if cells_sequential(ys):
@@ -1789,6 +1841,8 @@ def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, ba
         row['farm'] = p['farm']
     if p.get('mac'):
         row['mac'] = p['mac']
+    if base_backend is not None:                # (the opt-out: a control of another backend, said in the row)
+        row['base_backend'] = base_backend
     if role is not None:                        # (the pool mode's legs, docs/ENGINE.md 186.2)
         row.update(role=role, base_games=base_games)
     if cells_sequential(ys):
@@ -1833,22 +1887,118 @@ def measure_cells_base(run, label, pair, games, cfg=None, ys=None, log=print):
                              records=records_dir(run, cfg))
 
 
+def standalone_history(cdir, rows_out=None):
+    """The backends a standalone comparison's earlier games were played on (docs/ENGINE.md 217): its cache's baselines
+    and its rows file's rows -> [(time, family)], oldest first."""
+    import glob
+    seen = []
+    for p in glob.glob(os.path.join(cdir or '', '*.json')) if cdir else []:
+        d = load_base(os.path.dirname(p), os.path.splitext(os.path.basename(p))[0])
+        if isinstance(d, dict) and 'results' in d:
+            seen.append((d.get('time') or os.path.getmtime(p), backend_family(d.get('backend'))))
+    if rows_out and os.path.exists(rows_out):
+        with open(rows_out, encoding='utf-8') as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get('kind') in ('cells', 'cells_gen', 'cells_base'):
+                    seen.append((r.get('time') or 0, backend_family(r.get('backend'))))
+    return sorted(seen)
+
+
+def standalone_backend(ck, ref, ys, cdir, ask='auto', rows_out=None):
+    """A standalone cells comparison's backend (`run_yardsticks.py cells-match`, `tools/ab.py judge`; docs/ENGINE.md
+    217), decided before any game -> (backend, why, farm): 'local' (asked; or under 'auto' its earlier games - the
+    cache's baselines, the rows file's rows - were played here: a comparison keeps its backend; or what keeps the farm
+    from it) or 'farm' with the farm dict of `_play` (the release index's build of this checkout as its pool, each
+    side's own base keys as its seat's set: farm_campaign.match_job). The farm's conditions are zero.h2h's farm
+    backend's (mtgz.az.h2h_farm): the machine's farm keys, a clean checkout, a published build for its commit, a run
+    config next to `ck` (its rule is both sides'), every chooser match's and baseline's seats the local ones, the
+    build's check-config. 'farm' asked and impossible: SystemExit with the reason; earlier games on the farm and the
+    farm impossible now: SystemExit too (never a mixed comparison by default)."""
+    import shutil
+    import tempfile
+    from . import farm_campaign as C, h2h_farm as HF
+    if ask == 'local':
+        return 'local', 'asked (--backend local)', None
+    seen = standalone_history(cdir, rows_out) if ask == 'auto' else []
+    if seen and seen[-1][1] == 'local':
+        return 'local', f'kept: the comparison\'s earlier games ({len(seen)} baselines / rows in its cache and rows ' \
+                        f'file) were played here', None
+    try:
+        why = HF.can_put()
+        if why:
+            raise HF.NotHere(why)
+        dirty = HF.tracked_changes()
+        if dirty:
+            raise HF.NotHere(f'the checkout has uncommitted changes to tracked files ({"; ".join(dirty[:3])}): the farm '
+                             f'plays its commit\'s build')
+        e = HF.release_of()
+        run = os.path.dirname(os.path.dirname(os.path.abspath(ck)))
+        if not os.path.exists(os.path.join(run, 'config.json')):
+            raise HF.NotHere(f'{os.path.basename(ck)} has no run config next to models/ (its rule is both sides\')')
+        cfg = cfg_of(run)
+        games = ys['cells_games'] or ys['cells_gen_games']
+        first = None
+        for pair in cell_pairs(ys):
+            for j in pair_jobs(pair, games, ys):
+                for a, b in ((ck, ref), (ref, ref)):
+                    try:
+                        job = C.match_job(ck, a, b, ys['cells_sims'], j['spec'], tilts=bo1_tilts(cfg))
+                    except (C.CampaignError, ValueError, OSError) as x:
+                        raise HF.NotHere(f'cells {pair[0]} / {pair[1]}: {x}') from None
+                    first = first or job
+        d = tempfile.mkdtemp(prefix='cells-farm-')
+        try:
+            C.job_settings(e['worker'], e['build_id'], first[0], d, lambda m: None, seats=first[2])
+        except C.CampaignError as x:
+            raise HF.NotHere(f'build {e["build_id"]} refuses the job: {str(x)[-400:]}') from None
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+    except HF.NotHere as x:
+        if ask == 'farm' or seen:
+            raise SystemExit(f'cells-match: backend farm refused - {x}' + (
+                ' (the comparison\'s earlier games were played on the farm: --backend local mixes them explicitly)'
+                if seen else ''))
+        return 'local', str(x), None
+    pool = {'build_id': e['build_id'], 'runtime': e['runtime'], 'worker': e['worker'], 'min_agent': None}
+    farm = {'run': run, 'cfg': cfg, 'rule_ck': ck, 'pool': pool, 'own_base': True}
+    return 'farm', f'build {e["build_id"][:8]} + {HF.routes_of(e)}', farm
+
+
+def _standalone_name(farm, kind, ck, ref, pair, games, ys, base=None):
+    """A standalone comparison's campaign (its chooser matches '-c0' / '-c1'): deterministic from what it plays, so a
+    rerun resumes or collects it - a baseline by its cache key, a cell by the checkpoint, the reference and the pair."""
+    h = hashlib.sha256(json.dumps([kind, base or [sha12(ck), sha12(ref)], list(pair), games, ys['cells_seed'],
+                                   ys['cells_sims'], farm['pool']['build_id']]).encode()).hexdigest()[:12]
+    return dict(farm, name=f"cm-{kind.replace('_', '')}-{h}")
+
+
 def measure_cells_standalone(ck, ref, ys, cdir, label='ref', seat=None, rows_out=None, log=print, kind='cells',
-                             records=None):
-    """Every pair's cells of checkpoint `ck` against `ref` outside a run's watcher (local games; the baselines from
-    / into `cdir`): `seat` (default: bo1_seat of `ck` - its run's rule) -> (rows, summary). Each row is also appended
+                             records=None, backend='local', farm=None):
+    """Every pair's cells of checkpoint `ck` against `ref` outside a run's watcher (the baselines from / into
+    `cdir`): `seat` (default: bo1_seat of `ck` - its run's rule) -> (rows, summary). Each row is also appended
     to `rows_out` (a JSONL file) as it lands. `records`: a game records directory (docs/gamedb.md: every game played
-    under <records>/cells/misc/ and <records>/cells_base/misc/), None: none."""
+    under <records>/cells/misc/ and <records>/cells_base/misc/), None: none. `backend` 'local' (here) or 'farm' with
+    `farm` (`standalone_backend`'s): every baseline and cell a farm campaign, each pair's control (its baseline) played
+    on the same backend (`resolve_base`; docs/ENGINE.md 217)."""
     seat = dict(seat) if seat is not None else bo1_seat(ck)
     rows, cells = [], {}
     games = ys['cells_games'] or ys['cells_gen_games']
     for pair in cell_pairs(ys):
         todo = []
+        fb = fc = None
+        if farm is not None:
+            fb = _standalone_name(dict(farm, log=log), 'cells_base', ck, ref, pair, games, ys,
+                                  base=base_key(ref, pair, games, ys, seat)[0])
+            fc = _standalone_name(dict(farm, log=log), kind, ck, ref, pair, games, ys)
         if pair[0] != pair[1]:
-            todo.append(lambda pair=pair: measure_base_core(ref, label, pair, games, ys, seat, cdir, log=log,
-                                                            records=records))
-        todo.append(lambda pair=pair: measure_cells_core(kind, ck, None, ref, label, pair, games, ys, seat, cdir,
-                                                         log=log, records=records))
+            todo.append(lambda pair=pair, fb=fb: measure_base_core(ref, label, pair, games, ys, seat, cdir, backend, fb,
+                                                                   log=log, records=records))
+        todo.append(lambda pair=pair, fc=fc: measure_cells_core(kind, ck, None, ref, label, pair, games, ys, seat, cdir,
+                                                                backend, fc, log=log, records=records))
         for f in todo:
             r = f()
             rows.append(r)

@@ -9,7 +9,7 @@ opponents and the canary library, on every evaluated checkpoint, once each, in o
                                  [--no-publish] [--title T --note N --series-label L --ref-run R --ref-gen G ...]
                                  (against an OUTSIDE reference: the run's refmatch.<run> record on delverai, below)
   python tools/run_yardsticks.py refmatch RUN [--ref LABEL --ref-ckpt PATH] [--rows FILE ...] [--dry-run] [fields]
-                                 (rebuild and post the run's reference-match record: ENGINE.md 2XX)
+                                 (rebuild and post the run's reference-match record: ENGINE.md 225)
   python tools/run_yardsticks.py one RUN --kind cells_base --ref LABEL --pair X,Y --games G
   python tools/run_yardsticks.py one RUN --kind cells_fit --iter N        (the pool mode's joint fit: ENGINE.md 186)
   python tools/run_yardsticks.py cells RUN [--json] [--fit] [--boot B]   (the metagame cells' report: ENGINE.md 177;
@@ -17,8 +17,11 @@ opponents and the canary library, on every evaluated checkpoint, once each, in o
   python tools/run_yardsticks.py cells-fit RUN [--json] [--boot B]       (the joint fit from the records only: no games)
   python tools/run_yardsticks.py cells-freeze RUN --iter N [--label L] [--to PATH]    (the next reference)
   python tools/run_yardsticks.py cells-match CKPT --ref PATH [--games G] [--sims S] [--decks a,b,c] [--cache DIR]
-                                 [--out FILE.jsonl] [--device cpu|cuda] [--json] [--records DIR]   (standalone, local games;
+                                 [--out FILE.jsonl] [--device cpu|cuda] [--json] [--records DIR]   (standalone;
                                  --records: every game a game record, docs/gamedb.md)
+                                 [--backend auto|farm|local] [--reuse-control] [--farm-share X] [--farm-deadline-h H]
+                                 (auto, the default: the farm when it can play exactly these games and the
+                                 comparison's earlier games were not played here, docs/ENGINE.md 217)
                                  [--publish EXPERIMENT --title T [--a-label ..]]     (and to delverai's h2h tab:
                                  the overall match and one per cell, mtgz.az.site_h2h, ENGINE.md 193)
 
@@ -51,7 +54,7 @@ cells_local_jobs > 1 (docs/ENGINE.md 199): that many at once, the same way.
 
 `status`: what is measured, missing (an evaluated checkpoint without a result) and failing.
 
-Reference matches (docs/ENGINE.md 2XX; mtgz.az.site_refmatch): a mirror cells result (pair X,X, kind 'cells') against
+Reference matches (docs/ENGINE.md 225; mtgz.az.site_refmatch): a mirror cells result (pair X,X, kind 'cells') against
 a reference from OUTSIDE the run - a cells_refs 'LABEL=PATH' that is no file of the run, e.g. pb1@262 - posts the
 run's record refmatch.<run> on delverai (its page's reference-match chart) BY DEFAULT, rebuilt whole from every such
 row on disk (<run>/yardsticks.jsonl, <run>/yardsticks/refmatch_rows.jsonl: `one`'s by hand, and `--rows` files):
@@ -404,7 +407,7 @@ class Watcher:
 
     def refmatch(self, row, ys):
         """A mirror cells result against an outside reference -> the run's reference-match record posted (docs/ENGINE.md
-        2XX), or PUBLISH OFF / PUBLISH FAILED said; never raises (publishing never stops the yardsticks)."""
+        225), or PUBLISH OFF / PUBLISH FAILED said; never raises (publishing never stops the yardsticks)."""
         pair = row.get('pair') or []
         if row.get('kind') != 'cells' or len(pair) != 2 or pair[0] != pair[1]:
             return
@@ -441,11 +444,11 @@ class Watcher:
         name = RM.record_name(self.run)
         if not ys['refmatch_publish']:
             self.log(f'PUBLISH OFF: {name} - the mirror cells against the outside reference(s) {outs} will not appear on '
-                     f'the Delver AI site (the yardsticks setting refmatch_publish is false; docs/ENGINE.md 2XX)')
+                     f'the Delver AI site (the yardsticks setting refmatch_publish is false; docs/ENGINE.md 225)')
             return
         try:
             RM.check_key()
-            self.log(f'reference matches: the mirror cells against {outs} post {name} (docs/ENGINE.md 2XX)')
+            self.log(f'reference matches: the mirror cells against {outs} post {name} (docs/ENGINE.md 225)')
         except RM.RefmatchError as ex:
             self.log(f'PUBLISH FAILED: {name} cannot be posted: {ex} - the yardsticks go on, the results stay on disk')
 
@@ -621,6 +624,10 @@ class Watcher:
             self.log(f"watching {self.run}: {json.dumps(ys)}" + ('' if not ys['bo1_games'] else
                      f"; best-of-one opponents {[o['name'] for o in Y.opponents(self.run, cfg, ys)]}"))
             self.refmatch_plan(cfg, ys)
+            from mtgz.az import farm_campaign as C
+            note = C.run_pool_note(cfg)        # (farm settings that do nothing: said, docs/ENGINE.md 218)
+            if note:
+                self.log(f'WARNING: {note}')
             lanes = Y.lanes(self.run, cfg, ys)
             ew = None
             if not self.once:
@@ -700,7 +707,7 @@ def refmatch_fields(a):
 
 
 def refmatch_plan(a, run, cfg, ys, pair):
-    """Before `one`'s cells games (docs/ENGINE.md 2XX): against an outside reference by hand -> 'post' or 'off' (the
+    """Before `one`'s cells games (docs/ENGINE.md 225): against an outside reference by hand -> 'post' or 'off' (the
     row kept either way; the reference registered with the flags' fields), else None. SystemExit when the post could
     not work (no key, a pair that is no mirror, a label of another network) unless --no-publish."""
     if os.environ.get(CHILD_ENV) == '1' or a.kind != 'cells' or not RM.outside_ref(run, cfg, ys, a.ref):
@@ -741,7 +748,7 @@ def refmatch_after(a, run, row, plan):
 
 
 def cmd_refmatch(a):
-    """The run's reference-match record rebuilt from every row on disk and posted now (docs/ENGINE.md 2XX)."""
+    """The run's reference-match record rebuilt from every row on disk and posted now (docs/ENGINE.md 225)."""
     run = os.path.abspath(a.run)
     try:
         meta = RM.read_meta(run)
@@ -770,7 +777,7 @@ def cmd_refmatch(a):
 
 def _refmatch_args(p):
     """The reference-match record's flags (`one`, `refmatch`): its human fields and the post's options."""
-    g = p.add_argument_group("the run's reference-match record on delverai (docs/ENGINE.md 2XX)")
+    g = p.add_argument_group("the run's reference-match record on delverai (docs/ENGINE.md 225)")
     g.add_argument('--series-label', default=None, help="the reference's name on the site (default '<run>@<gen>')")
     g.add_argument('--title', default=None, help="the series' title")
     g.add_argument('--note', default=None, help="the series' note")
@@ -965,7 +972,9 @@ def cmd_freeze(a):
 
 
 def cmd_match(a):
-    """Standalone: a checkpoint's cells against a reference (local games), outside any run's watcher."""
+    """Standalone: a checkpoint's cells against a reference, outside any run's watcher - on the farm when it can play
+    exactly these games (--backend auto, the default; docs/ENGINE.md 217), else here."""
+    from mtgz.az import h2h_farm as HF
     ov = {'bo1_games': 0, 'blunders': False, 'cells_games': a.games, 'cells_refs': ['ref=' + a.ref]}
     ov.update(json.loads(a.yardsticks) if a.yardsticks else {})
     for k, v in (('cells_sims', a.sims), ('cells_device', a.device), ('cells_seed', a.seed)):
@@ -973,15 +982,27 @@ def cmd_match(a):
             ov[k] = v
     if a.decks:
         ov['cells_decks'] = a.decks.split(',')
+    if a.reuse_control:
+        ov['cells_reuse_base'] = True
+    # (an auto campaign's share and deadline: zero.h2h's farm backend's, docs/ENGINE.md 217)
+    ov.setdefault('bo1_farm_share', HF.AUTO_SHARE if a.farm_share is None else a.farm_share)
+    ys0 = Y.normalize(ov)
+    n = Y.pair_jobs(Y.cell_pairs(ys0)[-1], ys0['cells_games'], ys0)[0]['games']     # (a chooser match's games)
+    ov.setdefault('bo1_farm_wait_s', a.farm_deadline_h * 3600 if a.farm_deadline_h is not None else
+                  min(HF.DEADLINE_MAX_S, HF.DEADLINE_BASE_S + HF.DEADLINE_PER_WORK_S * n * ys0['cells_sims']))
     ys = Y.normalize(ov)
     S.check(a)
     cdir = a.cache or os.path.join(os.path.dirname(os.path.abspath(a.out or a.ckpt)), 'cells_base')
-    rows, s = Y.measure_cells_standalone(os.path.abspath(a.ckpt), os.path.abspath(a.ref), ys, cdir,
+    ck, ref = os.path.abspath(a.ckpt), os.path.abspath(a.ref)
+    backend, why, farm = Y.standalone_backend(ck, ref, ys, cdir, a.backend, a.out)
+    print(f'cells-match: backend {backend} - {why}', file=sys.stderr, flush=True)
+    rows, s = Y.measure_cells_standalone(ck, ref, ys, cdir,
                                          label=a.ref_label, rows_out=a.out,
                                          log=lambda m: print('# ' + m, file=sys.stderr, flush=True),
-                                         records=os.path.abspath(a.records) if a.records else None)
+                                         records=os.path.abspath(a.records) if a.records else None,
+                                         backend=backend, farm=farm)
     if a.json:
-        print(json.dumps({'summary': s, 'rows': rows}, indent=1))
+        print(json.dumps({'summary': s, 'rows': rows, 'backend': backend}, indent=1))
     else:
         print_summary(s, ys['cells_decks'], f'{a.ckpt} against {a.ref}:')
     if a.publish:
@@ -1025,7 +1046,7 @@ def main(argv=None):
                    "run's reference-match record (said loudly: PUBLISH OFF; the row is kept)")
     o.add_argument('--publish-dry-run', action='store_true', help='print the reference-match record, post nothing')
     _refmatch_args(o)
-    rm = sub.add_parser('refmatch', help="rebuild and post the run's reference-match record (docs/ENGINE.md 2XX)")
+    rm = sub.add_parser('refmatch', help="rebuild and post the run's reference-match record (docs/ENGINE.md 225)")
     rm.add_argument('run')
     rm.add_argument('--ref', default=None, help='the reference label the fields / --ref-ckpt are for')
     rm.add_argument('--ref-ckpt', default=None, help="the reference's checkpoint (registers its network)")
@@ -1065,6 +1086,17 @@ def main(argv=None):
                         '(docs/gamedb.md: tools/gamedb.py ingest --records DIR)')
     m.add_argument('--json', action='store_true')
     m.add_argument('--yardsticks', default=None, help='more cells_* options as JSON')
+    m.add_argument('--backend', default='auto', choices=['auto', 'farm', 'local'],
+                   help="where the games are played (docs/ENGINE.md 217): 'auto' (default) - the farm when it can play "
+                        "exactly these games and the comparison's earlier games (its cache, --out) were not played here, "
+                        "else here; 'farm' - there or refused; 'local' - here")
+    m.add_argument('--reuse-control', action='store_true',
+                   help="reuse a cached baseline (each pair's control) played on another backend (cells_reuse_base: "
+                        "the opt-out of one backend per comparison; said in the log and the row)")
+    m.add_argument('--farm-share', type=float, default=None, help='the campaigns\' share of the farm (default 0.5)')
+    m.add_argument('--farm-deadline-h', type=float, default=None,
+                   help='hours before the games the farm has not delivered are played here (default 1 h + 0.25 s per '
+                        'game-simulation of a chooser match, at most 12 h)')
     S.add_args(m)
     m.add_argument('--publish-overall-only', action='store_true', help='with --publish: the overall match only, no '
                    'match per cell')

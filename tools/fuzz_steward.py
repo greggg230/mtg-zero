@@ -20,6 +20,23 @@ build (`tools/farm_build.py --profile fuzz --publish` there, through the slot th
 of the same commit is reused). Main is rebuilt only when its **engine hash** changes (the git tree ids of every Rust
 input: tools/zcache.py's paths and the zero-core gitlink) and at most once per `main_rebuild_min_h` (24 h).
 
+**One set of campaigns per engine** (docs/ENGINE.md 219; `dedupe`, default on). Targets whose commits have the same
+engine hash (main and the runs pinned to it, an A/B's arms) build the same fuzz worker: the first - `main` when it is one
+- owns the engine's build, campaigns, pace and local jobs; the others follow it (none of their own). When the owner's
+run ends, a follower takes its build and campaigns over; a later target of a retired owner's engine takes its paused
+campaigns back (resumed) instead of making four new ones. Two owners of one engine in an older state: `main`'s (else
+the first built) stay, the other's are paused and it follows.
+
+**The farm's Macs** (docs/ENGINE.md 219; `mac_farm`, default on). The owner gets a signed macOS fuzz build of its
+engine - the release's (tools/farm_release.py `mac_fuzz`), found among the builds here, else `tools/farm_build.py
+--profile fuzz --platform macos-arm64 --publish` (built on the Mac, signed here) - and every campaign whose mode macOS may
+play (the Windows build's `fuzz-check --platform macos-arm64`; docs/ENGINE.md 197.3: libm-dependent modes such as the
+best-of-three matches loops stay Windows-only) lists it as its alternate (zero-farm PROTOCOL 11.4; `farm_campaign.py
+update NAME --alternate ID`). A failed macOS build is said in the log and tried again after `mac_retry_h` (6 h); the
+Windows campaigns never wait for it. A Mac's failure arrives like a PC's (the campaign's failures, its build id the macOS
+build's; the queue records the platform), is replayed here on the Windows build of the same engine, and keys to the same
+id as the same failure on a PC: a crash's `crash exit <code>` is named the same on both (`neutral_site`).
+
 **Quota and pace** (pure functions below; tests/test_fuzz_steward.py). A build's day: `quota` x (the part of the UTC
 day since the build started, or all of it); the pace at time t is `quota` x (seconds since the later of midnight and
 the build's start) / 86,400. Progress = seeds done today (farm results by their upload time, local jobs by their end)
@@ -48,8 +65,8 @@ short.
 live runs' self-play panics (`<run>/game_failures.jsonl`: a game dropped for a panic, docs/ENGINE.md 167.6) go into one
 queue `<state>/queue.jsonl`: one JSON line per failure site (tools/fuzz_farm.py's key: the panic site and its
 message's first line, digits masked - the id tools/farm_fuzz_pull.py gives the same panic), with kind, site, message,
-mode, the first seeds, repro command, build, engine commit, target, first / last seen, count, sources and whether it
-was confirmed. A new site is replayed here (a fuzz seed: the build's worker over that one seed, which must fail at the
+mode, the first seeds (each with its source, build and platform), repro command, build, engine commit, target, first /
+last seen, count, sources and whether it was confirmed. A new site is replayed here (a fuzz seed: the build's worker over that one seed, which must fail at the
 same site - a failure of a chunk's own checks after its last seed, reported at the chunk's first seed with "(the chunk:
 FUZZ_GAMES=n)", over that whole chunk, docs/ENGINE.md 209; a self-play failure: its record's `repro` command in the run's own checkout - docs/ENGINE.md 172's replay, which exits
 101 when it reproduces the panic) and,
@@ -133,6 +150,22 @@ CONFIG = {
     'run_modes': {'delver': DELVER_RUN_MODES},   # by the run's preset prefix; else main_modes
     'alerts': True,
     'farm_url': None,             # default zero.farm_def.URL
+    'dedupe': True,               # one set of campaigns per engine (targets of one engine share it: docs/ENGINE.md 219)
+    'mac_farm': True,             # the farm's Macs play the campaigns: a macOS fuzz build as each campaign's alternate
+    'mac_min_agent': '0.3.0',     # (agents that know platforms, zero-farm PROTOCOL 11)
+    'mac_retry_h': 6,             # a failed macOS fuzz build is tried again after this long
+}
+
+# A chunk process's crash as its site names it (zero-core crates/worker/src/fuzz.rs `exit_code_text`: Windows writes the
+# NTSTATUS as an unsigned number, a Unix the signal as -N) -> one platform-neutral name, so one crash seen on a Windows
+# PC and on a Mac is one failure site (docs/ENGINE.md 219.3: measured with the worker's test faults on both).
+CRASH_NAMES = {
+    '3221225725': 'stack overflow',    # 0xC00000FD STATUS_STACK_OVERFLOW
+    '3221226505': 'abort',             # 0xC0000409: std::process::abort is __fastfail on Windows
+    '3221225477': 'access violation',  # 0xC0000005
+    '-6': 'abort',                     # SIGABRT (Rust's stack overflow handler aborts too: told apart by its message)
+    '-11': 'access violation',         # SIGSEGV
+    '-10': 'access violation',         # SIGBUS
 }
 
 
@@ -240,11 +273,33 @@ def count_ranges(ranges):
     return sum(b - a for a, b in ranges)
 
 
+def neutral_site(site, message_lines=None):
+    """A failure site the same on every platform: a chunk crash's `crash exit <code>` by its name (CRASH_NAMES; a stack
+    overflow by Rust's message, which both platforms print); every other site as it is (a panic's file:line is already
+    '/'-separated by the worker, a hang is `HANG <mode>`)."""
+    m = re.fullmatch(r'crash exit (-?\d+)', site or '')
+    if not m:
+        return site
+    if any('has overflowed its stack' in str(x) for x in message_lines or []):
+        return 'crash stack overflow'
+    name = CRASH_NAMES.get(m.group(1))
+    return f'crash {name}' if name else site
+
+
+def failure_message(panic):
+    """A farm failure's message lines (its `panic`: Rust's hook text, or a crash's log tail): the first panic's message,
+    else the first five non-empty lines."""
+    from fuzz_farm import panics
+    ps = panics(panic or '')
+    return ps[0][1] if ps else [x for x in (panic or '').splitlines() if x.strip()][:5]
+
+
 def failure_id(site, message_lines):
     """tools/fuzz_farm.py's key (the site and its message's first line, digits masked) and its id (sha1[:12]): the
-    same id tools/farm_fuzz_pull.py and the Mac's fuzz farm give the same panic."""
+    same id tools/farm_fuzz_pull.py and the Mac's fuzz farm give the same panic. A crash's site is its platform-neutral
+    name (neutral_site): the same crash on a Windows PC and a Mac is one id."""
     from fuzz_farm import failure_key
-    key = failure_key(site or 'unknown', list(message_lines or []))
+    key = failure_key(neutral_site(site, message_lines) or 'unknown', list(message_lines or []))
     return hashlib.sha1(key.encode()).hexdigest()[:12], key
 
 
@@ -500,11 +555,16 @@ class Steward:
         big = local_config.big_disk_path('cargo-target', 'mtg-zero', f'steward-{key}')
         return big or os.path.join(self.wt_of(key), 'target')
 
-    def find_build(self, commit):
-        """A signed fuzz build on this machine of `commit`, or of a commit with the same engine hash (the same Rust
-        inputs: the same executable) -> (build_id, exe) or (None, None). The exact commit is preferred."""
+    def find_build(self, commit, platform='windows-x64'):
+        """A signed fuzz build on this machine of `commit` for `platform` (the manifest's, default windows-x64), or of a
+        commit with the same engine hash (the same Rust inputs: the same executable) -> (build_id, exe) or (None, None).
+        The exact commit is preferred. Looked for in every farm_build dist directory and the release's copies of
+        registered builds (<ZERO_BIG_DISK>/zero-farm-builds/<id>/: tools/farm_release.py's macOS fuzz builds)."""
         pat = local_config.big_disk_path('cargo-target', 'mtg-zero')
         dists = sorted(glob.glob(os.path.join(pat, '*', 'farm-build', 'dist', '*', 'manifest.json'))) if pat else []
+        reg = local_config.big_disk_path('zero-farm-builds')
+        if reg:
+            dists += sorted(glob.glob(os.path.join(reg, '*', 'manifest.json')))
         want, same = None, None
         for m in dists:
             with open(m, 'rb') as f:
@@ -516,6 +576,8 @@ class Steward:
             exe = os.path.join(os.path.dirname(m), man.get('entry') or 'mtgz-worker.exe')
             if man.get('profile') != 'fuzz' or man.get('kind') != 'worker' or not os.path.exists(exe):
                 continue
+            if (man.get('platform') or 'windows-x64') != platform:
+                continue                           # (a Mac build is never a Windows target's, nor the reverse)
             bid = hashlib.sha256(raw).hexdigest()[:24]
             if man.get('engine_commit') == commit:
                 return bid, exe
@@ -528,11 +590,115 @@ class Steward:
                     pass
         return same or (None, None)
 
+    # -------------------------------------------------------------- one set of campaigns per engine (docs/ENGINE.md 219)
+    # Targets whose commits have the same engine hash (main and the runs pinned to it, an A/B's arms) build the same
+    # fuzz worker: one of them - the owner - holds the engine's build and campaigns, the others follow it (no build,
+    # campaigns, pace or local jobs of their own). When the owner's run ends, a follower takes its build and campaigns
+    # over; a later target of that engine takes a retired owner's paused campaigns back instead of making new ones.
+    MOVED = ('campaigns', 'shares', 'boost_since', 'local_cursor', 'mac', 'mac_modes', 'mac_alts')
+    COPIED = ('build_id', 'exe', 'built_at', 'engine_hash', 'commit')
+
+    @staticmethod
+    def aliases(modes):
+        return sorted(m['alias'] for m in modes or [])
+
+    def owner_for(self, key, h, aliases):
+        """The live target other than `key` that holds (or is building) engine `h`'s build with the same modes, else
+        None."""
+        for k, c in self.state['targets'].items():
+            if k == key or c.get('retired') or c.get('follows') or self.aliases(c.get('modes')) != aliases:
+                continue
+            if (c.get('engine_hash') == h and c.get('build_id')) or (c.get('building') or {}).get('engine_hash') == h:
+                return k
+        return None
+
+    def take_over(self, dst, src, now):
+        """Target `dst` takes `src`'s build and campaigns (copied: the build; moved: the campaigns and their state)."""
+        s, d = self.state['targets'][src], self.state['targets'].setdefault(dst, {})
+        d.update({k: s.get(k) for k in self.COPIED})
+        d.update({k: s.get(k) for k in self.MOVED})
+        d.update(follows=None, handed_to=None, retired=None, pending=None)
+        d.setdefault('local', {'mac': {}, 'desktop': {}})
+        s.update(campaigns={}, shares={}, handed_to=dst, mac=None, mac_modes=None, mac_alts=None)
+        s.setdefault('history', []).append({'handed_to': dst, 'at': now})
+        for k, c in self.state['targets'].items():
+            if c.get('follows') == src and k != dst:
+                c['follows'] = dst
+
+    def follow(self, key, t, h, owner):
+        cur = self.state['targets'].setdefault(key, {})
+        if (cur.get('building') or {}).get('engine_hash') not in (None, h):
+            self.log(f'{key}: its build of engine {cur["building"]["engine_hash"]} is no longer needed (it follows {owner})')
+            cur.pop('building', None)                # (the process ends on its own; its build just stays in its dist)
+            self.procs.pop(f'build:{key}', None)
+        if cur.get('follows') != owner:
+            if cur.get('campaigns'):                     # (its own campaigns, of the engine it had before: retired)
+                self.pause_campaigns(cur)
+                cur.setdefault('history', []).append({k: cur.get(k) for k in ('build_id', 'commit', 'built_at', 'campaigns')})
+            self.log(f'{key}: engine {h} ({t["commit"][:9]}) is fuzzed by {owner}\'s campaigns: none of its own')
+        cur.update(follows=owner, handed_to=None, engine_hash=h, commit_seen=t['commit'], kind=t['kind'], modes=t['modes'],
+                   run_dir=t.get('run_dir'), run_wt=t.get('run_wt'), retired=None, campaigns={}, shares={})
+        cur.setdefault('local', {'mac': {}, 'desktop': {}})
+
+    def merge_duplicates(self):
+        """Two live owners of one engine (a state from before docs/ENGINE.md 219, or a race): `main` - else the first
+        built - keeps its campaigns, the other's are paused and it follows."""
+        groups = {}
+        for k, c in self.state['targets'].items():
+            if not c.get('retired') and not c.get('follows') and c.get('build_id') and c.get('campaigns'):
+                groups.setdefault((c.get('engine_hash'), tuple(self.aliases(c.get('modes')))), []).append(k)
+        for ks in groups.values():
+            if len(ks) < 2:
+                continue
+            keep = 'main' if 'main' in ks else min(ks, key=lambda k: self.state['targets'][k].get('built_at') or 0)
+            for k in ks:
+                if k == keep:
+                    continue
+                c = self.state['targets'][k]
+                self.log(f'{k}: the same engine as {keep} ({c.get("engine_hash")}): its campaigns paused, it follows {keep}')
+                self.pause_campaigns(c)
+                c.setdefault('history', []).append({k2: c.get(k2) for k2 in ('build_id', 'commit', 'built_at', 'campaigns')})
+                c.update(follows=keep, campaigns={}, shares={}, mac_alts=None)
+
+    def reclaim(self, key, t, h, now):
+        """A retired target's paused campaigns of engine `h` (same modes) -> taken over by `key` and resumed; True if
+        there were some."""
+        al = self.aliases(t['modes'])
+        for k, c in self.state['targets'].items():
+            if (k != key and c.get('retired') and c.get('engine_hash') == h and c.get('build_id') and c.get('campaigns')
+                    and self.aliases(c.get('modes')) == al):
+                self.log(f'{key}: takes over {k}\'s paused campaigns of engine {h} (build {c["build_id"]})')
+                self.take_over(key, k, now)
+                cur = self.state['targets'][key]
+                cur.update(kind=t['kind'], commit_seen=t['commit'], modes=t['modes'], run_dir=t.get('run_dir'),
+                           run_wt=t.get('run_wt'))
+                for name in (cur.get('campaigns') or {}).values():
+                    self.put_campaign(name, state='active', share=None)
+                cur['shares'] = {}
+                return True
+        return False
+
     def ensure_targets(self, now):
         found = self.discover()
+        if self.cfg['dedupe']:
+            self.merge_duplicates()
         for key, t in found.items():
             cur = self.state['targets'].get(key)
             h = engine_hash(t['commit'])
+            if self.cfg['dedupe']:
+                owns = bool(cur is not None and not cur.get('follows') and not cur.get('handed_to')
+                            and cur.get('engine_hash') == h and cur.get('build_id'))
+                owner = None if owns and not cur.get('retired') else self.owner_for(key, h, self.aliases(t['modes']))
+                if owner:
+                    self.follow(key, t, h, owner)
+                    continue
+                if cur and (cur.get('follows') or cur.get('handed_to')):
+                    cur.update(follows=None, handed_to=None)      # (a build of its own from here)
+                    if cur.get('engine_hash') != h or not cur.get('campaigns'):
+                        cur.update(build_id=None, campaigns={}, shares={})
+                if not owns and not (cur and cur.get('building')) and self.reclaim(key, t, h, now):
+                    continue
+                cur = self.state['targets'].get(key)
             if cur and cur.get('engine_hash') == h and cur.get('build_id'):
                 if cur.get('retired'):
                     self.log(f'{key}: a target again (build {cur["build_id"]}): its campaigns resume')
@@ -553,6 +719,16 @@ class Steward:
             if key not in found and not cur.get('retired'):
                 self.retire(key, now)
 
+    def checkout(self, key, commit):
+        """The target's own worktree `<wt>/steward-<key>` at `commit` (made once, forced clean)."""
+        wt = self.wt_of(key)
+        if not os.path.isdir(wt):
+            git('worktree', 'add', '--detach', wt, commit)
+        git('checkout', '-q', '--detach', '-f', commit, cwd=wt)
+        subprocess.run(['git', '-c', 'protocol.file.allow=always', 'submodule', 'update', '-q', '--init',
+                        'third_party/zero-core'], cwd=wt, creationflags=NO_WINDOW, capture_output=True)
+        return wt
+
     def start_build(self, key, t, h, now):
         bid, exe = self.find_build(t['commit'])
         cur = self.state['targets'].setdefault(key, {})
@@ -563,12 +739,7 @@ class Steward:
         if self.a.dry_run:
             self.log(f'dry run: {key} would build {t["commit"][:9]}')
             return
-        wt = self.wt_of(key)
-        if not os.path.isdir(wt):
-            git('worktree', 'add', '--detach', wt, t['commit'])
-        git('checkout', '-q', '--detach', '-f', t['commit'], cwd=wt)
-        subprocess.run(['git', '-c', 'protocol.file.allow=always', 'submodule', 'update', '-q', '--init',
-                        'third_party/zero-core'], cwd=wt, creationflags=NO_WINDOW, capture_output=True)
+        wt = self.checkout(key, t['commit'])
         logp = os.path.join(self.dir, 'builds', f'{key}-{t["commit"][:9]}.log')
         jid = f'build:{key}'
         self.spawn(jid, [bash_exe(), 'tools/slotd.sh', self.py(), 'tools/farm_build.py', '--profile', 'fuzz', '--publish'],
@@ -597,6 +768,7 @@ class Steward:
                 continue
             self.adopt_build(key, {'commit': b['commit'], 'modes': b['modes'], 'kind': b['kind'],
                                    'run_dir': b.get('run_dir'), 'run_wt': b.get('run_wt')}, b['engine_hash'], bid, exe, now)
+        self.poll_mac_builds(now)
 
     def adopt_build(self, key, t, h, bid, exe, now):
         cur = self.state['targets'].setdefault(key, {})
@@ -606,12 +778,13 @@ class Steward:
             cur.setdefault('history', []).append({k: cur.get(k) for k in ('build_id', 'commit', 'built_at', 'campaigns')})
         cur.update(kind=t['kind'], commit=t['commit'], commit_seen=t['commit'], engine_hash=h, build_id=bid, exe=exe,
                    built_at=now, modes=t['modes'], campaigns={}, shares={}, run_dir=t.get('run_dir'),
-                   run_wt=t.get('run_wt'), retired=None, pending=None,
-                   local={'mac': {}, 'desktop': {}}, boost_since=None)
+                   run_wt=t.get('run_wt'), retired=None, pending=None, follows=None, handed_to=None,
+                   local={'mac': {}, 'desktop': {}}, boost_since=None, mac=None, mac_modes=None, mac_alts=None)
         self.log(f'{key}: build {bid} ({t["commit"][:9]}, engine {h}) adopted')
         self.ensure_campaigns(key, cur)
 
     def ensure_campaigns(self, key, cur):
+        mac = self.mac_ready(cur)
         for m in cur['modes']:
             name = campaign_name(key, cur['commit'], m['alias'])
             if cur['campaigns'].get(m['alias']) == name:
@@ -620,6 +793,9 @@ class Steward:
                     '--mode', m['mode'], '--seed-base', str(FARM_SEED_BASE), '--priority', str(self.cfg['priority'])]
             for k, v in m['env'].items():
                 argv += ['--env', f'{k}={v}']
+            alt = mac if mac and self.mac_mode_ok(cur, m) is True else None
+            if alt:
+                argv += ['--alternate', alt]
             if self.a.dry_run:
                 argv.append('--dry-run')
             try:
@@ -638,10 +814,150 @@ class Steward:
                 continue
             if not self.a.dry_run:
                 cur['campaigns'][m['alias']] = name
-            self.log(f'{key}: campaign {name} ({m["mode"]} {m["env"]}) created')
+                if alt:
+                    cur['mac_alts'] = dict(cur.get('mac_alts') or {}, **{m['alias']: alt})
+            self.log(f'{key}: campaign {name} ({m["mode"]} {m["env"]}) created' + (f' with the macOS build {alt}' if alt else ''))
+
+    # -------------------------------------------------------------- the farm's Macs (docs/ENGINE.md 219)
+    # The owner of an engine's campaigns gets a signed macOS fuzz build of the same engine - one the release made
+    # (tools/farm_release.py `mac_fuzz`), else built here (farm_build.py --platform macos-arm64 builds it on the Mac,
+    # signs it here, publishes it) - and every campaign whose mode the platform may play (the Windows build's
+    # `fuzz-check --platform macos-arm64`: docs/ENGINE.md 197.3's libm refusals) lists it as its macOS alternate.
+    # A failed build is said loudly and tried again after mac_retry_h; the Windows campaigns never wait for it.
+    def mac_ready(self, cur):
+        m = cur.get('mac') or {}
+        return m.get('build_id') if self.cfg['mac_farm'] and m.get('state') == 'ready' else None
+
+    def mac_mode_ok(self, cur, m):
+        """True if `m`'s mode (and env) may be played on macOS, else the refusal (kept per target: a build's answer does
+        not change)."""
+        got = (cur.get('mac_modes') or {}).get(m['alias'])
+        if got is not None:
+            return got
+        argv = [cur['exe'], 'fuzz-check', '--mode', m['mode'], '--platform', 'macos-arm64']
+        for k, v in m['env'].items():
+            argv += ['--env', f'{k}={v}']
+        try:
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=300, creationflags=NO_WINDOW)
+            got = True if p.returncode == 0 else ((p.stderr or p.stdout).strip().splitlines() or ['refused'])[-1][:300]
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f'fuzz-check could not run: {e}'      # (not kept: asked again next check)
+        cur['mac_modes'] = dict(cur.get('mac_modes') or {}, **{m['alias']: got})
+        if got is not True:
+            self.log(f'macOS: mode {m["mode"]} {m["env"]} stays Windows-only: {got}')
+        return got
+
+    def ensure_mac(self, key, cur, now):
+        """The owner's macOS fuzz build: found, or a build started (at most every mac_retry_h after a failure); once
+        ready, every campaign whose mode may run on macOS lists it."""
+        if not self.cfg['mac_farm'] or cur.get('follows') or cur.get('retired') or not cur.get('build_id'):
+            return
+        m = cur.get('mac') or {}
+        if m.get('state') == 'building':
+            return
+        if m.get('state') != 'ready':
+            bid, exe = self.find_build(cur['commit'], 'macos-arm64')
+            if bid:
+                if not self.mac_registered(key, bid, os.path.dirname(exe)):
+                    return
+                cur['mac'] = {'state': 'ready', 'build_id': bid, 'dir': os.path.dirname(exe), 'since': now}
+                self.log(f'{key}: macOS fuzz build {bid} of engine {cur.get("engine_hash")} found ({os.path.dirname(exe)})')
+            elif not m.get('failed_at') or now - m['failed_at'] >= self.cfg['mac_retry_h'] * 3600:
+                self.start_mac_build(key, cur, now)
+                return
+            else:
+                return
+        self.ensure_mac_alternates(key, cur)
+
+    def mac_registered(self, key, bid, d):
+        """The build is registered on the coordinator: one the steward published, or the release's copy of a published
+        build (<ZERO_BIG_DISK>/zero-farm-builds/<id>/); any other found build (signed, maybe never published) is
+        published now (farm_build.py --publish-dir: idempotent). False when that fails (said; tried again next check)."""
+        known = self.state.setdefault('published', [])
+        reg = local_config.big_disk_path('zero-farm-builds')
+        inside = bool(reg) and os.path.normcase(os.path.abspath(d)).startswith(os.path.normcase(os.path.abspath(reg)) + os.sep)
+        if bid in known or inside or self.a.dry_run:
+            return True
+        p = subprocess.run([self.py(), os.path.join(HERE, 'farm_build.py'), '--publish-dir', d], cwd=ROOT, capture_output=True,
+                           text=True, creationflags=NO_WINDOW, timeout=1800)
+        if p.returncode:
+            self.log(f'{key}: macOS build {bid} NOT published: {(p.stderr or p.stdout).strip()[-600:]}')
+            return False
+        known.append(bid)
+        self.log(f'{key}: macOS build {bid} published ({d})')
+        return True
+
+    def start_mac_build(self, key, cur, now):
+        m = dict(cur.get('mac') or {})
+        if self.a.dry_run:
+            self.log(f'dry run: {key} would build the macOS fuzz worker of {cur["commit"][:9]}')
+            return
+        if not local_config.get('MTGZ_MAC'):
+            if not m.get('no_mac_said'):
+                self.log(f'{key}: no Mac configured (MTGZ_MAC): no macOS fuzz build, the campaigns stay Windows-only')
+            cur['mac'] = dict(m, no_mac_said=True, failed_at=now, state='failed', error='no MTGZ_MAC')
+            return
+        wt = self.checkout(key, cur['commit'])
+        logp = os.path.join(self.dir, 'builds', f'{key}-{cur["commit"][:9]}-macos.log')
+        self.spawn(f'macbuild:{key}', [self.py(), 'tools/farm_build.py', '--profile', 'fuzz', '--platform', 'macos-arm64',
+                                       '--min-agent', self.cfg['mac_min_agent'], '--publish'],
+                   wt, logp, env={'CARGO_TARGET_DIR': self.target_dir_of(key)})
+        cur['mac'] = dict(m, state='building', since=now, log=logp, commit=cur['commit'], tries=m.get('tries', 0) + 1)
+        self.log(f'{key}: building the macOS fuzz worker of {cur["commit"][:9]} on the Mac (log {logp})')
+
+    def poll_mac_builds(self, now):
+        for key, cur in self.state['targets'].items():
+            m = cur.get('mac') or {}
+            if m.get('state') != 'building':
+                continue
+            p = self.procs.get(f'macbuild:{key}')
+            if p is not None and p.poll() is None:
+                continue
+            bid, exe = self.find_build(m.get('commit') or cur.get('commit') or '', 'macos-arm64')
+            if p is None and not bid and now - m.get('since', now) < 3 * 3600:
+                continue                                 # (a steward restarted mid-build: its result may still come)
+            self.procs.pop(f'macbuild:{key}', None)
+            if bid:
+                self.state.setdefault('published', []).append(bid)          # (farm_build.py --publish)
+                cur['mac'] = {'state': 'ready', 'build_id': bid, 'dir': os.path.dirname(exe), 'since': now}
+                self.log(f'{key}: macOS fuzz build {bid} ready')
+                continue
+            tail = ''
+            try:
+                with open(m['log'], encoding='utf-8', errors='replace') as f:
+                    tail = ' | '.join(x.strip() for x in f.read().splitlines()[-4:])
+            except (OSError, KeyError):
+                pass
+            cur['mac'] = dict(m, state='failed', failed_at=now, error=tail[-500:])
+            self.log(f'{key}: the macOS fuzz build of {cur.get("commit", "")[:9]} FAILED (log {m.get("log")}): {tail[-300:]}; '
+                     f'tried again in {self.cfg["mac_retry_h"]} h - the campaigns stay Windows-only meanwhile')
+
+    def ensure_mac_alternates(self, key, cur):
+        """Every campaign of the owner whose mode may run on macOS lists the macOS build (farm_campaign.py update
+        --alternate: a new definition with both builds, then the PUT)."""
+        mb = self.mac_ready(cur)
+        if not mb:
+            return
+        alts = dict(cur.get('mac_alts') or {})
+        for m in cur['modes']:
+            name = (cur.get('campaigns') or {}).get(m['alias'])
+            if not name or alts.get(m['alias']) == mb or self.mac_mode_ok(cur, m) is not True:
+                continue
+            argv = [self.py(), os.path.join(HERE, 'farm_campaign.py'), 'update', name, '--alternate', mb]
+            if self.a.dry_run:
+                argv.append('--dry-run')
+            p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True, creationflags=NO_WINDOW, timeout=900)
+            if p.returncode:
+                self.log(f'{key}: campaign {name}: the macOS alternate {mb} NOT put: {(p.stderr or p.stdout).strip()[-600:]}')
+                continue
+            if not self.a.dry_run:
+                alts[m['alias']] = mb
+            self.log(f'{key}: campaign {name} lists the macOS build {mb}')
+        cur['mac_alts'] = alts
 
     def put_campaign(self, name, **change):
-        """The campaign put again with `change` (share, state); nothing signed (neither is in its definition)."""
+        """The campaign put again with `change` (share, state); nothing signed (neither is in its definition). Every
+        other field - its alternates included - is put back as GET answers it (farm_campaign.current_fields)."""
         if self.a.dry_run:
             self.log(f'dry run: campaign {name} would be put with {change}')
             return True
@@ -661,6 +977,19 @@ class Steward:
 
     def retire(self, key, now):
         cur = self.state['targets'][key]
+        if cur.get('follows'):
+            self.log(f'{key}: no longer a target (the run ended); it followed {cur["follows"]}\'s campaigns')
+            self.stop_local(key, 'retired')
+            cur['retired'] = now
+            return
+        heirs = [k for k, c in self.state['targets'].items()
+                 if c.get('follows') == key and not c.get('retired')] if self.cfg['dedupe'] else []
+        if heirs and cur.get('campaigns'):
+            self.log(f'{key}: no longer a target (the run ended): {heirs[0]} takes its build and campaigns over')
+            self.take_over(heirs[0], key, now)
+            self.stop_local(key, 'retired')
+            cur['retired'] = now
+            return
         self.log(f'{key}: no longer a target (the run ended): its campaigns paused, its local jobs finish')
         self.pause_campaigns(cur)
         self.stop_local(key, 'retired')
@@ -739,10 +1068,13 @@ class Steward:
             e['seeds'].append(seed_info)
         return e, new
 
+    @staticmethod
+    def platform_of_build(cur, bid):
+        """The platform of the build a failure names: the target's macOS fuzz build -> macos-arm64, else windows-x64."""
+        return 'macos-arm64' if bid and bid == (cur.get('mac') or {}).get('build_id') else 'windows-x64'
+
     def enqueue_fuzz(self, key, cur, f, source, t):
-        from fuzz_farm import panics
-        ps = panics(f.get('panic') or '')
-        msg = ps[0][1] if ps else [x for x in (f.get('panic') or '').splitlines() if x.strip()][:5]
+        msg = failure_message(f.get('panic'))
         fid, k = failure_id(f.get('site'), msg)
         mode = f.get('mode')
         repro = f.get('repro') or ''
@@ -752,7 +1084,8 @@ class Steward:
         e, new = self.touch(fid, key, {'kind': 'fuzz', 'site': f.get('site'), 'message': msg[:8], 'key': k, 'mode': mode,
                                         'seed': f.get('seed'), 'repro': f.get('repro'), 'build': cur.get('build_id'),
                                         'engine_commit': cur.get('commit'), 'target': key},
-                            t, {'seed': f.get('seed'), 'mode': mode, 'source': source, 'build': cur.get('build_id')})
+                            t, {'seed': f.get('seed'), 'mode': mode, 'source': source, 'build': f.get('build_id') or cur.get('build_id'),
+                                'platform': self.platform_of_build(cur, f.get('build_id'))})
         self.day(t, cur['build_id'])['failures'] += 1
         if new:
             self.log(f'NEW failure {fid} ({source}, {key} {mode} seed {f.get("seed")}): {f.get("site")}')
@@ -827,7 +1160,10 @@ class Steward:
             except subprocess.TimeoutExpired:
                 return None, 'the replay timed out'
             fails = [json.loads(x.split(' ', 1)[1]) for x in p.stdout.splitlines() if x.startswith('FUZZ_LOCAL_FAILURE ')]
-            if any(f.get('site') == e.get('site') for f in fails):
+            # (a failure a Mac reported replays here on the Windows build of its engine: the sites compare by their
+            # platform-neutral names, neutral_site)
+            want = neutral_site(e.get('site'), e.get('message'))
+            if any(neutral_site(f.get('site'), [f.get('panic') or '']) == want for f in fails):
                 return True, f'replayed here: {what} fails at the same site'
             if fails:
                 return True, f'replayed here: {what} fails, at {fails[0].get("site")}'
@@ -1039,11 +1375,15 @@ class Steward:
         dok = self.desktop_ok(now)
         report = {}
         for key, cur in self.state['targets'].items():
-            if cur.get('retired') or not cur.get('build_id'):
-                continue
-            ensure_missing = [m for m in cur['modes'] if m['alias'] not in cur.get('campaigns', {})]
+            if cur.get('retired') or cur.get('follows') or not cur.get('build_id'):
+                continue                                 # (a follower's engine is its owner's: one pace, one set)
+            ensure_missing = [m for m in cur['modes'] if m['alias'] not in (cur.get('campaigns') or {})]
             if ensure_missing:
                 self.ensure_campaigns(key, cur)
+            try:
+                self.ensure_mac(key, cur, now)
+            except Exception as e:                       # noqa: BLE001 - the Mac part never stops the Windows campaigns
+                self.log(f'{key}: the macOS part failed: {type(e).__name__}: {e}')
             rec = self.day(now, cur['build_id'])
             done_by = {}
             for src in ('farm', 'mac', 'desktop'):
@@ -1089,7 +1429,11 @@ class Steward:
                            'quota_today': round(day_quota(q, now, cur['built_at'])), 'pace': round(pace_target(q, now, cur['built_at'])),
                            'behind_h': round(h, 2), 'mode_behind': alias, 'farm_share': want, 'local': dec,
                            'by_source': {s: sum(rec[s].values()) for s in ('farm', 'mac', 'desktop')},
-                           'failures_today': rec['failures']}
+                           'failures_today': rec['failures'],
+                           'followers': sorted(k for k, c in self.state['targets'].items()
+                                               if c.get('follows') == key and not c.get('retired')),
+                           'macos': {'build': (cur.get('mac') or {}).get('build_id'), 'state': (cur.get('mac') or {}).get('state'),
+                                     'campaigns': sorted((cur.get('mac_alts') or {}).keys())}}
         self.process_queue()
         self.daily_summary(now)
         self.state['last_check'] = now
