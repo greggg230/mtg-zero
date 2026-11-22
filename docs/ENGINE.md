@@ -43962,8 +43962,8 @@ the gate) built by a later encoding change, not here.
 **Why.** Lane A's Hogaak write-up (220.1.5) found payment defects outside its card; the user asked for them to be fixed
 now (the fix brief's bugs 2-5; bug 1, 601.2g/h's order, is agent M's, numbered at its merge; bug 6 agent E's, 226). Branch
 `fix/hogaak-payment` from hogaak-a 29ca2296, main 45dbf2e1 (220.4) merged into it before the digests were explained and
-re-recorded; main 76973535 (217-222, no engine file) and 52d0bf9b (223, a search's finds by place) merged since, the
-digests checked again on each (227.7). The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
+re-recorded; main 76973535 (217-222, no engine file), 52d0bf9b (223, a search's finds by place), a99e9ca7 (224-225) and
+50205980 (226, fix E) merged since, the digests checked again on each (227.7). The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
 reachable state, proved here; no docs/shortcuts.md entry), no encoding gap, digests re-recorded on purpose with what
 moved and why, a regression test per bug (CR in the name; castability by brute force), the search impact measured.
 
@@ -44194,6 +44194,9 @@ Re-recorded once with `DIGEST_WRITE=1` on the Mac at f02256a7 (the values above;
 recorded files line for line; on, exactly the same games move in every file as before (the metagame's 36 the same 36),
 and only the metagame's combined digest differs from the values above - re-recorded alone: **0d13940b6d659a83**
 (36 of 288 lines from main's). The traces above were taken before 223's merge; the moved games are the same.
+Then a99e9ca7 (224-225, no engine file) and 50205980 (226, fix E: a departed copy's last-known mana value; it moves no
+digest) merged: on 8efb600d every part off = main's seven files line for line again, and every part on = this branch's
+recorded files line for line (the same 129 / 154 / 36 / 94 / 26 / 11 games): nothing re-recorded.
 
 ### 227.8 Search impact
 
