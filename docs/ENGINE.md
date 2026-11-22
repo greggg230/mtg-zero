@@ -45661,3 +45661,11 @@ pin commit; this paragraph is the next commit, docs only): **GATE PASSED WITH SK
 cache), then the group - the four core shards 427 to 745 s of pytest after 120 to 400 s of waiting for a slot (7 to 17
 minutes of waiting at 4 slots), 787 passed; the build-only step 138 s for the three games at once; checkpoint_compat
 identical (3,554 samples per target) in 1,808 s - one step, now the longest of the tier and what its wall time is.
+
+### 238.8 zero-core pin 2f7263c -> 61341a7: `check_checkpoint_compat.py` plays its digests at once
+
+zero-core `main` 61341a7 (its docs/az.md 75.1; tools, tests and docs only, and 0d2a503 before it: docs): the core
+tiers' checkpoint_compat step runs each target's self-play and the match of both checkouts as six processes at once
+instead of two processes one after the other, with the same printed lines (make_compat_checker reads them unchanged)
+and the same digests - this gate's command on one checkout against itself: 384 s against the 1,808 s of 238.7's gate,
+visits 4c42f1160eca9121, cq 88ab3306d3beba12, the match f2a5103266c05aa6, each the gate's own value.
