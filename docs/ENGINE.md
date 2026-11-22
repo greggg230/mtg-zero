@@ -43603,7 +43603,7 @@ information**, in the real game too.
   token's segment, slot and float, or an override) and handles rows of different lengths.
 
 **What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8; built: layout v8's
-`find_groups` segment, ENGINE.md 232).** Once finds are mixed with other cards, the rows
+`find_groups` segment, ENGINE.md 235).** Once finds are mixed with other cards, the rows
 no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
 already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
 encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
@@ -43948,7 +43948,7 @@ effects (ENGINE.md 156), so a departed copy's copied identity, last known mana v
 while an ability about it waits on the stack (the public-state gate classes the LKI fields Derived). The fix doesn't
 widen it (before, the network was equally blind to the copied face; the rules now compute 0 instead of the front
 face's). The maintainer's decision: one additive layout v8 (a stale-object LKI block in `rf`, the LKI fields Public in
-the gate) built by a later encoding change, not here. (Built: layout v8's `lki` segments keyed by the stale reference's key, ENGINE.md 232.)
+the gate) built by a later encoding change, not here. (Built: layout v8's `lki` segments keyed by the stale reference's key, ENGINE.md 235.)
 
 ### 226.8 Shared-file functions changed
 
@@ -44160,7 +44160,7 @@ random boards.
 
 ### 229.4 Bug 4: a payment's picks in progress - deferred to layout v8
 
-(Built: layout v8's `payment` and `pay_options` segments, the game `mtg_v8`, ENGINE.md 232.)
+(Built: layout v8's `payment` and `pay_options` segments, the game `mtg_v8`, ENGINE.md 235.)
 
 `PayMana`'s picks in progress (`chosen`, `multi`, `actors`, `phyrexian_life`, `now` / `which` / `actor_for` and the
 productions offered, `spend`) are in neither `Game::view_of` nor layout v7's input; two payments that differ only in
@@ -44622,7 +44622,343 @@ digest as recorded, farm compat identical, pytest 698 passed on the Mac and 49 o
 * The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
   counts): measured in 231.7.
 
-## 232. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg_v8`; branch `feat/layout-v8`, 2026-11-22)
+## 232. zero-core pin 899e0eb -> b0bce34: the farm pool counts stale rows per machine (metrics `by_machine`, one log line per iteration; zero-core `fix/stale-per-machine` b0bce34, docs/az.md 54.8; 2026-11-22)
+
+**Why.** The Fable farm review of 2026-11-21 (its recommendation 3) found legacy-meta3-r1's trainer dropping 18-25% of
+its farm rows as stale (older than `pool_max_stale`), and guessed that the agent's tuner holds so many games in flight
+on the slower PCs that one game outlasts the staleness window. The run's metrics had only totals, so the guess could
+not be checked per machine before building the fix (a games-in-flight cap from the staleness window: an agent release
+and a coordinator deploy).
+
+**What.** zero-core `python/zero/farm_pool.py`, rolling runs only: per machine, the accepted games and rows, the stale
+rows dropped, the games dropped whole and the accepted rows' lag histogram, in the iteration's pool metrics as
+`by_machine`; when a machine lost rows, one log line per iteration names those machines worst first
+(`stale rows by machine: <machine> <stale>/<stale + kept> (P%, N games whole)`). Counting only: no game, row, shard or
+lease changes; `pool_rolling` '' keeps the metrics' keys as before. No engine, encoding, search, worker or farm
+build change (Python only: the release watcher's builds are unchanged in behaviour). A run gets it when it (re)starts
+from a commit with this pin.
+
+**Tests.** zero-core `tests/test_farm_pool.py`: `test_staleness_per_row_with_rolling` checks `by_machine` beside the
+totals (classic: empty), `test_stale_rows_by_machine_in_metrics_and_log` (two machines: counters, lag histograms, a log
+line naming only the machine that lost rows); farm_pool + gamerec + package_hooks 36 passed on b0bce34.
+
+## 233. Near-tie branches, the game side: the merge key and the alternative check (`SearchGame::merge_key`, `branch_alt_ok`), branch games in the game database (zero-core pin 84bb5e1 -> eca650e; branch `feat/neartie-merge-key`, 2026-11-21)
+
+**Why.** zero-core's near-tie branch rule (its docs/search.md 2.11, built on a zero-core branch of its own) replays a
+self-play game from a decision where the move played and a runner-up were within 2 pp of root Q, with the runner-up
+forced. Sequencing ties often converge: if the branch reaches a state equivalent to one its game reached after the branch
+point, it ends there and its rows take the game's outcome (the game's actual hidden order is one draw of the same
+future). Two hooks on `SearchGame` (zero-core 92568b5; defaults: never merge, every alternative ok) are the game's part:
+**`merge_key`** (equal only for equivalent states) and **`branch_alt_ok`** (is the runner-up a real alternative). **A
+false merge labels a branch's rows with another future's outcome; a missed merge only costs compute**, so every case the
+key cannot settle is None. Nothing calls either hook unless the driver's near-tie rule is on: with it off, play is byte
+for byte as before (233.6).
+
+### 233.1 The key (`engine/src/az/merge_key.rs`)
+
+A stable 128-bit hash (`StableHash`: two SplitMix64 lanes over little-endian 64-bit words, the length mixed in; no
+`HashMap`, no process state, the same on every platform) of, in order:
+
+1. **Both seats' descriptions**, `build::describe_for_key(g, 0)` and `(g, 1)`: 95's `describe` (id-free, cards by name,
+   objects by place, timing by turn, every known library position and who knows it, the hand cards the opponent knows,
+   counters, the stack, the turn, step, priority and passes, the clouds) in a key mode, finer where the key needs it and
+   wider where the key covers the rest itself:
+   * a stale reference or a gone token carries its **age** (the card's zone changes since that object), so two earlier
+     objects of one card never read alike;
+   * the turn's **last known information** of gone objects (`lki_counters`, `lki_copy`, `lki_attached`, `lki_damage`,
+     `lki_toughness`, `spell_lki`, and `lki_power` - kept across turns - but for a card now in a library, which no
+     reference can name), each entry by its gone object, sorted (the rules look entries up by object, one each); and the
+     turn's **loop actions** (`loop_taken`, `loops.rs`: a view's loop hash, a battlefield place, action ids - no ids),
+     sorted, **but those whose activation sacrificed its source** (`LoopRec::sac_self`: a fetchland, a Bauble; 233.2).
+     The rules read both and the build has no key for them;
+   * each **graveyard as its creature cards in their order, then its other cards by identity** (the user's rule, 233.2),
+     references to graveyard cards by that place; the whole order when a card of the game (its objects, the sideboards,
+     their faces) is a positional graveyard reader (R17, `lower::graveyard_order`; a per-table flag, computed once);
+   * the sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (item 2 keys them);
+     EoE's W3 last known information and W6 state are refused.
+2. **The hidden parts as multisets**: each library's cards at the positions nobody knows, each hand's cards with who knows
+   each, the sideboards, the known pools (`Game::known_pools`), and the sightings (140.9) per viewer and owner, by
+   definition, then in the order seen, with their terms (what the hidden deck's deal reads, `seen_of`), and
+   `sightings_lost`.
+3. **The match**: the format, the game number, the results, wins and draws, who chose and who started each game, the
+   turns before, the reveals of this game and the earlier ones (`seen`, `earlier`, `earlier_by_game`), each seat's deck,
+   and the settings that differ by seat or by match (keep, the choice table, a deck prior, dealt; keep_known, post_board,
+   constructed_bo3, game_episodes, the first-pick priors, the metagame pairing).
+4. **The decision**: who moves, its tag (`decision_tag`), its legal actions.
+5. **Both seats' layout v7 rows**, bit for bit (`encode_row`: the head and the sealed tail tokens; the decider's pointer
+   overrides), as a guard: anything the network reads that differs stops a merge, even where items 1-4 would miss it.
+
+**Deliberately not keyed.** The true order of library cards nobody knows (under the engine's knowledge model, the one
+`determinize` deals from, ENGINE.md 10, it is a uniform arrangement of their multiset in both states: Lightning Bolt then
+a fetchland vs the fetchland then Bolt shuffle at different moments and merge); the RNG states, the game's and the
+match's (future chance, uniform in both lines; the dealt seat's deal seed too); object ids and incarnations; the log; the
+counters that only number things (timestamps beyond their order, stack ids, event groups, decisions answered, the
+sightings' clock). The match's fixed parts (its pools, the spec) are not keyed: keys compare states of one match, a branch
+and its game.
+
+**No key (None).** Sideboarding, the deck choice, between games, a match over; a position-lab game; a game over; a
+determinized world (`observer`); a forced-find spec (ENGINE.md 180: its records are not keyed); a library search's finds
+the other player tells apart (`found`, `finds_told`, 140.9, 223); a loop action's activation in progress; and everything
+`describe` refuses: every decision but priority, the combat declarations, the cleanup discard and the setup's (a decision
+inside a cast or a resolution: a target, a payment, Brainstorm's put-back, a search), **a private peek** (192: a card a
+player saw in the other's library that its owner never did, after a shuffle), a reference into a zone the viewer does not
+see, and the rare states `describe` does not cover (face-down cards, copies, links, permissions, waiting triggers, extra
+turns, companions, dungeons, ...).
+
+### 233.2 Decisions
+
+* **Graveyards: the creatures' order, the rest as a multiset (the user, 2026-11-21: "order only matters for
+  creatures").** The rules read a graveyard's order only through the card table's positional readers (R17: Shallow
+  Grave's "the top creature card"), and the network sees it only there (`graveyard_order` tokens) and in the list block of
+  a decision about graveyard cards (65.10; 125's D5: graveyards are bags of identities). Keeping the whole order would
+  never merge Bolt-then-fetch with fetch-then-Bolt (Bolt and the fetchland reach the graveyard in the other order, for
+  the rest of the game). **The stated approximation:** the relative order of the non-creature cards (and of a creature
+  among them) is not keyed, though a later graveyard-card decision (delve) lists the whole graveyard in order, so two
+  merged lines' rows there may list the same cards in another order. With a positional reader in the game the whole
+  order is kept. (The first version of this section keyed every graveyard as a multiset; the user's rule keeps the
+  creatures' order.)
+* **The convergence rule (agreed 2026-11-21): the key is both seats' network rows, the hidden cards as multisets, and the
+  rules-only state that can still change future legality or outcomes.** So **draw-step draws stay** (`draw_step_draws`,
+  a network input, g5::DRAW_STEP): a Brainstorm cast in the draw step and one cast in the main phase merge only as the
+  next turn begins. **Loop records whose activation sacrificed its source are left out** (`LoopRec::sac_self`: fetchlands,
+  Mishra's and Urza's Baubles): the record's loop hash holds that permanent on the battlefield, untapped, before its
+  costs, so no later state of the turn has it, and the loop rule reads a record only at a state with its hash. That is
+  an argument, so it is checked: `Game::check_dropped_loop_records` compares, after every step of every fuzz game, hidden-
+  deck game and match, each such record's hash with the loop hash of the state for its taker, and the fuzz's end-of-run
+  check requires no recurrence (233.7). Every other loop record stays (a loop action whose source stays on the
+  battlefield can come back to its state). Bolt-then-fetch and fetch-then-Bolt now merge within the turn.
+* **Best-of-three: keyed.** One episode per game (the presets' match, 121) keys the game with the match's state (item 3),
+  the sideboards, the known pools and the sightings; sideboarding and the deck choice have no key.
+
+### 233.3 The alternative check (`merge_key::branch_alt_ok`)
+
+False for the same action; for decisions not worth a branch by their kind (`PayMana`, `PayPool`, `ChooseMana`,
+`ActivateMana`, `OrderTriggers`); at priority for opening the mana-ability window (`YES`, "Activate mana abilities") or
+activating a permanent's mana ability (a float); and for two options that are the same card doing the same thing: the
+same kind of choice (a card, a play, a cast, a face, an ability of the same slot, an object target) of **twins** - two
+objects with every field equal but the incarnation and the timestamp, the same identity and counters, neither named by an
+effect, a mark, a link, an attachment or a stack target (the opponent's two untapped Volcanic Islands as Wasteland's
+target). True otherwise, including every sideboarding and deck-choice option. (Priority and the hand-card choices already
+offer one option for twin hand cards: the engine's canonical hand.)
+
+### 233.4 Cost
+
+`merge_key_cost` (ignored; `--ignored --nocapture`): 20 games each, moves half the heuristic's, half random, the key at
+every decision; release, on the desktop beside the live runs (noisy, about +-30%). **Delver mirror: 6,025 decisions,
+66.3% keyed, about 220 us a call; best-of-three dealt: 5,915 decisions, 59.6% keyed, about 200 us a call.** A refused
+position returns almost at once (`describe` stops at its decision). The two rows are most of it (about 120 us), the
+descriptions and their JSON most of the rest. For scale, 64 x (clone + determinize + the decider's row) - a
+64-simulation search's game side without its steps and its network - took 0.9-1.2 ms in the same runs; with the network a
+64-simulation search takes several milliseconds on a GPU and far more on a CPU.
+
+### 233.5 Tests (`engine/tests/merge_key.rs`, in `misc_suite`)
+
+Two lines from one built Delver-mirror position (95), played by option label (`Game::reseed_rng`, a test hook, gives a
+line its own shuffles, as a branch's differ from its game's):
+* `bolt_then_fetch_merges_with_fetch_then_bolt_within_the_turn`: different true library orders, the same multiset, the same
+  key once both have resolved (the fetch's record left out: its source sacrificed) and at the next turn;
+* `graveyards_key_the_order_of_their_creatures_only` (non-creature cards moved among them: the same key; the creatures
+  swapped: another);
+* `a_fetch_before_a_draw_does_not_merge_with_one_after` (Brainstorm's draws: the hands differ);
+* `brainstorm_in_the_draw_step_merges_with_brainstorm_in_the_main_phase_only_at_the_next_turn` (the draw-step draws);
+* `a_brainstorm_put_back_then_a_shuffle_merges_only_with_the_same_knowledge`: the put-back's order, shuffled away, merges;
+  the opponent's Bauble look at P0's top card before the Brainstorm vs after it (the same cards everywhere, a cloud in one
+  line) does not;
+* `renumbered_object_ids_keep_the_key` (Scenario positions whose cards were made in another order; another order of an
+  unknown library too);
+* `different_hands_knowledge_or_library_cards_give_different_keys` (a hand, a library multiset, a hand card the opponent
+  knows, P0's knowledge of its top card);
+* `a_private_peek_has_no_key` (a Bauble look at the opponent's top card keys; after the opponent's fetch shuffles it away,
+  None);
+* `branch_alt_ok_excludes_twins_and_mana_details` (the same action, the mana window, Wasteland's twin targets vs P0's own
+  land, `ActivateMana`, `ChooseMana`, Bolt's two player targets).
+
+### 233.6 Checks
+
+With the near-tie rule off nothing calls either hook, and `describe` outside its key mode is unchanged (the graveyard
+order and the references as before; the build round trip `misc_suite build::` 6 passed). On c3c0b6dd (desktop, CPU,
+below-normal priority, beside the live runs): **every digest as recorded** - the cube 44372545881ef768, constructed
+91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 4039d04b7971975e, dealt f0bfffd26a70a753,
+dealt per seat c67b186ba7d00e51; `cargo test --release -p engine --test az` 57 passed; `misc_suite` 222 passed (the
+merge-key tests included); `tools/build_py.sh` then `python -m pytest tests -q` 3,473 passed, 32 skipped (the live-run
+fence and private data); `tools/privacy_check.py` 0 findings.
+
+**Open** (as first written; (1) and (2) since settled by the user, 233.7). (1) Within a turn the loop records keep fetch and Bauble sequencing apart (233.2): a record whose source was
+sacrificed in its own activation (a fetchland, a Bauble) could only be read again at a state with its view's hash, which
+needs that permanent back where it was; dropping such records would merge within the turn, but that is an argument, not
+a check, so it is not done. (2) The graveyard order's one residual (233.2): the list block of a later graveyard-card
+decision. (3) Absolute timestamps (`ts`, written when continuous effects exist) can keep apart states equal up to a
+renumbering: a missed merge only. (4) The key's cost is mostly the two rows; a cheaper guard (the decider's row only) is
+the place to save if the driver's tallies show it matters.
+
+**The suite gate** (on d51092a3, this section's commit, in a warm worktree, `--no-mac`: every step on the desktop,
+throttled, beside the live legacy-meta3 runs): `python tools/gate.py suite --no-mac` - **GATE PASSED suite d51092a3b6ab
+in 964s**: privacy 0 findings; the full engine suite 2,878 passed (24 binaries); the sharded 2,000-game fuzz of the
+default pool (100 matches), the default pool with hidden decklists and delver_dealt (100 matches + 100 post-sideboard).
+
+**The engine gate** (on d51092a3, the same way): `python tools/gate.py engine --no-mac --tested-sha d51092a3b6ab
+--expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine d51092a3b6ab in
+828s** (skipped: 7 live-run-hazard tests of pytest, fenced by the live runs): the digests full 44372545881ef768 and
+encoding-free a965c3fc8d3bba8a (= expected); the formats constructed, EoE, driver, metagame and dealt (each = the
+checkout's recorded file); `az` 57, `limits` 13, `hidden` 28 passed; pytest 150 + 140 + 178 + 296 passed; the desktop
+smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6
+games, 2,609 rows); the suite evidence of d51092a3b6ab. The first run of this gate failed one test unrelated to the change,
+`tests/test_mac_remote.py::test_the_macs_selfplay_settings`: through `tools/slotd.sh`'s Git Bash the machine's
+`MTGZ_MAC_HOME` (a `/Users/...` path) reached Windows Python rewritten by the MSYS path conversion (reproduced alone
+through slotd.sh; passes without it, and with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, which the second run set). A tooling
+gap of `--no-mac` gates on Windows, not fixed here. The next commit adds this paragraph only (docs).
+
+### 233.7 The user's decisions, the re-pin and the integration (2026-11-21)
+
+* **Graveyards** (233.1, 233.2): the creatures' order, the rest as a multiset (the user's rule).
+* **Loop records** (233.2): those whose activation sacrificed its source are left out of the key, so fetch and Bauble
+  sequencing merges within the turn; draw-step draws stay (a network input). **The check**
+  (`Game::check_dropped_loop_records`, the fuzz's `loopdrop_*` / `match_loopdrop_*` counters and their end-of-run
+  check): each record left out, compared after every later step of its turn with the loop hash of the state for its
+  taker, 2,000 games (and 100 matches + 100 post-sideboard where the pool plays them) per pool - **0 recurrences** in
+  default 43,672 record-steps (+ 2,854 in matches), default with hidden decklists 43,882, delver_dealt 132,943 (+ 11,799),
+  delver 132,943 (+ 11,764), doomsday 80,510, cross 38,589 (+ 6,388), hogaak 56,360 (+ 5,686). The check stays in the fuzz
+  (a recurrence fails the run).
+* **zero-core pin 92568b5 -> eca650e** (zero-core `feat/neartie-branches`: the near-tie rule in the driver, records/2,
+  the farm worker's branch games and the farm gates with branches; zero-core docs/search.md 2.11.1, docs/az.md 72), and
+  origin/main merged (main's 224-226; ENGINE.md 226's last known mana values - `lki_copy` and `spell_lki` gained a mana
+  value - keyed with their entries).
+* **The game database** (`tools/gamedb.py`, docs/gamedb.md "Branch games"; tests/test_gamedb_branches.py): branch games
+  get their own ids (the branch point hashed), a merged branch is checked against its game's record, the games rows carry
+  `is_branch`, `branch_from`, `branch_alt`, `branch_merged`, `branch_tag`, `branch_gap` (a merged one: winner by the
+  borrowed result, method `merged`, turns at the merge), a branch's events and combo rows count from its branch point, and
+  the behaviour series leave branch games out unless `include_branches`.
+* **`tools/farm_compat.py`**: gate 3's game count is the games plus their branches (a branch is a record of its own);
+  without branches unchanged.
+
+**The integration smoke** (CPU, below-normal priority, a scratch run outside any live run): `python -m mtgz.az.run --preset
+legacy-meta3-smoke --rolling 1 --iters 3 --games 32 --sims 32 --p-full 1.0 --game-records 1 --selfplay-branch 0.2
+--selfplay-branch-rule neartie` (a fresh tiny network, evaluations off). Per iteration: **eligible near-tie decisions
+69.8 / 30.3 / 20.0 a game**; branches 2 / 4 / 6 (of 30 / 28 / 26 games); **merged 1 / 1 / 1** (3 of 12 branches, 25%), after
+2, 2 and 6 decisions; mean gap 0.008-0.011. By the branch point's decision tag (`1 + DecisionKind`): Priority 7 branches
+(3 merged: 2, 2, 6 decisions), and one each of a mulligan's bottom card, a target, a yes/no, a library search and a put-on-
+top (none merged). **Every record replays**: the game database ingested all 96 (84 games, 12 branches, the 3 merged ones
+checked against their games' results). **The farm gates with branching** (`tools/farm_compat.py --preset legacy-meta3 --set
+selfplay_branch=1.0 --set selfplay_branch_rule="neartie" --games 40`, the uniform evaluator): gate 2 (the native worker vs
+the Python remote worker, every branch played on both sides) identical, 40 games, 15,474 rows, 150 batches; gate 3 (the
+worker's records/2 replayed by the trainer's path, each branch with its game's record) identical, 80 records (40 branches,
+1 merged: its merge key and its game's result re-checked by `replay_branch`), 15,777 rows. (With 12 games and p 0.5:
+gate 2 identical, gate 3 identical with 9 branches, none merged.)
+
+**The gates of 61a747bd** (this revision's head, in a warm worktree, `--no-mac`, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`,
+throttled beside the live runs): **GATE PASSED suite 61a747bdfaa8 in 567s** (the full engine suite 2,889 passed; the
+2,000-game fuzz of default with 100 matches, default with hidden decklists, delver_dealt with 100 matches + 100
+post-sideboard - the dropped-loop-record check in each); **GATE PASSED WITH SKIPS engine 61a747bdfaa8 in 752s** (skipped:
+7 live-run-hazard tests, fenced): the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (= expected), the
+formats constructed, EoE, driver, metagame and dealt (= the recorded files), `az` 57, `limits` 13, `hidden` 28, pytest 233 +
+153 + 173 + 229 passed, the desktop smoke config, farm compat identical on `delver-mirror-bo3-dealt` (gate 2: 6 games,
+2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows), the suite evidence. The next commit adds this paragraph only (docs).
+
+### 233.8 Main's 601.2g step (merge 02488f43, origin/main e445ba27; zero-core 56fda50 = main's 899e0eb plus the branch rule)
+
+Main's payment fixes (229, 231) add game state and a decision kind. **The key:** `Game::cast_lock` (a spell's total cost
+locked by a mana ability during its cast) is refused by `describe` and checked by the key too; `Game::pool_wild` (the
+payment search's transient, (0, 0) at every decision) must be (0, 0), else no key. Nothing else main added is read by
+the key; a `CastMana` decision is not a built decision, so it has no key (as every decision inside a cast). **The
+alternative check:** `CastMana` (the 601.2g step: a mana ability while the spell is cast) is a mana detail, as
+`ActivateMana`, and so is a `ChooseMode` that the mana-ability window, the 601.2g step or a mana ability's X asks (which
+of a permanent's mana abilities, how much); `CostPart` and `ChooseColorsSpent` stay real decisions (the order of a
+cost's parts and the colours spent can change what happens). Test: `branch_alt_ok_excludes_the_cast_mana_step_and_its_mana_ability_modes`
+(random cube games: 7 `CastMana` decisions and 15 mana-ability modes, every pair false).
+
+**Checks on the merge** (desktop, CPU, below-normal priority, beside the live runs): `az` 57, `misc_suite` 224 passed;
+the digests equal main's re-recorded files (the feature is off by default): the cube 9473f7debc4bceb3, encoding-free
+d3c144b6cc2977e5, constructed 4a03293608edeba2, EoE 5ffb850dd963bad0, driver 6a03572828250b86, metagame d72ae0c904a0ffbd,
+dealt f858b1880091d94f; the game database's tests 56 passed. **The dropped-loop-record check**, 2,000 games per pool (and
+the pool's matches), 0 recurrences: default 45,472 record-steps (+ 3,205 in matches), default with hidden decklists
+42,883, delver_dealt 133,162 (+ 11,616), delver 133,162 (+ 11,824), doomsday 82,272, cross 38,443 (+ 5,642), hogaak 55,757
+(+ 5,539). **The meta3 smoke again** (233.7's command): eligible decisions 69.8 / 25.7 / 24.6 a game, branches 2 / 3 / 8,
+merged 1 / 0 / 0 (2 decisions); every record replays (the game database ingested all 96).
+
+**The gates of 9a546cc3** (after the merge; warm worktree, `--no-mac`, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, throttled beside
+the live runs): **GATE PASSED suite 9a546cc35869 in 661s** (the full engine suite 2,923 passed; the 2,000-game fuzz of
+default with 100 matches, default with hidden decklists, delver_dealt with 100 matches + 100 post-sideboard); **GATE PASSED
+WITH SKIPS engine 9a546cc35869 in 801s** (skipped: 7 live-run-hazard tests, fenced): the digests full 9473f7debc4bceb3 and
+encoding-free d3c144b6cc2977e5 (= main's), the formats constructed 4a03293608edeba2, EoE 5ffb850dd963bad0, driver
+6a03572828250b86, metagame d72ae0c904a0ffbd and dealt f858b1880091d94f (= the recorded files), `az` 57, `limits` 13,
+`hidden` 28, pytest 290 + 168 + 172 + 170 passed, the desktop smoke config, farm compat identical on
+`delver-mirror-bo3-dealt` (gate 2: 6 games, 2,468 rows, 150 batches; gate 3: 6 games, 2,598 rows), the suite evidence. The
+next commit adds this paragraph only (docs).
+
+## 234. The fuzz's shown cards of a hidden deck and a companion manifested face down (fuzz steward queue 2eeffcef33d5 / 88f4716ce1e7; branch `fix/lutri-hidden-deck`, 2026-11-22)
+
+**The failure.** `FUZZ_HIDDEN_DECKS=1`, seed 100,200,667 (the default pool): "a hidden-decklist world for P1 (mover P1):
+the sampled deck lacks a shown Lutri, the Spellchaser" (`check_determinize_hidden`, engine/src/fuzz/games.rs). Found by
+the farm's fuzz on main 6a44afdb (2026-11-20), still failing on 3e4094bd and e9ff0e24 (the queue's second id is the
+same failure at a moved line); replayed on Windows at e9ff0e24. On main e445ba27 the seed passes only because 231's
+step moves the game's random stream (it no longer reaches the state); the check's code is unchanged there.
+
+**The state** (a diagnostic at e9ff0e24, not kept). P0 revealed Lutri, the Spellchaser as its companion (CR 103.2b),
+took the special action (116.2g: Lutri into the hand, known to both players), and Lutri went back into P0's library,
+which was shuffled: P1 lost track of it (its identity is one of P1's cloud of P0's hidden cards). Then P0's Test
+Manifester manifested a card from the top of the library (look at two, manifest one: CR 701.40a) - Lutri: the
+companion's object (index 80, outside P0's 40 deck objects 0..40) became a face-down 2/2 on the battlefield that P1
+does not know (CR 708.2), its card Lutri (`sample::card_of`: a face-down permanent's card).
+
+**The cause: the check, not the deal.** `hd_shown` (the cards the viewer has seen of the other player's deck, which
+every world's deck must hold) adds the deck objects the viewer knows and the identities of the viewer's clouds of that
+player's cards, then drops the identity of every card of theirs outside the deck that is hidden from the viewer (a
+token, a companion put into the hand and lost track of): those identities are in a cloud but are no deck card. "Hidden"
+was written as three zones, Hand, Library, FaceDown (= `Zone::is_hidden`), which misses a face-down permanent (and a
+face-down spell): its zone is the battlefield (the stack). So the face-down companion's Lutri stayed among the shown
+deck cards, while the deck - `hd_deck`: the game's cards less one copy of the revealed companion (140.10, 152.5) -
+holds no Lutri, in any world and in the game itself (P0's real 40 had none). The check failed every world of that
+state. The engine's own knowledge was right: `sample::knowledge` takes the viewer's hidden slots
+(`Game::hidden_slots`, face-down permanents included) and deals the companion's identity as an `extras` card with the
+deck's (the world gave Lutri to a library object and a deck card to the face-down object: which of the hidden cards
+is the companion is hidden, 140.10), and every other check of the seed's worlds passed.
+
+**Not a hidden-information bug; no effect on self-play.** Nothing the engine deals, keys, shows or encodes changes;
+worlds used by search (any commit, so runs pinned to older ones too) were right. The fuzz check alone was wrong.
+
+**The fix** (engine/src/fuzz/games.rs). `hd_shown` drops the identity of every card of theirs outside the deck that
+the viewer does not know: `!Game::knows(viewer, c)` is false exactly for a card in a hidden zone or a face-down
+permanent or spell (`Game::hidden_obj`) that the viewer does not know - the case the comment always meant. The same
+filter in tests/dealt_decks.rs's copy (`shown`). **A new self-check**: `check_determinize_hidden` first asserts that
+the game's own deck holds every shown card ("the game's own deck of P_ lacks a ... P_ was shown (`hd_shown`)"): the
+game is one of the viewer's worlds, so a shown card it lacks blames the shown cards, not the deal - this failure would
+have named the check at once. (`hd_lacks`: the multiset test both use.)
+
+**Regression test** (seed-independent): `fuzz::games::hidden_shown_tests::a_companion_manifested_face_down_is_not_a_shown_deck_card`
+(engine lib tests). A hidden-decklist match of the default pool's table (as `play_hidden` makes it: the table's prior,
+32 cached decks), P0 40 Islands with Lutri revealed as companion, P1 40 Islands, played to P0's first priority; then the
+engine's own steps of the seed's line (`companion_to_hand`; `move_card` to the library's top; `shuffle_library`; P0
+looks at the card, as manifest's look does - else P0 would not know its own face-down permanent, CR 708.5 - and
+`put_onto_battlefield` entering face down), the decision asked again (`refresh_pending`), invariants and knowledge
+checked. It asserts the state (the companion's object a face-down permanent P1 doesn't know, Lutri in P1's cloud of
+P0's cards, no Lutri in P0's deck), that Lutri is not shown, and runs `check_determinize_hidden` (both viewers, six
+world seeds each) on three match seeds. Before the fix it fails with the fuzz's own message ("a hidden-decklist world
+for P1 (mover P0): the sampled deck lacks a shown Lutri, the Spellchaser"; with the self-check, "the game's own deck of
+P0 lacks a Lutri, the Spellchaser P1 was shown"); after, it passes. The seed itself passes at e9ff0e24 with the fix
+(264 worlds).
+
+**Digests**: all equal (no engine change; the fuzz's new self-check draws nothing from a random stream): cube
+9473f7debc4bceb3, `DIGEST_ENCODING=0` d3c144b6cc2977e5, constructed, EoE, driver, metagame and dealt as recorded.
+
+**Gates** (1952ff58): `gate.py suite` **GATE PASSED** (2,914 engine tests: main's 2,913 and this one; default, default
+hidden and delver_dealt 2k fuzz); `gate.py engine --tested-sha 1952ff588283 --expect-digest 9473f7debc4bceb3
+--expect-digest0 d3c144b6cc2977e5` **GATE PASSED WITH SKIPS** (the live-run fence's one desktop pytest; every digest
+equal, farm compat identical, pytest 698 passed on the Mac and 49 on the desktop).
+
+**Fuzz** (the Mac, 1952ff58, fresh seeds from 232,000,000): default 20,000 games + 1,000 matches **PASSED**; default
+with hidden decklists 20,000 games: 19,999 passed, one failed - seed 232,013,638, "option 404 (Priority P0: cast or
+play from the graveyard) of Priority for P0 can't be completed: the payment search passed 2000000 copies" (100.4.9's
+cap, `cost_order.rs`), not this section's: it fails the same on main 4dbf0ee1 (whose engine is e445ba27's), where
+this check never runs before it. The seeds after it in its shard (232,013,639..232,015,000) and the 15 other fuzz
+tests then passed.
+
+### 234.1 Known follow-ups
+
+* **Seed 232,013,638 (hidden decklists, release)**: the payment search's 2,000,000-copy cap in an option completion
+  of "cast or play from the graveyard" (Kaldra Compleat and Minsc & Boo in P0's hand) - for the payment-search lanes
+  (231's step, 100.4.9).
+
+## 235. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg_v8`; branch `feat/layout-v8`, 2026-11-22)
 
 **Why.** Three public facts the input left out, each found by a Hogaak-era fix and deferred to one additive layout by
 the user's decision of 2026-11-21 (thread T4): P's bug 4 (229.4, `encoding_needs_fix_P.md` option B: a mana payment's
@@ -44632,7 +44968,7 @@ counters) and D's group fact (223's decision 4, `encoding_needs_fix_D.md` option
 finds" once a scramble mixes finds with other cards). Layout v7's rows stay byte for byte; layout v8 = v7 + six tail-only
 gated segments.
 
-### 232.1 Design decisions (the user's answers of 2026-11-22: float32-close widening on rows with v8 tokens accepted, the keyed `lki` segment OK, layout v8 the default for new runs)
+### 235.1 Design decisions (the user's answers of 2026-11-22: float32-close widening on rows with v8 tokens accepted, the keyed `lki` segment OK, layout v8 the default for new runs)
 
 1. **Layout v8 is the default: the game `mtg_v8`. The game name `mtg` stays layout v7, the compatibility layout of what
    was made before.** zero-core chooses a token layout and an engine game by the game's NAME (`GamePackage.tokens`,
@@ -44644,9 +44980,9 @@ gated segments.
    auxiliary targets) is every MTG preset's game, the game package's default game (`GamePackage(game='mtg_v8')`), every
    co-training preset's resolver and what every tool that starts fresh plays (`mtgz.az.layouts.GAME`); `mtg` is what an
    old run, an old checkpoint and an old record keep. A run moves by `python tools/fork_run.py <checkpoint> <new run>
-   --game mtg_v8` (zero-core's widen, 232.5). Making the name `mtg` itself layout v8 needs a zero-core change (an alias
+   --game mtg_v8` (zero-core's widen, 235.5). Making the name `mtg` itself layout v8 needs a zero-core change (an alias
    in the encoding guard and the farm's graph check, so that a checkpoint recorded as `mtg` with layout v7 loads as a
-   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (232.9), not taken here.
+   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (235.9), not taken here.
 2. **E's "widen `rf`" is a segment keyed by the stale key.** The orchestrator's requirement - a v7 network widens onto v8
    computing what it did - rules out wider slots (a wider slot is one input product over more columns: equal to float32
    rounding only, 125.7); appended gated tail-only segments are exact (zero-core docs/az.md 43.8). So the stale object's
@@ -44654,7 +44990,7 @@ gated segments.
    reference already shows (`rf::STALE_KEY`, 125.3: the key that pairs two references to one gone object): every holder
    sees it through the key. The facts are E's option 2's, all of them.
 
-### 232.2 The segments (appended after `found`; `tail_v8.rs`)
+### 235.2 The segments (appended after `found`; `tail_v8.rs`)
 
 | # | segment | width | tokens |
 |---|---|---:|---|
@@ -44675,7 +45011,7 @@ of the public state names (`Game::for_each_public_ref`) that no token wrote, aft
 `W3State::lki_host` is `lki_attached`'s entry kept when a card reads it (now Derived). `lki_loss` is read only while its
 simultaneous move's leave triggers are gathered (Derived).
 
-### 232.3 Engine state added (no rule reads it; DIGEST_ENCODING=0 unchanged)
+### 235.3 Engine state added (no rule reads it; DIGEST_ENCODING=0 unchanged)
 
 * `Game::find_groups` (`hidden::FindGroup`: owner, members by card, finds). `scramble` (`group_scramble`, before 223's
   strict rule drops the domain's told finds): a domain mixing told finds or a group's members with any other card
@@ -44691,7 +45027,7 @@ simultaneous move's leave triggers are gathered (Derived).
   toughness, qualities, attached, counters); a copy's exceptions, keyword or named counters and a gone spell's item are
   refused (`unsupported`), never approximated. The round trips pass.
 
-### 232.4 The public-state gate (`tests/az.rs`; its rows are layout v8's now)
+### 235.4 The public-state gate (`tests/az.rs`; its rows are layout v8's now)
 
 Classification: `lki_copy`, `lki_power`, `lki_toughness`, `lki_counters`, `lki_attached`, `spell_lki`, the new
 `lki_qualities` and `find_groups` Public; `lki_damage`, `W3State::lki_host` Derived (above). `view_of` lists the payments
@@ -44723,7 +45059,7 @@ stream, the reshuffled partners met four pre-existing collisions unrelated to v8
 in v6, a hand card past the 16th learned in a framed row, a control effect's end, two loyalty records cancelling - noted
 here, not changed).
 
-### 232.5 The widen (exact) and v7 kept
+### 235.5 The widen (exact) and v7 kept
 
 * Rust: `layout_v8_is_checked_in_and_widens_layout_v7_exactly` - `mtgz/az/layout_v8.json` = `encode::layout_json_v8`, the
   widen's map from v7 is the identity, v7's 25 segments unchanged, the six appended tail-only and gated, `pay_options`'s
@@ -44741,7 +45077,7 @@ here, not changed).
   zero-weight tokens before the attention (not done: a zero-core change). The encoding guard takes the v7 network as `mtg`
   and refuses it as `mtg_v8` until widened.
 
-### 232.6 Digests
+### 235.6 Digests
 
 Behaviour unchanged: cube `DIGEST_ENCODING=0` **d3c144b6cc2977e5** (= main). Layout v7 unchanged: `DIGEST_ENCODING=v7`
 (new: v7's whole rows) **9473f7debc4bceb3** = main's recorded full digest; `digest_formats` with `DIGEST_ENCODING=v7`:
@@ -44755,7 +45091,7 @@ driver's (zero-core's driver on `mtg_v8`) **6a03572828250b86 -> cab97c01912f7e3f
 `DIGEST_ENCODING=v7` each gives main's value again (6a03572828250b86, f858b1880091d94f, 2719fdd478d14fa3). EoE (layout v6)
 unchanged.
 
-### 232.7 Cost
+### 235.7 Cost
 
 `layout_v8_cost` (`tests/az.rs`, ignored): 200 random games a pool, both viewers' rows at every decision, on the Mac.
 
@@ -44772,15 +45108,15 @@ cost.) Random play makes no Doomsday pile with a graveyard pick, so no `find_gro
 digest spec was 132 of ~14,500 rows. The network's cost: the new tokens are 0.1-0.3 more a row on average (the
 attention's T), the six segments' input maps (d x width each) and one pointer column.
 
-### 232.8 Checks
+### 235.8 Checks
 
 * The engine suite on the Mac (`cargo test --release -p engine -p card_ir --no-fail-fast`): passed but the two build
-  round trips, whose described positions lost the new public last known information (fixed: 232.3's `"lki"`; both pass).
+  round trips, whose described positions lost the new public last known information (fixed: 235.3's `"lki"`; both pass).
   `az` 58 passed (+ `layout_v8_cost` ignored), `hidden` 28, the engine's unit tests with `mtg_v8_is_mtg_in_layout_v8`.
 * Fuzz on the Mac (`tools/fuzz_shards.py`, 2,000 games each, every decision's v8 row checked against its v7 row and its
   payment pointers): default (+100 matches), delver (+100 matches, +100 post-sideboard), doomsday, hogaak (+100, +100),
   cross (+100, +100): **all PASSED**. Found on the way and fixed: the hidden-decklist information-set walk's leak of
-  `lki_damage`'s presence (232.3).
+  `lki_damage`'s presence (235.3).
 * pytest on the Mac (`bash tools/build_py.sh && python -m pytest -q tests`): 3,453 passed, 32 skipped; failed only the
   three tests gate.py runs on the desktop (`PYTEST_DESKTOP_ONLY`: the artifact cache's Windows paths, the deck scorer's
   bit-for-bit fixtures, the run publisher's supervisor) and `test_presets_leave_shard_sparse_off`, which now names
@@ -44789,7 +45125,7 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
   only) forked by `python tools/fork_run.py <copy> <scratch run> --game mtg_v8` (the six segments "gate 0"; the run not
   started) and compared with the original on Delver, Doomsday, Sneak and Show and Hogaak mirror games played in lockstep
   in both games (CPU, eager): 1,640 of 1,640 rows without a v8 token bit for bit; 136 rows with v8 tokens, 58 bit for bit,
-  the others within 2.7e-6 (232.5: the attention over more keys).
+  the others within 2.7e-6 (235.5: the attention over more keys).
 * **Farm parity of layout v8**: `tools/farm_compat.py --set game="mtg_v8"` (the release worker of this commit, the Delver
   best-of-three dealt preset as the game `mtg_v8`): gate 2 identical (6 games, 2,468 rows, 150 batches: dense features,
   tails, overrides) and gate 3 identical (6 games, 2,598 rows): **farm compat: PASSED**. The gates' own farm compat
@@ -44809,7 +45145,7 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
   (A first engine run on 191aa9dc failed one timing test of pytest, `test_cells_local_parallel`'s 300 s bound, on a Mac
   under another job's load; it passed on the rerun and in the full Mac pytest.) The next commit adds this paragraph only.
 
-### 232.9 The default and the compatibility layout: who plays which (the orchestrator's rework, 2026-11-22)
+### 235.9 The default and the compatibility layout: who plays which (the orchestrator's rework, 2026-11-22)
 
 **`mtgz.az.layouts`**: `GAME` = `mtg_v8` (the default), `GAME_V7` = `mtg`; `checkpoint_game` / `model_game` (the game a
 checkpoint or a network records), `load` (zero.net.load as that game), `use` / `current` / `load_used` (a tool plays the

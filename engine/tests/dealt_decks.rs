@@ -78,7 +78,7 @@ fn legal(g: &MtgAz) -> Vec<u16> {
     v
 }
 
-/// The whole row of `viewer` (the head first): layout v8's, the default game `mtg_v8`'s (ENGINE.md 232); with
+/// The whole row of `viewer` (the head first): layout v8's, the default game `mtg_v8`'s (ENGINE.md 235); with
 /// `DIGEST_ENCODING=v7` layout v7's (the game `mtg`'s, the compatibility layout).
 fn row(g: &MtgAz, viewer: usize) -> Vec<f32> {
     let v7 = std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7");
@@ -145,9 +145,11 @@ fn shown(a: &MtgAz, viewer: u8) -> Vec<u16> {
         v.extend(k.defs.iter().map(|&d| g.db().def(d).card_def(d)));
     }
     v.sort_unstable();
+    // (A card of theirs outside their deck hidden from the viewer - in a hidden zone or face down, CR 708.2 - is
+    // not a deck card: the fuzz's `hd_shown`, ENGINE.md 234.)
     for (i, ob) in g.objs().iter().enumerate() {
         let c = engine::CardIdx::new(i as u32);
-        if ob.owner == o && !r.contains(&i) && matches!(ob.zone, engine::Zone::Hand | engine::Zone::Library | engine::Zone::FaceDown) && !g.knows(viewer, c) {
+        if ob.owner == o && !r.contains(&i) && !g.knows(viewer, c) {
             if let Ok(at) = v.binary_search(&engine::az::sample::card_of(g, c)) {
                 v.remove(at);
             }
@@ -984,7 +986,7 @@ fn dealt_digests() {
         }
     }
     println!("dealt_digests: {} matches in {:.1} s; combined digest {:016x}", lines.len(), t.elapsed().as_secs_f64(), all.0);
-    // (`DIGEST_ENCODING=v7`: layout v7's rows, the combined digest printed only: ENGINE.md 232.)
+    // (`DIGEST_ENCODING=v7`: layout v7's rows, the combined digest printed only: ENGINE.md 235.)
     if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7") {
         return;
     }

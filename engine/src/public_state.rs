@@ -107,7 +107,7 @@ pub fn fields() -> Vec<Field> {
         sightings: Hidden "each player's sightings of the other's cards, in order, each blind or a search's find (ENGINE.md 140.9): the viewer's own knowledge, the same in all its worlds; read only by the hidden deck's deal",
         sight_at: Derived "the sightings' clock (ENGINE.md 140.9)",
         found: Hidden "the real game's record of its searches' finds for the sightings' order and weight (ENGINE.md 140.9), read only by the hidden deck's deal (`Game::sighted`); not the public fact (`finds_told`, ENGINE.md 223): a Doomsday pile's finds stay in it mixed with the graveyard cards the other player knew, whose places it no longer tells from theirs, and it lists them in the order of the searches - a pile's in its cards' definition order",
-        find_groups: Public "groups of places that hold search finds mixed with other cards, how many finds each (ENGINE.md 232, 223's decision 4): layout v8's find_groups tokens; the view lists them by place",
+        find_groups: Public "groups of places that hold search finds mixed with other cards, how many finds each (ENGINE.md 235, 223's decision 4): layout v8's find_groups tokens; the view lists them by place",
         finds_told: Public "which hidden cards everyone tells apart as their owner's search's finds (ENGINE.md 140.9, 223: a tutor's card put on top, a Doomsday pile of finds only, a find exiled face down, until seen, put into a hand or mixed with a card that is not one): only the set of their places is public, so the rows (layout v7's found tokens, ENGINE.md 142.12) and the view list them by place",
         tokens: Derived "a fast path: tokens created so far",
         first_token: Derived "a fast path: the first slot made as a token or a copy",
@@ -139,7 +139,7 @@ pub fn fields() -> Vec<Field> {
         combat_damage_now: Derived "transient: combat damage is being dealt",
         quiet_leave: Derived "transient: set and cleared around one move",
         monarch: Public "the monarch (CR 724)",
-        lki_counters: Public "the counters permanents that left this turn had as they last existed (CR 608.2h): layout v8's lki tokens of the stale references naming them (ENGINE.md 232)",
+        lki_counters: Public "the counters permanents that left this turn had as they last existed (CR 608.2h): layout v8's lki tokens of the stale references naming them (ENGINE.md 235)",
         entering_escaped: Derived "transient: set and cleared around one move",
         entering_x: Derived "transient: set and cleared around one move",
         entering_sunburst: Derived "transient: set and cleared around one move",
@@ -172,18 +172,18 @@ pub fn fields() -> Vec<Field> {
         next_turn_controller: Public "who will control each player during their next turn (CR 722.1; ENGINE.md 99.14)",
         turn_controller: Public "who controls the active player during this turn (CR 722.1; ENGINE.md 99.14)",
         copy_objs: Derived "which slots are copies (the copy flags of permanents and spells)",
-        lki_copy: Public "the copiable values and mana value of permanents that left this turn as they last existed (CR 608.2h, 707.2; ENGINE.md 226): layout v8's lki tokens (ENGINE.md 232)",
-        lki_attached: Public "what permanents that left this turn were attached to (CR 608.2h: an Aura's enchanted creature): layout v8's lki tokens (ENGINE.md 232)",
-        lki_damage: Derived "the rules' copy of lki_qualities' entries, kept only when a card of the game reads it (SEEN_LKI_DAMAGE, a bit of every card in the game, hidden ones too: its presence would tell one, ENGINE.md 232)",
-        lki_qualities: Public "the qualities as damage sources of permanents that left this turn (CR 608.2h, 113.7a), recorded whatever the cards of the game: layout v8's lki tokens (ENGINE.md 232)",
-        lki_toughness: Public "the toughness and controller of permanents that left this turn (CR 608.2h): layout v8's lki tokens (ENGINE.md 232)",
+        lki_copy: Public "the copiable values and mana value of permanents that left this turn as they last existed (CR 608.2h, 707.2; ENGINE.md 226): layout v8's lki tokens (ENGINE.md 235)",
+        lki_attached: Public "what permanents that left this turn were attached to (CR 608.2h: an Aura's enchanted creature): layout v8's lki tokens (ENGINE.md 235)",
+        lki_damage: Derived "the rules' copy of lki_qualities' entries, kept only when a card of the game reads it (SEEN_LKI_DAMAGE, a bit of every card in the game, hidden ones too: its presence would tell one, ENGINE.md 235)",
+        lki_qualities: Public "the qualities as damage sources of permanents that left this turn (CR 608.2h, 113.7a), recorded whatever the cards of the game: layout v8's lki tokens (ENGINE.md 235)",
+        lki_toughness: Public "the toughness and controller of permanents that left this turn (CR 608.2h): layout v8's lki tokens (ENGINE.md 235)",
         ref_lki: Derived "last known identities of gone objects (CR 400.7, 608.2h): what a stale reference shows, through the references the encoding writes (ENGINE.md 156)",
-        lki_power: Public "the power of objects that left the battlefield as they last existed (CR 608.2h; ENGINE.md 226): layout v8's lki tokens (ENGINE.md 232)",
+        lki_power: Public "the power of objects that left the battlefield as they last existed (CR 608.2h; ENGINE.md 226): layout v8's lki tokens (ENGINE.md 235)",
         loyalty: Public "loyalty abilities activated this turn (CR 606.3)",
         pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",
         moon_game: Derived "fast path: a card of the game says nonbasic lands are Mountains",
         lands_entered: Public "the lands that entered the battlefield under each player's control this turn (Bioengineered Future; ENGINE.md 99.12)",
-        spell_lki: Public "spells that left the stack while an ability about them waited: their definition, item and mana value as they last existed there (CR 608.2h: \"copy it\"): layout v8's lki, lki_spells and lki_relations tokens (ENGINE.md 232)",
+        spell_lki: Public "spells that left the stack while an ability about them waited: their definition, item and mana value as they last existed there (CR 608.2h: \"copy it\"): layout v8's lki, lki_spells and lki_relations tokens (ENGINE.md 235)",
         entering_copy: Derived "transient: set and cleared around one move",
         entering_times: Derived "transient: set and cleared around one move",
         enter_note: Derived "transient: set and cleared around one move",
@@ -214,7 +214,7 @@ pub fn fields() -> Vec<Field> {
             no_regen: Derived "transient: set and cleared around one destruction (\"it can't be regenerated\")",
             granted: Derived "a fast path: some permanent may have a granted triggered ability (Game.marks)",
             seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
-            lki_host: Derived "last known information (CR 608.2h): what a gone attached object enchanted, kept when SEEN_W3_HOST - the entry Game.lki_attached holds for it whatever the cards (that one is public, ENGINE.md 232)",
+            lki_host: Derived "last known information (CR 608.2h): what a gone attached object enchanted, kept when SEEN_W3_HOST - the entry Game.lki_attached holds for it whatever the cards (that one is public, ENGINE.md 235)",
             lki_loss: Derived "last known information (CR 603.10a): when a gone permanent lost its abilities - read only while its simultaneous move's leave triggers are gathered (`granted_observers` with `Game::leaving`), before any decision",
             entering_spent: Derived "transient: set and taken around one move",
             phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
@@ -2737,7 +2737,7 @@ pub const BASE: &str = "(the position as it is)";
 /// layout v6 (the `mtg_eoe` game, checked on the gate's EoE positions).
 pub const V7: u8 = 1;
 pub const V6: u8 = 2;
-/// Layout v8 (the game `mtg_v8`, ENGINE.md 232): the gate's rows since then.
+/// Layout v8 (the game `mtg_v8`, ENGINE.md 235): the gate's rows since then.
 pub const V8: u8 = 4;
 
 /// A public-state gap the encoding has, found by the gate and waiting on a decision (ENGINE.md
@@ -2889,7 +2889,7 @@ pub fn known_gaps() -> Vec<KnownGap> {
     let protection: Vec<&'static str> = ps.iter().filter(|p| p.name.starts_with("a creature gains protection from ")).map(|p| p.name).collect();
     // (A hand card promised to a delve is revealed too, so its v6 row is a learned card's: `alike`.)
     let mut v7_facts: Vec<&'static str> = V7_FIXED.iter().copied().filter(|&x| x != "a hand card is promised to a delve").collect();
-    // (Layout v6 lacks layout v8's facts too, ENGINE.md 232.)
+    // (Layout v6 lacks layout v8's facts too, ENGINE.md 235.)
     v7_facts.extend(v8_fixed());
     vec![
         KnownGap {
@@ -2975,7 +2975,7 @@ pub fn known_gaps() -> Vec<KnownGap> {
         },
         KnownGap {
             name: "layout v7 (the game mtg) lacks layout v8's facts (v8_fixed): a payment's picks and state in progress, a gone object's last known information, the find groups",
-            decision: "the user's decision of 2026-11-21 (ENGINE.md 232): one additive layout v8, the game mtg_v8; a v7 run stays on v7 until it is forked onto v8",
+            decision: "the user's decision of 2026-11-21 (ENGINE.md 235): one additive layout v8, the game mtg_v8; a v7 run stays on v7 until it is forked onto v8",
             layouts: V7,
             alone: v8_fixed(),
             alike: vec![],
@@ -3087,7 +3087,7 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
     v
 }
 
-// ---- layout v8's facts (ENGINE.md 232) ------------------------------------------------------
+// ---- layout v8's facts (ENGINE.md 235) ------------------------------------------------------
 
 /// The innermost payment in progress (`Task::PayMana`).
 fn pay_mana_mut(g: &mut Game) -> Option<&mut crate::pay::PayMana> {
@@ -3122,7 +3122,7 @@ fn public_stale(g: &Game) -> Vec<crate::ids::ObjRef> {
     v
 }
 
-/// The perturbations of layout v8's facts (ENGINE.md 232): a payment in progress and its 601.2g
+/// The perturbations of layout v8's facts (ENGINE.md 235): a payment in progress and its 601.2g
 /// step, a gone object's last known information, the find groups.
 fn v8_perturbations() -> Vec<Perturbation> {
     use crate::db::AbilitySlot;
@@ -3396,10 +3396,10 @@ fn v8_perturbations() -> Vec<Perturbation> {
     ]
 }
 
-/// Every perturbation of layout v8's facts (ENGINE.md 232; the gate's pairwise pass draws their partners from a
+/// Every perturbation of layout v8's facts (ENGINE.md 235; the gate's pairwise pass draws their partners from a
 /// stream of their own, so the pairs of the perturbations before them stay main's).
 ///
-/// Layout v8's facts (ENGINE.md 232): the perturbations of `v8_perturbations` whose change layout v7
+/// Layout v8's facts (ENGINE.md 235): the perturbations of `v8_perturbations` whose change layout v7
 /// (the game `mtg`) and layout v6 (`mtg_eoe`) leave out - all but the innermost payment's cost, which
 /// their context block's cost floats show (layout v8's `payment` tokens show every part exactly).
 pub fn v8_perturbation_names() -> Vec<&'static str> {
@@ -3436,7 +3436,7 @@ mod tests {
         assert!(!c(V6, &[red], &[red]), "the same perturbations: no difference to cover");
         assert!(c(V6, &[], &["a permanent was harnessed"]) && !c(V7, &[], &["a permanent was harnessed"]), "a v7 fact: a v6 gap only");
         // (layout v8's one known gap: the framed row's, found 2026-11-13, a decision of its own; layout v7's: that
-        // one and v8's facts, ENGINE.md 232)
+        // one and v8's facts, ENGINE.md 235)
         assert!(k.iter().filter(|g| g.layouts & V8 != 0).count() == 1, "layout v8's known gaps");
         assert!(k.iter().filter(|g| g.layouts & V7 != 0).count() == 2, "layout v7's known gaps");
         assert!(c(V7, &[], &["a payment's Phyrexian life is two higher"]) && !c(V8, &[], &["a payment's Phyrexian life is two higher"]), "a v8 fact: a v7 gap only");

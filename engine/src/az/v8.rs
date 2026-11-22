@@ -1,4 +1,4 @@
-//! The zero-core game `mtg_v8` (ENGINE.md 232): the `mtg` game in layout v8. Layout v8 is layout
+//! The zero-core game `mtg_v8` (ENGINE.md 235): the `mtg` game in layout v8. Layout v8 is layout
 //! v7 (the game `mtg`, ENGINE.md 125) plus six tail-only gated segments (`tail_v8`): a payment's
 //! picks and state in progress, the payment decisions' option meanings, a gone object's last known
 //! information, a gone spell's item and relations, and the groups of places holding search finds
@@ -99,7 +99,7 @@ impl SearchGame for MtgV8Az {
     fn encode(&self, viewer: usize, out: &mut [f32]) {
         let mut t = TailBuf::new(&tail_encode::TAILS_V8);
         self.0.encode_row_layout(viewer, out, &mut t, true);
-        assert!(t.is_empty(), "a head-only encoding of a layout v8 row with {} tail tokens (use encode_row; zero-core R1, ENGINE.md 232)", t.len());
+        assert!(t.is_empty(), "a head-only encoding of a layout v8 row with {} tail tokens (use encode_row; zero-core R1, ENGINE.md 235)", t.len());
     }
 
     fn encode_row(&self, viewer: usize, head: &mut [f32], tail: &mut TailBuf) {
@@ -188,6 +188,14 @@ impl SearchGame for MtgV8Az {
     fn key_obs(key: u64, viewer: usize) -> KeyObs {
         <MtgAz as SearchGame>::key_obs(key, viewer)
     }
+
+    fn merge_key(&self) -> Option<u128> {
+        self.0.merge_key()
+    }
+
+    fn branch_alt_ok(&self, played: u16, alt: u16) -> bool {
+        self.0.branch_alt_ok(played, alt)
+    }
 }
 
 #[cfg(test)]
@@ -196,7 +204,7 @@ mod tests {
 
     /// Every method `MtgAz` gives zero-core is forwarded (a default left in place would change the
     /// game): the constants agree, and one random game plays alike in both, the same rows but v8's
-    /// segments (ENGINE.md 232).
+    /// segments (ENGINE.md 235).
     #[test]
     fn mtg_v8_is_mtg_in_layout_v8() {
         assert_eq!(<MtgV8Az as SearchGame>::NUM_ACTIONS, <MtgAz as SearchGame>::NUM_ACTIONS);

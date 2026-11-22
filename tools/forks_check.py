@@ -36,7 +36,7 @@ from zero.workqueue import split_games  # noqa: E402
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 235): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts

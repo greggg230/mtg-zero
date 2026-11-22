@@ -484,6 +484,13 @@ impl Game {
         panic!("drive_until: no progress");
     }
 
+    /// Reseed the engine's RNG (tests: two lines from one position whose later shuffles come out differently, as
+    /// a branch's and its game's do; ENGINE.md 233).
+    #[doc(hidden)]
+    pub fn reseed_rng(&mut self, seed: u64) {
+        self.rng = crate::rng::Rng::new(seed);
+    }
+
     /// Set the X of the top stack item (tests: an X past what a payment
     /// reaches today, the u8 generic mana of a cost).
     pub fn set_top_x(&mut self, x: u32) {
@@ -541,7 +548,7 @@ impl Game {
             let depth = self.players[o.owner as usize].library.iter().rev().position(|&x| x == c).map_or(u64::MAX, |d| d as u64);
             v.extend([o.owner as u64, h64(&o.zone), depth]);
         }
-        // Layout v8's facts (ENGINE.md 232): the payments in progress and their 601.2g steps, the last known
+        // Layout v8's facts (ENGINE.md 235): the payments in progress and their 601.2g steps, the last known
         // information of the gone objects the public state names, the groups of places holding finds.
         crate::az::tail_v8::payment_view(self, viewer, &mut v);
         crate::az::tail_v8::lki_view(self, viewer, &mut v);

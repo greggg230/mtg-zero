@@ -35,6 +35,7 @@ pub mod hidden_decks;
 pub mod identity;
 pub mod lab;
 pub mod matches;
+pub mod merge_key;
 pub mod metagame;
 pub mod pools;
 pub mod sample;
@@ -889,7 +890,7 @@ impl MtgSpec {
     /// never fed another's encodings through the wrong game's name.
     pub fn check_game(&self, game: &str) -> Result<(), String> {
         let mine = self.game();
-        // (`mtg_v8` is `mtg` in layout v8, ENGINE.md 232: the same specs.)
+        // (`mtg_v8` is `mtg` in layout v8, ENGINE.md 235: the same specs.)
         if mine == game || (mine == "mtg" && game == v8::NAME) {
             return Ok(());
         }
@@ -1303,7 +1304,7 @@ impl Bot<MtgAz> for HeuristicBot {
 }
 
 impl MtgAz {
-    /// The row of `viewer` in layout v8 (`v8`: the game `mtg_v8`, ENGINE.md 232) or v7 (the game
+    /// The row of `viewer` in layout v8 (`v8`: the game `mtg_v8`, ENGINE.md 235) or v7 (the game
     /// `mtg`): the deck choice's and sideboarding's encodings have no tail (their lists fit the
     /// head) and are the same in both.
     pub fn encode_row_layout(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf, v8: bool) {
@@ -1763,6 +1764,17 @@ impl SearchGame for MtgAz {
         } else {
             KeyObs::Opaque
         }
+    }
+
+    /// Near-tie branches' merge key (`merge_key.rs`, ENGINE.md 233; zero-core docs/search.md 2.11): equal only for
+    /// equivalent states, None where the state cannot be keyed safely. Read only by the near-tie branch rule.
+    fn merge_key(&self) -> Option<u128> {
+        merge_key::merge_key(self)
+    }
+
+    /// Whether `alt` is worth a near-tie branch next to `played` (`merge_key::branch_alt_ok`, ENGINE.md 233).
+    fn branch_alt_ok(&self, played: u16, alt: u16) -> bool {
+        merge_key::branch_alt_ok(self, played, alt)
     }
 }
 

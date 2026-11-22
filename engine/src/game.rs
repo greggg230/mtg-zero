@@ -702,7 +702,7 @@ pub struct Game {
     /// show them by place (`Game::finds_by_place`). Kept in every world too (unlike `found`): a search in a world
     /// marks its finds as the real game's would.
     pub(crate) finds_told: Vec<CardIdx>,
-    /// The public groups of places that hold search finds mixed with other cards (ENGINE.md 232, 223's
+    /// The public groups of places that hold search finds mixed with other cards (ENGINE.md 235, 223's
     /// decision 4): a scramble that mixes told finds (or a group) with any other card makes one - "k of
     /// these places hold their owner's search's finds" - where `finds_told` drops them. A group lasts
     /// while its members keep their zone and the other player doesn't learn one (`move_card`, `learn`
@@ -926,7 +926,7 @@ pub struct Game {
     /// `SEEN_LKI_DAMAGE`).
     pub(crate) lki_damage: Vec<(ObjRef, DamageSource)>,
     /// The same qualities of every permanent that left the battlefield this turn, recorded whatever the cards
-    /// of the game (ENGINE.md 232): `lki_damage` is kept only when a card of the game reads it
+    /// of the game (ENGINE.md 235): `lki_damage` is kept only when a card of the game reads it
     /// (`SEEN_LKI_DAMAGE`, a bit of every card in the game, hidden ones too), so its presence would tell the
     /// network of a hidden card; layout v8's `lki` tokens read this one. No rule reads it.
     pub(crate) lki_qualities: Vec<(ObjRef, DamageSource)>,
@@ -2531,7 +2531,7 @@ impl Game {
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
         let from = self.objs[idx.i()].zone;
-        // (A find group's member leaving its zone ends the group: ENGINE.md 232.)
+        // (A find group's member leaving its zone ends the group: ENGINE.md 235.)
         if from != to && !self.find_groups.is_empty() {
             self.end_find_group(idx);
         }

@@ -33,7 +33,7 @@
 //! Per game or match the first two hash, decision by decision: the decider, the pending decision's
 //! kind and player (a sideboarding's decider and kind, a deck choice), the legal actions, the action
 //! taken and the chance keys; every 10th decision the decider's encoding (`mtg`: the whole layout v8
-//! row - head, tail tokens, pointer overrides, ENGINE.md 232; `DIGEST_ENCODING=v7`: layout v7's, the
+//! row - head, tail tokens, pointer overrides, ENGINE.md 235; `DIGEST_ENCODING=v7`: layout v7's, the
 //! combined digests printed only; `mtg_eoe`: its layout v6 floats); every 20th the
 //! decider's auxiliary targets and a world `determinize` deals it (its decision, both players' hand
 //! and library identities in order, both decks, the other player's encoding there, five random
@@ -109,7 +109,7 @@ fn encodings_on() -> bool {
     !std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0")
 }
 
-/// `DIGEST_ENCODING=v7` (ENGINE.md 232): `mtg`'s layout v7 rows hashed instead of layout v8's, the combined
+/// `DIGEST_ENCODING=v7` (ENGINE.md 235): `mtg`'s layout v7 rows hashed instead of layout v8's, the combined
 /// digests printed only (layout v7's recorded files of main e445ba27 while v8 only adds segments).
 fn layout_v7() -> bool {
     std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7")
@@ -503,7 +503,7 @@ const DRIVER_EVERY: u64 = 1_000;
 #[test]
 #[ignore]
 fn driver_digest() {
-    // (The default game's, `mtg_v8`, layout v8's rows, ENGINE.md 232; `DIGEST_ENCODING=v7`: the game `mtg`'s, layout v7.)
+    // (The default game's, `mtg_v8`, layout v8's rows, ENGINE.md 235; `DIGEST_ENCODING=v7`: the game `mtg`'s, layout v7.)
     if layout_v7() {
         driver_digest_of::<MtgAz>()
     } else {

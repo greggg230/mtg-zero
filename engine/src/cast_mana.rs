@@ -246,7 +246,7 @@ impl Game {
     /// that may put a card into `p`'s graveyard which the payment reads and its castability doesn't count
     /// (`gap_feeder`, ENGINE.md 231.4).
     /// The abilities of permanent `c` the 601.2g step of spell item `id` asks about (`ChooseMode`,
-    /// `NUMBER` + k: the k-th; layout v8's `pay_options` tokens, ENGINE.md 232).
+    /// `NUMBER` + k: the k-th; layout v8's `pay_options` tokens, ENGINE.md 235).
     pub(crate) fn cast_mana_slots(&self, id: u32, c: CardIdx) -> Vec<AbilitySlot> {
         let Some(pos) = self.item_index(id) else { return Vec::new() };
         let StackKind::Spell { card: spell } = self.stack[pos].kind else { return Vec::new() };

@@ -19,7 +19,7 @@ import numpy as np
 
 
 def kind(game):
-    """The game's (layout v8 `mtg_v8` or v7 `mtg`: a network's own, mtgz.az.layouts, docs/ENGINE.md 232) variable-length rows (`zero.mcts.Rows`) on the active engine, None for an engine or game without
+    """The game's (layout v8 `mtg_v8` or v7 `mtg`: a network's own, mtgz.az.layouts, docs/ENGINE.md 235) variable-length rows (`zero.mcts.Rows`) on the active engine, None for an engine or game without
     them (the info of an older engine has no 'tails' key)."""
     from zero import games as G
     info = G.info(game)

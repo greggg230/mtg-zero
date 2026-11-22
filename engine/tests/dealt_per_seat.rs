@@ -111,7 +111,7 @@ fn legal(g: &MtgAz) -> Vec<u16> {
     v
 }
 
-/// `viewer`'s whole row: layout v8's, the default game `mtg_v8`'s (ENGINE.md 232); with `DIGEST_ENCODING=v7` layout v7's
+/// `viewer`'s whole row: layout v8's, the default game `mtg_v8`'s (ENGINE.md 235); with `DIGEST_ENCODING=v7` layout v7's
 /// (the game `mtg`'s, the compatibility layout).
 fn row(g: &MtgAz, viewer: usize) -> Vec<f32> {
     let v7 = std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7");
@@ -609,7 +609,7 @@ fn dealt_per_seat_digests() {
         }
     }
     println!("dealt_per_seat_digests: {} matches; combined digest {:016x}", lines.len(), all.0);
-    // (`DIGEST_ENCODING=v7`: layout v7's rows, the combined digest printed only: ENGINE.md 232.)
+    // (`DIGEST_ENCODING=v7`: layout v7's rows, the combined digest printed only: ENGINE.md 235.)
     if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7") {
         return;
     }

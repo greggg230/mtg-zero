@@ -86,7 +86,7 @@ TABLES += ('bauble',)                         # the Bauble activations (tools/ga
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 235): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts
@@ -143,11 +143,18 @@ def below_normal():
 def game_id(rec):
     """A game's id: 63 bits of blake2b over (iteration, source, game id, seed, actions) - unique across sources and
     restarts (a restarted worker's game ids begin again; its seeds and moves differ). A game that is not self-play: over
-    (its unit - the records file -, game id, seed, actions)."""
+    (its unit - the records file -, game id, seed, actions). A branch game (zero-core records/2, docs/gamedb.md "Branch
+    games") adds its branch point (`branch.from`)."""
     if rec.get('_unit'):
-        k = f'{rec["_unit"]}|{rec["gid"]}|{rec["seed"]}|{rec["n_actions"]}'.encode()
+        k = f'{rec["_unit"]}|{rec["gid"]}|{rec["seed"]}|{rec["n_actions"]}'
     else:
-        k = f'{rec["it"]}|{rec["src"]}|{rec["gid"]}|{rec["seed"]}|{rec["n_actions"]}'.encode()
+        k = f'{rec["it"]}|{rec["src"]}|{rec["gid"]}|{rec["seed"]}|{rec["n_actions"]}'
+    # (A branch game, zero-core records/2: its game's gid and seed, and maybe its number of actions - told apart by its
+    # branch point. A record without one hashes as before.)
+    b = rec.get('branch')
+    if b is not None:
+        k += f'|branch|{b.get("from")}'
+    k = k.encode()
     return int.from_bytes(hashlib.blake2b(k, digest_size=8).digest(), 'little') & ((1 << 63) - 1)
 
 
@@ -287,10 +294,47 @@ def actions_of(rec):
     return list(steps)
 
 
+def branch_of(rec):
+    """A record's `branch` block (zero-core records/2, docs/gamedb.md "Branch games"), or None for a game."""
+    return rec.get('branch')
+
+
+def merged(rec):
+    """A near-tie branch that merged back into its game: it ends at a position of a game in progress and its result is
+    its game's (records/2's `branch.merged`: its decisions to the merge)."""
+    b = branch_of(rec)
+    return b is not None and b.get('merged') is not None
+
+
+def branch_from(rec):
+    """The index of a branch's first own action (its first `from` are its game's: counted there); 0 for a game."""
+    b = branch_of(rec)
+    return int(b.get('from') or 0) if b is not None else 0
+
+
+def branch_fields(rec):
+    """The games row's branch columns (docs/gamedb.md "Branch games")."""
+    b = branch_of(rec)
+    if b is None:
+        return {'is_branch': False, 'branch_from': None, 'branch_alt': None, 'branch_merged': None, 'branch_tag': None,
+                'branch_gap': None}
+    return {'is_branch': True, 'branch_from': b.get('from'), 'branch_alt': b.get('alt'), 'branch_merged': b.get('merged'),
+            'branch_tag': b.get('tag'), 'branch_gap': None if b.get('gap') is None else float(b['gap'])}
+
+
 def _final_fields(final, n_dec, method, rec, decks):
     pl = final['players']
     w = final.get('winner') if final.get('over') else None
     res = rec.get('result') or [None, None]
+    if merged(rec):
+        # (A merged branch: the result is its game's, borrowed at the merge - the winner by it, the method 'merged',
+        # the turns at the merge point.)
+        r0, r1 = (float(res[0]), float(res[1])) if len(res) > 1 and None not in res[:2] else (0.5, 0.5)
+        w = 0 if r0 > r1 else 1 if r1 > r0 else None
+        return {'starting': final.get('starting'), 'turns': final.get('turn'), 'mull0': pl[0].get('mulligans'),
+                'mull1': pl[1].get('mulligans'), 'life0': pl[0].get('life'), 'life1': pl[1].get('life'),
+                'winner': w, 'reason': 'Merged', 'method': 'merged', 'score0': res[0],
+                'score1': res[1] if len(res) > 1 else None, 'decisions': n_dec}
     return {'starting': final.get('starting'), 'turns': final.get('turn'), 'mull0': pl[0].get('mulligans'),
             'mull1': pl[1].get('mulligans'), 'life0': pl[0].get('life'), 'life1': pl[1].get('life'),
             'winner': rec['resigned'] if rec.get('resigned') is not None else w,
@@ -320,7 +364,22 @@ def replay_light(E, C, spec_txt, rec, decks):
 
 
 def check_end(g, rec):
-    """The replayed game ends as its record says (a game that does not replay raises, never dropped silently)."""
+    """The replayed game ends as its record says (a game that does not replay raises, never dropped silently). A merged
+    branch (records/2) ends at a position of a game in progress and says over with its game's result: it is checked
+    against its game's record (`_parent`: the same iteration, source, gid and seed, no branch), whose game is over."""
+    if merged(rec):
+        if g.to_move is None:
+            raise ValueError(f'game {rec["gid"]}: a merged branch replayed to a finished game')
+        par = rec.get('_parent')
+        if par is None:
+            raise ValueError(f"game {rec['gid']}: a merged branch without its game's record in its unit")
+        if not par.get('over'):
+            raise ValueError(f'game {rec["gid"]}: a merged branch whose game is not over')
+        mine = [round(float(x), 5) for x in rec.get('result') or []]
+        theirs = [round(float(x), 5) for x in par.get('result') or []]
+        if mine != theirs:
+            raise ValueError(f"game {rec['gid']}: a merged branch's result {mine}, its game's {theirs}")
+        return
     over = g.to_move is None
     if rec.get('resigned') is None and bool(rec.get('over')) != over:
         raise ValueError(f'game {rec["gid"]}: replayed over={over}, the record says over={rec.get("over")}')
@@ -349,12 +408,19 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
         for ln in lines:
             t, s, p, kind, card, fz, tz, det = parse_line(ln, state)
             events.append((len(events), step_ix, t, s, p, kind, card, fz, tz, det))
+    frm = branch_from(rec)
     lines_ev(st.get('log') or [], st, -1)
     if st.get('log_n', 0) > len(st.get('log') or []):
         lost += st['log_n'] - len(st['log'])
     prev = None
     n_dec = 0
+    # (A branch: its first `from` actions are its game's, whose rows hold them - its events and combo rows count from
+    # action `from` on; the combo lists' lengths there are the cut.)
+    cut = None
     for i, a in enumerate(actions_of(rec)):
+        if frm and i == frm:
+            cut = {k: len(v) for k, v in (('spells', R.spells), ('doomsday', R.doomsday), ('show', R.show),
+                                          ('sneak', R.sneak), ('entered', R.entered))}
         d = st.get('decision') or {}
         opts = d.get('options') or []
         text = next((o.get('t') for o in opts if o.get('a') == a), None)
@@ -390,6 +456,12 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
             last_attack = {'turn': max(ts), 'attackers': R.attacks[max(ts)][1]}
     combo = {'spells': R.spells, 'doomsday': R.doomsday, 'show': R.show, 'sneak': R.sneak, 'entered': R.entered,
              'last_attack': last_attack, 'lines_lost': lost, 'bauble': B.finish(g.to_move is None)}
+    if frm:
+        cut = cut or {k: len(combo[k]) for k in ('spells', 'doomsday', 'show', 'sneak', 'entered')}
+        combo = dict(combo, **{k: combo[k][n:] for k, n in cut.items()})
+        combo['bauble'] = [x for x in combo['bauble'] if x['action'] >= frm]
+        events = [e for e in events if e[1] >= frm]
+        events = [(j,) + tuple(e[1:]) for j, e in enumerate(events)]
     return _final_fields(final, n_dec, method, rec, decks), events, combo
 
 
@@ -452,7 +524,8 @@ def ingest_chunk(args):
                'over': bool(rec.get('over')), 'aborted': bool(rec.get('aborted')),
                'resigned': rec.get('resigned') is not None, 'n_actions': int(rec['n_actions']), 'detailed': full,
                'lines_lost': combo['lines_lost'] if combo else None,
-               'last_attackers': json.dumps(combo['last_attack']) if combo and combo['last_attack'] else None, **f}
+               'last_attackers': json.dumps(combo['last_attack']) if combo and combo['last_attack'] else None,
+               **branch_fields(rec), **f}
         out['games'].append(row)
         if not full:
             continue
@@ -498,7 +571,9 @@ def schemas():
                             ('forced_find_p', f), ('over', b), ('aborted', b), ('resigned', b), ('n_actions', i),
                             ('detailed', b), ('lines_lost', i), ('last_attackers', s), ('starting', i), ('turns', i),
                             ('mull0', i), ('mull1', i), ('life0', i), ('life1', i), ('winner', i), ('reason', s),
-                            ('method', s), ('score0', f), ('score1', f), ('decisions', i)]),
+                            ('method', s), ('score0', f), ('score1', f), ('decisions', i), ('is_branch', b),
+                            ('branch_from', i), ('branch_alt', i), ('branch_merged', i), ('branch_tag', i),
+                            ('branch_gap', f)]),
         'events': pa.schema([('game_id', pa.int64()), ('iter', i), ('seq', i), ('action', i), ('turn', i), ('step', s),
                              ('player', i), ('type', s), ('card', s), ('from_zone', s), ('to_zone', s), ('detail', s)]),
         'doomsday': pa.schema([('game_id', pa.int64()), ('iter', i), ('idx', i), ('caster', i), ('turn', i), ('pile', ls),
@@ -761,7 +836,13 @@ def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, l
                 raise SystemExit(f'{key}: no records (an empty unit is never ingested silently)')
             items = []
             chained = 0
+            # (Branch games, records/2: each one's game - the same iteration, source, gid and seed, no branch - for a
+            # merged branch's result, `check_end`.)
+            parents = {(p.get('it'), str(p.get('src')), p.get('gid'), p.get('seed')): p for p in recs if p.get('branch') is None}
             for r in recs:
+                if r.get('branch') is not None:
+                    par = parents.get((r.get('it'), str(r.get('src')), r.get('gid'), r.get('seed')))
+                    r = dict(r, _parent=None if par is None else {k: par.get(k) for k in ('result', 'over', 'resigned')})
                 r = dict(r, _engine=eng)
                 if what == 'selfplay':
                     r['_run'] = rname
@@ -955,13 +1036,13 @@ WITH r AS (
          count(*) FILTER (WHERE oracle = 'missed') AS missed,
          count(*) FILTER (WHERE ff_drawn IS NOT TRUE) AS undrawn,
          count(*) FILTER (WHERE ff_drawn IS NOT TRUE AND oracle = 'voluntary') AS undrawn_own_pile
-  FROM doomsday_piles WHERE kind = 'selfplay' AND caster_deck = $deck AND iter >= $since GROUP BY ALL),
+  FROM doomsday_piles WHERE kind = 'selfplay' AND caster_deck = $deck AND iter >= $since{branches} GROUP BY ALL),
 g AS (
   SELECT iter, {opp} AS opp_deck, count(*) AS games, count(*) FILTER (WHERE detailed) AS detailed_games,
          count(*) FILTER (WHERE outcome = 'win') AS wins,
          count(*) FILTER (WHERE outcome = 'win' AND method = 'oracle') AS oracle_wins
   FROM game_results JOIN (SELECT game_id, detailed FROM games) USING (game_id)
-  WHERE kind = 'selfplay' AND deck = $deck AND iter >= $since GROUP BY ALL)
+  WHERE kind = 'selfplay' AND deck = $deck AND iter >= $since{branches} GROUP BY ALL)
 SELECT g.iter, g.opp_deck, g.games, g.detailed_games, g.wins, g.oracle_wins,
        coalesce(r.resolutions, 0) AS resolutions, coalesce(r.own_pile, 0) AS own_pile, coalesce(r.forced, 0) AS forced,
        coalesce(r.in_hand, 0) AS in_hand, coalesce(r.not_findable, 0) AS not_findable, coalesce(r.missed, 0) AS missed,
@@ -971,31 +1052,44 @@ FROM g LEFT JOIN r ON r.iter = g.iter AND r.opp_deck IS NOT DISTINCT FROM g.opp_
 ORDER BY g.iter, g.opp_deck"""
 
 
-def doomsday_series(run, since_iter=0, by_opponent=False, deck='doomsday_8027957', db=None):
+def branch_filter(con, include_branches):
+    """The SQL condition that leaves branch games out of a behaviour series (docs/gamedb.md "Branch games": forced
+    off-policy lines), '' with `include_branches` or a database without branch columns."""
+    cols = [d[0] for d in con.execute('SELECT * FROM games LIMIT 0').description]
+    if include_branches or 'is_branch' not in cols:
+        return ''
+    return ' AND game_id NOT IN (SELECT game_id FROM games WHERE is_branch IS TRUE)'
+
+
+def doomsday_series(run, since_iter=0, by_opponent=False, deck='doomsday_8027957', db=None, include_branches=False):
     """The Doomsday deck's per-iteration series (docs/gamedb.md "The Doomsday series"; the delverai publisher's) -> plain
     dict rows, one per iteration (and opponent deck with `by_opponent`): `games` / `wins` / `oracle_wins` of `deck` (every
     game), `detailed_games` (the replayed-in-full ones the pile counts come from), the caster's `resolutions` and how
     the Oracle stood at each - `own_pile` (the network put it in its own pile: 'voluntary'), `forced` (the wheel's
     forced find), `in_hand`, `not_findable`, `missed` -, `undrawn` / `undrawn_own_pile` (the resolutions the wheel's draw
     passed over: the exit gate's, ENGINE.md 180) and the shares `own_pile_share`, `undrawn_own_pile_share` (None
-    without a resolution). `opp_deck` is None unless `by_opponent`. One query, milliseconds."""
+    without a resolution). `opp_deck` is None unless `by_opponent`. Branch games (forced off-policy lines) are left out
+    unless `include_branches`. One query, milliseconds."""
     con = connect(db_dir(run, db))
-    sql = DOOMSDAY_SERIES.replace('{opp}', 'opp_deck' if by_opponent else 'NULL::VARCHAR')
+    sql = DOOMSDAY_SERIES.replace('{opp}', 'opp_deck' if by_opponent else 'NULL::VARCHAR').replace(
+        '{branches}', branch_filter(con, include_branches))
     cur = con.execute(sql, {'deck': deck, 'since': int(since_iter)})
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-def bauble_blunder_series(run, since_iter=0, by_kind=False, kind=None, db=None):
+def bauble_blunder_series(run, since_iter=0, by_kind=False, kind=None, db=None, include_branches=False):
     """The Bauble targeting series (docs/gamedb.md "Bauble targeting", tools/gamedb_bauble.py; the delverai
     publisher's) -> plain dict rows, one per iteration and Bauble ('urza', 'mishra', 'all'; and kind of game with
     `by_kind`, `kind` None otherwise; `kind` filters to one): `activations`, `excluded` (targeting the opponent impossible
     or meaningless), `counted` (the denominator), `self_targets`, `blunders` (the user's rules), `self_with_fetch` (a
     Mishra's Bauble at oneself with a fetchland available: not a blunder) and the shares of each in `counted` with their
     binomial standard errors (`self_share` / `self_se`, `blunder_share` / `blunder_se`, `self_with_fetch_share` /
-    `self_with_fetch_se`; None without a counted activation)."""
+    `self_with_fetch_se`; None without a counted activation). Branch games (forced off-policy lines) are left out
+    unless `include_branches`."""
     import gamedb_bauble
-    return gamedb_bauble.series(connect(db_dir(run, db)), since_iter, by_kind, kind)
+    con = connect(db_dir(run, db))
+    return gamedb_bauble.series(con, since_iter, by_kind, kind, branch_filter(con, include_branches))
 
 
 def shell(run, db=None):
@@ -1215,6 +1309,7 @@ def main(argv=None):
     u.add_argument('--since', type=int, default=0)
     u.add_argument('--by-kind', action='store_true')
     u.add_argument('--kind', default=None)
+    u.add_argument('--include-branches', action='store_true', help='count branch games too (forced off-policy lines)')
     b = sub.add_parser('bench')
     b.add_argument('run')
     b.add_argument('--iter', type=int, default=None)
@@ -1225,6 +1320,7 @@ def main(argv=None):
     d.add_argument('--since', type=int, default=0)
     d.add_argument('--by-opponent', action='store_true')
     d.add_argument('--deck', default='doomsday_8027957')
+    d.add_argument('--include-branches', action='store_true', help='count branch games too (forced off-policy lines)')
     sub.add_parser('engine', help="this checkout's engine identity (JSON: the commits and the engine id)")
     c = sub.add_parser('import-combo')
     c.add_argument('out_run')
@@ -1259,10 +1355,10 @@ def main(argv=None):
     elif a.cmd == 'status':
         status(a.run, a.db)
     elif a.cmd == 'series':
-        for r in doomsday_series(a.run, a.since, a.by_opponent, a.deck, a.db):
+        for r in doomsday_series(a.run, a.since, a.by_opponent, a.deck, a.db, a.include_branches):
             say(json.dumps(r, default=str))
     elif a.cmd == 'bauble':
-        for r in bauble_blunder_series(a.run, a.since, a.by_kind, a.kind, a.db):
+        for r in bauble_blunder_series(a.run, a.since, a.by_kind, a.kind, a.db, a.include_branches):
             say(json.dumps(r, default=str))
     elif a.cmd == 'bench':
         bench(a.run, a.iter, a.games)
