@@ -218,3 +218,59 @@ Constructed play's table (`CardDb::constructed`); every test in `engine/tests/ca
 | Price of Progress x the lands | Magus of the Moon, a fetch land in response | `cr_305_7_nonbasic_lands_under_magus_of_the_moon_still_count`, `cr_608_2h_price_of_progress_counts_the_lands_as_it_resolves` | tested |
 | Rough // Tumble x flying now | Dragon's Rage Channeler's delirium | `cr_613_1f_rough_and_tumble_read_flying_as_it_is_now` | tested |
 | Rough // Tumble x copies, names, counts | Lutri, Disruptor Flute, Murktide Regent, Inquisition of Kozilek | `cr_707_10_a_copy_of_rough_is_rough`, `cr_709_4a_disruptor_flute_naming_rough_taxes_rough_only`, `cr_709_4_rough_tumble_is_one_card_for_murktide_regent`, `cr_202_3d_rough_tumble_in_hand_has_mana_value_eight` | tested |
+
+## Legacy Hogaak Tempo, lane A: Hogaak, Arisen Necropolis (ENGINE.md 220.1)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_hogaak_a.rs`. The deck's other
+lanes' cards (Stitcher's Supplier, Mockingbird, Dark Matter Manipulator, Moonshadow, Dryad Arbor, Massacre) are tested
+with Hogaak at the integration.
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| No mana x convoke and delve | lands, floating mana, a Lotus Petal | `cr_601_2h_hogaak_is_paid_by_convoke_alone_never_by_mana`, `cr_601_2h_lands_and_floating_mana_never_make_hogaak_castable`, `cr_601_2g_a_lotus_petal_is_no_source_of_hogaak_but_floated_first_it_is_delve_fuel`, `cr_601_2h_castability_and_the_payment_agree_on_random_boards` | tested |
+| Convoke x colours | hybrid pips, multicoloured and colourless creatures, Kaito as a creature, the Orc Army token | `cr_107_4e_702_51a_a_hybrid_pip_takes_a_black_or_a_green_creature`, `cr_702_51a_a_multicoloured_creature_pays_either_of_its_colours`, `cr_702_51a_kaito_a_creature_during_its_controllers_turn_convokes`, `cr_702_51a_orcish_bowmasters_army_token_convokes`, `cr_702_51a_each_pick_leaves_the_rest_payable` | tested |
+| Convoke x mana abilities | Sylvan Caryatid tapped, a creature sacrificed for mana | `cr_702_51a_a_creature_tapped_for_mana_first_cant_convoke_and_one_sacrificed_is_gone` | tested |
+| Convoke x combat | a blocker tapped for convoke (a flash test card) | `cr_506_4b_702_51a_a_blocking_creature_tapped_for_convoke_still_blocks_and_deals_damage` | tested |
+| Costs x convoke and delve | Disruptor Flute's {3}, Omniscience, Elite Spellbinder's {2}, Green Goblin's reduction, Thalia (no tax), Bolas's Citadel | `cr_118_9_702_66a_delve_and_convoke_with_an_alternative_cost_and_a_cost_increase`, `cr_601_2f_elite_spellbinders_tax_on_hogaak_cast_from_exile`, `cr_601_2f_spells_cast_from_the_graveyard_cost_less_green_goblin`, `cr_601_2f_thalia_doesnt_tax_hogaak_a_creature_spell`, `cr_118_9_bolass_citadel_casts_hogaak_for_life_rather_than_its_mana_cost` | tested |
+| Its graveyard permission x other permissions | Yawgmoth's Will, Underworld Breach (escape), Six (retrace) | `cr_601_3_yawgmoths_will_and_its_own_permission_are_one_cast`, `cr_702_138a_underworld_breach_offers_escape_besides_its_own_permission`, `cr_702_81a_six_gives_it_retrace_and_the_discarded_land_may_be_delved` | tested |
+| Cast from the graveyard x delve | itself on the stack, another Hogaak | `cr_601_2a_a_hogaak_cast_from_the_graveyard_is_on_the_stack_and_cant_delve_itself`, `cr_702_66a_another_hogaak_in_the_graveyard_is_delve_fuel` | tested |
+| Counterspells x Hogaak | Daze (paid with mana), Force of Will then the graveyard cast | `cr_118_12_daze_is_paid_with_mana_after_hogaak_is_cast`, `cr_601_3_force_of_will_counters_it_then_it_is_cast_again_from_the_graveyard` | tested |
+| Zones x Hogaak | Karakas, Dauthi Voidwalker (no delve fuel, a countered Hogaak exiled) | `cr_205_4_karakas_returns_hogaak_to_its_owners_hand`, `cr_614_1a_dauthi_voidwalker_leaves_no_delve_fuel_and_exiles_a_countered_hogaak` | tested |
+| Legend rule, trample | a second Hogaak; a blocker | `cr_704_5j_the_legend_rule_for_a_second_hogaak`, `cr_702_19b_hogaak_tramples_over_a_blocker` | tested |
+
+## Legacy Hogaak Tempo, lane B: Mockingbird and Massacre (ENGINE.md 220.2)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_hogaak_b.rs`. Hogaak, Stitcher's
+Supplier, Dark Matter Manipulator, Moonshadow and Dryad Arbor are other lanes' cards: their cells are the integration's.
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Mockingbird x the mana spent | X and {U}; Disruptor Flute's {3}; Ancient Tomb; Lotus Petal; floating mana; Omniscience (none); Show and Tell (not cast) | `cr_601_2h_*`, `cr_118_9_cast_without_paying_its_mana_cost_x_is_0_and_no_mana_is_spent`, `cr_601_2h_put_onto_the_battlefield_without_casting_it_no_mana_was_spent` | tested |
+| Mockingbird x enter triggers | Orcish Bowmasters (its enter and draw triggers) | `cr_707_5_copying_orcish_bowmasters_its_enter_trigger_and_the_exception`, `cr_707_5_copying_bowmasters_its_draw_trigger_is_the_copys_too` | tested |
+| Mockingbird x "enters with" / "as enters" | Arwen, Murktide Regent, True-Name Nemesis, Walking Ballista (107.3m) | `cr_614_1c_*`, `cr_607_2q_*`, `cr_614_12_*`, `cr_107_3m_copying_walking_ballista_x_is_mockingbirds` | tested |
+| Mockingbird x tokens and copies | the Orc Army, a Mockingbird copy, Phyrexian Metamorph | `cr_707_2_copying_a_token_*`, `cr_707_3_a_copy_of_a_copy_*` | tested |
+| Mockingbird x faces | a transformed Concealing Curtains (202.3b), Tamiyo (712.11a), a manifested face-down card | `cr_202_3b_*`, `cr_712_11a_*`, `cr_708_2_*` | tested |
+| Mockingbird x types | Kaito (306.5b, a creature in its controller's turn), an animated Creeping Tar Pit (205.3d), Ragavan (704.5j) | `cr_306_5b_*`, `cr_205_3d_*`, `cr_704_5j_*` | tested |
+| Massacre x its free cast | Tundra, Scrubland, Plains; Underground Sea, Swamp; Magus of the Moon; Thalia; Force of Will | `cr_118_9_*`, `cr_205_3_*`, `cr_305_7_*`, `cr_118_9d_*`, `cr_601_2i_*` | tested |
+| Massacre x the board | Bowmasters and its army, Haywire Mite, Sanguine Evangelist's Bat, the Delver deck's creatures, Kaito's emblem, Creeping Tar Pit | `cr_704_5f_*`, `cr_611_2c_*`, `cr_514_2_*`, `cr_613_4c_*` | tested |
+
+## The Legacy Hogaak Tempo deck, lane C (ENGINE.md 220.3)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_hogaak_c.rs`. (Hogaak,
+Mockingbird and Massacre with these cards: the integration's.)
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Moonshadow x mill | Stitcher's Supplier, Dark Matter Manipulator | `cr_603_2c_moonshadow_one_trigger_per_mill`, `moonshadow_and_dark_matter_manipulators_mill`, `moonshadow_and_stitchers_supplier_dying_two_events` | tested |
+| Moonshadow x discard | Thoughtseize, Hymn to Tourach, the cleanup discard; double-faced, adventurer and split cards | `moonshadow_a_discarded_permanent_card`, `moonshadow_two_cards_discarded_at_once_is_one_trigger`, `cr_514_1_the_cleanup_discard_is_one_event`, `moonshadow_double_faced_adventure_and_split_cards_by_their_graveyard_characteristics` | tested |
+| Moonshadow x the stack | Counterspell on a creature spell and an instant, Petty Theft countered, Consign to Memory on its trigger | `moonshadow_a_countered_creature_spell`, `moonshadows_trigger_without_its_source_and_countered` | tested |
+| Moonshadow x the battlefield | a creature dying, a token dying, Dryad Arbor destroyed by Wasteland, a fetch land's cost, dying with others (Brotherhood's End) | `moonshadow_a_creature_dying_into_your_graveyard`, `moonshadow_a_token_dying_doesnt_trigger_it`, `moonshadow_dryad_arbor_destroyed_is_a_permanent_card`, `moonshadow_a_fetch_land_sacrificed_as_a_cost`, `cr_603_6c_moonshadow_dying_with_others_doesnt_trigger` | tested |
+| Moonshadow x replacement effects | Leyline of the Void, Dauthi Voidwalker | `cr_614_1a_cards_exiled_instead_dont_trigger_moonshadow` | tested |
+| Moonshadow x counters | +1/+1 counters (704.5q), the "while" condition | `cr_704_5q_plus_one_counters_annihilate_moonshadows_minus_ones`, `cr_603_4_moonshadows_while_is_checked_as_the_event_happens` | tested |
+| Dark Matter Manipulator x the graveyard | counters, combat damage read late (Brainstorm), tokens, the opponent's graveyard | `cr_613_4c_*`, `dark_matter_manipulator_deals_damage_with_its_power_as_it_is`, `dark_matter_manipulator_counts_only_its_controllers_graveyard_cards` | tested |
+| Stitcher's Supplier x leaving | Lightning Bolt (dies), Petty Theft (bounced), Leyline of the Void (exiled instead) | `cr_603_10a_stitchers_supplier_mills_three_when_it_dies`, `cr_700_4_stitchers_supplier_bounced_or_exiled_instead_doesnt_mill` | tested |
+| Dryad Arbor x land rules | Omniscience, Show and Tell, Misty Rainforest, the land play and its timing | `cr_305_9_*`, `cr_305_4_*`, `cr_305_3_*`, `cr_205_3_*` | tested |
+| Dryad Arbor x summoning sickness | its mana ability, attacking, blocking | `cr_302_6_*`, `dryad_arbor_attacks_and_taps` | tested |
+| Dryad Arbor x Magus of the Moon, Painter's Servant | a Mountain Dryad creature; colours | `cr_305_7_dryad_arbor_under_magus_of_the_moon`, `cr_204_1_dryad_arbor_is_green_in_every_zone` | tested |
+| Dryad Arbor x removal | Lightning Bolt, Orcish Bowmasters, Fatal Push, Wasteland; Karakas can't | `dryad_arbor_is_a_creature_and_a_nonbasic_land_for_removal`, `karakas_cant_return_dryad_arbor` | tested |
+| The deck's line | Moonshadow, Verdant Catacombs for Dryad Arbor, Stitcher's Supplier | `the_decks_line_moonshadow_a_fetch_for_dryad_arbor_and_stitchers_supplier` | tested |

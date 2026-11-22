@@ -542,6 +542,11 @@ impl Game {
                     Subj::Obj(r) if ev.kind == EventKind::LeavesGraveyard => {
                         self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard && self.card_matches(f, r.idx, &ctx)
                     }
+                    // (A card put into a graveyard is seen there, as it is
+                    // after the event: CR 603.10; ENGINE.md 220.3.)
+                    Subj::Obj(r) if ev.kind == EventKind::PutIntoGraveyard => {
+                        self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard && self.card_matches(f, r.idx, &ctx)
+                    }
                     Subj::Obj(r) => self.live(r) && self.subject_matches(f, r.idx, &ctx),
                     Subj::Player(q) => self.filter_ok(f, Target::Player(q), &ctx),
                     Subj::None | Subj::Item(_) => false,
@@ -857,6 +862,14 @@ impl Game {
     pub(crate) fn end_batch(&mut self) {
         self.leaving.clear();
         self.batching = false;
+        // The cards the move put into graveyards, matched now, in its event
+        // group, with the objects that exist immediately after it (CR 603.6c,
+        // 603.10: "from anywhere" doesn't look back; ENGINE.md 220.3).
+        if !self.gy_arrivals.is_empty() {
+            for ev in std::mem::take(&mut self.gy_arrivals) {
+                self.event(ev);
+            }
+        }
         self.new_event();
         // The cards exiled until one of them left return now, after the
         // event (CR 610.3), together: those returning to the battlefield

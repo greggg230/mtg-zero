@@ -1395,7 +1395,9 @@ fn task_code(t: &Task) -> usize {
         Task::Run(_) => 9,
         Task::PutTriggers { .. } => 10,
         Task::SbaCheck { .. } => 11,
-        Task::PayCosts { .. } | Task::ManaNowCosts { .. } | Task::Emerge { .. } => 12,
+        // (A spell whose mana can't be spent, paid by convoke's taps: a
+        // cost's picks, ENGINE.md 220.1.)
+        Task::PayCosts { .. } | Task::ManaNowCosts { .. } | Task::Emerge { .. } | Task::ConvokePay { .. } => 12,
         Task::CastOption { .. } => 13,
         Task::ChooseModes { .. } => 14,
         Task::ManaNowPick { .. } => 15,
@@ -2992,6 +2994,7 @@ impl Game {
                 | Task::CastOption { id }
                 | Task::ChooseModes { id }
                 | Task::PayCosts { id, .. }
+                | Task::ConvokePay { id, .. }
                 | Task::CastPay { id }
                 | Task::ActPay { id }
                 | Task::CopyTargets { id, .. }
@@ -3058,6 +3061,22 @@ impl Game {
             Task::PayCosts { picked, .. } => {
                 card = frame_card(task);
                 x[ctx::PICKED] = picked.len() as f32 / 4.0;
+            }
+            // Convoke's taps for a spell whose mana can't be spent (ENGINE.md
+            // 220.1): the spell, the creatures picked so far (each a pick, its
+            // permanent's pick floats) and the cost they pay (its total cost
+            // less delve's cards), as a delve's.
+            Task::ConvokePay { id, picked } => {
+                card = frame_card(task);
+                x[ctx::PICKED] = picked.len() as f32 / 4.0;
+                if let Some(i) = self.item_index(*id) {
+                    let item = &self.stack[i];
+                    if let StackKind::Spell { card: c } = item.kind {
+                        if item.alt == 0 || self.item_alt(c, item).is_some() {
+                            cost_floats(x, &self.total_mana(c, item).less_generic(item.delved as u64));
+                        }
+                    }
+                }
             }
             Task::DeclareAttackers { next } => x[ctx::NEXT_ATTACKER] = *next as f32 / 32.0,
             Task::AttackTarget { card: c } => card = Some((self.objs[c.i()].def, None, None)),

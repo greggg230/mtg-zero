@@ -304,9 +304,11 @@ def test_the_specialist_specs_and_presets():
 
 
 def test_every_card_of_the_stew_75s_is_supported_in_best_of_three():
+    # (the first stew's field: Delver, Doomsday, Sneak and Show, and Hogaak - added to the live stew, docs/ENGINE.md 220)
     E = pytest.importorskip('mtgz._engine')
-    for a in D.META3:
-        for b in D.META3:
+    field = D.META3 + (D.LEGACY_HOGAAK,)
+    for a in field:
+        for b in field:
             sp, ev = A.pair_varied_specs(a, b)
             E.mtg_spec_check(sp)
             E.mtg_spec_check(ev)

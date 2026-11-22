@@ -98,8 +98,10 @@ impl Game {
         if kinds & SPEND_OUTSIDE_HAND != 0 && !from_hand {
             a |= SPEND_OUTSIDE_HAND;
         }
-        // A creature spell of a chosen type (ENGINE.md 124.2).
-        crate::doomsday_b::Allow { bits: a, types: self.creature_type_allow(card) }
+        // A creature spell of a chosen type (ENGINE.md 124.2). "You can't
+        // spend mana to cast this spell": its own static ability, however it
+        // is cast (CR 113.6e; Hogaak, ENGINE.md 220.1).
+        crate::doomsday_b::Allow { bits: a, types: self.creature_type_allow(card), no_mana: self.def_of(card).casting.no_mana }
     }
 
     /// The spending restrictions activating an ability of `card` satisfies

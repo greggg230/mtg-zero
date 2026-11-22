@@ -201,6 +201,13 @@ pub enum Mod {
     /// ability's source ("equipped creature gets +1/+1 for each +1/+1
     /// counter on this Equipment").
     PtPerSourceCounter { counter: Counter, p: i32, t: i32 },
+    /// Layer 7c: +p/+t for every `per` cards matching the filter in the
+    /// static ability's controller's graveyard, counted as the
+    /// characteristic is read (not tokens, CR 108.2, 111.1; one unit per
+    /// full group of `per`): "this creature gets +2/+0 for every seven cards
+    /// in your graveyard" (Dark Matter Manipulator; ENGINE.md 220.3; a
+    /// static ability only).
+    PtPerGraveyardCards { filter: Filter, per: u8, p: i32, t: i32 },
     /// Layer 6: it gains "Sacrifice this permanent: Add one mana of a type in
     /// the mask" (Rain of Filth; a mana ability used while paying, together
     /// with its own tap abilities: `pay::SAC_FOR`, ENGINE.md 31).
@@ -253,7 +260,10 @@ impl Mod {
     /// `Game::add_effect` refuses it (the public-state gate's classification,
     /// `public_state::STATIC_ONLY_MODS`, ENGINE.md 142).
     pub fn static_only(&self) -> bool {
-        matches!(self, Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::AttackDespiteDefender | Mod::PowerPlusGreatestMv { .. })
+        matches!(
+            self,
+            Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::PtPerGraveyardCards { .. } | Mod::AttackDespiteDefender | Mod::PowerPlusGreatestMv { .. }
+        )
     }
 
     /// `Mod::Pt` of a card's printed numbers.
@@ -704,6 +714,16 @@ pub enum EventKind {
     /// Recorded before the card moves (CR 603.10a: it looks back in time).
     /// Subjects: the graveyard's owner, the card (as it was there).
     LeavesGraveyard,
+    /// A card (not a token, CR 108.2) was put into a graveyard from any
+    /// zone ("whenever one or more permanent cards are put into your
+    /// graveyard from anywhere", Moonshadow; ENGINE.md 220.3). Recorded once
+    /// the card is there, after the whole event: a trigger on a card put
+    /// into a zone "from anywhere" is never a leaves-the-battlefield ability
+    /// and doesn't look back in time (CR 603.6c, 603.10), so the objects that
+    /// exist immediately after the event are checked (in a simultaneous move,
+    /// at its end: `Game::gy_arrivals`). Subjects: the graveyard's owner, the
+    /// card (as it is there).
+    PutIntoGraveyard,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -764,7 +784,7 @@ impl EventKind {
             E::CardsPutIntoLibrary => (&[Slot::Player], &[]),
             E::AttackersUnblocked => (&[Slot::Player], &[Slot::Defender]),
             E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
-            E::CardDiscarded | E::LeavesGraveyard => (&[Slot::Player], &[Slot::Card]),
+            E::CardDiscarded | E::LeavesGraveyard | E::PutIntoGraveyard => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
             E::BecomesTarget => (&[Slot::Target, Slot::TargetSpell], &[Slot::Controller]),
@@ -1063,6 +1083,49 @@ pub enum Cond {
     /// You attacked with a creature of this subtype (its card's printed
     /// subtypes) this turn ("if you attacked with a Spacecraft this turn").
     AttackedWithSubtype(u16),
+}
+
+/// Does condition `c` read the source of the ability it gates (its
+/// counters, what it is attached to, the cards exiled with it)? Such a
+/// condition can't gate a spell's alternative cost, which is checked for the
+/// caster with no source (`Game::alt_payable`). Exhaustive: a new condition
+/// says.
+pub(crate) fn cond_reads_source(c: &Cond) -> bool {
+    match c {
+        Cond::SourceAttached | Cond::SourceCountersIn(..) | Cond::LinkedTypesAtLeast(_) => true,
+        Cond::All(v) => v.iter().any(cond_reads_source),
+        Cond::ControlAtLeast(..)
+        | Cond::ControlAtMost(..)
+        | Cond::HandExactly(_)
+        | Cond::GraveyardAtLeast(_)
+        | Cond::Delirium(_)
+        | Cond::Revolt
+        | Cond::YourTurnAtMost(_)
+        | Cond::HandAtMost(_)
+        | Cond::DevotionCoversLibrary(_)
+        | Cond::FirstSpellThisGame
+        | Cond::IsMonarch
+        | Cond::GainedLifeThisTurn
+        | Cond::ArtifactEnteredThisTurn
+        | Cond::APlayerControlsNoCreatures
+        | Cond::GainedLifeAtLeast(_)
+        | Cond::OpponentHasMoreCards
+        | Cond::SpellsCastThisTurn { .. }
+        | Cond::LibraryEmpty
+        | Cond::YourTurn
+        | Cond::LifeAtMostHalfStart
+        // ("Other than the source": a spell's source is no permanent.)
+        | Cond::ControlOtherOfColor(_)
+        | Cond::SpellsCastAtLeast(_)
+        | Cond::HasInitiative
+        | Cond::CompletedDungeon
+        | Cond::CityBlessing
+        | Cond::LandsPlayedAtLeast(_)
+        | Cond::OpponentControlsMoreLands
+        | Cond::Void
+        | Cond::OpponentsControlAtLeast(..)
+        | Cond::AttackedWithSubtype(_) => false,
+    }
 }
 
 impl Cond {
@@ -1495,7 +1558,13 @@ impl CardDef {
             } else {
                 0
             })
-            | (if self.trig_mask & (1u64 << EventKind::CountersAdded as u32 | 1u64 << EventKind::CardsPutIntoLibrary as u32 | 1u64 << EventKind::AttackersUnblocked as u32) != 0 {
+            | (if self.trig_mask
+                & (1u64 << EventKind::CountersAdded as u32
+                    | 1u64 << EventKind::CardsPutIntoLibrary as u32
+                    | 1u64 << EventKind::AttackersUnblocked as u32
+                    | 1u64 << EventKind::PutIntoGraveyard as u32)
+                != 0
+            {
                 crate::game::SEEN_RARE_EVENTS
             } else {
                 0
@@ -1983,6 +2052,16 @@ pub struct CastingRules {
     /// 611.3a, 118.9): "Artifact cards and red creature cards in your hand
     /// have warp {2}{R}" (ENGINE.md 99.15).
     pub hand_alt_grants: Vec<HandAltGrant>,
+    /// Its own "You may cast this card from your graveyard" (CR 601.3,
+    /// 113.6f; Hogaak, Arisen Necropolis, ENGINE.md 220.1): its owner may cast
+    /// it from their graveyard for its costs, with its normal timing
+    /// (`cast::route::OWN`).
+    pub own_gy_cast: bool,
+    /// Its own "You can't spend mana to cast this spell" (CR 113.6e, 601.2f-h;
+    /// Hogaak, ENGINE.md 220.1): no mana pays any part of the total cost of
+    /// casting it, however it is cast - its convoke and delve do
+    /// (`doomsday_b::Allow::no_mana`, `Task::ConvokePay`).
+    pub no_mana: bool,
 }
 
 /// An alternative cost a permanent's static ability gives each card in its
