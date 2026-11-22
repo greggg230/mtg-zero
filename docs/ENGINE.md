@@ -44031,3 +44031,309 @@ repros name the commit. The comparison is unchanged: a build with no identity st
 given to the gates; `fault_failures` equal for a 12-character and a full sha, different for "unknown");
 `tests/test_farm_release.py` 19 passed. Python tools only: no build, engine, encoding or worker change. The next
 release (or `farm_release.py release 50205980`) backfills the missing macOS part.
+
+## 229. Payment fixes found by the Hogaak lanes: a payment's twins, castability and delve's need with convoke and improvise; the picks in progress deferred to layout v8 (branch `fix/hogaak-payment`, 2026-11-21)
+
+**Why.** Lane A's Hogaak write-up (220.1.5) found payment defects outside its card; the user asked for them to be fixed
+now (the fix brief's bugs 2-5; bug 1, 601.2g/h's order, is agent M's, numbered at its merge; bug 6 agent E's, 226). Branch
+`fix/hogaak-payment` from hogaak-a 29ca2296, main 45dbf2e1 (220.4) merged into it before the digests were explained and
+re-recorded; main 76973535 (217-222, no engine file), 52d0bf9b (223, a search's finds by place), a99e9ca7 (224-225),
+50205980 (226, fix E), 33720aab (227, a zero-core pin) and e73e64a6 (228, tools only) merged since, the digests checked again on each (229.7). The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
+reachable state, proved here; no docs/shortcuts.md entry), no encoding gap, digests re-recorded on purpose with what
+moved and why, a regression test per bug (CR in the name; castability by brute force), the search impact measured.
+
+| Bug | Root cause | Fix | Where |
+|---|---|---|---|
+| 2 | a payment's class (one option, its first free member picked) grouped sources by definition and ability, never by what tells two permanents apart; and the payment left convoke and improvise out of a permanent Urza can tap | every payment class split into runs of twins (229.2); such a permanent a source both ways | new `engine/src/pay_twins.rs`; `pay.rs` |
+| 3 | `normal_payable` and `alt_payable` counted convoke's and improvise's sources only for a spell of no mana (220.1) | one entry for a spell's payment sources, `Game::spell_classes`, in every castability check (229.3) | `cast.rs`, `eoe_c.rs` |
+| 4 | `PayMana`'s picks in progress are in neither the view nor the input | **deferred to the additive layout v8** (the user's decision): nothing implemented here (229.4) | - |
+| 5 | delve's need counted mana alone for a spell whose mana is spent | the payment's own sources counted (229.5) | `hogaak_a.rs`, `cast.rs` |
+
+No layout or encoding change (layout v7), no zero-core change, no docs/shortcuts.md entry.
+
+### 229.1 Functions changed (for the merge with agent M, who edits the same payment code)
+
+| File | Function | Change |
+|---|---|---|
+| `pay.rs` | `PayMana::min_class` (field) | u8 -> u32 (a payment's classes split into runs, up to one a permanent: `PERMANENT_LIMIT` 4,096) |
+| `pay.rs` | `Game::pay_mana` | its one `min_class` assignment (`u32::try_from`) |
+| `pay.rs` | `Game::payment_classes` | ends with `split_unlike` (229.2) |
+| `pay.rs` | `Game::pay_classes` | `mana_classes` + the new `with_alternatives` (no longer filtered by Urza's `TAP_FOR`) |
+| `pay.rs` | `Game::with_alternatives` | new |
+| `pay_twins.rs` | `Game::split_unlike`, `twin_of`, `ts_sensitive`, `named_objects`; `Twin`, `Own`, `Named` | new module (`lib.rs`: `mod pay_twins;`) |
+| `cast.rs` | `Game::spell_classes` | new |
+| `cast.rs` | `hand_castable`, `route_payable`, `normal_payable`, `alt_payable` | their classes from `spell_classes` (the if/else chains of improvise / convoke / no mana replaced) |
+| `cast.rs` | `x_range` (X paid with life) | `spell_pay_classes` for `mana_classes` |
+| `cast.rs` | `delve` | the Lotus Petal check calls `delve_rest_payable` (was `can_pay_for`) |
+| `eoe_c.rs` | `target_discount_castable` | `spell_classes`, and the spending restrictions casting it satisfies (`Keep::allow`) |
+| `hogaak_a.rs` | `delve_rest_payable` | a spell with convoke or improvise: `spell_pay_classes` + `can_pay_with` |
+| `cost_order.rs` | - | unchanged |
+| `testkit.rs` | `Scenario::battlefield_new`, `Game::set_damage` (+ `Scenario::new_perms`) | new test helpers |
+| `tools/delver_rerecord.py` | `translate` | a payment question no old step matches answered by trial (229.6) |
+| `tools/position_lab.py` | `RULES_EPOCH` | bumped (229.6) |
+### 229.2 Bug 2: a payment's twins (`pay_twins.rs`)
+
+**The defect.** `PayMana` offers its sources by class (`pay::Class`): one option a class, the pick taking the class's
+first free member whose pick leaves the payment payable (18, 49). The class builders (`mana_classes`,
+`convoke_classes`, `improvise_classes`, the shared activations') group by definition and ability - what a source
+yields - and never by the permanent's state or by what names it. So two creatures of one definition, one summoning
+sick or with a +1/+1 counter, were one option of Vote Out's convoke (220.1.5); two Swamps, one played this turn, one
+option of Dark Ritual's {B} (a land that becomes a creature later this turn is summoning sick); two Llanowar Elves, one
+with a counter; the spell's own target and its twin. Which permanent stays untapped is the player's choice (601.2g-h)
+and the rest of the game can tell the results apart: a collapse that is not rules-equivalent, i.e. an approximation.
+
+**The fix.** `Game::payment_classes` (the payment's sources, at each of its decisions) ends with
+`Game::split_unlike`: each class split into runs of **twins**, in member order and in the class's place (so the picks
+still go up the classes in their canonical order, 18). Each run is one option, its first free member picked. Two
+permanents are twins when
+
+* everything of its own the game keeps about each is equal (`Twin`): every field of `Obj` but its identity (slot,
+  incarnation, timestamp; `control_since` and `entered` as the only facts the rules read of them: summoning sickness,
+  CR 302.6, and "entered this turn"), its counters (122), its marks (`Game::marks`, a multiset), token and copy status
+  (111, 707), a face-down permanent's identity (708) and what its controller knows of it, its loyalty activations this
+  turn (606.3), and its other records of this turn keyed by it alone: how many times its abilities resolved
+  (`Game::resolved`), its once-each-turn actions done (`Game::done_once`), whether it attacked (`Player::attacked_with`);
+* nothing else in the state names either of them (`Game::named_objects`: every holder of an object reference - the
+  stack, the agenda's tasks, triggers waiting, held, delayed and temporary triggers, continuous and copy effects, links,
+  marks that name another object, attachments, blocks, attacks on a planeswalker, permissions, LKI records, the EoE
+  wave states, ... - but the payment's own task, which holds its picks, and the pending decision and its answer, so the
+  classes stay alike at each step of the payment); and
+* neither has an ability whose continuous effects its timestamp orders (CR 613.7: static abilities, a Painter's colour,
+  granted abilities, an Equipment's grant, an Aura's control; `ts_sensitive`).
+
+Cards in a hand (a Spirit Guide) keep their classes: the action space names a hand card by its definition (128, 156).
+
+**The proof that twins are interchangeable.** Swap two twins by relabelling the two objects - their slots,
+incarnations, timestamps and battlefield places. Every fact of each is equal (the first condition) except those, and
+the rules read none of the relabelled ones but these: the timestamp orders continuous effects (613.7: excluded by the
+third condition; elsewhere the timestamp orders a simultaneous event's objects canonically, where twins are
+interchangeable, or an event in progress, which no decision interrupts); `control_since` and `entered` are read as
+summoning sickness and "entered this turn" only (`is_sick`, `loyalty_instant_if_entered`, the tokens that entered this
+turn), equal now and so equal for good (both stop being sick as their controller's next turn begins - a control change
+is an effect naming one -, and the turn number only grows); the slot and place are names. No reference names either
+(the second condition), so the relabelling maps the state to itself, and tapping or sacrificing one twin or the other
+gives two states the relabelling maps onto each other: every option, legal action and outcome after one is the
+relabelled one after the other. Every exhaustive pattern of the module (`Game`, `Obj`, `Player`, `StackItem`, `Frame`,
+`Task`, `Mark`, `Choice`, the EoE wave states) fails to compile when a field or variant is added, so a new holder of
+references or a new fact is classified there first (the Hogaak merge's `Game::gy_arrivals`, 220.3, was: a
+simultaneous move's graveyard arrivals name their objects).
+
+Two of the engine's own records read a relabelled fact and are not rules (stated, not changed): the view and the loop
+rule's hash (`Game::view_state`, `loops.rs`, CR 732.2a / MTR 4.4) list permanents by battlefield place with their raw
+`entered` and `control_since`. So "the same state" for the loop rule tells twins apart - but it told the old classes'
+members apart the same way (by place), the payment's pick stays canonical (the first free member, 18), and the
+relabelled states are the same game state for the rules. Comparing the raw turn numbers instead would split every two
+lands played on different turns, nearly every payment, for no difference the rules see.
+
+**What it names on purpose.** A reference by slot names that slot's card whatever its incarnation (a superset: more
+splits, never fewer). Two holders keep a stale value when unused, and are read only while they mean something:
+`Game::leaving_card` (the card whose leave event waits for a 616.1 choice) only while `leaving_choice` is set - it keeps
+its last card, or card 0, otherwise, and named card 0 in every state (the review's catch: two Islands of a test, one of
+them card 0, became two options) -, and `Player::companion` only while the companion is the public card in no zone
+(702.139a; once in the game the slot is a card like any other, 116.2g).
+
+**Urza (and the payment's alternatives).** A permanent another's mana ability taps (Urza, Lord High Artificer's
+"Tap an untapped artifact you control: Add {U}", `TAP_FOR`) was left out of convoke's and improvise's classes (31.4:
+"the same tap"). It is not the same: convoke pays a pip of the creature's colour or {1} and improvise {1}, spending no
+mana, where Urza's ability makes {U} - mana spent, a colour spent (converge, "spend only", Badgermole-style "tapped for
+mana"). Such a permanent is now a source both ways, two options of its one `MY_PERM` id; which one is asked next
+(`PayMana::which`, `ChooseMode`), as for any permanent with several sources. `Game::pay_classes` is `mana_classes` +
+the new `Game::with_alternatives` (no filter).
+
+**The field.** `PayMana::min_class` (the class of the last pick) u8 -> u32: a payment can have up to one class a
+permanent (`PERMANENT_LIMIT` 4,096).
+
+### 229.3 Bug 3: castability counts convoke and improvise for every spell
+
+`normal_payable` and `alt_payable` were handed `mana_classes` by their callers (`cast_alt`, `castable_via`, `eoe_w5`,
+the bots) and added convoke's creatures and improvise's artifacts only for a spell of no mana (220.1). So a spell payable
+only with their help wasn't offered: Kappa Cannoneer (cube, improvise) or Vote Out (EoE, convoke) under Omniscience's
+"without paying its mana cost" offered its mana cost only when mana alone paid it (100.4.10's "found, not done"). One
+entry now gives a spell's payment sources as its payment has them, `Game::spell_classes` (cast.rs): no mana ->
+`no_mana_classes`; convoke or improvise -> `with_alternatives`; classes that hold them already (an `IMPROVISE` source:
+a caller's own `spell_classes`, delve's `delve_classes` of them) kept. Used by `hand_castable`, `route_payable`,
+`normal_payable`, `alt_payable` and `eoe_c::target_discount_castable` (which now also passes the spending restrictions
+casting it satisfies, `Keep::allow`, as its payment does); `x_range`'s X-paid-with-life bound counts them too
+(`spell_pay_classes`). Castability and the payment agree: the brute-force test (229.6) walks every payment path of 600
+random boards.
+
+### 229.4 Bug 4: a payment's picks in progress - deferred to layout v8
+
+`PayMana`'s picks in progress (`chosen`, `multi`, `actors`, `phyrexian_life`, `now` / `which` / `actor_for` and the
+productions offered, `spend`) are in neither `Game::view_of` nor layout v7's input; two payments that differ only in
+what was picked encode alike for both players. Layout v7 can't hold them exactly (its spare floats cover which source
+was picked but not a several-mana source's production, the Phyrexian life or the option meanings of `ChooseMana` /
+`ChooseMode` / `PayPool`), so under the no-encoding-gap rule this branch implements nothing of it (no partial encoding,
+no guard, no spare float used). The user's decision (2026-11-21): **one additive layout v8, built after this branch and
+agent M's are on main**, holding a `payment` tail segment - a token per picked source (its card, reference, kind,
+pool, production, actor, rank), one for the payment (the pool's mana spent, the Phyrexian life, the subject being
+asked) and the option meanings keyed to their options - together with E's (226) stale-reference LKI block. It waits for M's
+601.2g/h change because a mana ability activated mid-cast adds in-progress state the same segment must hold.
+
+### 229.5 Bug 5: delve's need counts convoke and improvise
+
+Delve's "can the rest be paid" (`delve_rest_payable`, hogaak_a.rs; and `delve`'s Lotus Petal check in cast.rs, which
+called `can_pay_for`) counted mana alone for a spell whose mana is spent, so a delve spell with convoke or improvise
+(none in the tables but the test cards; Hogaak, whose mana can't be spent, counted its convoke since 220.1) refused
+graveyard cards it could exile. A spell with convoke or improvise now asks `can_pay_with` over `spell_pay_classes`; every
+other spell `can_pay_for` as before (unchanged games).
+
+### 229.6 Tests, and the tests and data the fix moved
+
+`engine/tests/rules_pay_fixes.rs` (in `rules_suite`), 16 tests, names citing the CR. Bug 2: convoke offers a creature
+its counters tell apart, a summoning-sick one, a damaged one, the spell's own target apart from its twin (Vote Out's
+leftovers: two ways each, one before); twins stay one option; twins stay one option whatever their card slot (card 0,
+229.2); two Llanowar Elves a counter tells apart are two options; a land that entered this turn is apart from an older
+twin; an artifact Urza can tap is offered for improvise too, and an artifact creature for convoke's colour. Bug 3:
+Omniscience still offers Vote Out's and Kappa Cannoneer's mana cost paid with convoke / improvise; the brute force
+`cr_601_2f_702_51a_702_126a_castability_and_the_payment_agree_on_random_boards` (600 random boards of lands, mana
+creatures, artifacts, Sol Ring and Urza, a convoke or improvise spell with one coloured pip: castability, an exhaustive
+count of the board's ways, and the payment walked to the end on every path agree - 402 castable boards, 7,582 payment
+paths, 188 cost choices). Bug 5: delve's need counts convoke, improvise (the two test cards), and a Lotus Petal is delve
+fuel when convoke pays the rest. **On the base** (an export of hogaak-a with only the test file and its helpers): 14 of
+the 15 bug tests fail, "twins stay one option" passes (the card-0 test came later, with its own failure: two rules tests
+of the suite, below).
+
+Moved by the fix (behaviour, not rules, of these tests):
+* `rules_sba::cr_704_5g_...` and `rules_library::a_scry_after_a_revealed_top_card_...` failed on the first merge: their
+  two basic lands, one of them card 0, became two options (the stale `leaving_card`, 229.2) - fixed in `named_objects`,
+  not in the tests.
+* `az::encode_sparse_is_the_rows_non_zeros_with_the_same_key` needs at least 300 rows without a tail token: the changed
+  games gave 280; it plays 14 games of each spec instead of 12 (the check itself unchanged).
+* `tests/test_build.py`'s two round trips allow only "the decision ..." refusals: the mirror's random games now reach a
+  state the builder documents it can't describe (a cloud entry naming a card its owner never saw, ENGINE.md 192), named
+  in a `RARE` set (the test's comment already said "the rare states, by name").
+* **The Delver canary library** (`data/delver_canary_library.json`, ENGINE.md 100.8): `RULES_EPOCH` bumped
+  (1795312390) and the library re-recorded with `tools/delver_rerecord.py rerecord --old-engine <main 45dbf2e1's built
+  checkout> --any-old-engine` (main replays every spot exactly; its engine_sha256 isn't the library's recording one, so
+  the waiver): **72 of 72 spots re-recorded, none dropped**, 25 of them with 43 decisions inserted, every one "PayMana:
+  Tap Volcanic Island for mana" - a Volcanic Island fetched this turn beside an older one, where main's payment ended by
+  itself (one class left). The walk learned that question (`translate`: a PayMana no old step matches - tried option by
+  option, the one whose later states equal the old engine's kept; permanents are never paired anew, so at most one is);
+  no option added or removed at any spot. `delver_rerecord.py check`: 72 of 72 reach their position;
+  `tests/test_canary_library.py` + `tests/test_build.py` 40 passed.
+
+### 229.7 Digests: what moved and why
+
+The bisect (a scratch export of the branch with an environment toggle for each part of the fix, never merged; the
+Mac, bit-identical to the desktop, ENGINE.md 44): **every part off reproduces main's recorded digests exactly** (all
+seven files), so nothing else moved; every part alone:
+
+| digest | main | split (bug 2) alone | Urza filter removed alone | castability (3) / delve (5) alone | **branch** | lines moved |
+|---|---|---|---|---|---|---|
+| cube (`digests.txt`) | 44372545881ef768 | 64d656111d6fdae4 | 687b6323500faa3e | = main | **14e6735d8eb9cb4a** | 129 of 2,500 (r 95, h 34) |
+| cube `DIGEST_ENCODING=0` | a965c3fc8d3bba8a | | | | **5674f63cc335d204** | |
+| constructed | 91b6cf60576961a7 | = branch | = main | = main | **498c263f7048e81d** | 154 of 570 |
+| metagame | be3766d1f943c95c; 4039d04b7971975e since 223 | = branch | = main | = main | 13bcd5302669c67c; **0d13940b6d659a83** on 223 | 36 of 288 |
+| EoE | c3a9c786030f42eb | = branch | = main | = main | **7e45b554b95820ed** | 94 of 160 |
+| dealt | f0bfffd26a70a753 | = branch | = main | = main | **fb7532e8a30a63f4** | 26 of 80 |
+| dealt per seat | c67b186ba7d00e51 | = branch | = main | = main | **7da4211ed6ab4f3e** | 11 of 60 |
+| driver | 6a03572828250b86 | = | = | = | **6a03572828250b86** (equal) | 0 |
+
+The cube's 129 games are the split's 129, one of them (h 379) also the Urza filter's; castability and delve's need move
+no game (their spells - Kappa Cannoneer under a free-cast permission, a delve spell with convoke - never arise in the
+digest games).
+
+**Decision by decision.** Each moved game traced off and on (the same scratch export; `TRACE_PLAY` printing every
+decision of one game, `TRACE_SPLIT` every split class with the facts that differ or the holder that names a member):
+in all 450 moved games and matches the first difference is a payment class split at that step - no other first
+difference, none unexplained. Where it shows first (the digests' games answer one-option decisions by themselves,
+`auto_single`):
+
+| digest | a payment decision gains an option | a payment step main answered by itself (one option) asks | a determinized world's playout (`hash_world`) |
+|---|---|---|---|
+| cube | 65 | 28 | 36 |
+| constructed | 72 | 44 | 38 |
+| metagame | 12 | 16 | 8 |
+| EoE | 17 | 62 | 15 |
+| dealt | 16 | 9 | 1 |
+| dealt per seat | 1 | 9 | 1 |
+
+(The middle column: where main's payment had one option left - so it went on, or ended and gave priority or a trigger
+order - the branch asks between the split runs; e.g. cube r 192: Shifting Woodland's own ability paid with its
+mana, the Woodland whose ability is on the stack and its twin are two options.)
+
+Why the class split (a game can count under several): a member **entered this turn / is summoning sick** and its twin
+isn't (cube 50, constructed 126, metagame 34, EoE 94, dealt 22, dealt per seat 4 - a fetched dual or a land played this
+turn beside an older one, a mana creature cast this turn; and during the opponent's turn a land played on its
+controller's last turn, still sick: CR 302.6); a member **named by the stack** (cube 52, constructed 29, metagame 2,
+dealt 4, dealt per seat 7 - the source of a triggered or activated ability waiting there, a spell's target: tapping the
+targeted land in response is a different game); **named by a continuous effect** (cube 10 - an animated creature land,
+a pumped creature), **by a copy effect** (cube 9), **by a link** (cube 6), **counters** (cube 2: a Celestial Colonnade
+with a +1/+1 counter, Spirit tokens with different counters), a **timestamp-ordered ability** (cube 3). The dealt line
+`r 0` and per-seat `p 0` are equal (traced: no difference in 499 / 763 steps).
+
+Re-recorded once with `DIGEST_WRITE=1` on the Mac at f02256a7 (the values above; `digests_driver.txt` rewritten equal).
+**Main moved twice since** (both merged): 76973535 changes no engine file; 52d0bf9b (223) moves main's metagame digest
+(be3766d1f943c95c -> 4039d04b7971975e). On the merged code (1768d8a1) the bisect again: every part off = main's seven
+recorded files line for line; on, exactly the same games move in every file as before (the metagame's 36 the same 36),
+and only the metagame's combined digest differs from the values above - re-recorded alone: **0d13940b6d659a83**
+(36 of 288 lines from main's). The traces above were taken before 223's merge; the moved games are the same.
+Then a99e9ca7 (224-225, no engine file) and 50205980 (226, fix E: a departed copy's last-known mana value; it moves no
+digest) merged: on 8efb600d every part off = main's seven files line for line again, and every part on = this branch's
+recorded files line for line (the same 129 / 154 / 36 / 94 / 26 / 11 games): nothing re-recorded. 33720aab (227) changes
+no engine file (the zero-core pin only); on its merge 32ff0419 the engine gate finds every digest as recorded (below).
+
+### 229.8 Search impact
+
+2,000 uniform random games a pool (the fuzzer's decks; a scratch test `measure_pay`), every part of the fix off vs on:
+
+| pool | decisions / game | options / decision | PayMana decisions / game | PayMana options / decision |
+|---|---|---|---|---|
+| cube (default) | 436.53 -> 437.09 (+0.13%) | 3.2004 -> 3.1995 | 21.86 -> 21.90 | 3.302 -> 3.305 |
+| delver | 377.33 -> 376.81 (-0.14%) | 2.6800 -> 2.6798 | 5.58 -> 5.61 | 2.157 -> 2.161 |
+| doomsday | 312.60 -> 312.78 (+0.06%) | 2.7988 -> 2.7983 | 4.24 -> 4.28 | 2.233 -> 2.239 |
+| hogaak_a | 306.15 -> 306.80 (+0.21%) | 2.7367 -> 2.7363 | 3.39 -> 3.45 | 2.132 -> 2.139 |
+| hogaak | 244.18 -> 244.11 (-0.03%) | 2.7957 -> 2.7955 | 2.64 -> 2.67 | 2.174 -> 2.185 |
+| eoe | 664.85 -> 667.82 (+0.45%) | 3.5537 -> 3.5632 | 72.31 -> 73.24 | 3.868 -> 3.915 |
+| sneak_show | 241.25 -> 241.04 (-0.09%) | 2.7239 -> 2.7233 | 4.08 -> 4.09 | 2.242 -> 2.244 |
+| cross | 235.50 -> 235.75 (+0.11%) | 2.8128 -> 2.8135 | 3.88 -> 3.93 | 2.283 -> 2.284 |
+
+Small everywhere (the games differ, so the totals move both ways); EoE's most (convoke and many same-name creatures and
+lands): +1.3% payment decisions, +1.2% options a payment decision.
+
+### 229.9 Checks
+
+* **Full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast` on the Mac, incl. `az`'s public-state
+  gate: no new gap - a payment's classes are not part of the input): its first run on the merged code found the stale
+  `leaving_card` name and the three moved tests of 229.6; after them, every binary passed. On the final head (32ff0419,
+  main 33720aab merged) the suite gate's run: **2,896 passed**, 24 binaries (16 new). Pytest: the engine gate's
+  (below), 786 passed.
+* **Fuzz** on the Mac (`tools/fuzz_shards.py`, 24 shards, 12 at once; 0c2482fe, the tested engine), 20,000 games each,
+  every one **PASSED**: default (+1,000 matches) 200 s, eoe 544 s, delver (+1,000 matches, +1,000 post-sideboard) 158 s,
+  doomsday 169 s, hogaak_a 111 s, sneak_show 99 s, cross (+1,000 matches, +1,000 post-sideboard) 171 s, hogaak (+1,000
+  matches, +1,000 post-sideboard) 198 s - which covers the 2,000-game regressions of delver, doomsday, sneak_show, cross
+  and the default pool. The `fuzz` profile, 1,000 games + 50 matches: 19 passed. `FUZZ_CHANCE=10`, 600 games + 30
+  matches: 26,849 chance walks, 14,494 replays whose outcome the force changed; 18 passed, the Murktide-count unit test
+  failing as it does whenever `FUZZ_CHANCE` is set (the known artefact). `FUZZ_BELIEF=2`, 600 games + 30 matches:
+  15,804 belief worlds; 19 passed.
+  (These 20,000-game runs are of 0c2482fe, before main's 223 was merged; the merged engine's are the suite gate's.)
+* **The gates** (this worktree, its Mac steps on the Mac, the desktop's throttled beside the live legacy-meta3 runs;
+  the system Python), on 32ff0419 (main 33720aab merged): `python tools/gate.py suite --fuzz-pools
+  default,eoe,delver_dealt,hogaak,cross` - **GATE PASSED suite 32ff04192975 in 739s** (privacy 0 findings; the full
+  engine suite 2,896 passed; the sharded 2,000-game fuzz of each pool, with 100 matches + 100 post-sideboard where the
+  pool has them; the checkout unchanged; `gates/32ff04192975-suite.json`); `python tools/gate.py engine --tested-sha
+  32ff0419 --expect-digest 14e6735d8eb9cb4a --expect-digest0 5674f63cc335d204` - **GATE PASSED WITH SKIPS engine
+  32ff04192975 in 1233s** (skipped: seven live-run-hazard pytest tests, fenced by the live run here): the digests full
+  14e6735d8eb9cb4a and encoding-free 5674f63cc335d204 (= expected), the formats constructed 498c263f7048e81d, EoE
+  7e45b554b95820ed, driver 6a03572828250b86, metagame 0d13940b6d659a83 and dealt fb7532e8a30a63f4 (each = the recorded
+  file); `az`, `limits`, `hidden` passed; pytest 164 + 238 + 164 + 171 passed and the desktop part 49 (5 skipped); the
+  smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,452 rows, 150 batches);
+  `gates/32ff04192975-engine.json`. (Earlier merges' gates, all passed: suite 506797fe, 94b2b780, 60ccf3d4; engine
+  94b2b780, 878d1623, 60ccf3d4.) After e73e64a6's merge (228, tools only; this section renumbered 228 -> 229):
+  `gate.py engine --tested-sha 32ff0419 ...` on 293843e5 - **GATE PASSED WITH SKIPS engine 293843e54fc9 in 1442s** (the
+  live-run fence; the Mac's full-suite recheck 2,901 passed, every digest as recorded; `gates/293843e54fc9-engine.json`).
+  The next commit adds this paragraph only (docs).
+
+### 229.10 For the merge with agent M and open items
+
+* M edits the same payment code; the functions changed here are 229.1. A payment's classes are `payment_classes`
+  (split into twins at its end): a new step that lists a payment's sources (M's 601.2g activations) should take them
+  from there, or split its own with `split_unlike`, so its options and the payment's agree.
+* `RULES_EPOCH` and the canary library: both branches bump the epoch and may re-record; whichever merges second
+  re-records on the merged engine (`delver_rerecord.py rerecord`, the first one's merged main as the old engine; the
+  walk's PayMana rule of 229.6 stays).
+* The digests of 229.7 are this branch's on main 45dbf2e1; a later merge onto main re-checks them (E's 226 is expected
+  to move none).
+* Bug 4 waits for layout v8 (229.4). The loop rule's hash reading twins' raw turn numbers and places is stated in 229.2,
+  not changed.

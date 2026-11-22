@@ -195,11 +195,12 @@ fn encode_sparse_is_the_rows_non_zeros_with_the_same_key() {
     use zero_search::lookahead::{obs_hash, obs_hash_sparse};
     let names = engine::az::constructed::Decklist::izzet_delver().main_names();
     let mirror = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
-    let mut gs = states(scale(12), 5, 5);
+    // (14 games of each: at least 300 rows without a tail - 12 gave 280 once ENGINE.md 229 moved the games.)
+    let mut gs = states(scale(14), 5, 5);
     let sp = MtgSpec::parse(&mirror).unwrap();
     let mut rng = Rng::new(6);
     let mut h = Heuristic::new(6);
-    for s in 0..scale(12) {
+    for s in 0..scale(14) {
         let mut g = MtgAz::new_game(&sp, 2, 6000 + s).unwrap();
         let mut keys = Vec::new();
         while g.to_move().is_some() {

@@ -23,6 +23,8 @@ pub struct Scenario {
     step: Step,
     active: PlayerId,
     number: u32,
+    /// Permanents that entered this turn (`battlefield_new`).
+    new_perms: Vec<CardIdx>,
 }
 
 impl Scenario {
@@ -30,7 +32,7 @@ impl Scenario {
     /// single-option decisions auto-answered, logging on.
     pub fn new(db: &'static CardDb) -> Scenario {
         let spec = GameSpec { mulligans: false, log: true, ..GameSpec::default() };
-        Scenario { g: Game::empty(db, spec, 1), step: Step::Main1, active: 0, number: 3 }
+        Scenario { g: Game::empty(db, spec, 1), step: Step::Main1, active: 0, number: 3, new_perms: Vec::new() }
     }
 
     pub fn spec(mut self, f: impl FnOnce(&mut GameSpec)) -> Self {
@@ -100,6 +102,17 @@ impl Scenario {
                 self.g.add_counters(c, crate::db::Counter::Loyalty, n.max(0) as crate::num::Count);
             }
         }
+        self
+    }
+
+    /// Permanents that entered the battlefield this turn under `p`'s
+    /// control (summoning sick, CR 302.6; "entered this turn"): as
+    /// [`battlefield`](Self::battlefield), the turn's number set at `start`.
+    pub fn battlefield_new(mut self, p: PlayerId, names: &[&str]) -> Self {
+        let before = self.g.battlefield.len();
+        self = self.battlefield(p, names);
+        let added: Vec<CardIdx> = self.g.battlefield[before..].to_vec();
+        self.new_perms.extend(added);
         self
     }
 
@@ -253,6 +266,10 @@ impl Scenario {
         g.turn.starting = if self.number % 2 == 1 { self.active } else { 1 - self.active };
         g.turn.step = self.step;
         g.turn.normal = self.active;
+        for &c in &self.new_perms {
+            g.objs[c.i()].control_since = self.number;
+            g.objs[c.i()].entered = self.number as u16;
+        }
         g.players[self.active as usize].last_turn = self.number;
         g.players[1 - self.active as usize].last_turn = self.number.saturating_sub(1);
         // Turns begun so far: the starting player has had the odd ones.
@@ -323,6 +340,12 @@ impl Game {
     /// action (no event; ENGINE.md 99.3).
     pub fn set_tapped(&mut self, c: CardIdx, tapped: bool) {
         self.objs[c.i()].tapped = tapped;
+    }
+
+    /// Mark `n` damage on permanent `c` directly (CR 120.3e): a test's setup,
+    /// not a game action (no event, no state-based check).
+    pub fn set_damage(&mut self, c: CardIdx, n: u64) {
+        self.objs[c.i()].damage = n;
     }
 
     /// Player `p` gains control of permanent `c` (as a control-changing
