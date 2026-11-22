@@ -416,8 +416,9 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Interactions)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(40)));
     // (ENGINE.md 229.6: the 601.2g step changed these games; the scan `scan_seeds_for_the_seed_pinned_tests` re-found
-    // 5,202 in interactions seeds 0..32,000, its rows with the enclosing picks for both viewers.)
-    for seed in [5202] {
+    // 12,471 in interactions seeds 0..24,000 (every check, the checkpoint at 40), its rows with the enclosing picks for
+    // both viewers.)
+    for seed in [12471] {
         let p = play(seed, true);
         let mut g = new_game(seed);
         let mut keys = Vec::new();
@@ -435,7 +436,7 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
         assert_eq!(g.fingerprint(), p.fingerprint, "seed {seed}: the replay");
         println!("seed {seed}: an enclosing task's pick tokens by viewer {deep:?}");
         assert!(deep[0] + deep[1] > 0, "seed {seed}: no enclosing task's pick token");
-        if seed == 5202 {
+        if seed == 12471 {
             assert!(deep[0] > 0 && deep[1] > 0, "seed {seed}: {deep:?}");
         }
     }
