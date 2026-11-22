@@ -129,7 +129,7 @@ impl Game {
         }
         // (Its convoke's and improvise's sources too, and the spending
         // restrictions casting it satisfies, as its payment's: ENGINE.md
-        // 221.3.)
+        // 227.3.)
         let classes = self.spell_classes(p, card, classes);
         let keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), ..Default::default() };
         def.discounts.iter().any(|d| {

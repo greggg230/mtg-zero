@@ -115,10 +115,11 @@ def test_a_fork_publishes_as_a_side_run_and_records_its_lineage(tmp_path):
     import delverai_publish as P
     reg = P.fork_registry([str(forks)])
     assert reg[P._norm(dest)] == {'parent': src.replace('\\', '/'), 'at': 300, 'label': 'lr 5e-05', 'won': False}
-    # the same fork again: no second record; --set publish=...: the fork's own choice kept
+    # the same fork again: no second record; --set publish=...: the fork's own choice kept, named for the fork
+    # (for_run, docs/ENGINE.md 224)
     cfg2 = {'publish': {'title': 'The new main', 'side': False, 'forks': [str(forks)]}}
     PUB.on_fork(src, dest, 300, cfg2, {'publish': cfg2['publish']})
-    assert cfg2['publish'] == {'title': 'The new main', 'side': False, 'forks': [str(forks)]}
+    assert cfg2['publish'] == {'title': 'The new main', 'side': False, 'forks': [str(forks)], 'for_run': 'pb2-fork'}
     assert len(json.loads(forks.read_text())['done']) == 2
 
 
@@ -282,3 +283,66 @@ def test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished(tmp_pa
     assert '"state": "finished"' in console, console
     st = runctl.read_state(str(run), 'supervisor')
     assert st['ended'] == 'finished' and st['companion'] is None
+
+
+# ---------------------------------------------------------------- metagame runs publish by default (docs/ENGINE.md 224)
+
+def test_the_metagame_presets_publish_with_the_r1_publishers_options():
+    for name in ('legacy-meta3', 'legacy-meta3-ddwheel'):
+        assert A.PRESETS[name]['publish'] == PUB.META3_PUBLISH
+    for name in ('legacy-meta3-smoke', 'legacy-meta3-ddwheel-smoke'):
+        assert not A.PRESETS[name].get('publish')
+    assert PUB.META3_PUBLISH == {'side': False, 'every': 8, 'games': 9, 'combo_every': 0, 'census': 0, 'device': 'cpu',
+                                 'threads': 4, 'forks': []}
+    assert _cfg(['--preset', 'legacy-meta3-ddwheel'])['publish'] == PUB.META3_PUBLISH
+
+
+def test_combo_every_is_a_publish_option():
+    assert PUB.normalize({'combo_every': 0}) == {'combo_every': 0}
+    cmd = PUB.command('/r', {'combo_every': 0, 'every': 8})
+    assert cmd[cmd.index('--combo-every') + 1] == '0'
+    for bad in ({'combo_every': -1}, {'combo_every': 'none'}, {'combo_every': True}):
+        with pytest.raises(ValueError):
+            PUB.normalize(bad)
+
+
+def test_a_run_that_will_not_publish_says_so_loudly(tmp_path, capsys):
+    run = tmp_path / 'legacy-meta3-x'
+    run.mkdir()
+    assert PUB.companion(str(run), {'publish': {}}) is None
+    assert 'PUBLISH OFF: legacy-meta3-x will not appear' in capsys.readouterr().err
+    assert 'PUBLISH OFF' in (run / 'supervisor.log').read_text(encoding='utf-8')
+
+
+def test_a_publish_setting_copied_from_another_run_publishes_as_a_side_run(tmp_path, capsys):
+    pub = {'title': 'Three decks (run 1)', 'note': 'n', 'side': False, 'for_run': 'legacy-meta3-r1',
+           'state_dir': 'E:/somewhere', 'dry_run': True}
+    own = tmp_path / 'legacy-meta3-r1'
+    own.mkdir()
+    cmd = PUB.companion(str(own), {'publish': pub})['cmd']
+    assert '--side' not in cmd and cmd[cmd.index('--title') + 1] == 'Three decks (run 1)'
+    assert 'ANOTHER RUN' not in capsys.readouterr().err
+    copy = tmp_path / 'legacy-meta3-copy'
+    copy.mkdir()
+    cmd = PUB.companion(str(copy), {'publish': pub})['cmd']
+    assert '--side' in cmd and cmd[cmd.index('--title') + 1] == 'legacy-meta3-copy'
+    assert '--note' not in cmd and '--state-dir' not in cmd
+    assert 'made for legacy-meta3-r1, this run is legacy-meta3-copy' in capsys.readouterr().err
+
+
+def test_a_fork_of_an_unpublished_run_says_it_will_not_publish(tmp_path, capsys):
+    cfg = {'preset': 'legacy-meta3-ddwheel', 'publish': {}}
+    PUB.on_fork(str(tmp_path / 'r1'), str(tmp_path / 'r1-exp'), 50, cfg, {})
+    assert cfg['publish'] == {}
+    assert 'PUBLISH OFF - r1-exp will NOT appear' in capsys.readouterr().err
+
+
+def test_a_fork_of_a_metagame_run_is_a_side_run_made_for_itself(tmp_path, capsys):
+    cfg = {'preset': 'legacy-meta3-ddwheel',
+           'publish': dict(PUB.META3_PUBLISH, title='Three decks (run 1)', for_run='r1', state_dir='E:/s')}
+    PUB.on_fork(str(tmp_path / 'r1'), str(tmp_path / 'r1-exp'), 50, cfg, {})
+    p = cfg['publish']
+    assert p['side'] is True and p['title'] == 'r1-exp: a fork of r1 at 50' and p['for_run'] == 'r1-exp'
+    assert 'state_dir' not in p and p['combo_every'] == 0
+    err = capsys.readouterr().err
+    assert 'names no forks file' not in err and 'PUBLISH OFF' not in err

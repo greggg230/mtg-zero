@@ -42,7 +42,7 @@ from zero.package import GamePackage, register
 from . import deck_reader, decklists
 from .evaldecks import eval_spec
 from .mac import LocalGpuRemote, RunCommitRemote
-from .publish import DELVER_PUBLISH
+from .publish import DELVER_PUBLISH, META3_PUBLISH
 from .yardsticks import DELVER_YARDSTICKS
 from ..sealed.games import REMOTE_EVAL_LOG
 from ..sealed.rolling import SETTINGS as ROLLING_SETTINGS
@@ -284,12 +284,14 @@ PRESETS['delver-bo3-varied-smoke'] = dict(PRESETS['delver-bo3-smoke'], spec=SPEC
 # in each game record (`record_setup`'s "pairing").
 # The training settings are the Delver line's best-of-one preset, `delver-mirror` (mtg-3's: the 128 x 4 token network,
 # 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration, GPU inference and training) -
-# the settings the Delver mirror's best-of-one runs started from, on the same three decks' table - WITHOUT its two
-# Delver-only companions: the delverai publisher (`publish`: it publishes the Delver mirror's site) and the standing
-# yardsticks (`yardsticks`: the Delver mirror's anchors and canary library). A launch adds its own flags as the Delver
-# runs did (network size, evaluation cadence, remotes).
+# the settings the Delver mirror's best-of-one runs started from, on the same three decks' table - with the metagame
+# publisher (`publish` = META3_PUBLISH since 2026-11-21, docs/ENGINE.md 224: every metagame run and every fork of one
+# appears on the Delver AI site unless it says otherwise) and WITHOUT the Delver mirror's standing yardsticks
+# (`yardsticks`: its anchors and canary library). A launch adds its own flags as the Delver runs did (network size,
+# evaluation cadence, remotes, the publisher's title).
 SPEC_META3 = decklists.metagame_spec(decklists.META3, fmt='bo1', max_turns=60)
-PRESETS['legacy-meta3'] = dict(PRESETS['delver-mirror'], spec=SPEC_META3, eval_spec=SPEC_META3, publish={}, yardsticks={})
+PRESETS['legacy-meta3'] = dict(PRESETS['delver-mirror'], spec=SPEC_META3, eval_spec=SPEC_META3,
+                                publish=dict(META3_PUBLISH), yardsticks={})
 # the end-to-end check on CPU: the same spec with mtg-smoke's tiny network and sims (as delver-smoke)
 PRESETS['legacy-meta3-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_META3, eval_spec=SPEC_META3)
 # The Doomsday warm-up ("training wheel", docs/ENGINE.md 180, mtgz.az.forced_find): legacy-meta3 with the forced find in
