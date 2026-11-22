@@ -24,7 +24,8 @@ def nf():
 
 def test_engine_module_registers_the_games():
     from mtgz import _engine as E
-    assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft', 'mtg_eoe']
+    assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft', 'mtg_eoe', 'mtg_v8']
+    assert G.info('mtg_v8')['num_features'] == 56384 and G.info('mtg_v8')['num_actions'] == 1024   # layout v8: v7's head (ENGINE.md 232)
     info = G.info('mtg')
     assert info['num_actions'] == 1024 and info['num_features'] == 56384      # layout v7 (ENGINE.md 125)
     assert G.info('mtg_eoe')['num_features'] == 44212                        # mtg_eoe: layout v6 (ENGINE.md 100.5)
@@ -378,6 +379,95 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
                 a = lo_(xs[:, fmap][:, so['offset']:so['offset'] + so['count'] * so['width']].reshape(1, so['count'], -1))
                 b = ln(xs[:, sn['offset']:sn['offset'] + sn['count'] * sn['width']].reshape(1, sn['count'], -1))
                 assert torch.equal(a, b), so['name']
+
+
+def _eval_one(ev, row, legal, to_move, v, tail_widths):
+    """`ev`'s priors, value and margin on one row (eager, a batch of one; ENGINE.md 232)."""
+    from zero import rows as R
+    x, t, o, tok = row
+    acts = legal if v == to_move else np.zeros(0, np.int64)
+    off = np.array([0, len(acts)], np.int64)
+    n = np.full(1, 2, np.int64)
+    tail = R.Tail(np.array([0, len(t['t_seg'])], np.int64), t['t_seg'], t['t_slot'], t['t_val'], tail_widths)
+    ov = R.Overrides(np.array([0, len(o)], np.int64), o, tok)
+    return ev.evaluate(np.asarray(x, np.float32)[None], n, off, acts, None, tail, ov)
+
+
+def test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit(tmp_path):
+    """ENGINE.md 232: a layout v7 token network (the game `mtg`; random weights, its policy heads too) widened
+    onto layout v8 (the game `mtg_v8`: `zero.net.widen`, tools/fork_run.py's route) computes exactly what it
+    computed: on the same states, played in lockstep in both games (the cube's random decks and the Delver
+    mirror), the widened network on each v8 row (v7's plus v8's tokens: payments, last known information, and
+    the overrides into `pay_options`) gives the v7 network's priors, value and margin on the v7 row bit for bit
+    (eager, CPU). v8's six segments are appended gated, their gates exactly 0; v7's head and segments map one to
+    one. The v7 run's config keeps working: the v7 network is the game `mtg`'s (the encoding guard takes it
+    there) and refused by `mtg_v8` until widened."""
+    import torch
+    import mtgz.az as A
+    from mtgz.az import decklists
+    from zero import rows as R
+    from zero.infer import NetEvaluator
+    from zero.net import EncodingMismatch, TokenNet, check_encoding, encoding_mismatch, save, load, widen
+    info7, info8 = G.info('mtg'), G.info('mtg_v8')
+    torch.manual_seed(7)
+    old = TokenNet(info7['num_features'], info7['num_actions'], A.LAYOUT, d=64, layers=2, heads=4, ff=128, game='mtg').eval()
+    with torch.no_grad():
+        for lin in (old.gen, old.ptr):
+            lin.weight.normal_(0, 0.3)
+            lin.bias.normal_(0, 0.3)
+    check_encoding(old.config, 'mtg')
+    with pytest.raises(EncodingMismatch):
+        check_encoding(old.config, 'mtg_v8')
+    new = widen(old, info8['num_features'], info8['num_actions'], layout=A.LAYOUT_V8)
+    new.config['game'] = 'mtg_v8'
+    assert new.config['layout']['version'] == 8 and encoding_mismatch(new.config, 'mtg_v8') is None
+    g8 = new.gates()
+    assert {k: g8[k] for k in ('payment', 'pay_options', 'lki', 'lki_spells', 'lki_relations', 'find_groups')} == dict.fromkeys(
+        ('payment', 'pay_options', 'lki', 'lki_spells', 'lki_relations', 'find_groups'), 0.0)
+    assert all(g8[k] == v for k, v in old.gates().items())
+    p = str(tmp_path / 'v8.pt')
+    save(new, p)
+    load(p, game='mtg_v8')
+    eo, en = NetEvaluator(old, graphs=False), NetEvaluator(new, graphs=False)
+    w7, w8 = R.layout_tails(old.config['layout']), R.layout_tails(new.config['layout'])
+    E = G.engine()
+    rng = np.random.default_rng(232)
+    seen = {'same row': 0, 'v8 tokens': 0, 'v8 overrides': 0}
+    differ = []
+    specs = [SPEC, decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)]
+    for si, spec in enumerate(specs):
+        for seed in range(3):
+            a, b = E.Game('mtg', spec, 2, seed), E.Game('mtg_v8', spec, 2, seed)
+            k = 0
+            while not a.over and k < 400:
+                legal = np.asarray(a.legal(), np.int64)
+                assert legal.tolist() == list(b.legal())
+                sample = k % 2 == 0 or a.to_move is not None and len(legal) > 1 and k % 5 == 0
+                if sample:
+                    for v in range(2):
+                        x7, t7 = a.encode_row(v)
+                        x8, t8 = b.encode_row(v)
+                        none = (np.zeros(0, np.int32), np.zeros(0, np.int64))
+                        o7, k7 = a.option_overrides(v) if v == a.to_move else none
+                        o8, k8 = b.option_overrides(v) if v == b.to_move else none
+                        new_tok = int(np.sum(np.asarray(t8['t_seg']) >= 25))
+                        new_ov = sum(1 for z in k8 if z >= 0 and R.unpack_tok(int(z))[0] >= 25)
+                        if new_tok == 0 and new_ov == 0:
+                            seen['same row'] += 1
+                        seen['v8 tokens'] += new_tok > 0
+                        seen['v8 overrides'] += new_ov > 0
+                        ra = _eval_one(eo, (x7, t7, o7, k7), legal, a.to_move, v, w7)
+                        rb = _eval_one(en, (x8, t8, o8, k8), legal, b.to_move, v, w8)
+                        for name, u, w in zip(('priors', 'value', 'margin'), ra[:3], rb[:3]):
+                            if not np.array_equal(np.asarray(u), np.asarray(w)):
+                                differ.append((si, seed, k, v, name, new_tok, new_ov, float(np.max(np.abs(np.asarray(u, np.float64) - np.asarray(w, np.float64)), initial=0.0))))
+                x = int(legal[rng.integers(len(legal))])
+                a.step(x)
+                b.step(x)
+                k += 1
+    print(f'widen v7 -> v8: rows {seen}, {len(differ)} answers not bit for bit: {differ[:5]}')
+    assert seen['same row'] > 50 and seen['v8 tokens'] > 20 and seen['v8 overrides'] > 0, seen
+    assert not differ, differ[:10]
 
 
 @pytest.mark.parametrize('old_version, old_features', [(4, 33652), (5, 37620), (6, 44212)])
