@@ -43549,3 +43549,185 @@ glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; co
 skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core's timing flake
 (test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
 (docs).
+
+## 222. The stew: specialists, deck stews and a main stew, distilled upward (branch `feat/stew-distill`, lane 1: the distillation; 2026-11-21)
+
+### 222.1 Several teachers, each on its own rows: `tools/distill.py --sources` and the MTG row selector (zero-core pin c850a5d -> ae3bc6c, zero-core `feat/multi-distill`, docs/az.md 71)
+
+Branch `feat/stew-distill` from main 1e7416c5. **Why.** The stew distils a *deck stew* of deck X from every
+specialist whose pairing includes X, on the rows where X's player acts, and the *main stew* from each row's
+acting deck's deck stew plus a retention share (the stew's design, the rest of section 222). Distillation (62,
+zero-core docs/az.md 13) took one teacher and every row. This lane adds several sources to zero-core's tool and the
+row selector that says, exactly, which deck the acting player of a training row plays.
+
+**zero-core (docs/az.md 71).** `python tools/distill.py --sources SOURCES.json OUT.pt` (this repo's wrapper passes
+it through): a student (`{"init": S.pt}` warm start, or a fresh size), sources `{name, teacher, data, select,
+weight, heldout, config}`, `heldout` "auto" (each source's last shard with selected rows), the `train` block (the
+flags' settings). One window of every source's selected rows, each teacher's answers on its own rows only, every
+batch split by the sources' weights (stratified: a source's share does not depend on its row count), held-out
+agreement per source (KL(teacher || student), top-1, P(win) and margin differences, both networks' losses against
+the shards, per kind of row and per auxiliary target) in the progress lines and in OUT.pt's `extra.distill`
+(the sources file and its sha256, each source's teacher sha256, rows selected and used, the steps). The game package
+answers `select` through a new optional hook, `GamePackage.row_selectors` (a game without one refuses a non-empty
+select). Opt-in: the single-teacher tool is byte for byte the pin's (zero-core's golden test).
+
+**The row selector** (`mtgz/az/rowselect.py`, registered as `row_selectors={'mtg': 'mtgz.az.rowselect:row_select'}`):
+
+```json
+{"actor": "izzet_delver_8016541"}                          rows whose acting player plays that 75
+{"pairing": ["izzet_delver_8016541", "doomsday_8027957"]}  rows of games of that pairing (unordered; [x, x] = x's mirror)
+{"not_pairing": [[a, b], ...]}                              rows of none of those pairings
+```
+
+keys AND-combined, every name one of the shard's run's metagame decks (its config.json's spec: `<run>/config.json`
+beside `<run>/data`, or the source's `config`). A row is its `player`'s view - a value-only row (zero-core docs/az.md
+16) too. What the row holds, exactly (engine `encode.rs`; checked against the engine below):
+
+* **The opponent's deck: the opponent-pool bag** (`bag::OPP_POOL`, 0.25 a copy) is the opponent's whole pool in every
+  row of an open-decklist constructed game: in a best-of-three (`MatchPool::constructed`) its 75, basic lands
+  included, in game 1, at sideboarding and in the post-board games whose 60s are hidden (`known_before` hides
+  nothing of a constructed pool: no first picks); in a best-of-one (`MatchPool::new`) the main and sideboard less the
+  five basic lands (they are not pool cards there). The row's opponent deck is the one deck of the run whose pool
+  equals the bag count for count; none or several: a loud failure (a shard of another run or spec). Two decks with
+  the same pool are refused when the metagame is read.
+* **The acting player's own cards, U**: the bags of its hand, graveyard, exile and library (`MY_HAND`,
+  `MY_GRAVEYARD`, `MY_EXILE`, `MY_LIBRARY`) summed over the identities below the token range (`CUBE_CAP`: a token is
+  no deck card). Each of those zones is its owner's (CR 400.3; the exile bag is written by owner, a delve's promised
+  hand card counts as exiled, the library bag is the frame's own library), so U is a sub-multiset of the player's
+  current deck, itself within its 75. The battlefield bag is left out: it is by controller (a stolen permanent would
+  be the opponent's card). The true deck's 75 always holds U.
+* **Candidates** = the decks whose 75 holds U and that meet the row's opponent deck in a cell of positive weight
+  (either seat order). The true deck is always one of them, so a single candidate IS the deck. A row's selection is
+  **decided** when every candidate gives the same answer (one candidate; or several that agree, e.g. a pairing the
+  opponent's deck alone rules out); a row it cannot decide fails the whole selection, naming the shard, the count
+  and the first such row - never a guess, never a silent drop.
+
+Where that is complete: **a two-deck run and a mirror run** (a stew specialist: decks [C, D] with weights [[0, 1],
+[1, 0]], or [C] with [[1]]) decide every row from the opponent's deck alone (U cross-checks it); **a best-of-one
+metagame** decides every row from U (a best-of-one row always has the player's library and hand: 0 undecided on
+2.2 M real rows below); **a best-of-three metagame of three or more decks** cannot decide `actor` on a
+sideboarding row whose opponent deck several decks meet: no game bag is written while sideboarding (`encode_sideboarding`:
+the match block, the decider's pool list in the `list` segment, nothing of the waiting player's), so U is empty -
+the waiting player's value-only rows hold nothing of its own pool at all. The stew does not need it (its
+specialists are pairing runs; its retention rows come from the best-of-one source run's archive); a run that does
+needs a per-row tag (below).
+
+**By its 75, never by its 60.** The deck is identified by its pool: the opponent-pool bag is the whole 75 whatever 60
+the opponent plays, and U is checked against each deck's 75. So a post-board 60 with sideboard cards in, a dealt
+random 60 (ENGINE.md 154, 168.1: the stew's specialists will be dealt per seat, section 222's lane 3) and a sideboarding
+row whose decision is a table's teacher decision (168.3: one-hot targets) are read alike. The metagame spec refuses
+dealt decks until that lane lands, so it is checked on a fixed mirror: the engine test below plays a best-of-three
+Delver mirror dealt per seat (`dealt_decks` p 1.0, swaps 0-15, `start_game` 1 and 2), and on real data the Delver
+best-of-three line's `delver-bo3-pb3` (dealt per seat at p 0.85 / swaps 0-15, sideboarding by the matchup model's
+tables as teacher decisions; its spec read as a one-deck metagame): iteration 155, **220,211 rows, the opponent-pool
+bag the 75 and the own cards within the 75 on every one**, 205,008 of them (93%) with own cards NOT within the
+registered main 60, 3,762 sideboarding rows.
+
+**Tests** (`tests/test_rowselect.py`, 9): against the engine, every 2nd to 5th decision of random games, both
+players' head rows (`encode_row`): best-of-one metagame of the three decks (18 games of all 9 cells, 2,030 rows),
+best-of-three metagame (6 matches, 4,322 rows, 176 at sideboarding), a Delver|Doomsday pairing run (3 matches, 1,270
+rows) and the Delver mirror (2 matches, 1,086 rows) - the opponent's deck is the pairing's on every row, the true
+deck is among the candidates on every row, and the candidates are one deck on every row but the three-deck
+best-of-three's sideboarding rows (exactly those, where all 3 decks remain); a dealt 60 read by its 75 (the dealt
+Delver mirror above, both start games: the bag the 75 on every row, every row's own cards within the 75, over a
+tenth of the rows' own cards outside the main 60); `evaluate` decides what the opponent alone tells (a pairing ruled
+out on a sideboarding row) and nothing more; the hook on dense and sparse shard files
+(`actor`, `pairing`, `actor` + `not_pairing` equal the truth; `tally`), every refusal (an unknown key, a deck the
+run does not have, a malformed pair, no config, a non-metagame spec, a shard of another metagame), an undecidable
+row failing the selection with its count; `tools/distill.py --sources` through this repo's wrapper on
+best-of-three self-play shards of a Delver|Doomsday pairing run (value-only samples on): sources `actor` Delver and
+`actor` Doomsday, each from its own teacher - their selections partition the rows, both held-out KLs fall.
+
+**Measured: real shards** (read-only; the desktop's CPU, ~10 s a 65,536-row shard for the selection pass):
+
+* **`legacy-meta3-r1`** (its config's spec: the three decks with weights [[3, 1, 1], [1, 1, 1], [1, 1, 1]] - the Delver
+  mirror three times as often -, best-of-one): iterations 1199-1204 (the run was live: its six newest complete
+  iterations then; 1191-1196, the brief's, had left its window by the time the selector ran on them but 1196, read
+  before: 158,835 rows, 0 undecided, the same picture), **803,665 rows, every one decided** (0 undecided, 0
+  refused). By acting deck | opponent deck, rows and share, against each cell's share of games (11 weight units):
+
+  | acting deck \| opponent | rows | share of rows | share of games | rows / game, relative |
+  |---|---:|---:|---:|---:|
+  | Delver \| Delver | 272,408 | 33.9% | 27.3% | 1.24 |
+  | Delver \| Doomsday | 65,810 | 8.2% | 9.1% | 0.90 |
+  | Delver \| Sneak | 68,160 | 8.5% | 9.1% | 0.93 |
+  | Doomsday \| Delver | 68,640 | 8.5% | 9.1% | 0.94 |
+  | Doomsday \| Doomsday | 66,386 | 8.3% | 9.1% | 0.91 |
+  | Doomsday \| Sneak | 62,227 | 7.7% | 9.1% | 0.85 |
+  | Sneak \| Delver | 71,361 | 8.9% | 9.1% | 0.98 |
+  | Sneak \| Doomsday | 61,854 | 7.7% | 9.1% | 0.85 |
+  | Sneak \| Sneak | 66,819 | 8.3% | 9.1% | 0.91 |
+
+  (A cross pairing's games give rows to both acting decks, so each acting cell is compared with half its pairing's
+  games, 1/11.) The sanity check against the game database's shares of 2026-11-18 (`meta3_row_shares`, iterations
+  220-229, uniform weights then: decisions per game Delver mirror 239, Delver v Sneak 155, Doomsday v Sneak 152,
+  Doomsday v Delver 127, Doomsday mirror 190, Sneak mirror 145): with today's weights those predict the pairings'
+  row shares 37% / 16% / 16% / 13% / 10% / 8%; measured 33.9% / 17.4% / 15.4% / 16.7% / 8.3% / 8.3% - the same
+  ordering in size (the Delver mirror the longest per game, by about a quarter), the rest a thousand iterations of
+  changed game lengths. Within each cross pairing the two acting decks' rows are within 4% of each other (both
+  players' rows: decisions and value-only samples).
+* **`legacy-meta3-mirror`** (the Delver mirror alone): iterations 1229-1234, local and farm shards, **1,278,894
+  rows, all Delver | Delver, 0 undecided**.
+* Cost: ~10 s a 65,536-row shard (single-threaded numpy: the shard's sparse arrays read once, the five bags' columns
+  per chunk of 4,096 rows).
+
+**Measured: best-of-three smoke runs and the two-source distillation** (scratch runs, CPU, the tiny
+`legacy-meta3-smoke` network with value-only samples 0.5, root-view leaves and the belief and deck heads, 3
+iterations of 16 matches each: the three-deck best-of-three metagame, a Delver|Doomsday pairing run and a Delver
+mirror run, all `format` bo3, `game_episodes`, `start_game` 1):
+
+* **Rows per best-of-three match against a best-of-one game** (for sizing a specialist's iteration). The same
+  settings and network on the three-deck metagame in both formats, 48 matches against 48 games: best-of-three
+  **30,394 rows, 633 a match** (129 games, 2.69 a match - the untrained networks draw 62 of them at the turn limit,
+  which makes game 3 likelier -, 236 rows a game, sideboarding rows 257 = 5.4 a match, 0.85%); best-of-one **11,480
+  rows, 239 a game**. So a match's rows = its games x a game's rows (236 vs 239) + under 2% at sideboarding: **2.65
+  best-of-one games' rows a match here**. With trained networks: `legacy-meta3-r1` makes ~159k rows of its 2,444
+  best-of-one games an iteration (65 a game, three quarters of them resigned; the Delver mirror ~81, the other cells
+  55-64, from the table above), and `delver-bo3-pb3` (trained Delver mirror networks, best-of-three post-board games
+  only, `start_game` 2) makes 163 rows a match of 1.53 post-board games (1,950 games of 1,276 local matches at its
+  iteration 155; 3,762 of its 220,211 rows, 1.7%, at sideboarding: ~105 rows a post-board game). A full match
+  (`start_game` 1) plays game 1 and then 1.5 games on average in a mirror (pb3's game 3 rate 0.53), fewer in a
+  lopsided pairing: **about 2.5 best-of-one games' rows a match, up to ~3 if post-board games run as long as pb3's**,
+  i.e. ~800-1,000 matches an iteration for the rows of the meta3 run's 2,444 games. An estimate, not a measurement on
+  the stew's own networks: its first iteration's DONE.json (`samples`, `episodes.per_contest`) gives the real one.
+* **The selector on these shards**: the Delver|Doomsday run 18,756 rows (Delver acting 9,512, Doomsday 9,244), the
+  Delver mirror run 29,235 rows - **every row decided by the opponent's deck alone, 0 undecided**; the three-deck run
+  30,394 rows, 30,137 decided by U, **257 undecidable for `actor`** (169 sideboarding decisions, 88 the waiting
+  player's value-only rows at sideboarding): exactly its sideboarding rows, as 222.1 says.
+* **The two-source distillation** (`E:/mtg-zero-scratch/stew/m0/`: `sources_bo3_smoke.json`, `run_proof.sh`; CPU,
+  4 torch threads): a Delver deck stew warm-started from the three-deck run's last checkpoint (32 x 1 tokens with
+  the belief and deck heads), source 1 the Delver mirror run's last checkpoint on its rows where Delver acts, source
+  2 the Delver|Doomsday run's last checkpoint on its rows where Delver acts, weights 1:1 (64 + 64 rows a batch of
+  128), held out "auto", 300 steps at lr 1e-3. Source 1: its 2 training shards' 19,865 rows all selected; source 2:
+  7,606 of 15,229 selected; 27,471 rows in the window (9,185 value-only); held out 4,096 / 1,906 rows. Load and
+  selection 17 s, both teachers' answers 22 s, 0.35 s a step, 152 s in all. Held-out agreement, step 0 -> 300 (each
+  source against its own teacher):
+
+  | source | policy KL | top-1 | P(win) sq. error | belief KL | deck KL |
+  |---|---:|---:|---:|---:|---:|
+  | Delver mirror, Delver acting | 0.0065 -> 0.0019 | 0.46 -> 0.74 | 0.075 -> 0.053 | 1.05 -> 0.38 | 0.18 -> 0.061 |
+  | Delver \| Doomsday, Delver acting | 0.0057 -> 0.0013 | 0.62 -> 0.81 | 0.014 -> 0.0066 | 0.74 -> 0.20 | 0.13 -> 0.031 |
+
+  (the untrained teachers' policies are near uniform, hence the small KLs), the averages in the progress lines and in
+  `extra.distill.heldout`, each source's teacher sha256, rows and selection in `extra.distill.sources`. The same file
+  with an `actor` source on the three-deck run fails before any training: `source 'meta3-bo3:delver': shard ...: 42 of
+  9827 rows the selector {"actor": "izzet_delver_8016541"} cannot decide (row 953: its acting player plays one of
+  [all three] against sneak_show_8014220, and the row holds none of its own cards - a sideboarding row ...)`.
+
+**A per-row tag, not built** (for a best-of-three metagame of three or more decks): the driver would write each row's
+deck index (`MatchState::pairing` of the row's seat) as an optional shard member, the farm worker too (farm
+compatibility), and the selector would read it when present. An engine, core and worker change; nothing in the stew
+needs it.
+
+**Gates.** zero-core (tier `optin-core`'s checks, `feat/multi-distill` ae3bc6c): `cargo test --release` 212 + 3
+passed (a first run, beside the live meta3 run and other sessions' builds, failed the timing-sensitive
+`driver::tests::queued_setups_fill_every_free_slot_when_the_queue_is_long` and passed on the rerun; the branch changes
+no Rust file); `tests/test_distill_sources.py` 11 passed, the two byte-identity goldens among them; `test_distill`,
+`test_net_data`, `test_package_hooks`, `test_tail_train`, `test_shard_thread` 76 passed; privacy check 0 findings;
+`bash tools/smoke_all.sh --with-this-core --build-only`: **games: 3 of 3 checked** (glassroad-zero, caverna-zero,
+kingdombuilder-zero built against ae3bc6c), its core cargo test and build ok, its full core pytest 790 passed, 31
+skipped, 2 failed - both CUDA tests outside the diff on the GPU the live run holds:
+`test_dup_reduce::test_max_is_deterministic_on_cuda_and_matches_the_cpu` (fails alike on c850a5d in its own
+worktree) and `test_token_graphs::test_absent_slots_are_never_read[max]` (a 3e-8 difference; passed on the rerun, on
+c850a5d too). This repo: `tests/test_rowselect.py` 9 passed, with `test_mtg_az`'s distillation test,
+`test_delverai_meta` and `test_privacy`. The `python` gate on 4c11cd0d: GATE PASSED WITH SKIPS (only the live-run fence: 8 `live_run_hazard` tests fenced off beside the live runs; pytest 4 shards 227 + 178 + 163 + 150 passed, the desktop part 48, the run-loop smoke 16 games 0 unfinished; 1,830 s).
