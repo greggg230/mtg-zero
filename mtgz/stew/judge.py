@@ -347,6 +347,11 @@ def _p(x):
     return f"{100 * x['p']:.1f}% +- {100 * x['se']:.1f}"
 
 
+def _c(x):
+    """A table cell: Markdown's column bar escaped (cell ids 'X|Y', net names 'spec:A|B')."""
+    return str(x).replace('|', '\\|')
+
+
 def report_md(rep):
     """The report's Markdown (reports/gen_NNN.md)."""
     g = rep['round']
@@ -357,7 +362,7 @@ def report_md(rep):
         L += ['## Training', '', '| specialist | iterations | matches | games / match | rows | rows / match | hours |',
               '|---|---|---|---|---|---|---|']
         for k, t in tr.items():
-            L.append(f"| {k} | {t.get('from')} -> {t.get('to')} | {t.get('games')} | {t.get('games_per_match')} | "
+            L.append(f"| {_c(k)} | {t.get('from')} -> {t.get('to')} | {t.get('games')} | {t.get('games_per_match')} | "
                      f"{t.get('samples')} | {t.get('rows_per_match')} | {t.get('hours')} |")
         L.append('')
     for net, d in (rep.get('distill') or {}).items():
@@ -368,7 +373,7 @@ def report_md(rep):
                     if any(k in s for s in srcs)]
             L += ['| source | ' + ' | '.join(keys) + ' |', '|---|' + '---|' * len(keys)]
             for s in srcs:
-                L.append(f"| {s.get('name')} | " + ' | '.join(str(s.get(k, '')) for k in keys) + ' |')
+                L.append(f"| {_c(s.get('name'))} | " + ' | '.join(str(s.get(k, '')) for k in keys) + ' |')
             L.append('')
     j = rep.get('judge') or {}
     if j.get('gen_over_gen'):
@@ -376,7 +381,7 @@ def report_md(rep):
               '|---|---|---|---|']
         for k, s in j['gen_over_gen'].items():
             if s:
-                L.append(f"| {k} | {100 * s['score']:.1f}% +- {100 * s['se']:.1f} | {s['elo']:+.1f} +- {s['elo_se']:.1f} | "
+                L.append(f"| {_c(k)} | {100 * s['score']:.1f}% +- {100 * s['se']:.1f} | {s['elo']:+.1f} +- {s['elo_se']:.1f} | "
                          f"{s['matches']} |")
         L.append('')
     if j.get('cells'):
@@ -384,7 +389,7 @@ def report_md(rep):
               '| cell | P(X wins), specialist | deck stew as X | gap deck - spec (Elo) | main as X | main - deck | '
               'main - spec |', '|---|---|---|---|---|---|---|']
         for cid, c in j['cells'].items():
-            L.append(f"| {cid} | {_p(c.get('B'))} | {_p(c.get('A'))} | {_elo(c.get('gap_A_B'))} | {_p(c.get('M'))} | "
+            L.append(f"| {_c(cid)} | {_p(c.get('B'))} | {_p(c.get('A'))} | {_elo(c.get('gap_A_B'))} | {_p(c.get('M'))} | "
                      f"{_elo(c.get('gap_M_A'))} | {_elo(c.get('gap_M_B'))} |")
         L.append('')
     if j.get('field'):

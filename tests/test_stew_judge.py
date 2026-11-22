@@ -165,4 +165,6 @@ def test_report_markdown_renders_a_summary():
                                                                              'policy_kl': 0.1}]}},
            'judge': J.summarize(st, 0, res), 'notes': ['a note']}
     md = J.report_md(rep)
-    assert 'held here' in md and f'| {DEL}|{DD} |' in md and 'generation over generation' in md and 'a note' in md
+    assert 'held here' in md and f'| {DEL}\\|{DD} |' in md and 'generation over generation' in md and 'a note' in md
+    cells = [ln for ln in md.splitlines() if ln.startswith(f'| {DEL}\\|')]
+    assert cells and all(ln.replace('\\|', '').count('|') == 8 for ln in cells)       # 7 columns: no stray bar
