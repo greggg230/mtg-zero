@@ -45653,3 +45653,11 @@ zero-core `main` 2f7263c (its docs/az.md 75; tools, tests and docs only - no cra
 suites through it and `SMOKE_JOBS` (3) games at once. This gate's build-only step runs the pinned core's
 `smoke_all.sh --with-this-core --build-only`, so the three other games now build at once there (96 s for the three
 against 171 s one after the other, zero-core's measurement).
+
+`python tools/gate.py optin-core --baseline-root <a warm worktree of main f74d5fd7, its module built>` on 1b7616de (the
+pin commit; this paragraph is the next commit, docs only): **GATE PASSED WITH SKIPS optin-core 1b7616de28c1 in 2378s**
+(the skips: 17 live-run-hazard tests of the core, fenced). The first core gate with the desktop's `slots` at 8
+(`slots.conf`; 4 until then: 238.5): the builds 190 + 185 + 120 s one after the other (a new pin: nothing from the
+cache), then the group - the four core shards 427 to 745 s of pytest after 120 to 400 s of waiting for a slot (7 to 17
+minutes of waiting at 4 slots), 787 passed; the build-only step 138 s for the three games at once; checkpoint_compat
+identical (3,554 samples per target) in 1,808 s - one step, now the longest of the tier and what its wall time is.
