@@ -44160,7 +44160,7 @@ random boards.
 
 ### 229.4 Bug 4: a payment's picks in progress - deferred to layout v8
 
-(Built: layout v8's `payment` and `pay_options` segments, the game `mtg_v8`, ENGINE.md 236.)
+(Built: layout v8's `payment` and `pay_options` segments, the game `mtg`, ENGINE.md 236.)
 
 `PayMana`'s picks in progress (`chosen`, `multi`, `actors`, `phyrexian_life`, `now` / `which` / `actor_for` and the
 productions offered, `spend`) are in neither `Game::view_of` nor layout v7's input; two payments that differ only in
@@ -45152,7 +45152,12 @@ Checks:
   there): a pre-existing blow-up of the 601.2g / payment search, not this section's (which changes no rule, key or
   legal action). No information-set check failed.
 
-## 236. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg_v8`; branch `feat/layout-v8`, 2026-11-22)
+## 236. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg`; layout v7 the compatibility game `mtg_v7`; branch `feat/layout-v8`, 2026-11-22)
+
+**Naming.** Layout v8 is the game `mtg` and layout v7 the game `mtg_v7` (236.10: the user's decision, zero-core's game
+alias - everything made before layout v8 names `mtg` without a layout record and is `mtg_v7`). 236.1-236.9 were written
+while layout v8 was a game of its own name, `mtg_v8`, and `mtg` meant layout v7: read their `mtg_v8` as today's `mtg` and
+their `mtg` (where it means layout v7) as today's `mtg_v7`.
 
 **Why.** Three public facts the input left out, each found by a Hogaak-era fix and deferred to one additive layout by
 the user's decision of 2026-11-21 (thread T4): P's bug 4 (229.4, `encoding_needs_fix_P.md` option B: a mana payment's
@@ -45176,7 +45181,9 @@ gated segments.
    old run, an old checkpoint and an old record keep. A run moves by `python tools/fork_run.py <checkpoint> <new run>
    --game mtg_v8` (zero-core's widen, 236.5). Making the name `mtg` itself layout v8 needs a zero-core change (an alias
    in the encoding guard and the farm's graph check, so that a checkpoint recorded as `mtg` with layout v7 loads as a
-   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (236.9), not taken here.
+   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (236.9), not taken here. **Superseded
+   by 236.10** (the user: "The v8 layout needs to be the default for mtg going forward"): `mtg` is layout v8, `mtg_v7`
+   layout v7, through zero-core's game alias - and no old run's config is rewritten.
 2. **E's "widen `rf`" is a segment keyed by the stale key.** The orchestrator's requirement - a v7 network widens onto v8
    computing what it did - rules out wider slots (a wider slot is one input product over more columns: equal to float32
    rounding only, 125.7); appended gated tail-only segments are exact (zero-core docs/az.md 43.8). So the stale object's
@@ -45381,7 +45388,7 @@ takes the game from the checkpoint, the run or the record, and starts fresh as `
   worker build's repository name (zero-farm PROTOCOL 7: "mtg" for any MTG Zero run), not a layout; `mtg_eoe` (layout v6)
   as it was.
 
-**Open for the user: the name.** The orchestrator asked for the name `mtg` itself to mean layout v8 (v7 as e.g.
+**Open for the user: the name** (decided and done: 236.10). The orchestrator asked for the name `mtg` itself to mean layout v8 (v7 as e.g.
 `mtg_v7`). zero-core refuses that without a change of its own: its encoding guard compares a checkpoint's recorded game
 with the game it is loaded as, and every checkpoint of every old run (each live run's own included) records `mtg`; the
 farm's graphs carry the game too. Doing it needs (a) a zero-core change - an alias table in the game package (`mtg_v7`
@@ -45410,3 +45417,76 @@ encoding-free d3c144b6cc2977e5, formats and dealt as recorded). On 94b768b6: **G
 live-run fence's one desktop test; a first encoding run failed only `test_cells_local_parallel`'s 300 s timing bound on
 a loaded Mac, as on 191aa9dc, and passed on the rerun); farm compat with `--set game="mtg_v8"` and `--set game="mtg"`:
 both PASSED. The next commit adds this paragraph only.
+
+### 236.10 The name: `mtg` is layout v8, `mtg_v7` the compatibility layout (the user's decision; zero-core's game alias, zero-core docs/az.md 73; 2026-11-22)
+
+The user, on 236.9's open question: "The v8 layout needs to be the default for mtg going forward. Seems better than
+forking everything permanently into a new game." So the game NAME `mtg` is layout v8 for everything new, and layout v7
+survives only as the compatibility game `mtg_v7` for what was recorded before - with no file of an old run rewritten.
+
+**The rule (zero-core feat/game-alias, its docs/az.md 73).** A game package may declare `game_aliases`; MTG Zero's is
+`{'mtg': {'layout': 8, 'before': 'mtg_v7'}}` (`mtgz.az.GAME_ALIASES`). A record that names `mtg` **without a layout
+record** - a run config.json, a checkpoint's network config, an ONNX graph's or reference set's metadata, a shard's meta,
+a records file's header, a farm job's settings, an archive, a campaign state, a replay, a failure record: everything
+written before this change - is the game `mtg_v7`. `mtg` **with** `game_layout` 8 is layout v8; `mtg` with any other
+layout record, or `mtg_v7` with one, is refused (`GameAliasError` / the worker's `resolve_game`), never guessed. Inside a
+process every game name is the resolved one (the engine registers `mtg` = `MtgV8Az` and `mtg_v7` = `MtgAz`; every package
+table is keyed by those names); what is written from now on carries the stamp (`game_layout` 8 next to `mtg`; nothing
+next to `mtg_v7`, so `mtg_v7` reads back as itself and every other game's files are exactly as before).
+
+**What new runs record.** A run's first start records `game_layout` = the name's current revision (zero.run
+`resolve_run_game`): every MTG preset says `game='mtg'` and a new run's config.json saves `"game": "mtg", "game_layout":
+8`; its networks' configs record `game_layout` 8 (`zero.net.stamp_game`), its graphs and reference sets the metadata
+`game_layout` "8", its shards and records headers `game_layout` 8 (the Python writers and the native worker's), its farm
+jobs the settings `game_layout` 8. Presets and package defaults may not set `game_layout` (refused at registration): a
+preset fills a resumed run's missing settings and would otherwise move an old run onto layout v8.
+
+**How an old run resumes unchanged** (legacy-meta3-r1 as the case: its pinned config saves `"game": "mtg"` and no
+`game_layout`, its checkpoints record `mtg`, its preset legacy-meta3-ddwheel now says `mtg`). Re-pinned onto this main
+with no fork: `resolve_run_game` takes the saved config's layout record because the game is the saved config's - none -
+so the run is `mtg_v7` (the preset's `mtg` never lends it a record, and `--game mtg` given again changes nothing); it
+plays, encodes, trains on and evaluates layout v7 (`tokens_of('mtg_v7')`, version 7, 21 tail segments), loads its own
+checkpoints (`mtg` without a record = `mtg_v7`: the guard passes), reads its shards (their meta says `mtg`: `mtg_v7`).
+zero.run writes its config back with `"game": "mtg_v7", "game_layout": null` (as with any new setting; it reads back
+as the same game), and what it writes from then on names `mtg_v7`. Checked on read-only copies in scratch: r1's
+config.json resolved by origin/main and by this branch differs in exactly `game` (`mtg` -> `mtg_v7`) and the new key
+`game_layout` (None); r1's iteration 1234 played by origin/main as `mtg` and by this branch as `mtg_v7` (zero-core's
+selfplay_digest: self-play records, samples and results for 'visits' and 'cq', and a match against the random bot) -
+DIGESTS_R1; the release worker of this commit's `check-config` of r1's own config.json: game `mtg_v7`, no failure. A
+mistake fails loudly: the run moved by `--game-layout 8` (the guard refuses its v7 checkpoints at the start), a v7
+checkpoint loaded as `mtg` (exit 78: "game 'mtg_v7' -> 'mtg'"), a v8 graph given to an `mtg_v7` job (the worker refuses
+it: a network of game "mtg" layout 8, the job plays "mtg_v7").
+
+**A v7 run moves** to layout v8 only by a fork: `python tools/fork_run.py <its checkpoint> <new run> --game mtg` (the
+widen of 236.5; the fork's network config gets `game_layout` 8).
+
+**Old farm workers** (the releases on friends' PCs, built before this change: they know `mtg` = layout v7 and no
+`game_layout`). A run of the new layout declares `game_layout` python_only in its settings' `setting_classes` (zero-core's
+table classes it so, its docs/az.md 61 and 73), so an old build refuses it at `check-config` - before any lease - instead
+of playing layout v7 under the name. Checked with r1's own pool_worker build (f22f63bb...): `check-config` of r1's
+settings moved to `mtg` + `game_layout` 8 gives "REFUSED game_layout = 8: unsupported (unknown to this build; the run's
+definition declares it python_only (setting_classes))", exit 1 (its graphs would also fail its tail check: 27 tail
+segments, its `mtg` has 21). An old build given a resumed v7 run's settings (`mtg_v7`) refuses the unknown game; such a
+run needs a worker build of the commit it is pinned to, as every re-pin does (the pool replays records through the
+run's engine). The release worker of this commit plays `mtg` + `game_layout` 8 as layout v8, `mtg` without a record and
+`mtg_v7` as layout v7 (`GameEntry::of::<MtgV8Az>("mtg").layout(8)`, `GameEntry::of::<MtgAz>("mtg_v7").before_of("mtg")`).
+
+**Call sites changed** (beyond 236.9's): zero-core reads every recorded game through the rule (zero.run, zero.net
+build / load / the guard, the farm pool's headers and shards, RemotePlay's shards, the held-out set, archives,
+zero.farm_h2h and zero.h2h settings, fork_run, distill, failure replays, the gate tools onnx_worker_gate,
+worker_records_gate, worker_parity) and writes the stamp (configs, networks, graphs, shard metas, h2h results, failure
+records; the worker's shard metas, headers and failure files). MTG Zero: the engine's names (`v8::NAME` = `mtg`,
+`NAME_V7` = `mtg_v7`, `MtgSpec::check_game`), the py and worker registrations, `mtgz.az` (tables keyed `mtg` / `mtg_v7`,
+`GAME_ALIASES`, presets `mtg` natively), `mtgz.az.layouts` (`GAME` `mtg`, `GAME_V7` `mtg_v7`, `checkpoint_game` /
+`record_game` resolve, `stamp`), farm_campaign (job settings via `package.set_game`, its state stamped, old states
+resolved), mac (a mirror's config), deck_reader, keep_h2h, sideboard_census; tools farm_compat (a `--set game=` means the
+name's current layout unless `--set game_layout=` too), farm_gates, search_smoke, gamedb and root_view (replays
+resolved), delver_archive, delver_blunders, delverai_blunder_games (stamped), gate.py's checkpoint compat (`--game mtg`);
+the tests' names swapped (`mtg_v8` -> `mtg`, a v7 meaning -> `mtg_v7`) and
+`test_old_runs_stay_layout_v7_and_new_runs_are_layout_v8` rewritten for the alias (a config and a checkpoint saying
+`mtg` without a record resolve to `mtg_v7` and stay so across starts; a new run records `game_layout` 8;
+`--game-layout 8` on an old run is refused by the guard). Unchanged: `--game mtg` of tools/farm_build.py and
+farm_campaign.py and a worker manifest's `game` (the build's repository name, zero-farm PROTOCOL 7); the game records'
+files (zero.gamerec: they name no game; gamedb replays rules, the same in both layouts).
+
+GATES_236_10
