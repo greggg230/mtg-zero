@@ -44014,3 +44014,20 @@ hidden 28 passed; the other three games built against this core; core pytest 755
 live-run-hazard tests (fenced: live runs on this machine). Earlier gates of this branch: 699d413f (the resume fix
 alone, PASSED WITH SKIPS AND FLAKY RETRIES - test_remoteplay::test_a_dying_worker_gives_its_accepted_games_back passed
 on retry) and a412d697 (both fixes on main a99e9ca7, PASSED WITH SKIPS). The next commit adds this paragraph only (docs).
+
+## 228. The Mac farm gates' faults part: the local fuzz build names its commit (ZERO_FARM_ENGINE_COMMIT), so a release keeps its macOS build (tools/farm_release.py; 2026-11-21)
+
+**Why.** The release of main 50205980 (the first with 219 merged) was published WITHOUT its macOS build: `mac-gates`
+FAILED at part (d), "4 keyed differently", although the four injected faults matched on every key that is behaviour
+(neutral site, failure id, mode). The difference was the repro's commit: the Mac's published fuzz build reads it from
+its manifest.json (`(at 50205980e573)`, normalised to `(at <commit>)` by `farm_gates.fault_failures`), while
+`Release.local_fuzz_worker` is a bare `cargo build --profile fuzz` with no manifest, so its failures said
+`(at unknown)`. Every release from 219 on would lose its macOS part the same way.
+
+**What.** `Release.mac_gates` runs farm_gates.py with `ZERO_FARM_ENGINE_COMMIT` = the release worktree's HEAD - the
+worker's own fallback when there is no manifest (zero-core crates/worker/src/fuzz.rs `build_identity`) - so both sides'
+repros name the commit. The comparison is unchanged: a build with no identity still fails it. Test
+`tests/test_farm_release.py::test_the_mac_gates_name_the_commit_for_the_local_fuzz_build` (the environment and command
+given to the gates; `fault_failures` equal for a 12-character and a full sha, different for "unknown");
+`tests/test_farm_release.py` 19 passed. Python tools only: no build, engine, encoding or worker change. The next
+release (or `farm_release.py release 50205980`) backfills the missing macOS part.
