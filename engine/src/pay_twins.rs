@@ -555,6 +555,7 @@ impl Game {
             first_token: _,
             batching: _,
             releasing,
+            gy_arrivals,
             ev_seq: _,
             batch_fired,
             entering_cast: _,
@@ -723,6 +724,14 @@ impl Game {
         }
         for &r in releasing {
             n.obj(r);
+        }
+        // (A simultaneous move's graveyard arrivals, matched once it is over: ENGINE.md 220.3.)
+        for &crate::triggers::Event { kind: _, a, b, amount: _ } in gy_arrivals {
+            for s in [a, b] {
+                if let crate::triggers::Subj::Obj(r) = s {
+                    n.obj(r);
+                }
+            }
         }
         for &(r, _, _) in batch_fired {
             n.obj(r);
