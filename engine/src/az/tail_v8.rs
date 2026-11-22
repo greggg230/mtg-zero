@@ -410,7 +410,6 @@ fn pick_fields(cx: &Cx, x: &mut [f32], pm: &PayMana, s: &Src, rank: usize, prod:
 }
 
 fn state_fields(cx: &Cx, s: &mut [f32], pm: &PayMana) {
-    let g = cx.g;
     s[if pm.payer == cx.me { pm::PAYER_ME } else { pm::PAYER_OPP }] = 1.0;
     if let Some(v) = pm.vm {
         s[pm::VM] = 1.0;
@@ -919,7 +918,7 @@ pub(crate) fn lki_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
                 refs.push(x);
             }
         };
-        let live = |x: ObjRef| g.view_live_place(x);
+        let live = |x: ObjRef| g.view_live_place(viewer, x);
         let mut e: Vec<u64> = vec![g.lki_identity(viewer, r).map_or(u64::MAX, |d| d as u64)];
         let knew = g.lki_identity(viewer, r).is_some();
         e.push(l.copy.map_or(u64::MAX, |(_, vals, mv)| h64(&(if knew { Some(vals) } else { None }, mv))));
