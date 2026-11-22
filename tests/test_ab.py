@@ -253,3 +253,82 @@ def test_the_judge_plays_one_backend_per_experiment(tmp_path, monkeypatch):
     assert ab.judge_backend(s2, out) == ('farm', 'judge.backend', True)
     with pytest.raises(SystemExit, match='judge.backend'):
         ab.normalize(spec(judge={'backend': 'mac'}))
+
+
+# ------------------------------------------------------------------ the farm guards (docs/ENGINE.md 218)
+def test_the_arms_effective_settings_and_the_farm_pause_guard(tmp_path):
+    """An arm is judged by its EFFECTIVE settings: forked, its config.json; not yet, the source's config + the overrides
+    + fork_run's farm rule (its own farm runs, never the source's) - so an arm inheriting the source's farm self-plays on
+    the farm (check then needs the spec's "farm"). farm-pause pauses only the arm's own farm run: one another run
+    directory names too (the source's, from an arm forked before the rule) is refused and nothing is PUT."""
+    src = tmp_path / 'runs' / 'legacy-r1'
+    src.mkdir(parents=True)
+    (src / 'config.json').write_text(json.dumps({'selfplay_remote': 'pool:legacy-r1', 'eval_remote': 'pool:legacy-r1-eval',
+                                                 'pool_build': 'b' * 24, 'lr': 1e-4}))
+    s = ab.normalize(spec(source={'run': str(src), 'iter': 207}, runs_dir=str(tmp_path / 'runs'), out=str(tmp_path / 'o')))
+    eff, notes = ab.effective(s, 'adapt', 207)
+    assert (eff['selfplay_remote'], eff['eval_remote'], eff['pool_build']) == \
+        ('pool:meta3-x-adapt', 'pool:meta3-x-adapt-eval', 'b' * 24)
+    assert eff['p_full_rule'] == 'prior_uncertainty' and eff['iters'] == 207 + 28 and ab.farm_run(eff) == 'meta3-x-adapt'
+    assert any('OWN farm run pool:meta3-x-adapt' in n for n in notes)
+    # an arm that stays here (its override) stays here; one naming the source's farm run is refused
+    s2 = ab.normalize(spec(source={'run': str(src), 'iter': 207}, runs_dir=str(tmp_path / 'runs'),
+                           common={'selfplay_remote': '', 'eval_remote': ''}))
+    assert ab.farm_run(ab.effective(s2, 'ctrl', 207)[0]) is None
+    s3 = ab.normalize(spec(source={'run': str(src), 'iter': 207}, runs_dir=str(tmp_path / 'runs'),
+                           common={'selfplay_remote': 'pool:legacy-r1'}))
+    with pytest.raises(SystemExit, match='never writes into its parent'):
+        ab.effective(s3, 'ctrl', 207)
+    # forked: the arm's config.json is what it runs with
+    d = tmp_path / 'runs' / 'meta3-x-ctrl'
+    d.mkdir()
+    (d / 'config.json').write_text(json.dumps({'selfplay_remote': 'pool:legacy-r1', 'pool_worker': 'w.exe'}))
+    assert ab.effective(s, 'ctrl', 207) == ({'selfplay_remote': 'pool:legacy-r1', 'pool_worker': 'w.exe'}, [])
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def call(self, method, path, body=None):
+            self.calls.append((method, path))
+            return {'state': 'active'}
+    c = Client()
+    with pytest.raises(ab.FarmNotOwn, match='legacy-r1 is not the arm\'s own') as e:
+        ab.farm_pause(s, 'ctrl', client=c)
+    assert 'runs/legacy-r1' in str(e.value) and c.calls == []
+    with pytest.raises(SystemExit, match='FARM PAUSE REFUSED'):
+        ab.main(['farm-pause', str(_spec_file(tmp_path, s)), 'ctrl'])
+    # its own farm run: paused; a farm run another arm names too: refused
+    (d / 'config.json').write_text(json.dumps({'selfplay_remote': 'pool:meta3-x-ctrl'}))
+    assert ab.farm_pause(s, 'ctrl', client=c) == 'meta3-x-ctrl' and [m for m, _ in c.calls] == ['GET', 'PUT']
+    a = tmp_path / 'runs' / 'meta3-x-adapt'
+    a.mkdir()
+    (a / 'config.json').write_text(json.dumps({'selfplay_remote': 'mac', 'eval_remote': 'pool:meta3-x-ctrl'}))
+    with pytest.raises(ab.FarmNotOwn, match='meta3-x-adapt'):
+        ab.farm_pause(s, 'ctrl', client=c)
+    other = tmp_path / 'runs' / 'someone-else'
+    other.mkdir()
+    (other / 'config.json').write_text('{}')
+    (other / 'selfplay_remotes').write_text('pool:meta3-x-adapt\n')
+    (a / 'config.json').write_text(json.dumps({'selfplay_remote': 'pool:meta3-x-adapt'}))
+    assert ab.farm_owners(s, 'adapt', 'meta3-x-adapt') == [str(other).replace('\\', '/')]
+
+
+def _spec_file(tmp_path, s):
+    p = tmp_path / 'spec.json'
+    p.write_text(json.dumps({k: s[k] for k in ('id', 'title', 'source', 'iterations', 'arms', 'runs_dir', 'out')}))
+    return p
+
+
+def test_the_yardsticks_say_when_farm_settings_do_nothing():
+    """mtgz.az.farm_campaign.run_pool_note (the yardstick watcher logs it): pool_* settings with no farm pool in
+    selfplay_remote do nothing and keep the yardsticks local - said; a pool without its build or worker - said; a pool,
+    or no farm settings at all - nothing."""
+    from mtgz.az import farm_campaign as C
+    from zero import run as R
+    cfg = dict(R.DEFAULTS, selfplay_remote='', pool_build='b' * 24, pool_variants='gpu=fp16')
+    note = C.run_pool_note(cfg)
+    assert 'pool_build, pool_variants' in note and 'names no pool:<farm run>' in note
+    assert 'pool_build / pool_worker are not set' in C.run_pool_note(dict(R.DEFAULTS, selfplay_remote='pool:x'))
+    assert C.run_pool_note(dict(cfg, selfplay_remote='pool:x', pool_worker='w.exe')) is None
+    assert C.run_pool_note(dict(R.DEFAULTS)) is None

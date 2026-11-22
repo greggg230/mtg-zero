@@ -74,7 +74,8 @@ FAILED with the retry command (`ab.py publish SPEC`), exit 3; the judge's files 
 
 THE FARM BUILD: an override `"pool_build": "published"` (in `common` or an arm) is the published farm build of the
 code's commit (`code.sha`, else its worktree's HEAD; "published:<rev>" another commit) with its pool_runtime,
-pool_worker and pool_alternates unless the overrides give them (tools/farm_release.py lookup; docs/ENGINE.md 196).
+pool_worker, pool_alternates (its macOS build only when the arm's settings pass the platform check) and pool_variants
+unless the overrides give them (tools/farm_release.py lookup; docs/ENGINE.md 196, 218).
 
 PER-ARM CODE (code.arms): an arm whose engine differs (an A/B of an engine change) trains from its own pinned
 worktree: its supervisor, fork_run, pause_run and farm gates run there (`check` checks each worktree's sha and engine
@@ -94,6 +95,16 @@ returns it minus alternates[].problems) when the arm ends, so the farm stops ser
 
 STOP: `ab.py stop SPEC`; `go` exits when an arm stops before its last iteration (resume: `ab.py launch SPEC ARM`, or
 `go` again: complete arms are skipped). ROLLBACK: stop; delete the arms' run directories; the source was never touched.
+
+FARM GUARDS (docs/ENGINE.md 218, zero-core docs/az.md 70): an arm never self-plays or evaluates in the source's farm
+runs - tools/fork_run.py gives an arm that does not override selfplay_remote / eval_remote its own farm runs, named after
+the arm's run directory (the source's pool_* settings kept), and refuses an override naming the source's. `check`,
+`fork` and the farm gates judge each arm by its EFFECTIVE settings (`effective`: its forked config.json, else the
+source's config + the overrides + fork_run's farm rule), so an arm that inherits the source's farm needs the spec's
+"farm" too. `farm-pause` (and `go` after an arm) pauses only the arm's OWN farm run: one that the source, another arm or
+any other run directory under runs_dir also names is refused (FARM PAUSE REFUSED), never paused. An arm that stays on
+this machine beside a published farm build needs `selfplay_local_reason` (in common or the arm) at its first start -
+the run refuses it otherwise (exit 78).
 """
 import argparse
 import json
@@ -207,6 +218,50 @@ def run_dir(s, arm):
     return os.path.join(s['runs_dir'], s['run_prefix'] + arm).replace('\\', '/')
 
 
+def effective(s, arm, k, ov=None):
+    """The settings the arm runs with (docs/ENGINE.md 218): its forked config.json once forked (fork_run applied the
+    overrides and its farm rule), else the source's config.json + the overrides (`ov`, default `overrides`) + the farm
+    changes fork_run will make (zero.tools.fork_run.fork_farm: its own farm runs; SystemExit for an override naming the
+    source's) -> (settings, the farm notes)."""
+    d = run_dir(s, arm)
+    cfg = jload(os.path.join(d, 'config.json'))
+    if isinstance(cfg, dict):
+        return cfg, []
+    src = jload(os.path.join(s['source']['run'], 'config.json'), {}) or {}
+    ov = overrides(s, arm, k) if ov is None else ov
+    from zero.tools.fork_run import fork_farm
+    changes, notes = fork_farm(src, ov, d, source=s['source']['run'])
+    return dict(src, **ov, **changes), notes
+
+
+class FarmNotOwn(RuntimeError):
+    """`farm_pause`: the arm's farm run is not its own (another run directory names it too): not paused."""
+
+
+def farm_owners(s, arm, fr):
+    """Every other run directory whose settings name farm run `fr` (selfplay_remote or eval_remote `pool:<fr>`, or its
+    selfplay_remotes file; zero.tools.fork_run.farm_runs): the source run, the other arms, every run under runs_dir ->
+    [directory]."""
+    from zero.tools.fork_run import farm_runs
+    norm = lambda p: os.path.normcase(os.path.abspath(p))  # noqa: E731
+    me = norm(run_dir(s, arm))
+    dirs = [s['source']['run']] + [run_dir(s, a) for a in s['arms']]
+    if os.path.isdir(s['runs_dir']):
+        dirs += [os.path.join(s['runs_dir'], x) for x in sorted(os.listdir(s['runs_dir']))]
+    out, seen = [], {me}
+    for d in dirs:
+        if norm(d) in seen:
+            continue
+        seen.add(norm(d))
+        cfg = jload(os.path.join(d, 'config.json'))
+        if not isinstance(cfg, dict):
+            continue
+        f = farm_runs(cfg, d)
+        if fr in f['selfplay'] or fr == f['eval']:
+            out.append(d.replace('\\', '/'))
+    return out
+
+
 def judge_dir(s):
     return os.path.join(s['out'], 'judge')
 
@@ -250,7 +305,10 @@ def published_build(s, o, arm=None):
     if e is None:
         raise SystemExit(f'pool_build {v!r}: no published farm build for {rev} of {wt} (python tools/farm_release.py release {rev})')
     out = dict(o)
-    for key, val in FB.pool_settings(e).items():
+    # (the macOS alternate only when the arm's settings - the source's with the overrides - pass the platform check)
+    src = (s.get('source') or {}).get('run')
+    src = (jload(os.path.join(src, 'config.json'), {}) or {}) if src else {}
+    for key, val in FB.pool_settings(e, cfg=dict(src, **o), log=print).items():
         if key == 'pool_build' or key not in o:
             out[key] = val
     return out
@@ -341,8 +399,16 @@ def check(s):
         ov = overrides(s, arm, k)
         print(f"  {arm} ({role}, {s['labels'][arm]!r}): {run_dir(s, arm)} iters {k + 1}..{k + s['iterations']}: "
               f"{json.dumps(ov)}")
-        if farm_run(ov) and s['farm'] is None:
-            raise SystemExit(f'{arm} self-plays on the farm ({farm_run(ov)}): the spec needs "farm": {{...}} (the gates)')
+        # (the arm's EFFECTIVE settings, docs/ENGINE.md 218: an arm that inherits the source's farm self-plays on its
+        # own farm run - fork_run's rule - and needs the gates as much as one whose overrides name a pool)
+        eff, notes = effective(s, arm, k, ov)
+        fr = farm_run(eff)
+        print(f"     self-play: {'farm run ' + fr if fr else 'this machine only'}"
+              + (f"; evaluation: {eff['eval_remote']}" if str(eff.get('eval_remote') or '').startswith('pool:') else ''))
+        for n in notes:
+            print(f'     {n}')
+        if fr and s['farm'] is None:
+            raise SystemExit(f'{arm} self-plays on the farm ({fr}): the spec needs "farm": {{...}} (the gates)')
     print(f"code: {wt} at {head[:12]}; python {python(s)}; out {s['out']}")
     pub = s['publish']
     if pub['h2h'] or pub['live']:
@@ -715,6 +781,11 @@ def farm_pause(s, arm, client=None):
     fr = farm_run(jload(os.path.join(run_dir(s, arm), 'config.json'), {}) or {})
     if not fr:
         return None
+    # (only the arm's own farm run, docs/ENGINE.md 218: an arm forked before fork_run's farm rule may name the source's
+    # - pausing it would stop the source's farm self-play)
+    others = farm_owners(s, arm, fr)
+    if others:
+        raise FarmNotOwn(f'{arm}: farm run {fr} is not the arm\'s own - {", ".join(others)} name(s) it too: NOT paused')
     if client is None:
         from zero import farm_def as FD
         client = FD.Client()
@@ -749,6 +820,8 @@ def go(s, publish=True, judge_too=True):
         if s['farm'] and s['farm']['pause_when_done']:
             try:
                 farm_pause(s, arm)
+            except FarmNotOwn as e:        # (never another run's farm run; the arm's result stands)
+                print(f'{arm}: FARM PAUSE REFUSED: {e}', flush=True)
             except Exception as e:  # noqa: BLE001  (the arm's result stands; retried by hand)
                 print(f'{arm}: FARM PAUSE FAILED ({e}): ab.py farm-pause SPEC {arm}', flush=True)
         if not ok:
@@ -790,7 +863,10 @@ def main(argv=None):
     elif a.cmd == 'farm-pause':
         if a.arm not in s['arms']:
             ap.error(f'farm-pause: an arm ({", ".join(s["arms"])})')
-        farm_pause(s, a.arm)
+        try:
+            farm_pause(s, a.arm)
+        except FarmNotOwn as e:
+            raise SystemExit(f'FARM PAUSE REFUSED: {e}') from None
     elif a.cmd == 'status':
         status(s)
     elif a.cmd == 'stop':

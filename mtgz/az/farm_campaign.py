@@ -1483,3 +1483,24 @@ def run_pool(cfg):
         return None
     return {'farm': farm, 'build_id': cfg['pool_build'], 'runtime': cfg.get('pool_runtime'),
             'worker': cfg['pool_worker'], 'min_agent': cfg.get('pool_min_agent') or None}
+
+
+def run_pool_note(cfg):
+    """Why a run with farm settings gets no farm yardsticks (docs/ENGINE.md 218; `run_pool` None): pool_* settings set
+    while `selfplay_remote` names no `pool:<farm run>` (they do nothing - zero.run warns at the run's start too, zero-core
+    docs/az.md 70), or a pool without pool_build / pool_worker -> the line for the yardsticks' log, or None (a farm pool,
+    or no farm settings at all: local by plain choice)."""
+    if run_pool(cfg) is not None:
+        return None
+    from zero import run as R
+    rem = cfg.get('selfplay_remote') or ''
+    names = [x.strip() for x in (rem.split(',') if isinstance(rem, str) else rem) if str(x).strip()]
+    farm = next((x[5:] for x in names if str(x).startswith('pool:')), None)
+    if farm:
+        return (f'the yardsticks play here: selfplay_remote names pool:{farm} but pool_build / pool_worker are not set '
+                f'(the farm path needs both)')
+    keys = sorted(k for k in R.DEFAULTS if k.startswith('pool_') and k in cfg and cfg[k] != R.DEFAULTS[k])
+    if not keys:
+        return None
+    return (f'the yardsticks play here, not on the farm: the run sets {", ".join(keys)} but selfplay_remote names no '
+            f'pool:<farm run> (those settings do nothing; attach the farm, or drop them - docs/ENGINE.md 218)')
