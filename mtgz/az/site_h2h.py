@@ -1,8 +1,9 @@
 """Results to delverai's Head-to-heads tab (#/h2h; docs/ENGINE.md 193): the `--publish EXPERIMENT` option of
-`python -m mtgz.az.h2h`, `python -m mtgz.az.keep_h2h`, `tools/run_yardsticks.py cells-match` and `tools/ab.py`'s
-judge. The site's own uploader does the posting (delverai's tools/upload_h2h.py: the record's shape, the sides'
-labels, the path check, the merge into the experiment's record); this module finds it, checks before a long
-measurement starts that the post can work, saves the result and runs the uploader on it when the measurement ends.
+`python -m mtgz.az.h2h`, `python -m mtgz.az.keep_h2h`, `tools/run_yardsticks.py cells-match`, `tools/ab.py`'s
+judge and `tools/farm_campaign.py collect` (the last two by default: docs/ENGINE.md 225). The site's own uploader
+does the posting (delverai's tools/upload_h2h.py: the record's shape, the sides' labels, the path check, the merge into
+the experiment's record); this module finds it, checks before a long measurement starts that the post can work, saves
+the result and runs the uploader on it when the measurement ends.
 
   --publish EXPERIMENT     the experiment's id on the site (h2h.<id>; letters, digits, . _ -)
   --title T                its title; an experiment already on the site keeps its own (read back before the run;
@@ -86,11 +87,12 @@ def site_experiment(exp, url=None):
         raise
 
 
-def check(o, look_up=True):
+def check(o, look_up=True, default_title=None, default_description=None):
     """Before the measurement: the post can work (the uploader there, a key, a valid id, a title: the site's when
     the experiment exists and none was given) - else SystemExit. Fills o.title / o.description / o.publish_link from
     the site's record when they were not given (so a match added later never trips the uploader's 'another title'
-    refusal). Returns o."""
+    refusal), else from `default_title` / `default_description` (a tool that publishes by default: a new experiment
+    named for it, tools/farm_campaign.py collect). Returns o."""
     if not o.publish:
         return o
     if not NAME_RE.match(o.publish):
@@ -113,6 +115,10 @@ def check(o, look_up=True):
             o.description = have.get('description') or ''
         if o.publish_link is None:
             o.publish_link = have.get('link')
+    if not have:
+        o.title = o.title or default_title
+        if o.description is None:
+            o.description = default_description
     if not o.title:
         raise SystemExit(f'--publish {o.publish}: a new experiment needs --title')
     return o

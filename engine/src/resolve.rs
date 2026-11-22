@@ -575,15 +575,9 @@ impl Game {
                 None => 0,
             },
             Amount::TappedPower => self.tapped_power(f),
-            Amount::EventSpellMv => match f.ev.obj {
-                Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack => self.mana_value_of(r.idx) as W,
-                Some(r) => self
-                    .spell_lki
-                    .iter()
-                    .find(|x| x.0 == r)
-                    .map_or(0, |x| self.db.def(x.1).mana_value() as W + x.2.x as W * self.db.def(x.1).x_pips as W),
-                None => 0,
-            },
+            // (As it last existed on the stack: the mana value recorded as it
+            // left, by the rule that reads it now; ENGINE.md 226.)
+            Amount::EventSpellMv => f.ev.obj.map_or(0, |r| self.spell_mana_value_lki(r) as W),
             Amount::ControllerLife => self.players[f.controller as usize].life.max(0) as W,
             Amount::MulticoloredPermanents => {
                 self.permanents_of(f.controller).filter(|&c| self.colors_of(c).count_ones() >= 2).count() as W

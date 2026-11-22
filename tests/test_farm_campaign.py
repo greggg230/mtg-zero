@@ -75,13 +75,20 @@ class Fake:
         if method == 'GET':
             if cid not in self.campaigns:
                 return 404, json.dumps({'error': 'not_found', 'message': cid}).encode()
-            return 200, json.dumps(dict(self.campaigns[cid], campaign=cid, cursor=self.campaigns[cid]['seed_base'],
-                                        definition=df and {k: df[k] for k in ('version', 'sha256', 'key')})).encode()
+            got = dict(self.campaigns[cid], campaign=cid, cursor=self.campaigns[cid]['seed_base'],
+                       definition=df and {k: df[k] for k in ('version', 'sha256', 'key')})
+            # (the coordinator's GET: each alternate with its `problems`, gpu "any" when none was put)
+            got['alternates'] = [dict(x, problems=[]) for x in got.get('alternates') or []] or None
+            got['gpu'] = got.get('gpu') or 'any'
+            return 200, json.dumps(got).encode()
         body = json.loads(data)
         assert set(body) == set(FC.FIELDS), body
         assert df, 'a definition before the campaign'
         doc = df['doc']
         assert body['build_id'] in doc['builds'] and doc['jobs']['fuzz'] == {'mode': body['mode'], 'env': body['env']}
+        # every alternate in the definition's builds, each a {build_id, when: {platform}} as the coordinator takes it
+        for x in body['alternates'] or []:
+            assert set(x) == {'build_id', 'when'} and set(x['when']) == {'platform'} and x['build_id'] in doc['builds']
         created = cid not in self.campaigns
         self.campaigns[cid] = body
         return 200, json.dumps({'ok': True, 'created': created, 'cursor': body['seed_base']}).encode()
@@ -105,7 +112,8 @@ def test_create_update_pause_and_from_existing(tmp_path, monkeypatch, capsys):
     assert rc == 0 and 'fuzz-check delver-games ok' in err
     body = fake.campaigns['delver-test']
     assert body == {'build_id': bid, 'mode': 'delver-games', 'env': {'FUZZ_POOL': 'delver'}, 'seed_base': 20000000,
-                    'chunk': 'auto', 'priority': 0.3, 'state': 'active', 'needs': None, 'share': None}
+                    'chunk': 'auto', 'priority': 0.3, 'state': 'active', 'needs': None, 'share': None,
+                    'alternates': None, 'min_agent': None, 'gpu': None, 'providers': None}
     calls = STUB.calls(stub['log'])
     assert len(calls) == 1 and calls[0]['token_ok'] and not any(TOKEN in x for x in calls[0]['argv'])
     assert calls[0]['argv'][:2] == ['define', os.path.join(str(tmp_path / 'defs'), 'campaign', 'delver-test', '1', 'definition.json')]
@@ -184,3 +192,80 @@ def test_refusals_publish_nothing(tmp_path, monkeypatch, capsys):
     paths = [c['argv'][1] for c in STUB.calls(stub['log'])]
     assert len(paths) == 2 and paths[0] == paths[1] and paths[0].endswith(os.path.join('x', '1', 'definition.json'))
     assert fake.campaigns['x']['mode'] == 'games' and STUB.current(stub['state'], 'campaign', 'x')['version'] == 1
+
+
+def _mac_build(tmp_path, dist, bid, commit=None, platform='macos-arm64', profile=None, name='mtg-test-fuzz-macos'):
+    """A signed-looking macOS build directory beside the test build (its manifest: platform, entry mtgz-worker; the
+    executable a placeholder: it is never run here) -> its build_id."""
+    import glob
+    main = json.loads(open(glob.glob(os.path.join(dist, 'mtg-test-release', 'manifest.json'))[0], encoding='utf-8').read())
+    d = os.path.join(dist, name)
+    os.makedirs(d)
+    exe = b'\xcf\xfa\xed\xfe placeholder for a Mach-O executable'
+    with open(os.path.join(d, 'mtgz-worker'), 'wb') as f:
+        f.write(exe)
+    man = {'manifest': 1, 'kind': 'worker', 'version': name, 'created': 2, 'game': 'mtg',
+           'engine_commit': commit or main['engine_commit'], 'core_commit': '0' * 40, 'profile': profile or main['profile'],
+           'aw': 1, 'min_agent': '0.3.0', 'entry': 'mtgz-worker', 'platform': platform,
+           'files': [{'path': 'mtgz-worker', 'sha256': hashlib.sha256(exe).hexdigest(), 'size': len(exe)}]}
+    raw = json.dumps(man, indent=2).encode()
+    with open(os.path.join(d, 'manifest.json'), 'wb') as f:
+        f.write(raw)
+    return hashlib.sha256(raw).hexdigest()[:24]
+
+
+def test_alternates_a_macos_build_per_campaign(tmp_path, monkeypatch, capsys):
+    """docs/ENGINE.md 219 (zero-farm PROTOCOL 11.4): --alternate puts the macOS fuzz build as the campaign's macOS
+    alternate and signs it into the definition's builds; an update, a pause and a share change keep it (a PUT is the
+    whole configuration); --no-alternates removes it; a mode macOS must not play (the libm refusals, docs/ENGINE.md
+    197.3), another engine's build, the build's own platform or two of one platform are refused before anything is
+    signed or put."""
+    stub = STUB.setup(monkeypatch, tmp_path, TOKEN)
+    dist, bid = _build(tmp_path)
+    mac = _mac_build(tmp_path, dist, bid)
+    fake = Fake()
+    common = ['--dist', dist, '--key', stub['key'], '--farm-release', stub['exe'], '--defs-dir', str(tmp_path / 'defs')]
+    rc, out, err = _run(['create', 'g-test', '--build', bid, '--mode', 'games', '--seed-base', '100', '--alternate', mac,
+                         *common], fake, capsys)
+    assert rc == 0 and f'alternate {mac}' in err and '--platform macos-arm64 ok' in err
+    alt = [{'build_id': mac, 'when': {'platform': 'macos-arm64'}}]
+    assert fake.campaigns['g-test']['alternates'] == alt
+    doc, _ = FD.load_local('campaign', 'g-test', root=str(tmp_path / 'defs'))
+    assert doc['builds'] == [bid, mac] and doc['version'] == 1
+    # kept by an update of something else (the definition still says this: not re-signed), a share change, a pause
+    _run(['update', 'g-test', '--priority', '0.4', *common], fake, capsys)
+    _run(['update', 'g-test', '--share', '0.5', *common], fake, capsys)
+    _run(['pause', 'g-test', *common], fake, capsys)
+    assert fake.campaigns['g-test']['alternates'] == alt and fake.campaigns['g-test']['state'] == 'paused'
+    assert len(STUB.calls(stub['log'])) == 1
+    # the steward's put of a share (tools/fuzz_steward.py put_campaign: current_fields of GET, then PUT) keeps it too
+    got = json.loads(fake('GET', 'http://fake/v1/admin/campaign/g-test', {'authorization': f'Bearer {TOKEN}'}, None)[1])
+    assert FC.campaign_body(FC.current_fields(got))['alternates'] == alt
+    # --no-alternates: a new definition with the build alone
+    _run(['update', 'g-test', '--no-alternates', *common], fake, capsys)
+    assert fake.campaigns['g-test']['alternates'] is None
+    assert STUB.current(stub['state'], 'campaign', 'g-test')['doc']['builds'] == [bid] and len(STUB.calls(stub['log'])) == 2
+    # and back
+    _run(['update', 'g-test', '--alternate', mac, *common], fake, capsys)
+    assert fake.campaigns['g-test']['alternates'] == alt and len(STUB.calls(stub['log'])) == 3
+    # refusals: nothing signed, nothing put
+    other = _mac_build(tmp_path, dist, bid, commit='f' * 40, name='mtg-other-fuzz-macos')
+    win = _mac_build(tmp_path, dist, bid, platform='windows-x64', name='mtg-test-fuzz-win2')
+    mac2 = _mac_build(tmp_path, dist, bid, name='mtg-test-fuzz-macos2')
+    n_calls, n_put = len(STUB.calls(stub['log'])), sum(1 for c in fake.calls if c[0] == 'PUT')
+    for extra in (['--mode', 'delver_dealt2-matches', '--env', 'FUZZ_POOL=delver_dealt2', '--alternate', mac],
+                  ['--mode', 'games', '--alternate', other],
+                  ['--mode', 'games', '--alternate', win],
+                  ['--mode', 'games', '--alternate', mac, '--alternate', mac2],
+                  ['--mode', 'games', '--alternate', 'cd' * 12]):
+        with pytest.raises(SystemExit):
+            FC.main(['create', 'refused', '--build', bid, '--seed-base', '1', *extra, *common],
+                    client=FD.Client('http://fake', token=TOKEN, transport=fake))
+        err = capsys.readouterr().err
+        assert 'farm_campaign: ' in err, extra
+    assert len(STUB.calls(stub['log'])) == n_calls and sum(1 for c in fake.calls if c[0] == 'PUT') == n_put
+    assert 'refused' not in fake.campaigns
+    with pytest.raises(SystemExit):
+        FC.main(['update', 'g-test', '--alternate', mac, '--no-alternates', *common],
+                client=FD.Client('http://fake', token=TOKEN, transport=fake))
+    capsys.readouterr()

@@ -38,6 +38,10 @@ decision the old engine never asked is answered only as the old engine behaved:
   passed for the player, who had no other option);
 * PayMana offering "Pay the rest from the pool": that (the old engine ended the payment when the pool
   covered the rest; 100.4.3, 13.13);
+* any other PayMana no old step matches (ENGINE.md 229.2: a payment's sources the game tells apart are
+  options of their own, so a payment the old engine finished by itself - one class left - may ask): each
+  option is tried, and the one whose later states equal the old engine's is kept (the permanent the old
+  engine tapped: permanents are never paired anew, so at most one does);
 * OrderTriggers, ChooseReplacement, OrderTimestamps (questions 100.3 added): each option is tried, and
   the one whose later states equal the old engine's is kept. When several do (the order shows in no
   recorded state: nobody acted while those triggers waited), the first is taken and the spot lists the
@@ -338,6 +342,8 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
             cands.append(('ins', dict(opts)[PASS]))
         elif kind == 'PayMana' and POOL in labels:
             cands.append(('ins', dict(opts)[POOL]))
+        elif kind == 'PayMana' and not any(how == 'match' for how, _ in cands):
+            cands += [('ins', x) for _, x in opts]
         elif kind in ORDERS:
             cands += [('order', x) for _, x in opts]
         words = dict((x, t) for t, x in opts)

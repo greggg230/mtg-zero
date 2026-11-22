@@ -103,6 +103,11 @@ zero-core's (the test keeps the copies equal to the pinned core's).
   to GitHub (a pin must point at a commit that exists there), stage the new gitlink here
   (`git add third_party/zero-core`), and gate it. `ZERO_CORE_UNPINNED=1` builds an unpinned
   core while you iterate. Never squash or rebase a zero-core branch that something pins.
+* **Head-to-heads and judging run where the default backend puts them** (`docs/ENGINE.md` 217): `python -m
+  mtgz.az.h2h`, `tools/run_yardsticks.py cells-match` and `tools/ab.py judge` default to `--backend auto` (the farm when
+  it can play exactly that match, else here, said in one line). `--backend local` needs a stated reason: a local-only
+  option (`--lookahead`, `--graphs`, `--precision`), a timing study, no published build for the commit. Never mix
+  backends inside one comparison: a series keeps the backend its earlier results name.
 
 ## Gates: pick the tier from your diff
 

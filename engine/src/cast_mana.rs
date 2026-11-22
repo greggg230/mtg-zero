@@ -420,8 +420,15 @@ impl Game {
         if used.is_empty() {
             return self.delve_rest_payable(p, card, cost, allow);
         }
-        let classes: Vec<crate::pay::Class> = self
-            .mana_classes(p, None)
+        // (The payment's sources as `delve_rest_payable` reads them: a spell with convoke or improvise, its creatures and
+        // artifacts too, ENGINE.md 229.5.)
+        let def = self.def_of(card);
+        let all = if def.improvise || def.casting.convoke {
+            self.spell_pay_classes(p, None, if def.improvise { crate::db::types::ARTIFACT } else { 0 }, def.casting.convoke, allow)
+        } else {
+            self.mana_classes(p, None)
+        };
+        let classes: Vec<crate::pay::Class> = all
             .into_iter()
             .filter_map(|mut cl| {
                 let own = crate::pay::delve_source(&cl);
@@ -891,7 +898,7 @@ mod tests {
             // Path 1: the Mountain in the step, then everything else.
             let mut a = g.clone();
             a.pending = None;
-            a.cast_mana_run(id, 0, m, AbilitySlot::Activated(0));
+            a.cast_mana_run(id, 0, m, AbilitySlot::Activated(0), 0);
             a.advance();
             let mut one = Vec::new();
             ends(&a, &no_star, &mut one);

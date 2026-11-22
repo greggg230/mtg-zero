@@ -526,7 +526,7 @@ impl Describer<'_> {
             // (layout v7 engines, ENGINE.md 95.11: the hidden decklists' sightings and a search's finds - kept only
             // where whole-deck clouds are -, the last known identities of gone objects - described with each stale
             // reference, `obj` -, a loop action's activation in progress)
-            sightings, sight_at: _, found, sightings_lost: _, ref_lki: _, loop_open,
+            sightings, sight_at: _, found, finds_told, sightings_lost: _, ref_lki: _, loop_open,
             // (ENGINE.md 180: the forced find's records, a self-play setting's; a described position's game has none)
             ff: _,
         } = g;
@@ -555,7 +555,7 @@ impl Describer<'_> {
         empty(dungeons.iter().filter(|d| d.obj.is_some() || d.completed > 0).count(), "dungeons")?;
         empty(known_pools.iter().filter(|k| k.is_some()).count(), "hidden decks (best-of-three)")?;
         empty(sightings.len(), "the hidden decklists' sightings (ENGINE.md 140.9)")?;
-        empty(found.len(), "a library search's finds the other player tells apart (hidden decklists, ENGINE.md 140.9)")?;
+        empty(found.len() + finds_told.len(), "a library search's finds the other player tells apart (hidden decklists, ENGINE.md 140.9, 223)")?;
         empty(loop_open.is_some() as usize, "a loop action's activation in progress")?;
 
         let mut out = Map::new();

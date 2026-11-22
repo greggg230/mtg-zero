@@ -41637,8 +41637,9 @@ variants (14) apply to them unchanged.
 ### 215.1 What a campaign lists now
 
 `mtgz.az.farm_campaign.submit(..., alternates='release', variants='gpu=fp16,dml=matmul@amd')` - the defaults, so the
-CLI (`tools/farm_campaign.py submit`), the yardsticks' farm path (`measure_bo1_farm`, `play_pair_farm`: the cells and
-`tools/ab.py judge`) and anything else that calls `submit` get them without a change. Before anything is put
+CLI (`tools/farm_campaign.py submit`), the yardsticks' farm path (`measure_bo1_farm`, `play_pair_farm`: the cells) and
+anything else that calls `submit` get them without a change (not `tools/ab.py judge`, as this said before 217.6: it ran
+local `cells-match` until 217.4). Before anything is put
 (`prepare_alternates`, once per campaign, its result in the state):
 
 1. **The ids.** `alternates='release'`: every alternate the release index (`mtgz.az.farm_builds`, written by
@@ -41988,6 +41989,529 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
+## 217. Head-to-heads and judging on the farm by default: zero.h2h `--backend auto | farm | local` (zero-core pin c850a5d -> 1e26188, docs/az.md 69), routes per game, one backend per comparison, `cells-match` / `tools/ab.py judge` on the farm (branch `feat/h2h-backend`, 2026-11-21)
+
+**Why.** The user wants experiments that play many games on zero-farm by default. After 214-216 the farm could play any
+per-side head-to-head, on every route of a release, but only through `tools/farm_campaign.py submit/collect` with build
+ids; sessions reach for `python -m mtgz.az.h2h` because it is one command, and on 2026-11-20 the ISMCTS check (4 x 2,400
+games at 64 simulations, `--chance-k 0`) cost ~4 h of the desktop's GPU and paused a live run for 72 minutes. A review
+the user approved the same day (the maintainer's private notes, sections C and D) added: record the route of every farm
+game, one backend per comparison (a control is re-judged on the treatment's backend), a farm-vs-local estimate on the
+decision line, a larger share for these campaigns, a local top-up that never piles onto a live run, and `tools/ab.py
+judge` on the farm (215.1 claimed it was; it was not - 217.6).
+
+### 217.1 The one command
+
+`python -m mtgz.az.h2h A B [today's flags] [--backend auto|farm|local]`, default `auto` (zero-core docs/az.md 69:
+zero.h2h owns the flag and the output; the game package's `h2h_backend` hook decides and plays - here
+`mtgz.az.h2h_farm`, registered in mtgz/az/__init__.py):
+
+* **auto**: the farm when it can play exactly this match, else here - decided before any game, never a fallback in the
+  middle of a match, one stderr line saying which and why, e.g. `h2h: backend local - --b-lookahead is local-only (...)`,
+  `h2h: backend farm - campaign cmp-h2h-legacy-meta3-r1-1040v1040-573598a9e3, build 45917fd1 + CUDA/DML/macOS (the
+  release of 02e2d16c6e43: the same Rust inputs); estimate: farm ~3 setup + ~30 queue + ~47 play = ~80 min, local ~284
+  min of this machine's CPU`.
+* **farm**: the farm or a refusal (exit 2, `h2h: backend farm refused - <reason>`).
+* **local**: as before (the backend is not asked).
+
+**The conditions** (`h2h_farm.plan`, in this order; the first that fails is the reason):
+
+1. no local-only option: zero.seat_settings.LOCAL_ONLY (`--graphs`, `--a-graphs`, ..., `--lookahead`, `--a-lookahead`,
+   ...), `--precision` other than fp32, `--move-log`. `--device`, `--torch-threads`, `--conc`, `--groups`, `--sparse`,
+   `--max-rows` are local resources: ignored on the farm; `--threads` is the local top-up's.
+2. both checkpoints have their run's config.json next to models/;
+3. this machine can put a campaign: the admin token, data key and farm-release (zero.farm_def's paths);
+4. the checkout's tracked files are clean (`git status --porcelain --untracked-files=no`, the zero-core submodule
+   included): the farm plays the commit's build;
+5. a published build for the checkout's commit (`farm_builds.lookup`: its release, or one of a commit with the same Rust
+   inputs - a Python-only commit reuses its parent's), its signed worker on this machine. Without one, the reason names
+   `python tools/farm_release.py release <sha12>`. `--backend farm` does **not** run that release itself: a release
+   builds, gates and publishes (~20 minutes, the release lock, the Mac), a heavier step than a head-to-head should take
+   on its own; the watcher releases main's heads, and a Python-only branch commit reuses its parent's release;
+6. the farm job seats both sides exactly as the local match (`h2h_farm.job`): the job's settings are A's run's resolved
+   settings with the match's `eval_sims`, `c_puct`, `chance_k`, spec and `max_steps` 5000 (zero.h2h.match's), `sparse`
+   0, `eval_trace` 1; each seat's `set` holds every evaluation-seat setting (zero.seat_settings.SEAT_KEYS) in which that
+   side's own settings - its run's, with zero.h2h's per-side options over them (`h2h.sides_of`) - differ from the job's.
+   So B of another run plays its own run's rule, cache, margin and belief (a case `match_settings` refused before), and
+   one checkpoint on both sides is one network (`[{"net": 1, "set": ...}, {"net": 1, ...}]`). The farm's seats
+   (`zero.farm_eval.seat_dicts`) are compared with the local match's (`h2h._seats` without loading the networks) dict
+   for dict, and the build's own check-config must take the settings and seats (`farm_campaign.job_settings`). Then,
+   when the campaign still needs an export (`missing_exports`: a graph, its fp16 / matmul variants), this Python must
+   have onnx, onnxruntime and onnxscript;
+7. under `auto` only, big enough: games x the sides' mean simulations >= `--farm-min-work` (12,800 = 200 games at 64;
+   a sequential match counts its `--max-games`; 0 = any size). Below it the farm's fixed costs dominate - a checkpoint's
+   first export and GPU variants (~5-8 minutes of this machine), the queue (217.5) - while the match is a few minutes of
+   the desktop's GPU.
+
+**The estimate** (`h2h_farm.estimate`, on the line of a match that passes 1-6): the farm's minutes - setup (0.5 + 2.5
+for each graph still to export + 2.4 for gen 1's first fast-matmul variant, from the export cache), queue and play at the
+farm's measured pace (`farm_history`: the medians of the newest campaigns on this machine that kept a `first_result`
+and played no game locally - their put-to-first-result wait and their game-simulations a minute of play; without any:
+30 minutes and 270 a minute, 215.3's) - against this machine's minutes at its measured local rate (`--device cuda`:
+2,560 game-simulations a minute, the 11-20 check; the CPU: 45 a minute, 217.4's 8-game run beside the live runs).
+
+**The farm path** (`h2h_farm.Runner`). Each batch is an analysis campaign (165, 215): the plain match one, a sequential
+match (`--sprt` / `--target-se` / `--max-games`) one a batch - zero.h2h's `batch_loop` (docs/az.md 69) seeds batch k
+`seed + 7919 k` and stops where a local match would, on the same rows; each batch pays the queue, so a sequential match
+on the farm takes hours of wall time and no desktop GPU (`--backend local` with that reason when the wall time matters).
+The name: `cmp-h2h-<run>-<A>v<B>-<hash10>[-b<k>]`, the hash over both networks' sha256, the job's play settings, seats,
+pairing, seed, games and build - so the same command again resumes the campaign (or returns its collected result)
+instead of playing it again, and never collides with another user's `cmp-*` campaign (the yardsticks' are
+`cmp-<run>-y...` / `cmp-<run>-cells...`); a local state of that name with other inputs, or a coordinator run of that name
+without a state here, is refused. Every alternate of the release (CUDA, DirectML for AMD, macOS when the settings replay
+exactly there) with its GPU variants (215). **Share 0.5** (`--farm-share`; `AUTO_SHARE`): above the campaigns' 0.25 (the
+tool's default stays 0.25) - the alternative to a farm campaign is the desktop's GPU under the live run that trains on it
+(11-20: 72 minutes paused), and the campaign has a deadline. **The deadline** (per batch): `--farm-deadline-h`, else 1 h +
+0.25 s per game-simulation (at most 12 h) after the put; then the games the farm has not delivered are played here by
+the same worker (`--threads`), as every campaign does - each piece holding a slot of the heavy-command throttle
+(`tools/slotd.sh`, 166) while a run's supervisor is live on this machine (`h2h_farm.topup_wrap`, asked before each
+piece; the yardsticks' farm top-ups do the same), so a top-up waits for a slot rather than piling onto a live run's
+iteration. The line names the campaign so `python tools/farm_campaign.py collect <name> --deadline-now` can end the wait.
+
+**The output**: zero.h2h reads the batches' rows as a local match's (docs/az.md 69) - the same keys and meanings (`a`,
+`b`, `game`, `sims`, `chance_k`, `games`, `a_score`, `se`, `a_margin`, `elo_diff`, `unfinished`, `se_games`,
+`variance_ratio`, `pairs`, `elo_se`, `seconds` (here the wall time from the first put), `select_a`, `select_b`, `sims_a` /
+`sims_b`, `batches` / `stop` / `sprt` / `target_se`, `paired`), `merge` null when a side merges (the local driver's
+merged-tree counters), no local-only keys (`graphs_*`, `look`, `perf`, `max_rows`, `precision`, `sparse`), `per_game`
+(a best-of-three's games) not produced; then `backend` 'farm' and the runner's: `campaign` (a list for batches),
+`build`, `routes` (the default build and the alternates the campaign listed), `coverage` {farm, local, failed},
+`machines` (a short hash of each machine id - zero.gamerec.machine_tag, as game records keep it - with its games; 'local'
+for the top-up), `by_route` (217.2), `games_digest`, `spot` {checked, ok}, `routes_note`, `setup_s`, `queue_s` (the put
+to the first game), `wall_s`. A local run's line gains `backend` 'local' (its last key). `--records DIR` writes the
+traced games as a local match writes its own (`src` 'farm', `meta.backend` 'farm'). The backends' games are not
+bit-identical (torch here; the ONNX worker there, its GPU routes on float16 / MatMul variants): the line says which.
+
+**Elsewhere**: `farm_campaign.submit(..., job_class=None)`: an eval batch's lane class for the coordinator's backfill
+lane (zero-farm rev 25, not live yet; rev 24 refuses the field, so nothing passes it): when set, the run PUT's eval batch
+(a samples job's self-play) carries `class` and no `share`; None puts the bodies of before. `tools/farm_campaign.py
+submit` takes `--chance-k` (default 2, zero.h2h's; the 11-20 check used 0), its
+share default stays 0.25 (an explicit campaign is side work); `farm_campaign.pull` keeps `first_result` (the queue's
+wait).
+
+### 217.2 Routes per game
+
+A campaign plays on CPU fp32 (the default build), CUDA fp16 (the CUDA alternate's 'gpu' variant), DirectML fp32-MatMul
+('dml') and the Macs' CPU. `farm_campaign.collect` now names each game's route in games.jsonl - `route` {build, variant,
+label}: the lease's worker build and the model variant it was granted, labelled 'cpu', 'cuda:gpu', 'dml:dml',
+'macos-arm64', 'local' (the top-up), '?' unknown - and the result (and the readout) gain `by_route`: A's score, se and
+Elo per route (zero.h2h.summary of the route's games; paired games stay together - a lease holds whole pairs). The
+results listing of the coordinator's admin API names a result's lease and machine but not the lease's build or variant,
+so `lease_routes` reads them from the coordinator's leases table, read only (`npx wrangler d1 execute zero-farm --remote
+--json --command "SELECT lease_id, build_id, variant, machine_id FROM leases WHERE run = '<run>'"` in the zero-farm
+coordinator checkout: `ZERO_FARM_COORDINATOR` in the environment or ~/.config/zero/local.env, else
+~/zero-farm/coordinator), once per collect and only for the real coordinator (zero.farm_def.URL; a test's fake one: no
+read). Without it the routes are '?' and the log says why. The proper fix is the coordinator's (217.8).
+
+### 217.3 One backend per comparison
+
+Paired games of a lease keep both sides on one route, which protects an A-vs-B difference inside a campaign; a control
+measured on another backend does not. So:
+
+* **zero.h2h** plays both sides in one campaign (one backend) and the line names its backend.
+* **The cells' control** - a pair's reference-vs-reference baseline, against which every cell is judged - is played on
+  the cells' own backend (`yardsticks.resolve_base`): a cached baseline is reused only when it was played on the same
+  backend family ('farm', or 'local' = this machine's torch and the Mac's, which 198 made one on purpose; a baseline
+  that records no backend was played here). Another backend's baseline is kept and a new one is played beside it, under
+  its own key (the baseline's key and the family, hashed); the scheduler (`CellsWant._key`), `measure_base_core` and
+  `measure_cells_core` resolve the same key. A run's series keeps working: a farm run's baselines record 'farm', a local
+  one's 'local'. **Opt-out**: the yardsticks key `cells_reuse_base` true (`cells-match --reuse-control`, `ab.py`
+  `judge.reuse_control`) reuses the cached baseline whatever played it, said in the log and in the row (`base_backend`,
+  and a baseline row's `for_backend`).
+* **A standalone comparison keeps its backend** (`yardsticks.standalone_backend`, `cells-match`): under `auto`, its
+  earlier games - the baselines in its `--cache`, the rows of its `--out` - decide: played here, it stays here; played on
+  the farm, it stays there or is refused (never mixed by default; `--backend local` mixes explicitly).
+
+### 217.4 `cells-match` and `tools/ab.py judge` on the farm
+
+* **`tools/run_yardsticks.py cells-match`**: `--backend auto|farm|local` (default `auto`), `--reuse-control`,
+  `--farm-share` (0.5), `--farm-deadline-h` (1 h + 0.25 s per game-simulation of a chooser match); one stderr line
+  `cells-match: backend X - why`; the JSON gains `backend`. Under `auto` (beyond 217.3's history): the farm conditions of
+  217.1 (keys, a clean released checkout, a run config next to the checkpoint - its rule is both sides') and every chooser
+  match's and baseline's seats the local ones: `farm_campaign.match_job` - `match_settings` of the checkpoint's run with
+  each side's own margin_w / redet / eval_cache as its seat's set, so a reference without a run config (an A/B's copied
+  start) is played as locally (margin 0, redet on, no cache) - and the build's check-config. The farm path is the
+  yardsticks' `play_pair_farm` with the release index's build as its pool (`pool`, `own_base`), each baseline and each
+  cell a campaign `cmp-cm-<kind>-<hash>-c<chooser>` (a baseline named by its cache key, a cell by both networks and the
+  pair: a rerun resumes them).
+* **`tools/ab.py judge`**: one backend per experiment. `judge.backend` ('auto' | 'farm' | 'local') fixes it; null (the
+  default) decides it once: an experiment judged before this section (a match's result or a cached baseline in judge/)
+  stays 'local' (every judge before played here); a new one runs its first match with `--backend auto`, keeps what that
+  match was played on in `judge/backend.json` and passes it explicitly to every later match, which then refuses rather
+  than mixes. `judge.reuse_control` is `--reuse-control`. The edits are in the judge path only (the fork and farm-pause
+  guards are another branch's).
+* **The run's yardsticks are unchanged** (bo1_backend / cells_backend 'auto' = farm when the run has a farm pool and the
+  match is exact, 165): a new farm run's yardsticks go to the farm already, and widening 'auto' to the release index for
+  a run without a pool would flip the backend of existing local series (the user: never). Their farm top-ups now hold a
+  throttle slot beside a live run, and their cells' controls follow 217.3 (the same backend; a run's existing caches
+  keep working).
+
+### 217.5 End to end on the farm (2026-11-21)
+
+The 11-20 ISMCTS check scaled down, through the one command with the default backend, from this branch's clean
+checkout (68267a12; its release: 02e2d16c's build 45917fd1, the same Rust inputs), with the zero-farm environment's
+Python (the system Python has no onnx: 217.9):
+
+    python -m mtgz.az.h2h <legacy-meta3-r1>/models/iter_1040.pt <same> --paired --games 200 --sims 64 --chance-k 0
+        --spec "$(cat <scratch>/spec_dd_vs_delver.json)" --a-infoset-merge 1 --b-infoset-merge 0 --records <scratch>/rec
+
+* **The line**: `h2h: backend farm - campaign cmp-h2h-legacy-meta3-r1-1040v1040-573598a9e3, build 45917fd1 +
+  CUDA/DML/macOS (the release of 02e2d16c6e43: the same Rust inputs); estimate: farm ~3 setup + ~30 queue + ~47 play =
+  ~80 min, local ~284 min of this machine's CPU` (decided in 0.3 s; the 11-20 check's `--device cuda` would read ~5 min
+  of the GPU).
+* **Setup** (13:22:55 to the put at 13:29:35, 6.7 minutes on the desktop beside two live runs and other sessions'
+  gates): gen 1's export cached (214's), its matmul variant exported in 353 s (a new fast-matmul template, 215.3: 140 s
+  unloaded) and its fp16 variant in 0.4 s; the GPU self-tests on the desktop (CUDA alternate 50d28377 on the fp16 graph:
+  max abs 7.07e-3, CPU 2.51e-3; DirectML ffbd8d40 on the MatMul graph: 2.92e-6 / 3.99e-6, both deterministic); the macOS
+  route kept (`check-config --platform macos-arm64`: the settings replay exactly there); min_agent 0.3.5; the run, its
+  signed definition (seats `[{"net": 1, "set": {"eval_infoset_merge": 1}}, {"net": 1}]`), gen 1 and its variants, the
+  batch of 200 games at share 0.5.
+* **Queue**: the first lease 43 s after the put (a Mac on the stable channel - not a canary: rev 24's preemption is
+  canary-gated), the first result after 5.0 minutes (`queue_s` 301: the put to the first credited game).
+* **Leases** (the leases table, read only; machines as their short hashes): two Macs on the macOS build ae6de9d3 (no
+  variant, CPU) - 4 leases, **164 games**: 32 games in 4.7 and 5.0 min, 50 in 6.4 and 8.3 min (about 390-500
+  game-simulations a minute a lease, the batches' p50 2.2-2.9 ms); one NVIDIA PC on the CUDA alternate 50d28377 with
+  the `gpu` variant - 1 lease of 36 games issued at 13:44:48 whose agent ran it on its **CPU** (`stats.provider` 'cpu':
+  the float16 graph on a CPU, p50 39.9 ms a batch, ~15x the Macs') - **28 games** credited in 88 minutes (a 29th held for
+  its pair-mate), given back when the deadline paused the run; nothing on the default CPU build or the DirectML route
+  (no AMD PC leased). 192 of 200 games by about 15:10 (the Macs' 164 by 13:47:41, 18 minutes after the put).
+* **Deadline** (15:22:55, 1 h 53 min after the put: 1 h + 0.25 s x 200 x 64): the run paused, the 8 games the CUDA
+  lease had not delivered ([174, 176), [178, 184)) played here by the same worker, each piece first waiting for a slot of
+  the heavy-command throttle (two live supervisors on the machine: `topup_wrap`). The first `mtgz.az.h2h` process was
+  stopped at the deadline by its session's 2-hour background limit (a tool limit, not the code); **the same command
+  again** found the campaign by its name, resumed it (`resuming (192/200 games in)`, nothing put again, the estimate's
+  setup now ~0: the exports cached) and went on with the top-up. The throttle's 4 slots were held by other sessions'
+  gates and smokes, so the first piece waited about an hour (15:31 to ~16:25; the piece of 2 games then played in ~4 minutes) for a slot - the throttle works as designed, and has no queue
+  (217.9).
+* **Stopped there** (16:30, a wrap-up asked by the maintainer): 194 of 200 games done - 192 by the farm, 2 by the
+  local top-up ([174, 176)), 0 failed; the second top-up piece ([178, 184), 6 games) was still waiting for a throttle
+  slot and was stopped (the process tree killed by its root; no worker left); the coordinator run `paused` (the
+  deadline's pause). The campaign is intact under ~/.zero-farm/campaigns/: **the same command again** resumes it, plays
+  the 6 games here and prints the line, the routes and the records. So the JSON line, `--records`, the digests, the
+  spot check and `by_route` of this campaign were not produced in this section; the line's keys against a local run's
+  are shown by tests/test_h2h_backend.py (the line of a backend's batches = the local line of the same games, key for
+  key) and by the local 8-game run of the same command (`backend` 'local', keys: a, b, game, sims, chance_k, games,
+  a_score, se, a_margin, elo_diff, unfinished, se_games, variance_ratio, pairs, elo_se, seconds, select_a, select_b,
+  merge, paired, backend - a farm line adds its own keys after `backend`, with `merge` null). That local run (the same
+  match, 8 games, the desktop's CPU beside the live runs, 680.6 s): A 0.75 +- 0.14, `select_a`
+  'cq-n4-v50-s0.3-rv-b1m0.25-ism', `select_b` 'cq-n4-v50-s0.3-rv-b1m0.25', merge links 62,498 - 8 records written.
+* **Wall time** so far: 6.7 minutes of setup, 0.7 minute to the first lease, 18 minutes to 82% of the games (the Macs),
+  then 75 minutes of one slow CPU-played CUDA lease until the deadline, then the throttle's queue.
+
+### 217.6 Corrections
+
+* **215.1** listed `tools/ab.py judge` among the callers that got the farm's routes "without a change": it ran local
+  `cells-match` (ab.py's judge, `run_yardsticks.py cells-match` -> `measure_cells_standalone`, local games only) until
+  this section (217.4); 215.1 now says so.
+* Two hints named the wrong command for a farm build: `tools/ab.py`'s docstring (`tools/farm_build.py` -> `python
+  tools/farm_release.py release <sha>`) and `farm_builds.published_pool`'s refusal (`farm_release.py <rev>` ->
+  `farm_release.py release <rev>`).
+
+### 217.7 Tests and gates
+
+* zero-core (docs/az.md 69): tests/test_h2h_backend.py (5) and the earlier h2h tests - passed; privacy 0 findings.
+* Here: tests/test_h2h_farm.py (14): the backend registered with its options; the farm job's seats = the local
+  match's (no options: [net 1, net 2]; per-side options as sets, one network on both seats; B of a run with another
+  cache and rule: its own settings as its set); the local-only reasons; the conditions in order (each reason, the size
+  under auto only, `--backend farm` whatever the size, a sequential match's batches, no onnx only while an export is
+  needed); `release_of`'s command; `tracked_changes` on a scratch repository; deterministic `cmp-h2h-...` names
+  (another seed, games or option: another name; a batch's `-b<k>`); deadlines and work; the runner (one campaign a
+  batch, share 0.5, the release's alternates, the rows as zero.h2h's with records, the line's keys, machine ids only as
+  hashes, a state of other inputs refused); the estimate (the farm's medians, the export cache); the top-up's throttle
+  slot beside a live run; a standalone cells comparison keeping its backend; `submit --chance-k`; `job_class` in the PUT
+  body only when set. tests/test_ab.py `test_the_judge_plays_one_backend_per_experiment`; tests/test_cells_yardstick.py
+  (the farm cells test now with a farm-played control, the opt-out; `test_a_comparisons_control_is_played_on_its_own_
+  backend`). The farm, yardstick, cells, ab and h2h test files: 162 passed, 19 skipped (live-run fence, no local
+  worker).
+* **Gate** of 68267a12 (the code; the warm worktree warm-3, `--baseline-root` warm-2 at main 1e7416c5 with its engine
+  module from the artifact cache): **GATE PASSED WITH SKIPS optin-core 68267a12cf6e in 2149s** - privacy 0 findings;
+  core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each); the digest formats as
+  recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913,
+  dealt a890c27da3c7d1a8); farm compat identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3 identical); cargo
+  test --test az 57 and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built against
+  this core; core pytest 743 passed, 71 skipped - skipped: 17 live-run-hazard tests (fenced: live runs on this
+  machine). **Gate** of d951a044 (the code with `job_class`, warm-2): **GATE PASSED WITH SKIPS python d951a04455d1 in 960s** - privacy 0 findings; pytest 133 + 165 + 227 + 225 passed in four shards and 48 in the desktop part; the run-loop smoke 16 games, 0 unfinished - skipped: 8 live-run-hazard tests (fenced: live runs on this machine).
+* **The release** of 02e2d16c (the pin and the first code; `farm_release.py release 02e2d16c --no-speed`, 21 minutes):
+  build 45917fd1fd20906fcf47e9d3 (CUDA alternate 50d28377acfa726241ae2311, DirectML ffbd8d401fafe2df103c7dad, macOS
+  ae6de9d3ae904542992cc76b); FARM GATES PASSED (gate 2: 8 matches, 491 rows, 200 batches identical; gate 3: 12
+  matches, 710 rows identical), the Mac gates passed; speed gate skipped (`--no-speed`: the speed windows need an idle
+  machine). Every later commit of the branch is Python only and reuses it (`lookup`: the same Rust inputs).
+
+### 217.8 A coordinator proposal (not made)
+
+1. **Routes in the results listing.** `GET /v1/admin/run/{run}/results` could give each result its lease's
+   `build_id` and `variant` (a join on `leases` by `lease_id`; two fields). `collect` would then record every game's
+   route from the API it already reads, instead of reading the coordinator's database through wrangler (217.2), which
+   needs the maintainer's Cloudflare login on the collecting machine and a zero-farm checkout.
+2. **The fp16 variant on a CPU.** In 217.5 the CUDA alternate's lease went to an NVIDIA PC whose agent chose its CPU
+   (`stats.provider` 'cpu') and then ran the float16 graph there - 29 games of 36 in 88 minutes, the batches' p50 39.9 ms - while the Macs played the rest at
+   ~2.2-2.9 ms a batch, 390-500 game-simulations a minute a lease. A route granted for a GPU variant that the agent runs on its CPU could fall back to the gen's default
+   float32 graph (an agent change: the lease names both models, PROTOCOL 14.3), or the coordinator could grant the
+   variant only to machines whose bench picked the GPU. Not made here (agent / coordinator).
+3. **The queue** was not the bottleneck this time (217.5: the first lease ~1 minute after the put, a Mac; rev 24's
+   priority lane is canary-gated). The straggler was: one slow lease held the last 18% of the games for 75 minutes.
+   A lease that runs far behind its peers near a batch's end could be re-issued to an idle machine (the first copy of a
+   game wins, `dup_ids`) - the coordinator's call.
+
+### 217.9 Open points
+
+* **The default Python has no onnx.** The farm path exports networks with onnx / onnxruntime / onnxscript, which the
+  desktop's system Python 3.13 lacks (the zero-farm venv has them): `auto` there plays locally with that reason until
+  the campaign's exports are cached (they are for iter_1040 on the Doomsday-vs-Delver spec after 217.5). Installing the
+  three packages in the system Python (the user's call) makes `auto` reach the farm from the default command.
+* **auto as the default** stays on this branch; the coordinator's priority lane (rev 24, canary-gated today) is the
+  condition the maintainer set for merging it as the default.
+* **The yardsticks' auto** is unchanged (217.4): a run without a farm pool still measures here; widening it needs a
+  rule for runs whose series are local (keep them), which this branch did not add.
+* **A sequential match on the farm** pays the queue once a batch (each batch a campaign); fine with the queue measured
+  here, long when the farm is busy.
+* **Exports**: the matmul variant of a new architecture took 353 s on the desktop beside two live runs and another
+  gate (215.3: 140 s), the estimate's 2.4 minutes is low under load.
+* **cells-match's farm path** was tested with fakes and the plan only (no farm cells campaign was played in this
+  section); the yardsticks' own farm cells (215, legacy-meta3-r1) run the same `play_pair_farm`.
+* `job_class` (the coordinator's backfill lane, rev 25) is exposed but passed by nothing yet.
+
+## 218. Farm guards: forks on their own farm runs, a refusing worker stops loudly, inert pool settings said, a reason to stay local; `pool_settings` with the GPU variants and the macOS alternate (zero-core pin c850a5d -> 1694d97, zero-core `feat/farm-guards`, docs/az.md 70; branch `feat/farm-guards`, 2026-11-21)
+
+**Why.** The farm review of 2026-11-21 (the maintainer's notes; section C.2, C.7 and D.6-D.8) found experiments landing
+desktop-only, or worse, without a decision: a fork that kept `selfplay_remote pool:<parent>` published into the parent's
+farm run and `tools/ab.py` would then pause the parent's farm run (ab.py checked only the arms' overrides); a pool whose
+worker refused the settings retried "refused" for a whole A/B while the run played on the desktop; `pool_*` settings
+with `selfplay_remote ''` did nothing and silently turned the farm yardsticks off; the launchers people use are scratch
+scripts that call the run loop or fork_run, which no tool-level check reaches; and a `--pool-build published` run got
+no `pool_variants` (AMD PCs on their CPUs, the CUDA PCs on the float32 graph) and no macOS alternate (the Macs idle).
+
+**The pin** (zero-core docs/az.md 70; Python only, plus one trainer-only key in the worker's settings table, so the
+worker plays and encodes exactly as before - the farm-compat gate below):
+
+* `tools/fork_run.py --source`: every `pool:<farm run>` of the source's self-play (its setting or its
+  `selfplay_remotes` file) becomes the fork's OWN farm run, named after the fork's directory (`--farm own`, default) or
+  `--farm NAME`; a farm evaluation of the source's becomes `pool:<name>-eval`; the source's pool settings kept;
+  `--farm none` keeps the fork on this machine; a `--set` naming the source's farm run is refused. Printed as `FARM:`
+  lines. Every fork gets `fork.json` (`started` once its first start passed every start check, just before its
+  first iteration: a first start refused for any reason stays one).
+* The farm pool: a definitive refusal (`farm_pool.Refused`: the worker's check-config refusing the settings - the
+  keys and their statuses named, not cut off -, no worker, the platform or rolling check, a manifest refusing an
+  alternate) refuses the run's start (exit 78) when met by a new pool's settings check, or stops the pool loudly on
+  its thread (STOPPED + the fix in the log at once and every iteration, `selfplay.pools.<name>.stopped` in the metrics,
+  progress.json `state` 'stopped', the dashboard). Network and coordinator errors stay transient (retried).
+* The run's start: pool settings that do nothing are warned of; without a self-play pool and without a reason, a
+  published farm build of the commit (the game package's `farm_build` hook) refuses a fresh start or a fork's first
+  start (exit 78) and warns on a resume. The reason: the new run setting **`selfplay_local_reason`** (trainer-only),
+  or `$ZERO_SELFPLAY_LOCAL_REASON`.
+
+**This repo.**
+
+* `mtgz.az` registers `farm_build='mtgz.az.farm_builds:published_for_run'`: `lookup('HEAD')` of the checkout the run
+  runs from (an exact release, or a release of the same Rust inputs, 196), described with how to attach it
+  (`--selfplay-remote pool:<farm run> --pool-build published`). A machine without the builds index has none: no check.
+* `mtg-smoke` (and every smoke preset made from it: delver-smoke, delver-bo3-smoke, legacy-meta3-smoke, eoe-smoke, ...)
+  carries `selfplay_local_reason` 'a smoke run: a few games on this machine', so the README's quick start and the
+  gates' run-loop smoke start on a released commit; `tests/conftest.py` sets `ZERO_SELFPLAY_LOCAL_REASON` ('a pytest
+  run') for the runs the tests start (in process or as processes).
+* **`farm_builds.pool_settings(e, alternates=True, cfg=None, log=None)`**: `pool_alternates` is the CUDA alternate,
+  the DirectML one, then the entry's published macOS build (`mac_build`) **only when the run's settings `cfg` pass the
+  farm pool's own platform check** (`mac_check` -> `zero.farm_pool.platform_check` with the release worker:
+  `check-config --platform macos-arm64`, the libm rule, 216.1's reason for leaving it out - a run whose settings it
+  refuses would now have its pool stopped); and **`pool_variants`** names the variant each GPU alternate plays,
+  `VARIANT_OF` = CUDA 'gpu=fp16', DirectML 'dml=matmul@amd' (legacy-meta3-r1's launcher's 'gpu=fp16,dml=matmul@amd',
+  211 / 213.2; left out when the release has neither). A route left out is said through `log` (no published macOS
+  build, a failed macOS part, no run settings, the worker not on this machine, the platform check's refusal).
+  `published_pool` (`--pool-build published`) resolves the run's settings as zero.run will (`run_settings`: its
+  config.json < the flags) when the release has a macOS build and prints what it left out; `tools/ab.py`'s
+  `"pool_build": "published"` checks the source's settings with the arm's overrides; `farm_release.py lookup
+  --pool-args` has no run settings (the macOS build left out, said on stderr). `pool_export` is not set by it (a run's
+  choice: legacy-meta3-r1 runs 'fast').
+* **`tools/ab.py`**: `effective(s, arm, k)` - the arm's forked config.json, else the source's config + the overrides +
+  fork_run's farm rule (`zero.tools.fork_run.fork_farm`) - is what `check` judges (an arm that inherits the source's
+  farm self-plays on its own farm run and needs the spec's `"farm"` and its gates; the plan prints each arm's farm runs
+  and fork_run's notes); `farm_pause` (and `go` after each arm) pauses only the arm's own farm run - one that the
+  source, another arm or any run directory under `runs_dir` names too (`farm_owners`: selfplay_remote, eval_remote or
+  a selfplay_remotes file) raises `FarmNotOwn`: `FARM PAUSE REFUSED`, nothing PUT. The judge path is untouched.
+* **The yardsticks**: `farm_campaign.run_pool_note(cfg)` - pool settings set while selfplay_remote names no pool (the
+  farm path off: `run_pool` is None), or a pool without its build or worker - is logged by the watcher
+  (`tools/run_yardsticks.py watch`) as a `WARNING:` line at its start, next to its settings line.
+
+**Existing runs** (checked read-only on 2026-11-21 under the desktop's runs directory): no run has a fork.json, so
+every resume - live runs after PAUSE included - is a resume (at most warning lines, never refused); every farm run's
+pool state already has its template (`play`), so no settings check runs at a farm run's restart. legacy-meta3-r1 and
+the mirror fork lr3 attach their farm pools (no warning). The paused desktop-only runs would print the published-build
+warning on a resume from a released commit, and the inert-settings warning where they carry pool settings.
+
+**Measured** (the desktop, 2026-11-21, read-only): `lookup('HEAD')` 0.03 s; the pool's settings check on
+legacy-meta3-r1's settings with its release worker f22f63bb 0.23 s (56 play keys), an unknown key refused in 0.04 s
+naming it (`no_such_setting (unknown)`); `pool_settings` of main 1e7416c5's release (5e4023e2) with legacy-meta3-r1's
+settings 0.12 s: `pool_alternates` CUDA 1bf4304c, DirectML 2bc046a8 and macOS cc8db289 (the platform check passed),
+`pool_variants` 'gpu=fp16,dml=matmul@amd'.
+
+**Tests.** `tests/test_farm_release.py` (+3, 3 updated for `pool_variants`): `pool_settings`' variants and macOS
+route (passed, no settings, a libm refusal, not published, failed, no worker here; the variants per alternate);
+`--pool-build published` checking the run's resolved settings (config.json + flags) and leaving the macOS build out on
+a refusal with the reason printed; the `farm_build` hook (none / the release's description) and the run's start
+through it (refused first start, warned resume, a reason). `tests/test_ab.py` (+2): an arm's effective settings (its
+own farm runs, an override kept, an override naming the source's farm refused, a forked arm's config.json), the
+farm-pause guard (the source's farm run refused with nothing PUT, the CLI's `FARM PAUSE REFUSED`, its own paused, one
+another arm or another run's selfplay_remotes file names refused); the yardsticks' note. zero-core's own: docs/az.md 70.
+
+### 218.1 The gate of d5a9d0f0; the pin 1694d97 -> d32f6f8 (docs only)
+
+On d5a9d0f0 (218 with the pin 1694d97), in the warm worktree warm-4, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the automatic
+placement (5 steps on the Mac, 8 on the desktop throttled: two live supervisors here), `--baseline-root` warm-1 at main
+1e7416c5 (built; held through the gate by `warm_pool.py acquire`): **GATE PASSED WITH SKIPS optin-core d5a9d0f00028 in
+2506s** - privacy 0 findings; core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each);
+the digests as recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame
+56ff52ffef1b1913, dealt a890c27da3c7d1a8 over 80 matches); farm compat identical (gate 2: 6 games, 2,890 rows, 150
+batches; gate 3: 6 games, 2,556 rows, 6 decks compared); cargo test --test az 57 and --test hidden 28 passed;
+glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 750 passed, 71 skipped -
+skipped: 17 live-run-hazard tests (fenced: a live run on this machine). An earlier gate run on 7755db6f (the pin
+f93ec16) was stopped after its builds, superseded by 1694d97's fix (a fork's fork.json marked only after every start
+check). The optin-core tier runs no pytest of this repo: the files 218 touches and their neighbours ran by hand on
+7755db6f / d5a9d0f0's code (tests/test_ab.py and tests/test_farm_release.py 35 passed; with the farm, yardstick, cells,
+loop, smoke, publisher, worker-farm and privacy files 175 passed, 22 skipped - the worker not built in that checkout,
+no onnx there, the live-run fence).
+
+This commit moves the pin to d32f6f8, zero-core docs/az.md 70's checks on top of 1694d97 (1694d97..d32f6f8: docs/az.md
+only, so the gate above stands for it). zero-core's own full suite on its branch (the desktop, beside two live runs,
+GPU visible): 790 passed, 31 skipped, 3 failed, none this change's (a CUDA determinism test that fails the same on
+c850a5d with the GPU busy, a CUDA-graph test and a rolling-quota timing test that pass alone; docs/az.md 70); its
+`smoke_all.sh --with-this-core --build-only`: 3 of 3 games, GREEN.
+
+On 296c62f0 (this pin, 218.1's docs), in the warm worktree warm-1, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the automatic
+placement: **GATE PASSED WITH SKIPS python 296c62f04bf5 in 1752s** - privacy 0 findings; build and the release worker;
+pytest 1-of-4 135 passed, 4 skipped, 2-of-4 (the Mac) 170 passed, 2 skipped, 3-of-4 148 passed, 1 skipped, 4-of-4 278
+passed, 6 skipped, the desktop part 48 passed, 5 skipped; the run-loop smoke (mtg-smoke: its `selfplay_local_reason`)
+16 games, 0 unfinished - skipped: 8 live-run-hazard tests (fenced: a live run on this machine). The python tier is
+this repo's pytest, which the optin-core tier above does not run.
+
+### 218.2 Open points
+
+* **Scratch launchers.** A launcher that starts a fresh run, or a fork, without a farm pool from a commit with a
+  published farm build is now refused at its start (exit 78) until it sets `selfplay_local_reason` (or attaches the
+  farm); a run resumed after PAUSE is never refused, only warned.
+* **A stopped pool leaves its farm run as it was**: the coordinator keeps serving the last generation registered before
+  the refusal until someone pauses the farm run (the log says so); the pool does not PUT `paused` itself.
+* **The farm evaluation** (`eval_remote pool:...`, zero-core docs/az.md 65) still retries its SystemExit refusals
+  (zero-core 65's "REFUSED (SystemExit)" retry): only the self-play pool's refusals are classified here.
+* **ab.py** checks an arm's farm use but not its `selfplay_local_reason`: a desktop-only arm beside a published build
+  without one is refused by the run at its first start, and `go` stops there (its supervisor ends 'refused').
+* `pool_settings` does not set `pool_export` (legacy-meta3-r1 runs 'fast'; the fp16 variant is the float16 copy of
+  whichever graph the run exports).
+* Merging with branch `feat/h2h-backend` (217): the zero-core branches meet in `GamePackage.__init__` (`farm_build` and
+  `h2h_backend` added at the same places) and at the end of docs/az.md (69 and 70); here, in `tests/test_ab.py`'s end
+  and the gitlink. All "keep both".
+
+## 219. The farm's Macs fuzz: a macOS fuzz build as each fuzz campaign's alternate, one set of campaigns per engine, failures keyed the same on every platform (branch `feat/backfill`, 2026-11-21)
+
+Why: in the week to 2026-11-21 the two farm Macs had no lease 43% of their time on the farm, because the fuzz
+campaigns were Windows-only (zero-farm PROTOCOL 11.4 already lets a campaign list one worker build per platform; no
+campaign did). Every live run and A/B arm also registered its own four fuzz campaigns even when its engine was main's
+(20+ campaigns of one commit, competing with each other). No rule, card, encoding, search or worker change; behaviour
+digests untouched. Python tools only: tools/farm_campaign.py, tools/fuzz_steward.py, tools/farm_release.py,
+tools/farm_gates.py.
+
+### 219.1 Fuzz campaigns with alternates (`farm_campaign.py create|update --alternate ID`)
+
+* `--alternate ID` (repeatable) names a signed fuzz build of another platform, found like the build (the farm_build dist
+  directories and `<ZERO_BIG_DISK>/zero-farm-builds`) and checked by its manifest only (a Mach-O executable does not start
+  on Windows): a worker, the build's game and profile, another platform than the build's (one per platform), the same
+  engine commit or one with the same farm worker inputs (`farm_builds.rust_key`). The build's own `fuzz-check --mode M
+  --env ... --platform <the alternate's>` must accept the mode there (197.3's libm refusals: `delver_dealt2-matches`,
+  `FUZZ_BELIEF`, ... stay Windows-only). The definition's `builds` are the build and its alternates.
+* **A PUT is the campaign's whole configuration** (the coordinator resets what a PUT leaves out). `FIELDS` now carries
+  `alternates`, `min_agent`, `gpu`, `providers` besides the old nine, and `current_fields` reads them back from GET (each
+  alternate without its `problems`), so `update`, `pause`, `resume` and the steward's share changes
+  (`put_campaign`) keep a campaign's alternates. Before, a steward share change would have dropped any alternate.
+  `update --no-alternates` removes them; `update --alternate ...` replaces the list.
+
+### 219.2 The steward's Macs and one set of campaigns per engine (tools/fuzz_steward.py)
+
+* **One set per engine** (`dedupe`, default on): targets of one engine hash (main and the runs pinned to it, an A/B's
+  arms) share one owner's build, campaigns, pace and local jobs; the others follow it. An owner whose run ends hands
+  everything to a follower; a later target of a retired owner's engine resumes those paused campaigns instead of making
+  four new ones; two owners of one engine in an older state merge (main's campaigns stay, the other's are paused). Only
+  the steward's own state named per-target campaigns, so nothing else changes (campaign names stay
+  `fz-<owner>-<sha7>-<alias>`).
+* **The Mac part** (`mac_farm`, default on): the owner gets a macOS fuzz build of its engine - found (the release's, see
+  219.3, or any signed one of the same engine hash; a found build that may never have been published is published
+  with `farm_build.py --publish-dir`), else built (`farm_build.py --profile fuzz --platform macos-arm64 --publish`: on
+  the Mac, signed here) - and every campaign whose mode macOS may play lists it (`farm_campaign.py update NAME
+  --alternate ID`; new campaigns are created with it). A failed macOS build is logged and tried again after
+  `mac_retry_h` (6 h); the Windows campaigns never wait for it.
+* `find_build` takes a platform (default windows-x64) and never returns another platform's build. Before, a macOS fuzz
+  build of the same commit in a dist directory could have been picked as a Windows target's build.
+* **Failures from a Mac** arrive like a PC's (the campaign's failures; the build id is the macOS build's, and the queue
+  records each seed's platform). They are replayed here on the Windows build of the same engine, and key to the same
+  id as on a PC: `neutral_site` names a chunk crash's `crash exit <code>` the same on both platforms (219.4); the
+  replay compares neutral sites.
+
+### 219.3 The release builds the macOS fuzz build by default (tools/farm_release.py)
+
+`mac_fuzz` now defaults to true (`--no-mac-fuzz` / release.json `"mac_fuzz": false` turn it off): every release's macOS
+part builds and publishes the macOS fuzz build next to the release build (216), and its Mac gates run 197.4(c), the fuzz
+identity, and the new part (d) below. The steward finds that build for main's engine without building one.
+
+### 219.4 Measured: Mac fuzz finds and reports failures the same way (`farm_gates.py --mac` parts c and d)
+
+New part (d) of `farm_gates.py --mac` (with the fuzz workers; `--no-fuzz-faults` skips it): one fuzz job with the
+worker's test faults (zero-core `ZERO_FARM_TEST_FAULT`, taken only by fuzz-profile builds whose process has
+`ZERO_FARM_ALLOW_TEST_FAULTS=1`) on both builds. The faults are a panic, an abort, a stack overflow and a hang at seeds
+first+2/5/8/11, `--seed-timeout 20`. Each side's `fuzz-final.json` (the failures an agent uploads) is read; it passes
+when the same seeds fail on both, nothing else does, and every failure's steward id (site and message, the site
+platform-neutral), mode and repro (the engine commit aside) are equal.
+
+On main 1e7416c5's engine: the Windows fuzz build c37801105831b0c62553f8b2 and the macOS fuzz build
+de486c2e6e785fd5df47f3b0 (signed, not published), with the Mac idle on AC power:
+
+* (c) identity: `games` seeds [1000, 1400), every seed's outcome identical (400 of 400).
+* (d) faults (93 s): the same four seeds fail on both, and the four ids are equal with neutral sites:
+
+| fault | site on Windows | site on the Mac | neutral site | steward id before / after |
+|---|---|---|---|---|
+| panic | `third_party/zero-core/crates/worker/src/fuzz.rs:346` | the same | the same | equal / equal |
+| abort | `crash exit 3221226505` (0xC0000409) | `crash exit -6` (SIGABRT) | `crash abort` | different / equal |
+| stack overflow | `crash exit 3221225725` (0xC00000FD) | `crash exit -6` | `crash stack overflow` | different / equal |
+| hang | `HANG games` | the same | the same | equal / equal |
+
+Without `neutral_site` one crash seen on a PC and on a Mac would have been two queue entries, and a Mac crash's replay
+here would have "failed at another site". A Unix abort and a stack overflow share exit -6; Rust's "has overflowed its
+stack" message, printed on both platforms, tells them apart. The steward's queue held no crash entries, so no id
+changes for an existing entry. The coordinator's own per-campaign site count (`first_of_site`) still sees the raw site.
+
+### 219.5 Tests
+
+* tests/test_farm_campaign.py: the PUT body's new fields, and a macOS alternate created, kept by update / share / pause
+  and by the steward's put pattern, removed and re-added. It is refused, with nothing signed or put, for: a libm-refused
+  mode (`delver_dealt2-matches`), another engine's build, the build's own platform, two of one platform, an unknown
+  build.
+* tests/test_fuzz_steward.py:
+  * neutral sites;
+  * one set per engine (follow, hand-over, pause, reclaim, re-pin, the merge of an older state);
+  * `find_build` per platform, including the release's copies;
+  * the Mac part (a build started, a failure retried only after `mac_retry_h`, the alternates on the three modes macOS
+    may play and not on `dd2m`, a follower never building);
+  * part (d)'s comparison on the measured outputs.
+* tests/test_farm_release.py: the switches' new default. The macOS-part tests keep `mac_fuzz` off in their
+  release.json; they test the release build's mechanics.
+
+Gate: `GATE PASSED WITH SKIPS python bbea9922540f in 1058s` (skips: the live-run fence only).
+
+### 219.6 Switching it on (not done here)
+
+Merge, then restart the steward from main AT ONCE (`python tools/fuzz_steward.py stop`, then the logon task or `run`).
+The order matters: the release watcher runs farm_release.py afresh for each release, so the merge turns `mac_fuzz` on
+for its next release, which puts a macOS fuzz build into a dist directory the steward searches. A steward still running
+the code from before this section has no platform filter in `find_build`: at main's next rebuild it would take that
+Mach-O build as main's Windows fuzz build (`mtg-<sha>-fuzz-macos-arm64` sorts before `mtg-<sha>-fuzz`), and its
+campaign creation would then fail on `info`. At the new steward's first check, main's and the live runs' duplicate
+campaigns merge (the followers' are paused), the owner's macOS build is found or built, and the three Mac-playable
+campaigns list it.
+
+What to watch:
+* a Mac takes a fuzz lease when no run needs it;
+* its seeds are credited;
+* its leases are not given back as starved. The agent's starvation check counts the worker process's CPU only, not its
+  chunk processes; that is the same on Windows, where fuzz works.
+
+The release watcher builds the macOS fuzz build from its next release on (219.3).
 
 ## 220. Legacy Hogaak Tempo: the deck's cards (lanes `hogaak-a`, `hogaak-b`, `hogaak-c`; integrated on `hogaak`, 2026-11-21)
 
@@ -42926,6 +43450,893 @@ on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 
 compared); the suite evidence of 1052673bd712 (`gates/1052673bd712-suite.json`); the Mac's full-suite recheck not
 needed (the tested sha differs in docs only); the checkout unchanged (`gates/93513ea86b60-engine.json`). The next
 commit adds this paragraph only (docs).
+
+## 221. zero-core pin c850a5d -> f1b5a8c: farm match leases in fewer, larger batches on evaluator lanes of their own (zero-core `feat/eval-speed`, docs/az.md 71; branch `feat/eval-speed`, 2026-11-21)
+
+**Why.** Farm match (eval) leases on a PC's CPU spent ~98% of their time in ONNX Runtime at ~2 rows a call: 32 games of a
+cells campaign took 45-60 minutes on one PC (215). The worker played them in the run's own `groups` (legacy-meta3-r1:
+4), both networks on one evaluator thread, one session with the job's 16-20 search threads.
+
+**The pin** (zero-core docs/az.md 71; the worker crate only - no engine, encoding or search change): an eval job's
+batches go to evaluator lanes of their own (on the CPU a lane per network seat, on CUDA one per generation, other GPU
+providers one lane as before); on the CPU a job line without `groups` plays in one group (never the settings'), each
+lane a session of at most 4 threads (macOS's 3). GPU jobs keep their groups. Only the batches change.
+
+**Parity** (2026-11-21, the desktop's CPU beside the live runs, below normal priority, the CPU pack d531424b;
+legacy-meta3-r1 iter_1040 against iter_1024, the yardsticks' best-of-one spec, 32 simulations, paired, traced):
+
+* *Old worker, layouts* (main 1e7416c5's release worker 5e4023e2): games 0-7 in the settings' groups 4 with 4
+  intra-op threads, in groups 1 with 2 threads, and as two leases (0-3, 4-7) in groups 1 with 1 thread: **every row and
+  trace digest identical** - the CPU graph answers a row the same in any batch and on any thread count.
+* *New worker against old* (this core's worker, built here): games 0-7 in its default layout (1 group, 2 lanes x 2
+  threads), with 4 lanes in 2 groups, and with `--lanes one` (the layout before) on games 2-5: **8 of 8 / 8 of 8 / 4 of
+  4 rows and digests identical to the old worker's**.
+* *zero-core's eval gate* (`tools/worker_eval_gate.py`, the new worker against `zero.farm_eval.match_driver`, groups 1,
+  sparse rows, 4 search + 4 ONNX Runtime threads, untraced): **8 of 8 rows identical, 60 batches identical**; both sides'
+  rows equal the old worker's.
+
+### 221.1 Measured on the farm, the gate, and the pin c850a5d -> 0dd8a1f (docs only)
+
+**Test campaigns** (2026-11-21; `tools/farm_campaign.py submit` through a wrapper that can put settings over the match
+settings, `--no-alternates` so every lease played on a PC's CPU; legacy-meta3-r1 iter_1040 against iter_1024, `--bo1
+--sims 32 --seed 11`, 128 games each, 32 or 64 games a lease; all paused when done): the old build (main 1e7416c5's
+release 5e4023e2), the old build with the campaign's `groups` 1, and two measurement builds of this branch released with
+`tools/farm_release.py release <sha> --no-mac --no-speed` from side commits not merged here (two groups / four lanes:
+8506cfa0; one group / two lanes, this layout: 89533c80; farm gates passed for both). Per farm PC from D1's lease stats
+(zero-core docs/az.md 71 has the whole table): two 16-thread PCs **237 -> 645 and 204 -> 655 games/h** with 32-game
+leases (392 -> 1,055 and 335 -> 1,047 leaves/s; leaves per ONNX Runtime call 2.4 -> 6.6-7.3), **768 games/h** (1,243
+leaves/s, 12.4 leaves a call) with 64-game leases; a 20-thread laptop 81 (one wide session) -> 182 games/h. The
+two-group layout lost at both lease sizes (576 / 656 games/h). **Every game identical across the campaigns** - rows and
+trace digests of the same 128 games played by the old and the new builds on four PCs in five layouts.
+
+**A CUDA lease** (a farm PC with an NVIDIA GPU, paused on the coordinator for the 31 minutes of the measurement; the CUDA
+alternates of both builds, float16 variants, 64 games, the job's groups 2): 407 -> 436 games/h (+7%, a lane per
+generation), all 64 rows and digests identical. One group there: 556 games/h, but 59 of 64 games differ (the float16
+GPU graph's answers depend on the batch shape), so GPU jobs keep the agent's groups.
+
+**Gate of 2023ffac** (optin-core, this worktree, baseline main 1e7416c5 in a warm worktree, `--offload local`,
+throttled beside the live run): every step passed - core tests 215, checkpoint_compat byte identity (visits and cq,
+3,185 samples each), the digests as recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver
+6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8), farm compat identical (gate 2: 6 games, 2,890 rows,
+150 batches; gate 3: 6 games, 2,556 rows), az 57 and hidden 28, the three other games built against this core - but
+core pytest 814 passed, 1 failed: `tests/test_measure.py::test_heldout_make_losses_and_guards`, which compares the
+`seconds` of two separate held-out evaluations (0.0 against 0.01 on the loaded machine); it passes alone 3 of 3 and
+this branch changes no Python. So formally GATE FAILED (a pre-existing timing flake). Also: MTG Zero's
+`tests/test_worker_farm.py -k eval` with the gate's worker: 2 passed.
+
+**WIP / not merged** (2026-11-21): main moved to 45dbf2e1 (the Hogaak lanes; no pin change, ENGINE.md 220 - this
+section conflicts only at the end of this file). Left: merge main, the optin-core gate on the merged commit (baseline
+main), then main. The pin 0dd8a1f differs from f1b5a8c by zero-core docs only. zero-core's `feat/farm-guards` also
+takes docs/az.md 70: this branch's section should become 71 at the integration.
+
+## 222. The farm integration: 217 + 218 + 219 + 221 on main together, zero-core pin -> 84bb5e1 (the merge of zero-core `feat/h2h-backend`, `feat/farm-guards`, `feat/eval-speed`; docs/az.md 69, 70, 71; 2026-11-21)
+
+**What merged.** Four branches made beside each other from main 1e7416c5, onto main 45dbf2e1 (the Hogaak lanes, 220):
+`feat/h2h-backend` 32955e7d (217: `--backend auto | farm | local`, `job_class` folded in), `feat/farm-guards` 0c6f972e
+(218), `feat/backfill` d369b948 (219: the Macs fuzz) and `feat/eval-speed` 366518b4 (221). Their zero-core halves
+(each from c850a5d) are one zero-core branch, `integrate/t2-farm` = 84bb5e1: `feat/h2h-backend` 1e26188
+(fast-forward from zero-core main d499716), then `feat/farm-guards` d32f6f8 (59dc7fe: `GamePackage` gets both
+`h2h_backend` and `farm_build` - the docstring, the keyword and the attribute kept both; az.md 69 then 70), then
+`feat/eval-speed` 0dd8a1f (84bb5e1). The pin moves to 84bb5e1, which replaces 221.1's WIP pin to 0dd8a1f; 84bb5e1
+differs from 1e26188 / d32f6f8 / 0dd8a1f by their merges only (the conflict resolutions below; no other code).
+
+**Numbers.** zero-core: eval-speed's section was az.md 70 on its branch, the same number as the guards' - it is
+**docs/az.md 71** now, and its references follow (crates/worker `evaljob.rs`, `job.rs`, `proto.rs`, `tests/evaljob.rs`;
+this file's 221, but for 221.1's historical note). This file: 217, 218, 219 and 221 were free on main (each branch had
+taken its number before 220 landed), so they keep their numbers and every reference to them stays right; the sections
+stand in number order (217-219 before 220). Conflicts, all keep-both: the end of this file (217 / 218 / 219 / 221
+against 220), the end of `tests/test_ab.py` (the judge's backend test and the farm guards' tests) and the gitlink.
+AGENTS.md, `tools/ab.py`, `mtgz/az/farm_campaign.py`, `mtgz/az/__init__.py` and `farm_builds.py` merged by themselves.
+
+**`auto` is the default** (zero.h2h, `cells-match`, `tools/ab.py judge`, as 217 built it). The user had said not
+before the farm's priority lane is live; the lane is live on the coordinator's canary machines only, and asked on
+2026-11-21 the user answered that canary counts.
+
+**What a user meets after this commit.** (1) A FRESH desktop-only start - or a fork's first start - from a commit with
+a published farm build is refused (exit 78) without `selfplay_local_reason` (`--selfplay-local-reason "<why>"`, env
+`ZERO_SELFPLAY_LOCAL_REASON`); a resume only warns (218). Scratch launchers that start such runs need the reason. (2)
+Head-to-heads go to the farm when they can and say so in one line (217). (3) The fuzz steward is restarted with the
+Macs' fuzz build on (219, approved by the user on 2026-11-21) right after main moves. (4) Eval jobs on CPUs play in one
+group on lanes per seat once a release built from this commit reaches the farm (221).
+**Gate** of 37bbfc82 (this section's commit; the warm worktree warm-3, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the system
+Python, the automatic placement - 5 steps on the Mac, 8 on the desktop throttled: four live supervisors here -,
+`--baseline-root` warm-2 at main 45dbf2e1 with its engine module from the artifact cache): **GATE PASSED WITH SKIPS
+optin-core 37bbfc820dfe in 3290s** - privacy 0 findings; core tests 215 passed; checkpoint_compat byte identity (visits
+and cq, 3,185 samples each); the digests as recorded (constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver
+6a03572828250b86, metagame be3766d1f943c95c, dealt f0bfffd26a70a753 over 80 matches); farm compat identical (gate 2: 6
+games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows); cargo test --test az 57 and --test hidden 28 passed;
+glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 755 passed, 71 skipped -
+skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core's timing flake
+(test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
+(docs).
+
+## 223. A search's finds by place, not by search: the Doomsday-mirror hidden-information leak (branch `fix/dd-mirror-infoset`, 2026-11-21)
+
+**Why.** The Hogaak integration's first FUZZ_POOL=hogaak probe (220.4) hit a Doomsday-mirror post-sideboard match (seed
+163, games 2-3 with hidden decks) that failed `check_match_information_set`: same keys, different encodings of P1 at
+flat index 57219. That failure was already on main (1e7416c5, 45dbf2e1). The new `Row::locate` names the index: the
+`found` token slot 0, float `CODE + fs::DEPTH`, depth 1 against depth 0. Trace: P1's library held only two cards,
+Murktide Regent and Pact of Negation, both finds of P1's earlier Doomsday pile (140.9, 142.12). P1 cracked a fetch land:
+search, then `shuffle_library`. The shuffle kept both marked (the library was finds only), and the two worlds' RNGs put
+them in different orders. `write_found` wrote each find's depth **by its slot in the order of the searches**, so slot
+0's depth was "which find is on top": the shuffle's result, hidden from everyone (its owner too), was in P1's row. The
+key correctly omits the shuffle. So this was not merged search nodes: **the network's input showed hidden
+information**, in the real game too.
+
+**Same root, more cases** (found by reading the code; the regression tests below cover them):
+
+1. *A private reorder among finds.* After a Doomsday pile's `Op::PileTo` order, or Ponder over finds, the other player no
+   longer knows which find is where, but slot k still pointed at one object's depth. Worse, a pile's finds are marked
+   in **definition order** (`dd_pile_found` sorts the pile by definition before `found_by_search`), so slot k was "the
+   pile's k-th smallest definition" and **the opponent's row mapped definition rank to depth**. That is identity-correlated
+   hidden information (e.g. where Thassa's Oracle sits), from the moment the pile is ordered. In the opponent's worlds the
+   pile's definitions are dealt anew, so the walk could also diverge there.
+2. *Finds mixed with cards the other player knew.* 140.9's rule unmarked a scramble's finds only when its domain held a
+   card the viewer did NOT know that was not a find. Cases: a Doomsday pile with graveyard picks (public cards, never
+   finds); a pile card the viewer saw (Mishra's Bauble: `learn` unmarks it); a revealed card on top (Personal Tutor). After
+   the private order those cards are a cloud's, so which places hold finds is not public, yet the tokens showed each
+   find's exact depth.
+
+**The fix** (no layout change: the same `found` token, the same widths):
+
+* `Game::finds_told: Vec<CardIdx>` (game.rs), **the public fact**: the finds whose places everyone tells apart as their
+  owner's search's finds. A find is added in `found_by_search` under the same `keeps_sightings` gate as before. It is
+  added in a world too: a search inside the tree marks its finds as the real game's would. `found` itself stays
+  real-game only. A find is removed by `untrack_found` (seen, put into a hand, `forget_order`), and in `scramble` by the
+  **strict rule**: if the domain holds any card that is not a told find (the owner's told-apart hand cards excepted),
+  the domain's told finds leave `finds_told`. With that rule the **set of the told finds' places is always public**,
+  though which-is-which is not. A told find is created at a public place: on top after a tutor, the top n for a pile of
+  finds only, a face-down exile place. Its place then changes only by public moves (draws and mills from the top leave
+  and unmark it; cards put on top or bottom shift the places publicly; a search's removal comes after a whole-library
+  scramble) or by scrambles and shuffles, which now keep told finds only when the domain is told finds only (the
+  domain's places hold finds before and after). `determinize` keeps objects' places and the marks.
+* `Game::finds_by_place()` (hidden.rs): the told finds sorted by (owner, zone, depth from the top / exile place).
+  `write_found` (tail_encode.rs) and `Game::view_of` (testkit.rs) list them in that order: **slot k = the k-th find by
+  place**. Identity only where the viewer knows the card (`Cx::ref_def`, unchanged: after a shuffle the owner doesn't).
+* `Game::found` keeps 140.9's likelihood semantics exactly (same entries, same order, the deal's posterior unchanged).
+  It is reclassified **Hidden** in `public_state.rs`: it is the real game's sighting record, not the public fact.
+  `finds_told` is Public. The gate's two perturbations ("the top library card is its owner's search's find", "a
+  search's find is no longer told apart") now perturb `Game.finds_told`. Their names are unchanged, so the `V7_FIXED`
+  / `COMBO_EXCLUDED` entries still match.
+* `build.rs`: a described position must have neither `found` nor `finds_told`.
+* `check_match_information_set` reports where two rows differ (`Row::locate`: a head segment's slot and float, a tail
+  token's segment, slot and float, or an override) and handles rows of different lengths.
+
+**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8).** Once finds are mixed with other cards, the rows
+no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
+already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
+encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
+layout v8 question (P's payment segment, E's stale-reference LKI block): a group-level finds fact in v8, or counting a
+pile's graveyard picks as told members without a layout change (partial). **The user chose the group fact in the single
+additive v8** (one token per group of places: owner, zone, the places, how many hold search finds and other cards). Also noted, not
+changed: 140.9's likelihood reads the real mark when a find and a mixed-in known card share an identity (pre-existing);
+open-decklist games record no finds at all (A1's rule), so no cube or game-1 row has the fact.
+
+**Tests.**
+* `engine_223_doomsday_mirror_post_board_match_163_information_set` (tests/fuzz.rs): the repro. It also runs as a scan:
+  `ENGINE_223_DECKS=<p0>,<p1>` (files of data/decks), `ENGINE_223_START=1|2`, `ENGINE_223_SEEDS=a..b` or a list.
+* `engine_223_a_doomsday_piles_private_order_is_not_in_the_found_tokens` (tests/v7_tails.rs): a pile of five library
+  finds in two orders. Five tokens at depths 1-5 in both rows, the card at each depth in its owner's row only. The
+  opponent's tokens are equal across the two orders and in 16 of its worlds. Then a fetch land finds nothing and
+  shuffles: still five tokens at depths 1-5, no identity in either row (the owner no longer knows the order), equal in
+  each player's worlds. With the sort toggled back to search order the test fails (the owner's slot 0 at depth 2).
+* `engine_223_a_pile_mixing_finds_with_a_graveyard_pick_has_no_found_token` (tests/v7_tails.rs): the strict rule.
+* Unchanged and passing: `a_tutors_card_on_top_is_a_found_token`, the az public-state gate (the perturbations now on
+  `finds_told`), the hidden suite.
+
+**Digests.** Cube full 44372545881ef768, DIGEST_ENCODING=0 a965c3fc8d3bba8a, v5 9f4cb802bae20e3b, constructed
+91b6cf60576961a7 (dealt and dealt per seat as recorded), EoE c3a9c786030f42eb, driver 6a03572828250b86: **all equal**
+(open decklists record no finds; EoE's layout v6 has no `found` token). **Metagame be3766d1f943c95c -> 4039d04b7971975e**:
+12 of its 288 lines (games and matches of the meta3 spec: Delver, Doomsday, Sneak and Show with hidden decks). Every move
+explained by toggling (an uncommitted switch, on the desktop):
+* the old `found` segment (the 140.9 set in search order) with all the rest of the new code: **= be3766d1f943c95c**, so
+  the 12 lines move through the `found` segment's content alone (no play, no other float);
+* only the order changed (the old set, by place): 11 of the 12 lines move (the leak: case 1 and the shuffle);
+* only the set changed (the strict rule, search order): 10 of the 12 move (case 2). The instrument logged 14 drops,
+  every one a scramble whose domain mixed told finds with cards the viewer knew (a Doomsday pile with Thoughtseize,
+  Force of Will, Dark Ritual... picked from the graveyard, or cards seen before);
+* the 12 lines are exactly the union (mm 18 11 and mp 7 11 by the order only; mp 10 11 by the strict rule only); no
+  other line moves under any toggle.
+Re-recorded with DIGEST_WRITE=1 (`digests_metagame.txt`).
+
+**How often** (the metagame digest's games as a stand-in for meta3's rows: random and heuristic play, not the run's self-play; an uncommitted counter in `write_found`, on the Mac): of about 14,500 rows encoded (real positions and `hash_world`'s worlds), 147 hold a find (the old or the new set), and **144 of them showed hidden information under the old code**: 12 by the order (the old set in search order, not by place: case 1 and the shuffle) and 132 by a mixed group (case 2: the old code kept those finds with exact depths). About 1% of the rows, all in hidden-deck games where a Doomsday player has piled. The live run's own rate depends on how often its Doomsday player piles in games 2-3; it was not measured from its game records.
+
+**Checks** (on the Mac, at a17fd01b = this fix's code): the full engine suite (`cargo test --release -p engine -p
+card_ir --no-fail-fast`) passed; fuzz: FUZZ_POOL=cross 20,000 games + 1,000 matches + 1,000 post-sideboard, doomsday
+2,000, delver 2,000 (+100 matches, +100 post-sideboard), sneak_show 2,000, hogaak 2,000 (+100, +100), the default 2,000
+(+100 matches), all passed. FUZZ_HIDDEN_DECKS=1 with `cross` is refused by main's own guard (129.3), and with `doomsday`
+it plays no Doomsday deck (the pool's played-card checks fail by design), so neither applies. **The widened
+post-sideboard scan** (the repro test as a scan, every check of `play_match_spec` incl. the information-set walk):
+2,000 matches each of the Doomsday, Delver, Sneak and Show and Hogaak mirrors from game 2, and of Doomsday-Delver
+(both seats), Doomsday-Sneak and Show and Hogaak-Doomsday from game 1: **16,000 matches, all passed**.
+
+**The live run.** legacy-meta3 self-plays best-of-three matches whose games 2-3 have hidden decks, where `found` is kept
+and Doomsday piles are the deck's core. So it trained on this leak: the opponent's row after a pile ordered by
+definition rank, and both rows after a shuffle of a library of finds only. The fix moves encodings only in those
+states. A checkpoint keeps its layout (no layout change), so a run can re-pin onto the fix with no fork.
+
+**The suite gate** (on 1115a8bf, this section's commit, in its worktree; steps on the Mac beside the live legacy-meta3 runs):
+`python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,doomsday,cross,hogaak,delver` - **GATE PASSED
+suite 1115a8bff898 in 978s**: privacy 0 findings; the full engine suite 2,870 passed (24 binaries); the sharded 2,000-game
+fuzz of each pool passed (the default with 100 matches; default with hidden decklists; delver_dealt, cross, hogaak and
+delver each with 100 matches + 100 post-sideboard; doomsday games only).
+
+**The engine gate** (on 6048fb79 = this branch merged with main 76973535, zero-core pin 84bb5e1; in the branch's worktree,
+steps on the Mac and the desktop's throttled beside the live legacy-meta3 runs): `python tools/gate.py engine --tested-sha
+1115a8bff898 --expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine
+6048fb7978fd in 1355s** (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live runs): privacy 0
+findings; the build and the release worker; the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (=
+expected); the formats constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame
+4039d04b7971975e and dealt f0bfffd26a70a753 (each = the checkout's recorded file); `az` 57, `limits` 13, `hidden` 28
+passed; pytest on the Mac 214 + 114 + 143 + 196 passed and the desktop part 49 (5 skipped); the desktop smoke config;
+**farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609
+rows); the suite evidence of 1115a8bff898; the Mac's full-suite recheck not needed (main's 21 files outside engine/ and
+card_ir/). The next commit adds this paragraph only (docs).
+
+## 224. Metagame runs publish by default; a run or a fork that will not publish says so; a copied setting stays a side run (branch `feat/meta3-publish`, 2026-11-21)
+
+Branch `feat/meta3-publish` from e9ff0e24 (legacy-meta3-r1's pinned commit, so the run can move onto it with Python
+changes only). Why: the user (2026-11-21), after a day of meta3 experiments none of which appeared on the Delver AI
+site: "We did work before to make it so that stuff like this should be published without having to remember to do
+that". 163 (the run-owned publisher; forks of a publishing run publish as side runs) and 193 (tools/ab.py) exist, but:
+
+* the `legacy-meta3` preset set `publish={}` (written 2026-11-17 when the publisher showed Delver-mirror runs only; the
+  metagame view landed days later) and legacy-meta3-r1's launcher passes `--publish {}`; r1 got a hand-started
+  publisher instead, so as far as 163 knows r1 does not publish;
+* so every fork of r1 inherits "off" (163's fork hook publishes only forks of a publishing run), and the experiment
+  launchers copied r1's flags, `--publish {}` included (the games2x data experiment, the mirror-only / lr / shrink-and-
+  perturb forks, the low-simulation arms): none appeared without a hand-started publisher;
+* r1's hand publisher runs with `--combo-every 0`, which the `publish` setting did not accept, so r1 could not move to
+  its own publisher as it was;
+* nothing said that a run or a fork would not publish.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 224.1 What changed (mtgz/az/publish.py, mtgz/az/__init__.py)
+
+* **`combo_every`** is a `publish` option (int >= 0; the publisher's `--combo-every`).
+* **`META3_PUBLISH`** = r1's hand publisher's options: `{side: false, every: 8, games: 9, combo_every: 0, census: 0,
+  device: cpu, threads: 4, forks: []}` (9 games = every pairing once; no fork-record file: the metagame lineage keeps
+  none, a fork's charts start from the metrics it copied). `legacy-meta3` and so `legacy-meta3-ddwheel` set it; the
+  smoke presets stay off. A run that saved `publish` keeps what it saved (r1's `{}` until its launcher passes one).
+* **PUBLISH OFF is loud.** `companion()` (the supervisor's hook, every start) with the setting off writes `PUBLISH OFF:
+  <run> will not appear on the Delver AI site ...` to the run's supervisor.log and stderr and returns None (the run goes
+  on, as 163: publishing never stops training). `on_fork` prints `fork_run: PUBLISH OFF - <fork> will NOT appear ...`
+  for a fork of a run that does not publish.
+* **`for_run`**: the run directory name a setting was made for. A run of another name carrying it - a launcher that
+  copied another run's flags, `--publish` included - publishes as a SIDE run titled after itself (its own state dir,
+  no note), said loudly (`PUBLISH SETTING OF ANOTHER RUN`), instead of posting under the other run's title or taking
+  the site's default run. `on_fork` writes the fork's own name into it (and drops a copied `state_dir`); a launcher
+  that passes a main run's `--publish` should name the run in it.
+* An explicit `forks: []` is deliberate (the metagame presets, ab.py's arms): no "names no forks file" note.
+
+### 224.2 Tests
+
+tests/test_run_publisher.py: the metagame presets carry META3_PUBLISH (smokes off; resolved through `--preset
+legacy-meta3-ddwheel`); `combo_every` reaches the command, bad values refused; PUBLISH OFF on stderr and in
+supervisor.log; a copied setting (for_run another run's) becomes a side run titled after the run without the note or
+state dir, the own run unchanged; a fork of an unpublished run says it will not publish; a fork of a metagame run is a
+side run made for itself, `combo_every` kept, no forks-file note.
+
+### 224.3 Turning it on for legacy-meta3-r1
+
+At the run's next start from a checkout with this change (a re-pin onto this branch's commit: Python only, the worker
+build unchanged): its launcher passes `--publish '{..., "title": "<r1's site title>", "for_run": "legacy-meta3-r1",
+"state_dir": "<the hand publisher's state dir>"}'` over META3_PUBLISH (same site record, same history), and the
+hand-started publisher is stopped first. From then on every fork of r1 publishes as a side run with no step to
+remember.
+
+## 225. Judging publishes by default: reference matches from the cells yardstick, farm campaigns' head-to-heads, ab.py's outside reference (branch `feat/judging-publish`, 2026-11-21)
+
+Branch `feat/judging-publish` from 00cfd372 (`feat/meta3-publish` merged with main: 224's loud PUBLISH OFF is the
+pattern followed here). Why: the user (2026-11-21, after 224): "Experiments should appear on Delver AI without anyone
+remembering to wire it up." 224 made the runs and their forks publish; the measurements of an experiment still did
+not:
+
+* the reference-match chart of a run's page (delverai's record `refmatch.<run>`: the run's checkpoints against a
+  fixed network from outside the run - the metagame runs' Delver mirror against pb1@262) was fed only by a
+  hand-written sidecar per experiment that measured with `run_yardsticks.py one --kind cells --ref LABEL --pair X,X`
+  and ran delverai's tools/upload_refmatch.py from the site's checkout when a file `UPLOAD` existed (none did for the
+  shrink-and-perturb fork: nothing appeared);
+* `tools/farm_campaign.py collect` printed a head-to-head nobody posted;
+* `tools/ab.py` judged arms only against each other and the start: a single-arm experiment (one fork trained on,
+  judged against a fixed network) did not fit it at all.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 225.1 The reference-match record in this repo (mtgz/az/site_refmatch.py)
+
+The record is built here, not by shelling out to the site's checkout, field for field the one upload_refmatch.py
+builds (`{run: "refmatch.<run>", kind: "refmatch", for_run, updated, series: [{key, label, title, note, ref: {run,
+gen}, deck, deck_label, format, games, sims, rows: [{iter, games, score, se, elo, elo_se, unfinished, note?}]}],
+marks?, iters: []}`; se from the deals' pentanomial, elo / elo_se the cell's): the shrink-and-perturb sidecar's
+upload.json and rows.jsonl give a byte-identical JSON record through both. It is posted with mtgz.az.publish's key and
+POST (`upload_key` / `post` moved there from mtgz.az.replays, which re-exports them: one copy, light enough for the
+yardsticks' watcher). Each post replaces the record whole, so it is rebuilt every time from every row on disk:
+`<run>/yardsticks.jsonl` (the watcher's), `<run>/yardsticks/refmatch_rows.jsonl` (rows measured by hand: the watcher
+stays the only writer of its file) and any `--rows` files. A row counts when it is a 'cells' result of a mirror pair
+X,X against a registered reference with that reference's network (ref_sha); the newest row of a generation wins.
+
+* **An outside reference** is a cells reference that is not the gen-over-gen kind, not frozen from the run
+  (`cells-freeze` entries carry an iteration) and no file under the run directory (generation 0 is not one).
+* **Registration**: <run>/yardsticks/refmatch.json keeps per reference label its network (sha256[:12], at the first
+  measurement; a row of another network under the label is left out and said; a new network needs a new label), the
+  reference's run and generation (default: from its checkpoint's path `<run>/models/iter_N.pt`) and the human fields
+  the flags gave - `--series-label` (default `<run>@<gen>`), `--title`, `--note`, `--deck-label` (default
+  data/decks/<deck>.json's name), `--ref-run`, `--ref-gen`, `--mark ITER=LABEL`, `--row-note ITER=TEXT` - kept for
+  every later post, derived defaults otherwise.
+* **Checked as the site checks** (refmatchProblem: names, lengths, counts, at most 8 series and 2,000 rows, no local
+  path in any string) before the post, and **a record with no row is refused** (RefmatchError, exit 3): a publish
+  that posts nothing is a failure, never a quiet no-op.
+
+### 225.2 Who posts it (tools/run_yardsticks.py; the yardsticks setting `refmatch_publish`)
+
+* **`one RUN --kind cells --ref LABEL --pair X,X --iter N` by hand, against an outside reference: posts by default.**
+  Before any game it checks that the post can work (an upload key; a mirror pair - the record shows mirrors only, a
+  non-mirror pair needs `--no-publish`; the label's network), registers the reference with the flags' fields; after
+  the games it prints the result line as always (stdout; a sidecar parsing it is unchanged), keeps the row in
+  refmatch_rows.jsonl and posts (its lines on stderr). `--no-publish`: a loud `PUBLISH OFF: refmatch.<run> is not
+  posted (--no-publish) ...` with the command that posts later, the row kept. A failed post: `PUBLISH FAILED` with
+  the retry command, exit 3 after the result line. `--publish-dry-run` prints the record.
+* **`watch`**: after each mirror cells result against an outside reference it appended, the watcher posts (the new
+  yardsticks setting `refmatch_publish`, default true; false: `PUBLISH OFF` at each such result and at the watcher's
+  start). A failed post is said (`PUBLISH FAILED`) and the lane goes on; the next result posts again. The watcher's
+  measurement children carry `MTGZ_YARDSTICK_CHILD=1` and never post themselves (their command line is unchanged).
+  At its start the watcher names the outside references it will post for, or says why it cannot (no key).
+* **`refmatch RUN [--ref LABEL --ref-ckpt PATH] [--rows FILE ...] [--dry-run] [fields]`**: the record rebuilt and
+  posted now - after `--no-publish`, to change a field, or to adopt a sidecar's rows (an unregistered label takes its
+  network from `--ref-ckpt` or from the rows' own ref_sha when they agree).
+
+So a sidecar like the shrink-and-perturb fork's (`one` from the run's own worktree) posts on its own once its
+worktree carries this commit, without its `UPLOAD` file or the site's checkout; a run whose yardsticks setting names
+an outside reference in its ladder posts from its watcher.
+
+### 225.3 farm_campaign.py collect posts its head-to-head
+
+After `collect` (or `submit --wait`) printed its result, the campaign's readout (zero.h2h's summary, A = seats[0])
+goes to the Head-to-heads tab through mtgz.az.site_h2h (the site's uploader, as 193) **by default**: experiment
+`--publish`, default the campaign's farm run name (`cmp-<name>`); `--title`, default `Farm campaign <name>`, and a
+derived description (site_h2h.check gained `default_title` / `default_description`: used only for an experiment that
+is not on the site yet, so a later match never trips the uploader's "another title" refusal); the sides by
+`--a-label` / `--b-label`, default each checkpoint's run and generation (one checkpoint with a set per side: each
+side's move-rule tag after the name; the same tag on both sides is refused - give labels); the match key
+`--publish-key`, default the farm run name. The check runs **before any waiting** (no uploader or key: refused, as
+`ab.py go`). `--no-publish`: `PUBLISH OFF` on stderr. A self-play or samples campaign, or an unpaired one, has
+nothing the tab can show: `PUBLISH SKIPPED` with the reason. No readout after a collect, or a failed post:
+`PUBLISH FAILED`, exit 3 after the result (a collected campaign returns its result at once, so `collect NAME` again
+retries the post).
+
+### 225.4 ab.py: an outside reference and single-arm experiments
+
+The spec's optional `"reference": {"path": CKPT, "label": "pb1@262"}` (label default: the checkpoint's run and
+generation), or `--ref CKPT [--ref-label L]` on judge / go / check / publish (kept in ab_state.json, so a later
+`publish` rebuilds the same manifest): every arm's last checkpoint is also judged against it with the cells
+(`<arm>_vs_ref.json`, cells-match `--ref-label ref`), published as each arm's overall match against the reference
+(key rank 7) and one match per cell (rank 3) - the tab lists treatments vs control (9), arms vs the reference (7),
+arms vs the start (5), then the cells. With a reference **one arm is enough**: it is the control, there are no
+treatments. The judge was already publishing by default (193); its opt-outs are now loud: `--no-publish` or
+`"publish": {"h2h": false}` print `PUBLISH OFF: h2h.<id> ... post them later: python tools/ab.py publish SPEC` at the
+judge and at the start of `go`. report.json names the reference's label.
+
+### 225.5 Tests
+
+tests/test_site_refmatch.py: outside vs own references (generation 0, a file of the run, frozen, gen over gen); the
+record from every mirror row of the registered network (the newest row of a generation; non-mirror, foreign-network,
+unregistered and failed rows left out; upload_refmatch.py's field order; derived and given fields; marks and row
+notes); no row, a local path and a re-used label refused; the POST faked (url, key, the whole record; dry run posts
+nothing); `one` by hand posting by default, the fields kept for the next post, `--no-publish` loud with the row kept,
+the watcher's child not posting; refusals before any game (a non-mirror pair, no key), a failed post exit 3 with the
+row kept, an own reference silent; the watcher posting after a mirror result, not after a non-mirror or own one,
+PUBLISH OFF / FAILED said and never raised; `refmatch` adopting a sidecar's rows. tests/test_judging_publish.py:
+ab.py's single-arm experiment with a reference (matches, manifest keys and labels, no path sent), the command line's
+reference kept for a later publish, the judge's PUBLISH OFF; farm_campaign.py collect's default post through a fake
+uploader (experiment, title, labels, key, the saved result), PUBLISH OFF / SKIPPED / FAILED, the per-side labels, no
+key refused before waiting. The site is never contacted.
+
+## 226. Last-known mana value of a departed copy; last known power of a slot that left twice (branch `fix/eoe-copy-mv`, 2026-11-21)
+
+**Why.** Bug 6 of the pre-existing engine gaps the Hogaak lanes found (220.2, 220.4's follow-ups): EoE W3's
+`DamageEachSourceMv` (Terminal Velocity's granted "When this permanent leaves the battlefield, it deals damage equal to
+its mana value to each creature") did not know that a departed source was a copy, so it missed the copy's mana value
+(lane B's 202.3b fix, 220.2). The audit of every last-known-information read found a second defect (`lki_power`).
+From hogaak-b c273ef11, merged with main 45dbf2e1. No layout change, no zero-core change, no docs/shortcuts.md entry.
+
+### 226.1 Root cause
+
+The last known information of a permanent that left the battlefield stored only its **copiable values**
+(`Game::lki_copy`: definition, exceptions, double-faced). Mana value isn't a function of copiable values alone: being a
+copy isn't copiable (CR 707.2), yet 202.3b gives a copy of a nonmodal back face mana value 0, and a copy exception "no
+mana cost" gives 0 (202.3a). `DamageEachSourceMv` recomputed the mana value as the definition's, which gives the front
+face's value for a departed copy of a back face and ignores `no_cost`; with nothing recorded it read the card in its new
+zone. A token copy created back face up (707.8a) has **the same copiable values** as the transformed original, so
+nothing in the record could tell them apart. `Amount::EventSpellMv` (Thor, God of Thunder's "that spell's mana value",
+cascade) made the same mistake for a spell that left the stack (`def mv + x * x_pips` from `spell_lki`), missing a spell
+that is a copy of a back face.
+
+`Game::lki_power` kept one departure per slot: a card that left the battlefield, returned (a new object, 400.7) and left
+again in the same turn overwrote the first object's power, and an ability about the first (Jacked Rabbit's attack
+trigger, `Amount::SourcePower`) fell back to the printed power.
+
+### 226.2 The fix
+
+* `cast.rs`: `mana_value_of` split. `mana_value_with_x(c, x)` is the one rule (no mana cost 0; a copy or copy slot of a
+  face with `front_mv` 0; else the face's mana value + x * X pips); `mana_value_of` passes the stack's X.
+* `game.rs`: `lki_copy: Vec<(ObjRef, CopyVals, u64)>`; `move_card` records `mana_value_of` as the permanent leaves,
+  before its copy effects end. `spell_lki: Vec<(ObjRef, DefId, StackItem, u64)>`.
+* `copies.rs`: `Game::mana_value_lki(r)` (now, or as it last existed on the battlefield); `note_spell_lki` records
+  `mana_value_with_x(card, item.x)`; `Game::spell_mana_value_lki(r)`.
+* `eoe_w3.rs` `DamageEachSourceMv`: a live source gives its current qualities and mana value; a departed one the
+  recorded `lki_damage` and `mana_value_lki`, each `expect`ed (the old fallback read the card in its new zone; it can't
+  be reached, because this op sets `SEEN_LKI_DAMAGE` through `seen_bits`, which scans every trigger, delayed included).
+* `resolve.rs` `Amount::EventSpellMv` reads `spell_mana_value_lki`.
+* `loops.rs` (`loop_lki`): the loop hash includes the recorded mana values (equality unchanged: the value is fixed per
+  departed object).
+* `lki_power`: every departure of the turn stays, keyed by slot and incarnation (`set_lki_power`, `lki_power_of`); as a
+  turn begins (`flow.rs`, with the other last known information) `prune_lki_power` keeps each slot's latest departure
+  (the old behaviour across turns) and any earlier one a reference of the public state still names
+  (`for_each_public_ref`: a delayed trigger about that object reads its power in a later turn too).
+
+### 226.3 The audit: every last-known-information read
+
+| Record / read | Verdict |
+|---|---|
+| `lki_copy` -> `copiable_of` (a token copy of it, `CopyOf::Source/Target` LKI) | correct: copiable values are exactly what a copy takes; the new copy's own mana value is computed live |
+| `lki_copy` -> `DamageEachSourceMv`'s mana value | **fixed** |
+| `spell_lki` -> `Amount::EventSpellMv` (Thor, cascade) | **fixed** |
+| `spell_lki` -> `spell_now_or_lki` (copy that spell), `event_spell_times` | correct (copiable values, times) |
+| `lki_damage` (from `damage_source_of`, layered) -> the W3 ops, `Ext::DamageFrom` | correct; `DamageEachSourceMv`'s dead fallback made loud |
+| `lki_toughness`, `lki_counters`, `lki_attached`, `w3.lki_host` / `lki_loss`, `triggers::Lki.def` (the copy's face) | correct |
+| `ev.amount` at a sacrifice (`CostMvPlus`), transmute, Mana Drain's `RememberSpellMv`, emerge | read live before the move: correct |
+| `def_of(..).mana_value()` of cards in graveyards, libraries, exile, hands (`FromGraveyard`, linked exiled cards, cascade's exiled cards, transmute's found card) | not copies, no X there: equal to `mana_value_of` |
+| `lki_power` (one entry per slot) | **fixed** (above) |
+| `lki_source` (eoe_w3) fallback `damage_source_of(card now)` | unreachable (the same seen bit); left as is |
+
+### 226.4 Tests
+
+`engine/tests/rules_lki_mana_value.rs` (rules_suite, 6; the table is the cube + the legacy cards + Terminal Velocity):
+Phyrexian Metamorph as a transformed Ulvenwald Oddity deals 0; a real transformed Concealing Curtains deals 1 (its front
+face's mana value); Metamorph as Curtains deals 1, not its card's 4; Mockingbird (put by Terminal Velocity, no mana
+spent) copying the Metamorph-as-Behemoth deals 0; Metamorph as Jacked Rabbit (an X creature) deals 2; Thor and a
+countered Green Sun's Zenith with X 2 deals 3. `copies.rs` `lki_mana_value_tests` (lib, 4; built states): a token copy
+back face up deals 0 against the original's 4, their copiable values equal; a copy with the no-cost exception deals 0; a
+spell made a copy of Jace, Telepath Unbound, countered under Thor's trigger: 0 against 2 for the card;
+`cr_608_2h_400_7_last_known_power_of_a_slot_that_left_twice_is_the_first_objects` (Jacked Rabbit with three counters
+attacks; with its trigger waiting it is exiled, returned and put into the graveyard: 4 tokens, the old record 1; the
+pruning keeps the first object's power while the trigger names it, drops it after, and the latest stays across the
+turn). The creature that takes the damage is a 6/7 in every damage test that expects 0, asserted still on the
+battlefield, so a 0 is the damage dealt and not a dead creature's.
+
+**Toggle check** (the old reads restored on a scratch commit, the new tests run on the Mac): 6 of the 10 fail - the
+token copy, the no-cost copy, the Thor copy spell, the Jacked Rabbit power (lib), the Metamorph copying a back face and
+the Mockingbird (rules) - and the 4 that don't are the cases whose value the old reads already gave (a real back face 1,
+Metamorph as Curtains 1, the X creature 2, the Thor X spell 3).
+
+Full engine suite on the Mac at the merged code (`cargo test --release -p engine -p card_ir --no-fail-fast`, az
+included): **2,882 passed, 0 failed, 37 ignored** (main's 2,872 + the 10 here; `cards_suite` 1,533, `rules_suite` 459,
+`rulings_suite` 397, `misc_suite` 212, lib 99, `az` 57, `hidden` 28, `fuzz` 19, `limits` 13). The public-state gate in
+`az`: no new gap.
+
+### 226.5 Digests
+
+**No digest moves; none re-recorded.** On the Mac at the merged code (a4fea0e1, bit-identical to the desktop, ENGINE.md
+44): the cube `--test digest` **44372545881ef768** (all 2,500 games equal to `tests/data/digests.txt`); `--test
+digest_formats` constructed **91b6cf60576961a7**, metagame **be3766d1f943c95c**, EoE **c3a9c786030f42eb**, driver
+**6a03572828250b86**; dealt **f0bfffd26a70a753**; dealt per seat **c67b186ba7d00e51** - each equal to main 45dbf2e1's
+recorded file (220.4.7). Expected: the changed reads matter only for a departed copy of a back face or a departed copy
+with no mana cost under Terminal Velocity's granted trigger, a spell copy of a back face under Thor or cascade, and a
+slot that leaves the battlefield twice in a turn with an ability about its first object waiting; no digest game reaches
+one (Terminal Velocity is in the EoE table only, which holds no card that enters as a copy).
+
+The constructed and metagame numbers in 220.2's Limits stand as history: 16441662701e233d / 56ff52ffef1b1913 there are
+main's files of that day, which lane B's branch (two cards added to the table) did not match - it measured
+2d00d87dc223dcc9 / 1213d7d29aad1f11, and this branch before the merge (6151d155) gave the same. 220.4.7 re-recorded the family once
+for all seven cards (91b6cf60576961a7 / be3766d1f943c95c, the values above), so 220.2's text needs no change.
+
+### 226.6 Fuzz
+
+On the Mac at a4fea0e1 (`tools/fuzz_shards.py`, 12 shards): `FUZZ_POOL=eoe` **20,000 games** (the pool this touches;
+games only), the default cube pool 2,000 games + 100 matches, `hogaak_b` 2,000, `hogaak` 2,000 + 100 matches + 100
+post-sideboard, `delver` 2,000 + 100 + 100, `doomsday` 2,000, `sneak_show` 2,000, `cross` 2,000 + 100 + 100 - **all
+PASSED**; the test binary directly (fuzz_shards strips `FUZZ_*`): the `fuzz` profile 1,000 games, `FUZZ_CHANCE=10` 600,
+`FUZZ_BELIEF=2` 600 - all ok. No search impact to measure: the fix adds no options (no decision point changes).
+
+### 226.7 Encoding
+
+No layout change. A pre-existing gap was found: a stale reference (`tail_encode::rf`) shows its own card without copy
+effects (ENGINE.md 156), so a departed copy's copied identity, last known mana value and power are not in the input
+while an ability about it waits on the stack (the public-state gate classes the LKI fields Derived). The fix doesn't
+widen it (before, the network was equally blind to the copied face; the rules now compute 0 instead of the front
+face's). The maintainer's decision: one additive layout v8 (a stale-object LKI block in `rf`, the LKI fields Public in
+the gate) built by a later encoding change, not here.
+
+### 226.8 Shared-file functions changed
+
+`cast.rs`: `mana_value_of` (now passes the stack's X), `mana_value_with_x` (new, next to it). `game.rs`: the `lki_copy`,
+`spell_lki`, `lki_power` fields, `lki_power_of`, `set_lki_power`, `prune_lki_power` (new), `move_card_ctl`'s LKI record.
+`copies.rs`: `mana_value_lki`, `spell_mana_value_lki` (new), `note_spell_lki`. `eoe_w3.rs`: `DamageEachSourceMv`.
+`resolve.rs`: `Amount::EventSpellMv`. `loops.rs`: `loop_lki`. `flow.rs`: `start_turn` (one line). No payment code
+(`pay.rs`, `cost_order.rs`, `hogaak_a.rs`) is touched.
+
+## 227. zero-core pin 84bb5e1 -> 899e0eb: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good; an NVIDIA card's CUDA ordinal by its LUID, a second DXGI listing of a card left out (zero-core `fix/resume-fatal` f8a6211, `fix/cuda-luid-ordinal` 899e0eb; 2026-11-21)
+
+**Why.** On 2026-11-21 a farm GPU lease went dead for 86 minutes after an owner-activity pause: at the `resume` the
+worker could not rebuild its GPU session (CUBLAS_STATUS_ALLOC_FAILED). The resume arm of the worker's control loop
+sent a NON-fatal `error` and stayed alive, and the job stayed yielded forever (`job::do_resume` returns at
+`EvalLink::restore()?`, before `set_yielded(false)`): a live process answering pings and playing nothing. Agent 0.3.15's
+watchdog already treats a non-fatal error while resuming plus no progress as a failed worker (after its wait); this is
+the worker's half.
+
+**What.** zero-core `crates/worker/src/proto.rs`: `control()` returns the fatal message of a failed resume (nothing
+emitted there); `with_control` stops reading control lines, quits the job, joins it and returns that error, which the
+serve loops already emit as `{"ev": "error", "fatal": true}` and exit 1 with - the path of a job's own error. A resume
+that works is unchanged (`resumed`). The agent takes a fatal error straight to `worker_failed` (zero-farm
+agent/src/lease.rs), so the lease fails over at once instead of after the watchdog's wait. No engine, encoding, search
+or row change: the worker crate's control path only.
+
+**Tests.** zero-core `proto::tests::a_failed_resume_is_fatal` (the resume arm: a link whose evaluator threads are gone
+-> the message, no `resumed`, still yielded until the caller quits; no link -> `resumed`) and
+`with_control_quits_the_job_on_a_failed_resume_and_returns_its_error` (end to end: yield, a failing resume, the job
+quit and joined, the error returned); `cargo test -p zero_worker --lib` 43 passed; clippy: nothing new.
+
+### 227.1 The CUDA ordinal by LUID (zero-core 899e0eb)
+
+**Why.** The farm releases of main 76973535 and 52d0bf9b FAILED at `cuda-selftest`: "Invalid device ID: 1, must be
+between 0 (inclusive) and 1 (exclusive)". The desktop has one NVIDIA card, but its user was on a remote desktop
+session, whose indirect display renders on the GPU - and DXGI then lists the card a second time under a new LUID
+(..f58f at DXGI 0, ..0b3978b9df at DXGI 2, the iGPU between). `gpu::dedup` keeps one adapter per LUID, so both stayed,
+and a CUDA-family provider's ordinal was the adapter's index among NVIDIA adapters: the probe tried the second listing
+as CUDA device 1. The probe code had not changed (the 16:37 release of 45dbf2e1 passed its self-test without the
+session). Any farm PC used over a remote desktop meets the same.
+
+**What.** zero-core `crates/worker/src/gpu.rs`: when DXGI lists two or more NVIDIA adapters, the CUDA driver
+(nvcuda.dll, loaded when asked: cuInit, cuDeviceGetCount, cuDeviceGet, cuDeviceGetLuid) gives each CUDA device's LUID;
+an NVIDIA adapter no CUDA device has the LUID of is left out of `gpu::adapters()` (`cuda_filter`), and
+`session::bind` gives CUDA / TensorRT-RTX the CUDA ordinal of the adapter's LUID (`device_ordinal`) - also right when
+CUDA's device order is not DXGI's (several cards, CUDA_DEVICE_ORDER). One NVIDIA adapter (most PCs): the driver is
+never asked, ordinal 0, as before; a driver that fails, or LUIDs none of which DXGI lists: nothing left out, the rule
+of before. AMD (MIGraphX) and DirectML unchanged.
+
+**Checked.** On the desktop under the remote desktop session, `gpu::adapters()` lists the RTX 5090 once (..f58f) and
+the iGPU; before, three adapters. Test `gpu::tests::a_second_listing_of_an_nvidia_card_goes_and_cuda_names_the_ordinal`
+(that desktop's listing; the second listing's old ordinal 1; no driver answer = before; two cards in CUDA's order; one
+card; AMD). `cargo test -p zero_worker --lib` 44 passed; clippy: nothing new.
+
+**Left (zero-farm agent, not here):** the agent's own DXGI list (agent/src/profile.rs `adapters`) still shows the
+second listing in its profile; a lease or probe sent to that LUID now fails with "no adapter with LUID ... on this PC"
+(before: the CUDA device-id error). The agent could drop it the same way (NVML's device LUIDs).
+**Gate** of c4057736 (this section's code merged with main 50205980; the warm worktree warm-2, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`,
+the system Python, `--baseline-root` warm-1 at main 50205980 with its engine module from the artifact cache): **GATE
+PASSED WITH SKIPS optin-core c40577368190 in 1784s** - privacy 0 findings; core tests 215 passed; checkpoint_compat
+byte identity (visits and cq, 3,185 samples each); the digests as recorded (constructed 91b6cf60576961a7, EoE
+c3a9c786030f42eb, driver 6a03572828250b86, metagame 4039d04b7971975e, dealt f0bfffd26a70a753 over 80 matches); farm
+compat identical (gate 2: 6 games, 2,773 rows, 150 batches; gate 3 identical); cargo test --test az 57 and --test
+hidden 28 passed; the other three games built against this core; core pytest 755 passed, 71 skipped - skipped: 17
+live-run-hazard tests (fenced: live runs on this machine). Earlier gates of this branch: 699d413f (the resume fix
+alone, PASSED WITH SKIPS AND FLAKY RETRIES - test_remoteplay::test_a_dying_worker_gives_its_accepted_games_back passed
+on retry) and a412d697 (both fixes on main a99e9ca7, PASSED WITH SKIPS). The next commit adds this paragraph only (docs).
+
+## 228. The Mac farm gates' faults part: the local fuzz build names its commit (ZERO_FARM_ENGINE_COMMIT), so a release keeps its macOS build (tools/farm_release.py; 2026-11-21)
+
+**Why.** The release of main 50205980 (the first with 219 merged) was published WITHOUT its macOS build: `mac-gates`
+FAILED at part (d), "4 keyed differently", although the four injected faults matched on every key that is behaviour
+(neutral site, failure id, mode). The difference was the repro's commit: the Mac's published fuzz build reads it from
+its manifest.json (`(at 50205980e573)`, normalised to `(at <commit>)` by `farm_gates.fault_failures`), while
+`Release.local_fuzz_worker` is a bare `cargo build --profile fuzz` with no manifest, so its failures said
+`(at unknown)`. Every release from 219 on would lose its macOS part the same way.
+
+**What.** `Release.mac_gates` runs farm_gates.py with `ZERO_FARM_ENGINE_COMMIT` = the release worktree's HEAD - the
+worker's own fallback when there is no manifest (zero-core crates/worker/src/fuzz.rs `build_identity`) - so both sides'
+repros name the commit. The comparison is unchanged: a build with no identity still fails it. Test
+`tests/test_farm_release.py::test_the_mac_gates_name_the_commit_for_the_local_fuzz_build` (the environment and command
+given to the gates; `fault_failures` equal for a 12-character and a full sha, different for "unknown");
+`tests/test_farm_release.py` 19 passed. Python tools only: no build, engine, encoding or worker change. The next
+release (or `farm_release.py release 50205980`) backfills the missing macOS part.
+
+## 229. Payment fixes found by the Hogaak lanes: a payment's twins, castability and delve's need with convoke and improvise; the picks in progress deferred to layout v8 (branch `fix/hogaak-payment`, 2026-11-21)
+
+**Why.** Lane A's Hogaak write-up (220.1.5) found payment defects outside its card; the user asked for them to be fixed
+now (the fix brief's bugs 2-5; bug 1, 601.2g/h's order, is agent M's, numbered at its merge; bug 6 agent E's, 226). Branch
+`fix/hogaak-payment` from hogaak-a 29ca2296, main 45dbf2e1 (220.4) merged into it before the digests were explained and
+re-recorded; main 76973535 (217-222, no engine file), 52d0bf9b (223, a search's finds by place), a99e9ca7 (224-225),
+50205980 (226, fix E), 33720aab (227, a zero-core pin) and e73e64a6 (228, tools only) merged since, the digests checked again on each (229.7). The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
+reachable state, proved here; no docs/shortcuts.md entry), no encoding gap, digests re-recorded on purpose with what
+moved and why, a regression test per bug (CR in the name; castability by brute force), the search impact measured.
+
+| Bug | Root cause | Fix | Where |
+|---|---|---|---|
+| 2 | a payment's class (one option, its first free member picked) grouped sources by definition and ability, never by what tells two permanents apart; and the payment left convoke and improvise out of a permanent Urza can tap | every payment class split into runs of twins (229.2); such a permanent a source both ways | new `engine/src/pay_twins.rs`; `pay.rs` |
+| 3 | `normal_payable` and `alt_payable` counted convoke's and improvise's sources only for a spell of no mana (220.1) | one entry for a spell's payment sources, `Game::spell_classes`, in every castability check (229.3) | `cast.rs`, `eoe_c.rs` |
+| 4 | `PayMana`'s picks in progress are in neither the view nor the input | **deferred to the additive layout v8** (the user's decision): nothing implemented here (229.4) | - |
+| 5 | delve's need counted mana alone for a spell whose mana is spent | the payment's own sources counted (229.5) | `hogaak_a.rs`, `cast.rs` |
+
+No layout or encoding change (layout v7), no zero-core change, no docs/shortcuts.md entry.
+
+### 229.1 Functions changed (for the merge with agent M, who edits the same payment code)
+
+| File | Function | Change |
+|---|---|---|
+| `pay.rs` | `PayMana::min_class` (field) | u8 -> u32 (a payment's classes split into runs, up to one a permanent: `PERMANENT_LIMIT` 4,096) |
+| `pay.rs` | `Game::pay_mana` | its one `min_class` assignment (`u32::try_from`) |
+| `pay.rs` | `Game::payment_classes` | ends with `split_unlike` (229.2) |
+| `pay.rs` | `Game::pay_classes` | `mana_classes` + the new `with_alternatives` (no longer filtered by Urza's `TAP_FOR`) |
+| `pay.rs` | `Game::with_alternatives` | new |
+| `pay_twins.rs` | `Game::split_unlike`, `twin_of`, `ts_sensitive`, `named_objects`; `Twin`, `Own`, `Named` | new module (`lib.rs`: `mod pay_twins;`) |
+| `cast.rs` | `Game::spell_classes` | new |
+| `cast.rs` | `hand_castable`, `route_payable`, `normal_payable`, `alt_payable` | their classes from `spell_classes` (the if/else chains of improvise / convoke / no mana replaced) |
+| `cast.rs` | `x_range` (X paid with life) | `spell_pay_classes` for `mana_classes` |
+| `cast.rs` | `delve` | the Lotus Petal check calls `delve_rest_payable` (was `can_pay_for`) |
+| `eoe_c.rs` | `target_discount_castable` | `spell_classes`, and the spending restrictions casting it satisfies (`Keep::allow`) |
+| `hogaak_a.rs` | `delve_rest_payable` | a spell with convoke or improvise: `spell_pay_classes` + `can_pay_with` |
+| `cost_order.rs` | - | unchanged |
+| `testkit.rs` | `Scenario::battlefield_new`, `Game::set_damage` (+ `Scenario::new_perms`) | new test helpers |
+| `tools/delver_rerecord.py` | `translate` | a payment question no old step matches answered by trial (229.6) |
+| `tools/position_lab.py` | `RULES_EPOCH` | bumped (229.6) |
+### 229.2 Bug 2: a payment's twins (`pay_twins.rs`)
+
+**The defect.** `PayMana` offers its sources by class (`pay::Class`): one option a class, the pick taking the class's
+first free member whose pick leaves the payment payable (18, 49). The class builders (`mana_classes`,
+`convoke_classes`, `improvise_classes`, the shared activations') group by definition and ability - what a source
+yields - and never by the permanent's state or by what names it. So two creatures of one definition, one summoning
+sick or with a +1/+1 counter, were one option of Vote Out's convoke (220.1.5); two Swamps, one played this turn, one
+option of Dark Ritual's {B} (a land that becomes a creature later this turn is summoning sick); two Llanowar Elves, one
+with a counter; the spell's own target and its twin. Which permanent stays untapped is the player's choice (601.2g-h)
+and the rest of the game can tell the results apart: a collapse that is not rules-equivalent, i.e. an approximation.
+
+**The fix.** `Game::payment_classes` (the payment's sources, at each of its decisions) ends with
+`Game::split_unlike`: each class split into runs of **twins**, in member order and in the class's place (so the picks
+still go up the classes in their canonical order, 18). Each run is one option, its first free member picked. Two
+permanents are twins when
+
+* everything of its own the game keeps about each is equal (`Twin`): every field of `Obj` but its identity (slot,
+  incarnation, timestamp; `control_since` and `entered` as the only facts the rules read of them: summoning sickness,
+  CR 302.6, and "entered this turn"), its counters (122), its marks (`Game::marks`, a multiset), token and copy status
+  (111, 707), a face-down permanent's identity (708) and what its controller knows of it, its loyalty activations this
+  turn (606.3), and its other records of this turn keyed by it alone: how many times its abilities resolved
+  (`Game::resolved`), its once-each-turn actions done (`Game::done_once`), whether it attacked (`Player::attacked_with`);
+* nothing else in the state names either of them (`Game::named_objects`: every holder of an object reference - the
+  stack, the agenda's tasks, triggers waiting, held, delayed and temporary triggers, continuous and copy effects, links,
+  marks that name another object, attachments, blocks, attacks on a planeswalker, permissions, LKI records, the EoE
+  wave states, ... - but the payment's own task, which holds its picks, and the pending decision and its answer, so the
+  classes stay alike at each step of the payment); and
+* neither has an ability whose continuous effects its timestamp orders (CR 613.7: static abilities, a Painter's colour,
+  granted abilities, an Equipment's grant, an Aura's control; `ts_sensitive`).
+
+Cards in a hand (a Spirit Guide) keep their classes: the action space names a hand card by its definition (128, 156).
+
+**The proof that twins are interchangeable.** Swap two twins by relabelling the two objects - their slots,
+incarnations, timestamps and battlefield places. Every fact of each is equal (the first condition) except those, and
+the rules read none of the relabelled ones but these: the timestamp orders continuous effects (613.7: excluded by the
+third condition; elsewhere the timestamp orders a simultaneous event's objects canonically, where twins are
+interchangeable, or an event in progress, which no decision interrupts); `control_since` and `entered` are read as
+summoning sickness and "entered this turn" only (`is_sick`, `loyalty_instant_if_entered`, the tokens that entered this
+turn), equal now and so equal for good (both stop being sick as their controller's next turn begins - a control change
+is an effect naming one -, and the turn number only grows); the slot and place are names. No reference names either
+(the second condition), so the relabelling maps the state to itself, and tapping or sacrificing one twin or the other
+gives two states the relabelling maps onto each other: every option, legal action and outcome after one is the
+relabelled one after the other. Every exhaustive pattern of the module (`Game`, `Obj`, `Player`, `StackItem`, `Frame`,
+`Task`, `Mark`, `Choice`, the EoE wave states) fails to compile when a field or variant is added, so a new holder of
+references or a new fact is classified there first (the Hogaak merge's `Game::gy_arrivals`, 220.3, was: a
+simultaneous move's graveyard arrivals name their objects).
+
+Two of the engine's own records read a relabelled fact and are not rules (stated, not changed): the view and the loop
+rule's hash (`Game::view_state`, `loops.rs`, CR 732.2a / MTR 4.4) list permanents by battlefield place with their raw
+`entered` and `control_since`. So "the same state" for the loop rule tells twins apart - but it told the old classes'
+members apart the same way (by place), the payment's pick stays canonical (the first free member, 18), and the
+relabelled states are the same game state for the rules. Comparing the raw turn numbers instead would split every two
+lands played on different turns, nearly every payment, for no difference the rules see.
+
+**What it names on purpose.** A reference by slot names that slot's card whatever its incarnation (a superset: more
+splits, never fewer). Two holders keep a stale value when unused, and are read only while they mean something:
+`Game::leaving_card` (the card whose leave event waits for a 616.1 choice) only while `leaving_choice` is set - it keeps
+its last card, or card 0, otherwise, and named card 0 in every state (the review's catch: two Islands of a test, one of
+them card 0, became two options) -, and `Player::companion` only while the companion is the public card in no zone
+(702.139a; once in the game the slot is a card like any other, 116.2g).
+
+**Urza (and the payment's alternatives).** A permanent another's mana ability taps (Urza, Lord High Artificer's
+"Tap an untapped artifact you control: Add {U}", `TAP_FOR`) was left out of convoke's and improvise's classes (31.4:
+"the same tap"). It is not the same: convoke pays a pip of the creature's colour or {1} and improvise {1}, spending no
+mana, where Urza's ability makes {U} - mana spent, a colour spent (converge, "spend only", Badgermole-style "tapped for
+mana"). Such a permanent is now a source both ways, two options of its one `MY_PERM` id; which one is asked next
+(`PayMana::which`, `ChooseMode`), as for any permanent with several sources. `Game::pay_classes` is `mana_classes` +
+the new `Game::with_alternatives` (no filter).
+
+**The field.** `PayMana::min_class` (the class of the last pick) u8 -> u32: a payment can have up to one class a
+permanent (`PERMANENT_LIMIT` 4,096).
+
+### 229.3 Bug 3: castability counts convoke and improvise for every spell
+
+`normal_payable` and `alt_payable` were handed `mana_classes` by their callers (`cast_alt`, `castable_via`, `eoe_w5`,
+the bots) and added convoke's creatures and improvise's artifacts only for a spell of no mana (220.1). So a spell payable
+only with their help wasn't offered: Kappa Cannoneer (cube, improvise) or Vote Out (EoE, convoke) under Omniscience's
+"without paying its mana cost" offered its mana cost only when mana alone paid it (100.4.10's "found, not done"). One
+entry now gives a spell's payment sources as its payment has them, `Game::spell_classes` (cast.rs): no mana ->
+`no_mana_classes`; convoke or improvise -> `with_alternatives`; classes that hold them already (an `IMPROVISE` source:
+a caller's own `spell_classes`, delve's `delve_classes` of them) kept. Used by `hand_castable`, `route_payable`,
+`normal_payable`, `alt_payable` and `eoe_c::target_discount_castable` (which now also passes the spending restrictions
+casting it satisfies, `Keep::allow`, as its payment does); `x_range`'s X-paid-with-life bound counts them too
+(`spell_pay_classes`). Castability and the payment agree: the brute-force test (229.6) walks every payment path of 600
+random boards.
+
+### 229.4 Bug 4: a payment's picks in progress - deferred to layout v8
+
+`PayMana`'s picks in progress (`chosen`, `multi`, `actors`, `phyrexian_life`, `now` / `which` / `actor_for` and the
+productions offered, `spend`) are in neither `Game::view_of` nor layout v7's input; two payments that differ only in
+what was picked encode alike for both players. Layout v7 can't hold them exactly (its spare floats cover which source
+was picked but not a several-mana source's production, the Phyrexian life or the option meanings of `ChooseMana` /
+`ChooseMode` / `PayPool`), so under the no-encoding-gap rule this branch implements nothing of it (no partial encoding,
+no guard, no spare float used). The user's decision (2026-11-21): **one additive layout v8, built after this branch and
+agent M's are on main**, holding a `payment` tail segment - a token per picked source (its card, reference, kind,
+pool, production, actor, rank), one for the payment (the pool's mana spent, the Phyrexian life, the subject being
+asked) and the option meanings keyed to their options - together with E's (226) stale-reference LKI block. It waits for M's
+601.2g/h change because a mana ability activated mid-cast adds in-progress state the same segment must hold.
+
+### 229.5 Bug 5: delve's need counts convoke and improvise
+
+Delve's "can the rest be paid" (`delve_rest_payable`, hogaak_a.rs; and `delve`'s Lotus Petal check in cast.rs, which
+called `can_pay_for`) counted mana alone for a spell whose mana is spent, so a delve spell with convoke or improvise
+(none in the tables but the test cards; Hogaak, whose mana can't be spent, counted its convoke since 220.1) refused
+graveyard cards it could exile. A spell with convoke or improvise now asks `can_pay_with` over `spell_pay_classes`; every
+other spell `can_pay_for` as before (unchanged games).
+
+### 229.6 Tests, and the tests and data the fix moved
+
+`engine/tests/rules_pay_fixes.rs` (in `rules_suite`), 16 tests, names citing the CR. Bug 2: convoke offers a creature
+its counters tell apart, a summoning-sick one, a damaged one, the spell's own target apart from its twin (Vote Out's
+leftovers: two ways each, one before); twins stay one option; twins stay one option whatever their card slot (card 0,
+229.2); two Llanowar Elves a counter tells apart are two options; a land that entered this turn is apart from an older
+twin; an artifact Urza can tap is offered for improvise too, and an artifact creature for convoke's colour. Bug 3:
+Omniscience still offers Vote Out's and Kappa Cannoneer's mana cost paid with convoke / improvise; the brute force
+`cr_601_2f_702_51a_702_126a_castability_and_the_payment_agree_on_random_boards` (600 random boards of lands, mana
+creatures, artifacts, Sol Ring and Urza, a convoke or improvise spell with one coloured pip: castability, an exhaustive
+count of the board's ways, and the payment walked to the end on every path agree - 402 castable boards, 7,582 payment
+paths, 188 cost choices). Bug 5: delve's need counts convoke, improvise (the two test cards), and a Lotus Petal is delve
+fuel when convoke pays the rest. **On the base** (an export of hogaak-a with only the test file and its helpers): 14 of
+the 15 bug tests fail, "twins stay one option" passes (the card-0 test came later, with its own failure: two rules tests
+of the suite, below).
+
+Moved by the fix (behaviour, not rules, of these tests):
+* `rules_sba::cr_704_5g_...` and `rules_library::a_scry_after_a_revealed_top_card_...` failed on the first merge: their
+  two basic lands, one of them card 0, became two options (the stale `leaving_card`, 229.2) - fixed in `named_objects`,
+  not in the tests.
+* `az::encode_sparse_is_the_rows_non_zeros_with_the_same_key` needs at least 300 rows without a tail token: the changed
+  games gave 280; it plays 14 games of each spec instead of 12 (the check itself unchanged).
+* `tests/test_build.py`'s two round trips allow only "the decision ..." refusals: the mirror's random games now reach a
+  state the builder documents it can't describe (a cloud entry naming a card its owner never saw, ENGINE.md 192), named
+  in a `RARE` set (the test's comment already said "the rare states, by name").
+* **The Delver canary library** (`data/delver_canary_library.json`, ENGINE.md 100.8): `RULES_EPOCH` bumped
+  (1795312390) and the library re-recorded with `tools/delver_rerecord.py rerecord --old-engine <main 45dbf2e1's built
+  checkout> --any-old-engine` (main replays every spot exactly; its engine_sha256 isn't the library's recording one, so
+  the waiver): **72 of 72 spots re-recorded, none dropped**, 25 of them with 43 decisions inserted, every one "PayMana:
+  Tap Volcanic Island for mana" - a Volcanic Island fetched this turn beside an older one, where main's payment ended by
+  itself (one class left). The walk learned that question (`translate`: a PayMana no old step matches - tried option by
+  option, the one whose later states equal the old engine's kept; permanents are never paired anew, so at most one is);
+  no option added or removed at any spot. `delver_rerecord.py check`: 72 of 72 reach their position;
+  `tests/test_canary_library.py` + `tests/test_build.py` 40 passed.
+
+### 229.7 Digests: what moved and why
+
+The bisect (a scratch export of the branch with an environment toggle for each part of the fix, never merged; the
+Mac, bit-identical to the desktop, ENGINE.md 44): **every part off reproduces main's recorded digests exactly** (all
+seven files), so nothing else moved; every part alone:
+
+| digest | main | split (bug 2) alone | Urza filter removed alone | castability (3) / delve (5) alone | **branch** | lines moved |
+|---|---|---|---|---|---|---|
+| cube (`digests.txt`) | 44372545881ef768 | 64d656111d6fdae4 | 687b6323500faa3e | = main | **14e6735d8eb9cb4a** | 129 of 2,500 (r 95, h 34) |
+| cube `DIGEST_ENCODING=0` | a965c3fc8d3bba8a | | | | **5674f63cc335d204** | |
+| constructed | 91b6cf60576961a7 | = branch | = main | = main | **498c263f7048e81d** | 154 of 570 |
+| metagame | be3766d1f943c95c; 4039d04b7971975e since 223 | = branch | = main | = main | 13bcd5302669c67c; **0d13940b6d659a83** on 223 | 36 of 288 |
+| EoE | c3a9c786030f42eb | = branch | = main | = main | **7e45b554b95820ed** | 94 of 160 |
+| dealt | f0bfffd26a70a753 | = branch | = main | = main | **fb7532e8a30a63f4** | 26 of 80 |
+| dealt per seat | c67b186ba7d00e51 | = branch | = main | = main | **7da4211ed6ab4f3e** | 11 of 60 |
+| driver | 6a03572828250b86 | = | = | = | **6a03572828250b86** (equal) | 0 |
+
+The cube's 129 games are the split's 129, one of them (h 379) also the Urza filter's; castability and delve's need move
+no game (their spells - Kappa Cannoneer under a free-cast permission, a delve spell with convoke - never arise in the
+digest games).
+
+**Decision by decision.** Each moved game traced off and on (the same scratch export; `TRACE_PLAY` printing every
+decision of one game, `TRACE_SPLIT` every split class with the facts that differ or the holder that names a member):
+in all 450 moved games and matches the first difference is a payment class split at that step - no other first
+difference, none unexplained. Where it shows first (the digests' games answer one-option decisions by themselves,
+`auto_single`):
+
+| digest | a payment decision gains an option | a payment step main answered by itself (one option) asks | a determinized world's playout (`hash_world`) |
+|---|---|---|---|
+| cube | 65 | 28 | 36 |
+| constructed | 72 | 44 | 38 |
+| metagame | 12 | 16 | 8 |
+| EoE | 17 | 62 | 15 |
+| dealt | 16 | 9 | 1 |
+| dealt per seat | 1 | 9 | 1 |
+
+(The middle column: where main's payment had one option left - so it went on, or ended and gave priority or a trigger
+order - the branch asks between the split runs; e.g. cube r 192: Shifting Woodland's own ability paid with its
+mana, the Woodland whose ability is on the stack and its twin are two options.)
+
+Why the class split (a game can count under several): a member **entered this turn / is summoning sick** and its twin
+isn't (cube 50, constructed 126, metagame 34, EoE 94, dealt 22, dealt per seat 4 - a fetched dual or a land played this
+turn beside an older one, a mana creature cast this turn; and during the opponent's turn a land played on its
+controller's last turn, still sick: CR 302.6); a member **named by the stack** (cube 52, constructed 29, metagame 2,
+dealt 4, dealt per seat 7 - the source of a triggered or activated ability waiting there, a spell's target: tapping the
+targeted land in response is a different game); **named by a continuous effect** (cube 10 - an animated creature land,
+a pumped creature), **by a copy effect** (cube 9), **by a link** (cube 6), **counters** (cube 2: a Celestial Colonnade
+with a +1/+1 counter, Spirit tokens with different counters), a **timestamp-ordered ability** (cube 3). The dealt line
+`r 0` and per-seat `p 0` are equal (traced: no difference in 499 / 763 steps).
+
+Re-recorded once with `DIGEST_WRITE=1` on the Mac at f02256a7 (the values above; `digests_driver.txt` rewritten equal).
+**Main moved twice since** (both merged): 76973535 changes no engine file; 52d0bf9b (223) moves main's metagame digest
+(be3766d1f943c95c -> 4039d04b7971975e). On the merged code (1768d8a1) the bisect again: every part off = main's seven
+recorded files line for line; on, exactly the same games move in every file as before (the metagame's 36 the same 36),
+and only the metagame's combined digest differs from the values above - re-recorded alone: **0d13940b6d659a83**
+(36 of 288 lines from main's). The traces above were taken before 223's merge; the moved games are the same.
+Then a99e9ca7 (224-225, no engine file) and 50205980 (226, fix E: a departed copy's last-known mana value; it moves no
+digest) merged: on 8efb600d every part off = main's seven files line for line again, and every part on = this branch's
+recorded files line for line (the same 129 / 154 / 36 / 94 / 26 / 11 games): nothing re-recorded. 33720aab (227) changes
+no engine file (the zero-core pin only); on its merge 32ff0419 the engine gate finds every digest as recorded (below).
+
+### 229.8 Search impact
+
+2,000 uniform random games a pool (the fuzzer's decks; a scratch test `measure_pay`), every part of the fix off vs on:
+
+| pool | decisions / game | options / decision | PayMana decisions / game | PayMana options / decision |
+|---|---|---|---|---|
+| cube (default) | 436.53 -> 437.09 (+0.13%) | 3.2004 -> 3.1995 | 21.86 -> 21.90 | 3.302 -> 3.305 |
+| delver | 377.33 -> 376.81 (-0.14%) | 2.6800 -> 2.6798 | 5.58 -> 5.61 | 2.157 -> 2.161 |
+| doomsday | 312.60 -> 312.78 (+0.06%) | 2.7988 -> 2.7983 | 4.24 -> 4.28 | 2.233 -> 2.239 |
+| hogaak_a | 306.15 -> 306.80 (+0.21%) | 2.7367 -> 2.7363 | 3.39 -> 3.45 | 2.132 -> 2.139 |
+| hogaak | 244.18 -> 244.11 (-0.03%) | 2.7957 -> 2.7955 | 2.64 -> 2.67 | 2.174 -> 2.185 |
+| eoe | 664.85 -> 667.82 (+0.45%) | 3.5537 -> 3.5632 | 72.31 -> 73.24 | 3.868 -> 3.915 |
+| sneak_show | 241.25 -> 241.04 (-0.09%) | 2.7239 -> 2.7233 | 4.08 -> 4.09 | 2.242 -> 2.244 |
+| cross | 235.50 -> 235.75 (+0.11%) | 2.8128 -> 2.8135 | 3.88 -> 3.93 | 2.283 -> 2.284 |
+
+Small everywhere (the games differ, so the totals move both ways); EoE's most (convoke and many same-name creatures and
+lands): +1.3% payment decisions, +1.2% options a payment decision.
+
+### 229.9 Checks
+
+* **Full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast` on the Mac, incl. `az`'s public-state
+  gate: no new gap - a payment's classes are not part of the input): its first run on the merged code found the stale
+  `leaving_card` name and the three moved tests of 229.6; after them, every binary passed. On the final head (32ff0419,
+  main 33720aab merged) the suite gate's run: **2,896 passed**, 24 binaries (16 new). Pytest: the engine gate's
+  (below), 786 passed.
+* **Fuzz** on the Mac (`tools/fuzz_shards.py`, 24 shards, 12 at once; 0c2482fe, the tested engine), 20,000 games each,
+  every one **PASSED**: default (+1,000 matches) 200 s, eoe 544 s, delver (+1,000 matches, +1,000 post-sideboard) 158 s,
+  doomsday 169 s, hogaak_a 111 s, sneak_show 99 s, cross (+1,000 matches, +1,000 post-sideboard) 171 s, hogaak (+1,000
+  matches, +1,000 post-sideboard) 198 s - which covers the 2,000-game regressions of delver, doomsday, sneak_show, cross
+  and the default pool. The `fuzz` profile, 1,000 games + 50 matches: 19 passed. `FUZZ_CHANCE=10`, 600 games + 30
+  matches: 26,849 chance walks, 14,494 replays whose outcome the force changed; 18 passed, the Murktide-count unit test
+  failing as it does whenever `FUZZ_CHANCE` is set (the known artefact). `FUZZ_BELIEF=2`, 600 games + 30 matches:
+  15,804 belief worlds; 19 passed.
+  (These 20,000-game runs are of 0c2482fe, before main's 223 was merged; the merged engine's are the suite gate's.)
+* **The gates** (this worktree, its Mac steps on the Mac, the desktop's throttled beside the live legacy-meta3 runs;
+  the system Python), on 32ff0419 (main 33720aab merged): `python tools/gate.py suite --fuzz-pools
+  default,eoe,delver_dealt,hogaak,cross` - **GATE PASSED suite 32ff04192975 in 739s** (privacy 0 findings; the full
+  engine suite 2,896 passed; the sharded 2,000-game fuzz of each pool, with 100 matches + 100 post-sideboard where the
+  pool has them; the checkout unchanged; `gates/32ff04192975-suite.json`); `python tools/gate.py engine --tested-sha
+  32ff0419 --expect-digest 14e6735d8eb9cb4a --expect-digest0 5674f63cc335d204` - **GATE PASSED WITH SKIPS engine
+  32ff04192975 in 1233s** (skipped: seven live-run-hazard pytest tests, fenced by the live run here): the digests full
+  14e6735d8eb9cb4a and encoding-free 5674f63cc335d204 (= expected), the formats constructed 498c263f7048e81d, EoE
+  7e45b554b95820ed, driver 6a03572828250b86, metagame 0d13940b6d659a83 and dealt fb7532e8a30a63f4 (each = the recorded
+  file); `az`, `limits`, `hidden` passed; pytest 164 + 238 + 164 + 171 passed and the desktop part 49 (5 skipped); the
+  smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,452 rows, 150 batches);
+  `gates/32ff04192975-engine.json`. (Earlier merges' gates, all passed: suite 506797fe, 94b2b780, 60ccf3d4; engine
+  94b2b780, 878d1623, 60ccf3d4.) After e73e64a6's merge (228, tools only; this section renumbered 228 -> 229):
+  `gate.py engine --tested-sha 32ff0419 ...` on 293843e5 - **GATE PASSED WITH SKIPS engine 293843e54fc9 in 1442s** (the
+  live-run fence; the Mac's full-suite recheck 2,901 passed, every digest as recorded; `gates/293843e54fc9-engine.json`).
+  The next commit adds this paragraph only (docs).
+
+### 229.10 For the merge with agent M and open items
+
+* M edits the same payment code; the functions changed here are 229.1. A payment's classes are `payment_classes`
+  (split into twins at its end): a new step that lists a payment's sources (M's 601.2g activations) should take them
+  from there, or split its own with `split_unlike`, so its options and the payment's agree.
+* `RULES_EPOCH` and the canary library: both branches bump the epoch and may re-record; whichever merges second
+  re-records on the merged engine (`delver_rerecord.py rerecord`, the first one's merged main as the old engine; the
+  walk's PayMana rule of 229.6 stays).
+* The digests of 229.7 are this branch's on main 45dbf2e1; a later merge onto main re-checks them (E's 226 is expected
+  to move none).
+* Bug 4 waits for layout v8 (229.4). The loop rule's hash reading twins' raw turn numbers and places is stated in 229.2,
+  not changed.
 
 ## 230. Mana abilities while a spell is cast: the 601.2g step (fix agent M, bug 1 of the Hogaak lanes' findings; branch `fix/hogaak-midcast-mana`, 2026-11-21)
 

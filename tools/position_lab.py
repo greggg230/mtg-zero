@@ -77,7 +77,7 @@ REPLAYS = os.environ.get('MTGZ_LAB_REPLAYS', os.path.expanduser('~/mtg-zero/runs
 # can't be rebuilt action for action (the decisions differ: e.g. ENGINE.md 100.3 orders triggers of
 # different objects of one card, which the old engine offered once). Bump it with every commit that
 # re-records the behaviour digests; replays recorded since are the ones `check_spot` must rebuild.
-RULES_EPOCH = 1794970741  # 2026-11-17: a look at the opponent's library card its owner doesn't know is remembered (ENGINE.md 192)
+RULES_EPOCH = 1795312390  # 2026-11-21: a payment's sources the game tells apart are options of their own; castability and delve's need count convoke and improvise (ENGINE.md 229)
 PUBLISH_LOG = A.local_config.big_disk_path('mtg-zero-scratch/delverai-publish.log', default='delverai-publish.log')
 MODES = ('belief', 'actual', 'pinned', 'uniform')
 
