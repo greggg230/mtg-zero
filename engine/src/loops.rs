@@ -583,9 +583,9 @@ impl Game {
             }
         }
         v.push(u64::MAX - 41);
-        for (x, vals) in &self.lki_copy {
+        for (x, vals, mv) in &self.lki_copy {
             if *x == r {
-                v.push(h64(vals));
+                v.extend([h64(vals), *mv]);
             }
         }
         v.push(u64::MAX - 42);
@@ -615,9 +615,9 @@ impl Game {
             }
         }
         v.push(u64::MAX - 46);
-        for (x, d, item) in &self.spell_lki {
+        for (x, d, item, mv) in &self.spell_lki {
             if *x == r {
-                v.push(*d as u64);
+                v.extend([*d as u64, *mv]);
                 self.item_canon(item, v);
             }
         }
