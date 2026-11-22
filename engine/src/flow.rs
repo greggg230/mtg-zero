@@ -327,6 +327,17 @@ impl Game {
         self.ask_options(task, player, kind, options);
     }
 
+    /// [`ask`](Self::ask) of options already filtered by `completing` (the 601.2g step's, ENGINE.md 222).
+    pub(crate) fn ask_completed(&mut self, task: Task, player: PlayerId, kind: DecisionKind, options: Vec<Opt>) {
+        if self.perms_past_slots(player, &options) {
+            let page = self.page.unwrap_or(crate::decision::Page::FIRST);
+            self.ask_ranges(task, page, player, kind, &[], options, true);
+            return;
+        }
+        self.page = None;
+        self.ask_options(task, player, kind, options);
+    }
+
     /// [`ask`](Self::ask) with the options' ids as they are.
     pub(crate) fn ask_options(&mut self, task: Task, player: PlayerId, kind: DecisionKind, mut options: Vec<Opt>) {
         // A mana ability past the pool's 255 of a type: the options may have

@@ -827,10 +827,16 @@ impl Game {
         pm.life_after = self.life_later(card, item);
         let mut w = self.mana_writes(&pm, def.delve);
         let mut any_leaves = false;
-        for c in self.permanents_of(p).chain(self.players[p as usize].hand.iter().copied()) {
+        // (The permanents' activated abilities, theirs and granted; the hand's mana abilities - of its mana sources,
+        // which a payment in progress pins in every world the other player deals, ENGINE.md 10: nothing else of the
+        // caster's hidden hand is read, so the collapse never depends on it.)
+        let hand: Vec<CardIdx> = self.players[p as usize].hand.iter().copied().filter(|&c| self.hand_mana_source(c)).collect();
+        for c in self.permanents_of(p).chain(hand) {
             let d = self.abilities(c);
-            let granted = self.granted_activated(c);
-            let ads = d.activated.iter().chain(d.hand_abilities.iter()).chain(granted.iter().map(|g| self.db.def(g.def).activated_def(crate::db::AbilitySlot::Activated(g.slot))));
+            let on_bf = self.objs[c.i()].zone == Zone::Battlefield;
+            let granted = if on_bf { self.granted_activated(c) } else { Vec::new() };
+            let own: &[crate::db::ActivatedDef] = if on_bf { &d.activated } else { &d.hand_abilities };
+            let ads = own.iter().chain(granted.iter().map(|g| self.db.def(g.def).activated_def(crate::db::AbilitySlot::Activated(g.slot))));
             for ad in ads.filter(|ad| ad.mana().is_some()) {
                 let k = &ad.cost;
                 if k.sacrifice.is_some() || k.bounce.is_some() {

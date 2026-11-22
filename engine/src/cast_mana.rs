@@ -141,11 +141,12 @@ impl Game {
                     .collect();
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
                 let task = Task::CastMana { id, card: None, again };
-                // (Only `PASS` leaves the payment completable: no decision.)
-                if !self.oracle && self.completing(&task, opts.clone()).iter().all(|o| o.choice == Choice::Pass) {
+                // (The options that leave the payment completable, once; only `PASS`: no decision.)
+                let opts = self.completing(&task, opts);
+                if !self.oracle && opts.iter().all(|o| o.choice == Choice::Pass) {
                     return;
                 }
-                self.ask(task, p, DecisionKind::CastMana, opts);
+                self.ask_completed(task, p, DecisionKind::CastMana, opts);
             }
         }
     }
@@ -407,7 +408,16 @@ impl Game {
                 defs.push(self.objs[c.i()].def);
             }
         }
-        for &c in &self.players[p as usize].hand {
+        // (A card in hand triggers only once it leaves it: no triggered ability functions from a hand, the IR has
+        // no such condition (`TrigPred`: graveyard's, `InGraveyard`, alone). The rest of the cast moves a card from
+        // the caster's hand only by a cost that discards or exiles it - then no collapse, whatever the hand holds - or
+        // by a hand mana ability discarding or exiling its own card: a mana source in hand, which a payment in
+        // progress pins (ENGINE.md 10). So nothing else of the caster's hidden hand is read: the other player's worlds
+        // agree on the step.)
+        if self.rest_moves_hand(p, spell, id) {
+            return false;
+        }
+        for &c in self.players[p as usize].hand.iter().filter(|&&c| self.hand_mana_source(c)) {
             defs.push(self.objs[c.i()].def);
         }
         defs.push(self.objs[spell.i()].def);
@@ -424,6 +434,22 @@ impl Game {
             // 2: nothing reacts to a permanent becoming tapped.
             def.trig_mask & bit == 0 && def.triggers.iter().all(|t| t.event != EventKind::BecomesTapped && !self.pred_reads_tapped(&t.pred) && !Self::ability_reads_tapped(&t.ability))
         })
+    }
+
+    /// May the rest of spell `id`'s cast (`spell`, cast by `p`) move a card of `p`'s hand other than a mana source's own
+    /// (collapse check 4): its cost's discard or exile from hand, a mana ability `p` may activate that discards
+    /// (another card, the hand)?
+    fn rest_moves_hand(&self, p: PlayerId, spell: CardIdx, id: u32) -> bool {
+        let moves = |k: &crate::db::Cost| k.discard > 0 || k.discard_hand || k.discard_also.is_some() || k.exile_from_hand.is_some();
+        let pos = self.item_index(id).expect("the spell being cast");
+        if self.spell_rest(spell, &self.stack[pos]).is_some_and(|r| moves(&r)) {
+            return true;
+        }
+        let hand = self.players[p as usize].hand.iter().copied().filter(|&c| self.hand_mana_source(c));
+        self.permanents_of(p).any(|c| {
+            self.abilities(c).activated.iter().any(|ad| ad.mana().is_some() && moves(&ad.cost))
+                || self.granted_activated(c).iter().any(|g| moves(&self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot)).cost))
+        }) || hand.into_iter().any(|c| self.def_of(c).hand_abilities.iter().any(|ad| ad.mana().is_some() && moves(&ad.cost)))
     }
 
     /// Does a trigger condition read, as its event happens, whether a permanent is tapped (exhaustive: a new condition
