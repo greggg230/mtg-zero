@@ -819,8 +819,8 @@ impl Describer<'_> {
         for &(r, k, n) in &g.lki_counters {
             lki.push(json!(["counters", self.obj(r)?, counter_name(g, k), n]).to_string());
         }
-        for (r, v) in &g.lki_copy {
-            lki.push(json!(["copy", self.obj(*r)?, format!("{v:?}")]).to_string());
+        for (r, v, mv) in &g.lki_copy {
+            lki.push(json!(["copy", self.obj(*r)?, format!("{v:?}"), mv]).to_string());
         }
         for &(r, h) in &g.lki_attached {
             lki.push(json!(["attached", self.obj(r)?, self.obj(h)?]).to_string());
@@ -844,8 +844,8 @@ impl Describer<'_> {
             }
             lki.push(json!(["power", self.obj(crate::ids::ObjRef { idx, inc })?, p]).to_string());
         }
-        for (r, d, item) in &g.spell_lki {
-            lki.push(json!(["spell", self.obj(*r)?, g.db.def(*d).name, self.stack_item(item)?]).to_string());
+        for (r, d, item, mv) in &g.spell_lki {
+            lki.push(json!(["spell", self.obj(*r)?, g.db.def(*d).name, self.stack_item(item)?, mv]).to_string());
         }
         lki.sort_unstable();
         out.insert("lki".into(), json!(lki));
