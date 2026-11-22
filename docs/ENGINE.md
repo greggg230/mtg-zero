@@ -43812,3 +43812,20 @@ a check, so it is not done. (2) The graveyard order's one residual (227.2): the 
 decision. (3) Absolute timestamps (`ts`, written when continuous effects exist) can keep apart states equal up to a
 renumbering: a missed merge only. (4) The key's cost is mostly the two rows; a cheaper guard (the decider's row only) is
 the place to save if the driver's tallies show it matters.
+
+**The suite gate** (on d51092a3, this section's commit, in a warm worktree, `--no-mac`: every step on the desktop,
+throttled, beside the live legacy-meta3 runs): `python tools/gate.py suite --no-mac` - **GATE PASSED suite d51092a3b6ab
+in 964s**: privacy 0 findings; the full engine suite 2,878 passed (24 binaries); the sharded 2,000-game fuzz of the
+default pool (100 matches), the default pool with hidden decklists and delver_dealt (100 matches + 100 post-sideboard).
+
+**The engine gate** (on d51092a3, the same way): `python tools/gate.py engine --no-mac --tested-sha d51092a3b6ab
+--expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine d51092a3b6ab in
+828s** (skipped: 7 live-run-hazard tests of pytest, fenced by the live runs): the digests full 44372545881ef768 and
+encoding-free a965c3fc8d3bba8a (= expected); the formats constructed, EoE, driver, metagame and dealt (each = the
+checkout's recorded file); `az` 57, `limits` 13, `hidden` 28 passed; pytest 150 + 140 + 178 + 296 passed; the desktop
+smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6
+games, 2,609 rows); the suite evidence of d51092a3b6ab. The first run of this gate failed one test unrelated to the change,
+`tests/test_mac_remote.py::test_the_macs_selfplay_settings`: through `tools/slotd.sh`'s Git Bash the machine's
+`MTGZ_MAC_HOME` (a `/Users/...` path) reached Windows Python rewritten by the MSYS path conversion (reproduced alone
+through slotd.sh; passes without it, and with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, which the second run set). A tooling
+gap of `--no-mac` gates on Windows, not fixed here. The next commit adds this paragraph only (docs).
