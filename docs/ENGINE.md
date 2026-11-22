@@ -46461,3 +46461,7 @@ pin and the six shards; before the merge of main's 241): **GATE PASSED WITH SKIP
 (the skips: the core's live-run-hazard tests, fenced) - the module and the worker built (169 + 118 s: main's Rust had
 changed) and the Mac's test binaries (208 s), then the group in about 520 s: the six core shards 237 to 520 s (641 to
 871 s as four), checkpoint_compat identical in 296 s, the build-only step 122 s.
+
+After the merge of main (57c5e0e5: the six shards and this section on top of 241's pin; this paragraph is the next
+commit, docs only): `tests/test_gate.py` 103 passed, **GATE PASSED WITH SKIPS python 57c5e0e59c3f in 255s** (the
+desktop's one fenced test).
