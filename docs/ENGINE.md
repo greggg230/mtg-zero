@@ -43055,7 +43055,16 @@ needs concrete mana (a `ManaNowPick` of the combinations first) or the spell's c
 combination tried: that part's castability is a search of its own) - the class model's units are masks, so a unit of
 the mask is exactly "some type of the mask"; (2) a paged decision of a step activation filters its items by
 `completing` (`ask_paged_ranges`: Cascading Cataracts' 126 productions); (3) one `completing` pass per step decision
-(`ask_completed`). A spell whose total cost has no mana has no step: the search asks its payment as it is.
+(`ask_completed`); (4) the feeding abilities a search node activates are taken in increasing card order
+(`Task::CastMana::after`, marked `SEARCH_ORDER` so an option the player chose outside the search orders nothing) when
+none of the node's feeding abilities has an "only if" condition: two such activations in either order reach states
+equal but for the graveyard's order and the waiting triggers' order, which the search's question (can the payment be
+completed) never reads - the payment's exiles and delve's picks are sets, the triggers wait - and each stays legal in
+the other order, their costs taking disjoint permanents and cards (the same choices) and a mana cost one paid by the
+other's mana being paid by activating that ability within its own payment (605.3a); a condition could be made true
+or false by the other activation, so then every order is searched (a cube digest game: five hand cards with
+discard-for-mana abilities and an escaped Phlage, every order of them searched, 2,000,000 copies). A spell whose total
+cost has no mana has no step: the search asks its payment as it is.
 
 ### 229.5 Found and fixed on the way
 
