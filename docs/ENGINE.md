@@ -45520,3 +45520,94 @@ Mac's full pytest of 9d01c425 had three failures, none of this change: `test_run
 (a timing flake under load), and `test_artifact_cache::test_check_scope_reads_cargo_dep_info` and
 `test_deck_scorer::test_the_engines_fixtures_are_reproducible` fail the same on the Mac at origin/main c6ba3909 (they pass
 on the desktop).
+
+## 238. A gate's Mac steps really run at once, and zero-core's pytest runs in shards (branch `feat/gate-parallel`, 2026-11-22)
+
+The question was whether the gates could be faster by spreading their work over cores and machines. 167 had already
+made a tier's independent checks one parallel group and 166 had put the pure-CPU ones on the Mac beside a live run. Two
+things undid most of that:
+
+* **`tools/mac.sh` ran one command per Mac checkout** (143's lock: a second mac.sh had once force-switched the sources
+  under a running cargo test). A gate's parallel group, offloaded, therefore ran one step at a time, and so did every
+  gate of the same commit (their Mac checkout is the same `detached-<sha>`). The engine gate of f9d04af3 (236.10, 1,446
+  s): `cargo test az` 23 s of work in a step of 829 s, `limits` 0.04 s in 1,067 s, `hidden` 1 s in 877 s, the digest
+  formats 20 s in 866 s, the four pytest shards 116 / 138 / 175 / 308 s of work in steps of 594 / 797 / 1,065 / 475 s -
+  each log's first line: "[mac] ... is in use (...): waiting for it".
+* **zero-core's pytest was one process**: 44 and 52 minutes of test time in two optin-core gates of the day (815 and
+  851 tests, 40 s of slot wait), the long pole of the core tiers. It cannot go to the Mac (its search goldens are x86's:
+  166.2).
+
+### 238.1 `tools/mac.sh`: one commit's commands share the checkout
+
+* A command of the SAME commit as the ones running in a Mac checkout joins them (the checkout is not touched: its HEAD
+  is checked, never moved); a command of ANOTHER commit waits until the checkout is free, then checks its own out as
+  before. `--pin`, `--eval-checkout` and `MTGZ_MAC_EXCLUSIVE=1` take the checkout alone.
+* Beside the checkout: `<checkout>.mac-users/<pid>` per running command ("<sha> <shared|excl> <what>"; a file whose
+  process is gone is dropped), `<checkout>.mac-want/<pid>` per waiting command ("<since> <what>": waiters go in the order
+  they began to wait, and a later arrival goes after them even where it could share), and the old
+  `<checkout>.mac-lock`, now held only while a command reads those and syncs the checkout (the bare repos' fetch, the
+  config, the worktree list and the checkout are written under it: several mac.sh arrive at once). An older mac.sh still
+  holds that lock for its whole command and is waited for, so the two versions are safe beside each other on a
+  `detached-<sha>` checkout; an older mac.sh on a named branch that moved could still switch the sources under a new
+  one's command, until every checkout carries this version.
+* The desktop side: several mac.sh of one checkout push the same refs at once; a push that lost the race for the ref's
+  lock is tried again (quietly), and `git remote add mac` losing its race is not an error.
+* How many commands run at once on the Mac is `tools/slotd.sh`'s there (the gate's Mac commands take a slot each:
+  166.2); its `slots` went from 2 to 4 (the Mac's own `~/.mtgz-state/slots.conf`, not in the repo). A caller that does
+  not use slotd.sh and counted on the lock to run its commands one at a time now sets `MTGZ_MAC_EXCLUSIVE=1`.
+* Checked on the Mac with commands that only sleep: three of one commit overlapped (15 s for 3 x 8 s); with one
+  running, an exclusive command, then a sharing one, then one of another commit each waited and ran in that order, the
+  last at its own commit.
+
+### 238.2 The gate on the Mac: the module built once, a shard's own basetemp
+
+* `mac-build`: when a parallel group holds more than one Mac step that imports the module (their commands begin with
+  `bash tools/build_py.sh &&`), `place` puts one Mac step before the group that builds it there
+  (`mac_module_step`; evidence: build_engine.sh's "mtgz._engine OK: .../mtgz/_engine.* | games: [...]" line + exit 0).
+  The group's steps then take the artifact cache's module (placed by a rename). Without it, the first build's install
+  (the old file removed, the new one copied) could land under a step importing it, now that the steps run at once.
+* A Mac pytest shard runs with its own `--basetemp` under the Mac checkout's `gates/tmp`, removed after (`mkdir -p
+  gates/tmp` first: pytest makes its basetemp, not the parents - the first run's three shards errored on a new Mac
+  checkout for that).
+
+### 238.3 zero-core's pytest in shards
+
+`--core-pytest-shards` (default 4; search-core, optin-core): `core_steps` splits the core's `tests/test_*.py` with
+`pytest_partition` / `pytest_coverage` (167.4's, now taking the suite's root) into steps `core-pytest-K-of-N`, each its
+own process, `--basetemp` and junit file, each a heavy desktop step with the flaky policy (91) for its own failures;
+durations in `core_pytest_durations.json` beside this repo's `pytest_durations.json` (a file without one is weighed by
+its size, so the first run's shards were uneven). One shard, or a core checkout without two test files: the one step
+`core-pytest` as before.
+
+### 238.4 Builds
+
+* `--jobs` defaults to the environment's `CARGO_BUILD_JOBS`, else `jobs` of the machine's `slots.conf` (what slotd.sh
+  gives a command whose caller set none; 10 on the desktop), else 4. It was 4 everywhere. Not measured.
+* The Python module and the worker are still built one after the other. Two cargo builds in one target dir serialise on
+  its lock, and one `cargo build -p mtgz_py -p mtgz_worker` unifies the host dependencies' features (`syn` and
+  `proc-macro2` get other feature sets than in either build alone: `cargo tree -e features`), so the separate builds the
+  cache keys and the farm use would each compile again. A second target dir would compile the engine twice.
+
+### 238.5 Measured (beside two live runs and other sessions' gates)
+
+| gate | before | here |
+|---|---|---|
+| python, no Rust change | 703 - 1,029 s (167.7) | **190 s** (567522d0: `mac-build` 4 s; the four shards 73 / 86 / 101 / 114 s of pytest at once, one waited 40 s for a Mac slot; the run-loop smoke 40 s; the desktop part 60 s) |
+| optin-core's core pytest | one step, 44 - 52 min of test time | four steps, 6.2 / 7.7 / 8.9 / 12.7 min of test time (780 passed; one `test_remoteplay` test failed in its shard and passed alone: the flaky policy) |
+| optin-core, whole gate | 1,833 s (5082442f) | 1,875 s (1622f2ab, checkpoint_compat skipped): no gain - each core shard waited 7 - 17 min for one of the desktop's 4 slots, which the gate's own eight heavy desktop steps and two other sessions' gates shared |
+
+The first row is the Mac lock. The last row says what bounds a core tier now: the desktop's slot count (`slots.conf`,
+the machine owner's setting for side work beside live runs), not the test time.
+
+### 238.6 Gates, and what is left
+
+`tests/test_gate.py` 102 passed (new: the Mac module checker, the `mac-build` step before a group and none for the suite
+tier, a Mac shard's basetemp, the jobs default, the core shards - every file once, the split of a measured file, the
+flaky retry's own basetemp, the one-step fallback - and a failed core shard failing the gate). **GATE PASSED WITH SKIPS
+python 567522d039cd in 190s** (skip: the desktop's one live-run-hazard test, fenced). The optin-core run above passed
+every step and failed only "the checkout unchanged by the gate" (the basetemp fix was edited in its checkout while it
+ran).
+
+Left: more desktop slots for the single-threaded pytest shards (the owner's call); the durations of shards that ran on
+the Mac are still not recorded (167.10), so beside a live run this repo's shards stay as balanced as the last desktop
+run left them; `check_checkpoint_compat` is one ~22 min step.

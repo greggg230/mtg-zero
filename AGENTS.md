@@ -141,7 +141,7 @@ config and checkpoint (`docs/ENGINE.md` 114.8, 155).
 
 **Beside a live run the gate works off the desktop** (`docs/ENGINE.md` 166). When a supervisor is live on this machine
 (pb2 and friends), `gate.py` sends its pure-CPU steps (cargo tests, digests, the engine suite, the fuzz, pytest, the
-run-loop and search smokes; not zero-core's own tests, whose goldens are the desktop's) to the MacBook through `tools/mac.sh` (`nice`, at most two at once there)
+run-loop and search smokes; not zero-core's own tests, whose goldens are the desktop's) to the MacBook through `tools/mac.sh` (`nice`; one commit's commands share its checkout there and run at once, as many as the Mac's own `slotd.sh` slots: `docs/ENGINE.md` 238)
 and runs the desktop's own heavy steps (builds, the Windows worker, farm compat, private-data tests) each holding a slot
 of `tools/slotd.sh`. Same checkers and evidence; the plan's `placement:` line says where each step ran. `--no-mac`
 keeps everything here (throttled); `--offload local|mac` and `--throttle on|off` override the automatic choice. Any
@@ -154,7 +154,7 @@ the desktop's `E:/mtg-zero-state`;
 tools/gate.py <tier>` checks the commit out into one of a few fixed worktrees with their own fixed target dirs, so cargo
 rebuilds only what changed, and the Python module and the release worker come from the artifact cache
 (`tools/zcache.py`) when the commit changed no Rust input. gate.py runs a tier's independent steps at once, each where
-the placement above puts it. Never edit in a warm worktree.
+the placement above puts it (pytest in shards - zero-core's too: `--core-pytest-shards`, `docs/ENGINE.md` 238). Never edit in a warm worktree.
 
 Don't re-run a full suite on a sha that already passed it: each tier writes `gates/<sha12>-<tier>.json`
 (`docs/ENGINE.md` 143). The checkout must be exactly its commit: an untracked file under `engine/`,
