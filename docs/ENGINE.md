@@ -45048,3 +45048,30 @@ Checks:
   known gap covers - none involving the field: the first version gave `Obj::lost` a public perturbation of its own,
   which shifted the pairwise pass's partner draws (`combinable.len()`) onto pre-existing gaps (a controlled turn's framed
   row; layout v6's delve promise and saddled marks). Classified derived instead (235.3), the pass draws as on main.
+
+### 235.7 Gates and the fresh-seed fuzz
+
+* **The suite gate** on 779185cd (this branch merged with main 71ca1493; in its worktree, every step on the Mac beside
+  the live legacy-meta3 runs): `python tools/gate.py suite --fuzz-pools
+  default,default+hidden,delver_dealt,doomsday,cross,hogaak,delver` - **GATE PASSED suite 779185cd2230 in 734s**:
+  privacy 0 findings; the full engine suite 2,925 passed (24 binaries); the sharded 2,000-game fuzz of each pool passed
+  (the default with 100 matches; default with hidden decklists; delver_dealt, cross, hogaak and delver each with 100
+  matches + 100 post-sideboard; doomsday games only); the checkout unchanged (`gates/779185cd2230-suite.json`).
+* **The engine gate** on the same commit: `python tools/gate.py engine --tested-sha 779185cd2230 --expect-digest
+  9473f7debc4bceb3 --expect-digest0 d3c144b6cc2977e5` - **GATE PASSED WITH SKIPS engine 779185cd2230 in 791s**
+  (skipped: three live-run-hazard pytest tests, fenced by the live runs here): the digests full 9473f7debc4bceb3 and
+  encoding-free d3c144b6cc2977e5 (= main's), constructed 4a03293608edeba2, EoE 5ffb850dd963bad0, driver
+  6a03572828250b86, metagame d72ae0c904a0ffbd, dealt f858b1880091d94f (each = the recorded file: **no digest moves**);
+  `az` 57, `limits` 13, `hidden` 28 passed; pytest 133 + 170 (desktop, throttled) + 243 + 189 (Mac) + 49 (desktop part);
+  the smoke config; **farm compat identical** (`delver-mirror-bo3-dealt`: gate 2 6 games, 2,468 rows, 150 batches; gate
+  3 6 games, 2,598 rows); the suite evidence of 779185cd2230.
+* **Fresh seeds** (the Mac, 779185cd): the `fuzz` profile (every checkpoint walked, 173.2) on the default pool, games
+  4,236,000,000.. in six shards of 500 - five passed (559,276 open-decklist walks, 3,099,714 states compared), the
+  sixth stopped at seed 4,236,000,644; hidden decklists, games 4,237,000,000.. in four shards of 500 - three passed
+  (1,308,073 hidden-decklist steps), the fourth stopped at 4,237,001,606; release, the default pool's games
+  4,235,000,000..4,235,019,999 in twelve shards - ten passed, two stopped at seeds 4,235,003,677 and 4,235,009,397;
+  1,000 matches from 4,239,000,000 passed. **Every stop is the payment search's node cap** ("the payment search passed
+  2000000 copies (ENGINE.md 100.4.9)", cost_order.rs, Squandered Resources' cast with lands to sacrifice for mana) and
+  **fails the same on main 71ca1493** (4,235,003,677 release and 4,236,000,644 under the `fuzz` profile, replayed
+  there): a pre-existing blow-up of the 601.2g / payment search, not this section's (which changes no rule, key or
+  legal action). No information-set check failed.
