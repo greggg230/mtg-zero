@@ -44619,7 +44619,27 @@ digest as recorded, farm compat identical, pytest 698 passed on the Mac and 49 o
 * The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
   counts): measured in 231.7.
 
-## 232. The fuzz's shown cards of a hidden deck and a companion manifested face down (fuzz steward queue 2eeffcef33d5 / 88f4716ce1e7; branch `fix/lutri-hidden-deck`, 2026-11-22)
+## 232. zero-core pin 899e0eb -> b0bce34: the farm pool counts stale rows per machine (metrics `by_machine`, one log line per iteration; zero-core `fix/stale-per-machine` b0bce34, docs/az.md 54.8; 2026-11-22)
+
+**Why.** The Fable farm review of 2026-11-21 (its recommendation 3) found legacy-meta3-r1's trainer dropping 18-25% of
+its farm rows as stale (older than `pool_max_stale`), and guessed that the agent's tuner holds so many games in flight
+on the slower PCs that one game outlasts the staleness window. The run's metrics had only totals, so the guess could
+not be checked per machine before building the fix (a games-in-flight cap from the staleness window: an agent release
+and a coordinator deploy).
+
+**What.** zero-core `python/zero/farm_pool.py`, rolling runs only: per machine, the accepted games and rows, the stale
+rows dropped, the games dropped whole and the accepted rows' lag histogram, in the iteration's pool metrics as
+`by_machine`; when a machine lost rows, one log line per iteration names those machines worst first
+(`stale rows by machine: <machine> <stale>/<stale + kept> (P%, N games whole)`). Counting only: no game, row, shard or
+lease changes; `pool_rolling` '' keeps the metrics' keys as before. No engine, encoding, search, worker or farm
+build change (Python only: the release watcher's builds are unchanged in behaviour). A run gets it when it (re)starts
+from a commit with this pin.
+
+**Tests.** zero-core `tests/test_farm_pool.py`: `test_staleness_per_row_with_rolling` checks `by_machine` beside the
+totals (classic: empty), `test_stale_rows_by_machine_in_metrics_and_log` (two machines: counters, lag histograms, a log
+line naming only the machine that lost rows); farm_pool + gamerec + package_hooks 36 passed on b0bce34.
+
+## 234. The fuzz's shown cards of a hidden deck and a companion manifested face down (fuzz steward queue 2eeffcef33d5 / 88f4716ce1e7; branch `fix/lutri-hidden-deck`, 2026-11-22)
 
 **The failure.** `FUZZ_HIDDEN_DECKS=1`, seed 100,200,667 (the default pool): "a hidden-decklist world for P1 (mover P1):
 the sampled deck lacks a shown Lutri, the Spellchaser" (`check_determinize_hidden`, engine/src/fuzz/games.rs). Found by
@@ -44686,7 +44706,7 @@ cap, `cost_order.rs`), not this section's: it fails the same on main 4dbf0ee1 (w
 this check never runs before it. The seeds after it in its shard (232,013,639..232,015,000) and the 15 other fuzz
 tests then passed.
 
-### 232.1 Known follow-ups
+### 234.1 Known follow-ups
 
 * **Seed 232,013,638 (hidden decklists, release)**: the payment search's 2,000,000-copy cap in an option completion
   of "cast or play from the graveyard" (Kaldra Compleat and Minsc & Boo in P0's hand) - for the payment-search lanes

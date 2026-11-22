@@ -144,7 +144,7 @@ fn shown(a: &MtgAz, viewer: u8) -> Vec<u16> {
     }
     v.sort_unstable();
     // (A card of theirs outside their deck hidden from the viewer - in a hidden zone or face down, CR 708.2 - is
-    // not a deck card: the fuzz's `hd_shown`, ENGINE.md 232.)
+    // not a deck card: the fuzz's `hd_shown`, ENGINE.md 234.)
     for (i, ob) in g.objs().iter().enumerate() {
         let c = engine::CardIdx::new(i as u32);
         if ob.owner == o && !r.contains(&i) && !g.knows(viewer, c) {

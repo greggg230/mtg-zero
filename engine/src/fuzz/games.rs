@@ -5957,7 +5957,7 @@ fn hd_shown(a: &crate::az::MtgAz, viewer: u8) -> Vec<u16> {
     // (A cloud's identity may be a card of theirs outside their deck, hidden from the viewer: a
     // token in a hidden zone, a companion put into the hand. Not a deck card. Hidden wherever it
     // is: in a hidden zone, or a face-down permanent or spell (CR 708.2) - `Game::knows` is false
-    // for those alone, when the viewer does not know them. ENGINE.md 232: the hidden zones listed
+    // for those alone, when the viewer does not know them. ENGINE.md 234: the hidden zones listed
     // here before missed a companion shuffled away and then manifested face down.)
     for (i, ob) in g.objs().iter().enumerate() {
         let c = crate::CardIdx::new(i as u32);
@@ -6099,7 +6099,7 @@ fn check_determinize_hidden(a: &crate::az::MtgAz, seed: u64, rng: &mut Rng) {
         let shown = hd_shown(a, viewer);
         let (real, mine) = (hd_deck(a, o), hd_deck(a, viewer));
         // (The game itself is one of the viewer's worlds: its deck holds every card shown, or the shown cards are
-        // wrong, not a world - ENGINE.md 232.)
+        // wrong, not a world - ENGINE.md 234.)
         if let Some(x) = hd_lacks(&real, &shown) {
             panic!("seed {seed}: the game's own deck of P{o} lacks a {} P{viewer} was shown (`hd_shown`)", a.g.db().def(x).name);
         }
@@ -6251,7 +6251,7 @@ fn check_hidden_information_set(a: &crate::az::MtgAz, viewer: u8, seed: u64, rng
 
 #[cfg(test)]
 mod hidden_shown_tests {
-    //! ENGINE.md 232: the fuzz's cards shown of a hidden deck (`hd_shown`) and a revealed companion that went
+    //! ENGINE.md 234: the fuzz's cards shown of a hidden deck (`hd_shown`) and a revealed companion that went
     //! into its owner's hand, back into the library, and onto the battlefield face down (the fuzz steward's
     //! queue 2eeffcef33d5 / 88f4716ce1e7: seed 100,200,667 of `FUZZ_HIDDEN_DECKS=1`, a Test Manifester's manifest).
     use super::*;
