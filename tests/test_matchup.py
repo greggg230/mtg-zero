@@ -177,7 +177,9 @@ def test_the_game_log_reader(tmp_path):
 class FakeRun:
     def __init__(self, run, **cfg):
         self.run = run
-        spec = {'constructed': True, 'format': 'bo3', 'dealt_decks': {'p': 0.85, 'swaps': [0, 15], 'per_seat': True}}
+        # (a mirror of the one-card 75 the fake version's table lists: `with_tables` places a table on its 75's seats)
+        spec = {'constructed': True, 'format': 'bo3', 'dealt_decks': {'p': 0.85, 'swaps': [0, 15], 'per_seat': True},
+                'decks': {'p0': ['x'], 'p1': ['x']}}
         self.cfg = dict(MU.SETTINGS, spec=json.dumps(spec), **cfg)
         self.lines = []
 

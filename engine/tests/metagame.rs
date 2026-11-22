@@ -129,7 +129,9 @@ fn unsupported_combinations_are_refused_loudly() {
         w[k] = x;
         w
     };
-    refused(&with3("dealt_decks", json!({"p": 0.5, "swaps": [0, 4]})), "metagame with \"dealt_decks\"");
+    // (dealt decks are a metagame's in best-of-three since ENGINE.md 223: each seat from its own 75 - the per-deck
+    // settings' test below; best-of-one refuses them as any spec does)
+    refused(&with("dealt_decks", json!({"p": 0.5, "swaps": [0, 4]})), "dealt_decks is for a constructed best-of-three");
     refused(&with3("keep_deck", json!([0])), "metagame with \"keep_deck\"");
     refused(&with3("keep_known", json!(true)), "metagame with \"keep_known\"");
     refused(&with3("sideboard_table", json!({})), "metagame with \"sideboard_table\"");
@@ -220,7 +222,7 @@ fn same_position(a: &MtgAz, b: &MtgAz, seed: u64, step: u32) {
 
 /// Play the metagame spec `meta` (JSON) and its pairing's fixed spec in lockstep from `seed` with random actions; every
 /// position the same (`same_position`). The pairing played.
-fn lockstep(meta: &str, seed: u64) -> [u8; 2] {
+pub(crate) fn lockstep(meta: &str, seed: u64) -> [u8; 2] {
     let ms = MtgSpec::parse(meta).unwrap();
     let mut a = MtgAz::new_game(&ms, 2, seed).unwrap();
     let pairing = a.m.pairing.clone().expect("a metagame match has its pairing");
@@ -229,6 +231,9 @@ fn lockstep(meta: &str, seed: u64) -> [u8; 2] {
     let fs = MtgSpec::parse(&fixed).unwrap();
     let mut b = MtgAz::new_game(&fs, 2, seed).unwrap();
     assert_eq!(b.m.pairing, None);
+    // (ENGINE.md 223: the per-deck settings follow the pairing - each seat's dealt flag and choice table)
+    assert_eq!([a.m.is_dealt(0), a.m.is_dealt(1)], [b.m.is_dealt(0), b.m.is_dealt(1)], "seed {seed}: the dealt seats");
+    assert_eq!(a.m.table, b.m.table, "seed {seed}: the seats' choice tables");
     // the game record names the pairing; otherwise it is the fixed game's
     let (ra, rb): (Value, Value) = (serde_json::from_str(&a.record_setup()).unwrap(), serde_json::from_str(&b.record_setup()).unwrap());
     assert_eq!(ra["decks"], rb["decks"]);
@@ -265,7 +270,11 @@ fn lockstep(meta: &str, seed: u64) -> [u8; 2] {
         a.legal_actions(&mut la);
         b.legal_actions(&mut lb);
         assert_eq!(la, lb, "seed {seed} step {step}: the legal actions");
-        let act = la[rng.below(la.len() as u32) as usize];
+        // (ENGINE.md 223: a seat's choice table - the same in both games, played as zero-core's driver plays a
+        // teacher decision; every other decision at random)
+        let taught = a.table_action();
+        assert_eq!(taught, b.table_action(), "seed {seed} step {step}: the table's action");
+        let act = taught.unwrap_or_else(|| la[rng.below(la.len() as u32) as usize]);
         ka.clear();
         kb.clear();
         a.step(act, &mut ka).unwrap();

@@ -52,6 +52,8 @@ mod lab;
 mod match_worlds;
 #[path = "metagame.rs"]
 mod metagame;
+#[path = "pair_sideboarding.rs"]
+mod pair_sideboarding;
 #[path = "post_board.rs"]
 mod post_board;
 #[path = "sealed.rs"]
