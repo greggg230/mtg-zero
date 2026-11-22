@@ -373,7 +373,12 @@ fn cr_602_5_601_2g_timing_restricted_mana_abilities_while_casting_as_while_payin
             let def = t.def(d);
             for ad in def.activated.iter() {
                 if ad.mana().is_some() && (ad.sorcery || ad.instant_only || ad.your_turn || ad.only_if.is_some() || ad.exhaust) && !found.iter().any(|f| f.1 == def.name) {
-                    found.push((t, def.name.clone(), ad.instant_only || ad.sorcery, ad.only_if.is_some() || ad.your_turn));
+                    // (`exact`: every mana ability of the card has an "only if" or "only during your turn": the
+                    // card is offered exactly when one of them may be activated. A card with an unrestricted one
+                    // besides - a Verge's first, a plain "{T}: add" the step leaves to the priority after the cast,
+                    // ENGINE.md 222.3 - is offered while casting only if the payment may activate it.)
+                    let all = def.activated.iter().filter(|a| a.mana().is_some()).all(|a| a.only_if.is_some() || a.your_turn);
+                    found.push((t, def.name.clone(), ad.instant_only || ad.sorcery, all));
                 }
             }
             assert!(def.hand_abilities.iter().all(|ad| !(ad.mana().is_some() && (ad.sorcery || ad.instant_only || ad.your_turn || ad.only_if.is_some() || ad.exhaust))), "{}: a restricted hand mana ability (add it here)", def.name);
@@ -461,24 +466,26 @@ fn cr_601_2g_hogaak_is_castable_only_through_a_chromatic_star_its_cost_paid_by_a
 #[test]
 fn cr_601_2g_702_51a_a_creature_that_pays_a_chromatic_stars_cost_doesnt_convoke() {
     // Llanowar Elves ({T}: add {G}) may pay the Star's {1} or convoke for Hogaak, not both (tapped for mana it can't
-    // be tapped for convoke): with one other green creature Hogaak's two hybrid pips and the Star's {1} are one source
-    // short; with two others it is castable, the Elves paying the Star.
-    let board = |greens: usize| {
-        let mut b = vec!["Chromatic Star", "Llanowar Elves"];
-        b.extend(std::iter::repeat_n(GREEN, greens));
+    // be tapped for convoke): with one other green creature and four graveyard cards, the Elves paying the Star leaves
+    // one creature for Hogaak's two hybrid pips, and the Elves convoking leaves the Star's {1} unpaid: not castable. A
+    // Swamp paying the Star instead: castable, the Elves convoking.
+    let board = |swamp: bool| {
+        let mut b = vec!["Chromatic Star", "Llanowar Elves", GREEN];
+        if swamp {
+            b.push("Swamp");
+        }
         scen().battlefield(0, &b).graveyard(0, &["Ponder", "Brainstorm", "Daze", "Island"]).hand(0, &[HOGAAK]).at(Step::Main1, 0).start()
     };
-    let one = board(1);
-    assert!(!one.has_option(Choice::Cast(one.card(0, HOGAAK, Zone::Hand))), "{}", opts(&one));
-    let mut g = board(2);
+    let none = board(false);
+    assert!(!none.has_option(Choice::Cast(none.card(0, HOGAAK, Zone::Hand))), "{}", opts(&none));
+    let mut g = board(true);
     let h = g.card(0, HOGAAK, Zone::Hand);
-    let elves = bf(&g, 0, "Llanowar Elves");
     assert!(g.has_option(Choice::Cast(h)), "{}", opts(&g));
     g.choose(Choice::Cast(h));
     until_priority(&mut g, &|g| delve_any(g, &[]));
     assert_eq!(g.obj(h).zone, Zone::Stack, "{}", log(&g));
-    assert!(g.log_lines().iter().any(|l| l.contains("activates a mana ability of Llanowar Elves")), "the Elves paid the Star: {}", log(&g));
-    assert!(g.obj(elves).tapped);
+    assert!(g.log_lines().iter().any(|l| l.contains("taps Llanowar Elves for convoke")), "the Elves convoked: {}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Swamp")).tapped, "the Swamp paid the Star: {}", log(&g));
 }
 
 #[test]

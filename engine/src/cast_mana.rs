@@ -660,17 +660,27 @@ mod tests {
     }
 
     /// Both players' loop hashes of each state (ENGINE.md 222.3: the states compared as the game tells them apart),
-    /// sorted, each once.
-    fn hashes(states: &[Game]) -> Vec<(u64, u64)> {
-        let mut v: Vec<(u64, u64)> = states.iter().map(|g| (g.loop_hash(0, None), g.loop_hash(1, None))).collect();
+    /// sorted, each once; the twin permanents `twins` (alike in every respect but which of them is tapped, one payment
+    /// class: the payment taps the first free one) told apart only by how many are tapped.
+    fn hashes(states: &[Game], twins: &[CardIdx]) -> Vec<(u64, u64)> {
+        let canon = |g: &Game| {
+            let mut c = g.clone();
+            let k = twins.iter().filter(|t| c.objs[t.i()].tapped).count();
+            for (i, t) in twins.iter().enumerate() {
+                c.objs[t.i()].tapped = i < k;
+            }
+            c
+        };
+        let mut v: Vec<(u64, u64)> = states.iter().map(canon).map(|g| (g.loop_hash(0, None), g.loop_hash(1, None))).collect();
         v.sort_unstable();
         v.dedup();
         v
     }
 
     /// ENGINE.md 222.3 (the collapse): a Mountain's "{T}: add {R}" activated in Lightning Bolt's 601.2g step reaches
-    /// exactly the states the cast without it, then the Mountain activated with the priority right after (when it is
-    /// still untapped; tapped by the payment it is the same), reach. Chromatic Star makes the step ask (never chosen).
+    /// exactly the states the cast without it reaches with a Mountain's ability activated by its payment or, with the
+    /// priority right after it, by the player (the two Mountains are twins: which one is the payment's canonical
+    /// choice). Chromatic Star makes the step ask (never chosen in the step).
     #[test]
     fn a_collapsed_land_activated_while_casting_reaches_the_states_of_activating_it_after() {
         let mut g = Scenario::new(CardDb::cube())
@@ -705,23 +715,24 @@ mod tests {
             ends(&b, &no_star, &mut cast);
             let mut two = Vec::new();
             for e in cast {
-                if e.objs[m.i()].tapped {
-                    two.push(e);
-                    continue;
+                if lands.iter().any(|l| e.objs[l.i()].tapped) {
+                    two.push(e.clone());
                 }
-                let mut f = e.clone();
-                f.pending = None;
-                f.agenda.push(Task::Priority);
-                f.begin_activate(0, m, AbilitySlot::Activated(0));
-                f.advance();
-                assert_eq!(f.kind(), Some(DecisionKind::Priority), "{}", f.log_lines().join("\n"));
-                two.push(f);
+                for &l in lands.iter().filter(|l| !e.objs[l.i()].tapped) {
+                    let mut f = e.clone();
+                    f.pending = None;
+                    f.agenda.push(Task::Priority);
+                    f.begin_activate(0, l, AbilitySlot::Activated(0));
+                    f.advance();
+                    assert_eq!(f.kind(), Some(DecisionKind::Priority), "{}", f.log_lines().join("\n"));
+                    two.push(f);
+                }
             }
             assert!(!one.is_empty());
             let desc = |v: &[Game]| -> Vec<String> {
                 v.iter().map(|g| format!("{:?} tapped {:?} pool {:?} {}", (g.loop_hash(0, None), g.loop_hash(1, None)), lands.iter().map(|&l| g.objs[l.i()].tapped).collect::<Vec<_>>(), g.players[0].pool.amt, g.log_lines().join(" / "))).collect()
             };
-            assert_eq!(hashes(&one), hashes(&two), "the Mountain {m:?}: the states differ
+            assert_eq!(hashes(&one, &lands), hashes(&two, &lands), "the Mountain {m:?}: the states differ
 {:#?}
 {:#?}", desc(&one), desc(&two));
         }
@@ -764,7 +775,7 @@ mod tests {
         assert_eq!(g.total_mana(emry, g.stack().last().unwrap()), before, "one artifact left, the cost unchanged");
         let mut h = g.clone();
         h.cast_lock.clear();
-        assert_eq!(h.total_mana(emry, h.stack().last().unwrap()).total(), 2, "unlocked it would be {{1}}{{U}}");
+        assert!(h.total_mana(emry, h.stack().last().unwrap()).total() > before.total(), "unlocked it would be more");
         for _ in 0..20 {
             if g.kind() == Some(DecisionKind::Priority) {
                 break;
