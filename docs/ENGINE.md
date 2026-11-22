@@ -42169,4 +42169,4 @@ skipped, 2 failed - both CUDA tests outside the diff on the GPU the live run hol
 `test_dup_reduce::test_max_is_deterministic_on_cuda_and_matches_the_cpu` (fails alike on c850a5d in its own
 worktree) and `test_token_graphs::test_absent_slots_are_never_read[max]` (a 3e-8 difference; passed on the rerun, on
 c850a5d too). This repo: `tests/test_rowselect.py` 9 passed, with `test_mtg_az`'s distillation test,
-`test_delverai_meta` and `test_privacy`. The `python` gate: 222.1's gate note (the next commit).
+`test_delverai_meta` and `test_privacy`. The `python` gate on 4c11cd0d: GATE PASSED WITH SKIPS (only the live-run fence: 8 `live_run_hazard` tests fenced off beside the live runs; pytest 4 shards 227 + 178 + 163 + 150 passed, the desktop part 48, the run-loop smoke 16 games 0 unfinished; 1,830 s).
