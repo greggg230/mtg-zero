@@ -5985,16 +5985,32 @@ fn hd_shown(a: &crate::az::MtgAz, viewer: u8) -> Vec<u16> {
     }
     v.sort_unstable();
     // (A cloud's identity may be a card of theirs outside their deck, hidden from the viewer: a
-    // token in a hidden zone, a companion put into the hand. Not a deck card.)
+    // token in a hidden zone, a companion put into the hand. Not a deck card. Hidden wherever it
+    // is: in a hidden zone, or a face-down permanent or spell (CR 708.2) - `Game::knows` is false
+    // for those alone, when the viewer does not know them. ENGINE.md 234: the hidden zones listed
+    // here before missed a companion shuffled away and then manifested face down.)
     for (i, ob) in g.objs().iter().enumerate() {
         let c = crate::CardIdx::new(i as u32);
-        if ob.owner == o && !r.contains(&i) && matches!(ob.zone, crate::Zone::Hand | crate::Zone::Library | crate::Zone::FaceDown) && !g.knows(viewer, c) {
+        if ob.owner == o && !r.contains(&i) && !g.knows(viewer, c) {
             if let Ok(at) = v.binary_search(&crate::az::sample::card_of(g, c)) {
                 v.remove(at);
             }
         }
     }
     v
+}
+
+/// The first card of sorted multiset `cards` that sorted multiset `deck` does not hold (a card twice in `cards`,
+/// once in `deck`: its second copy), or None.
+fn hd_lacks(deck: &[u16], cards: &[u16]) -> Option<u16> {
+    let mut left = deck.to_vec();
+    cards.iter().copied().find(|x| match left.binary_search(x) {
+        Ok(i) => {
+            left.remove(i);
+            false
+        }
+        Err(_) => true,
+    })
 }
 
 /// One game of `FUZZ_HIDDEN_DECKS` (module docs): the mode's decks, played through `MtgAz` with
@@ -6113,6 +6129,11 @@ fn check_determinize_hidden(a: &crate::az::MtgAz, seed: u64, rng: &mut Rng) {
         let o = 1 - viewer;
         let shown = hd_shown(a, viewer);
         let (real, mine) = (hd_deck(a, o), hd_deck(a, viewer));
+        // (The game itself is one of the viewer's worlds: its deck holds every card shown, or the shown cards are
+        // wrong, not a world - ENGINE.md 234.)
+        if let Some(x) = hd_lacks(&real, &shown) {
+            panic!("seed {seed}: the game's own deck of P{o} lacks a {} P{viewer} was shown (`hd_shown`)", a.g.db().def(x).name);
+        }
         let mut d = a.clone();
         let s = rng.next_u64();
         // (FUZZ_DECK_TILT: the deck-tilted deal, ENGINE.md 106; the prediction from its own generator)
@@ -6182,14 +6203,8 @@ fn check_determinize_hidden(a: &crate::az::MtgAz, seed: u64, rng: &mut Rng) {
         // one form of farm-fuzz's 152.5 fix and A1's, A1's kept at the integration, 157.)
         let world = hd_deck(&d, o);
         assert_eq!(world.len(), real.len(), "{}: the deck's size", what());
-        let mut left = world.clone();
-        for x in &shown {
-            match left.binary_search(x) {
-                Ok(i) => {
-                    left.remove(i);
-                }
-                Err(_) => panic!("{}: the sampled deck lacks a shown {}", what(), a.g.db().def(*x).name),
-            }
+        if let Some(x) = hd_lacks(&world, &shown) {
+            panic!("{}: the sampled deck lacks a shown {}", what(), a.g.db().def(x).name);
         }
         assert_eq!(d.m.deck(o), world, "{}: the match's deck of the opponent", what());
         assert_eq!(hd_deck(&d, viewer), mine, "{}: the viewer's own cards", what());
@@ -6261,6 +6276,97 @@ fn check_hidden_information_set(a: &crate::az::MtgAz, viewer: u8, seed: u64, rng
                 }
             }
             return;
+        }
+    }
+}
+
+#[cfg(test)]
+mod hidden_shown_tests {
+    //! ENGINE.md 234: the fuzz's cards shown of a hidden deck (`hd_shown`) and a revealed companion that went
+    //! into its owner's hand, back into the library, and onto the battlefield face down (the fuzz steward's
+    //! queue 2eeffcef33d5 / 88f4716ce1e7: seed 100,200,667 of `FUZZ_HIDDEN_DECKS=1`, a Test Manifester's manifest).
+    use super::*;
+    use crate::{CardIdx, Zone};
+    use zero_search::game::SearchGame;
+
+    const LUTRI: &str = "Lutri, the Spellchaser";
+
+    /// A hidden-decklist match of the default pool's table (as `play_hidden` makes it): P0 40 Islands with Lutri,
+    /// the Spellchaser revealed as its companion (CR 103.2b; every nonland card of an all-land deck has a different
+    /// name), P1 40 Islands; played to P0's first priority, its other choices the first option.
+    fn match_to_priority(seed: u64) -> crate::az::MtgAz {
+        let db = super::super::cards::db();
+        let (island, lutri) = (db.expect_id("Island").unwrap(), db.expect_id(LUTRI).unwrap());
+        let gspec = GameSpec { hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };
+        let seat = |sideboard: Vec<u16>| crate::az::Seat { deck: vec![island; 40], sideboard, first_picks: Vec::new(), elsewhere: Vec::new() };
+        let prior: std::sync::Arc<dyn crate::az::hidden_decks::DeckPrior> = crate::az::hidden_decks::TablePrior::of(db);
+        let mut a = crate::az::MtgAz::from_seats(db, gspec, crate::az::Format::Bo1, &[seat(vec![lutri]), seat(Vec::new())], seed, [Some(prior.clone()), Some(prior)])
+            .unwrap();
+        a.m.deal.k = 32;
+        let mut keys = Vec::new();
+        for _ in 0..200 {
+            let d = a.g.pending_decision().expect("the game runs");
+            if d.kind == DecisionKind::Priority && d.player == 0 {
+                break;
+            }
+            let act = match d.kind {
+                DecisionKind::RevealCompanion if d.player == 0 => {
+                    d.options.iter().find(|o| o.choice == Choice::Def(lutri)).expect("Lutri is a companion of an all-land deck").action
+                }
+                _ => d.options[0].action,
+            };
+            a.step(act, &mut keys).unwrap();
+        }
+        assert_eq!((a.g.pending_decision().map(|d| (d.kind, d.player))), Some((DecisionKind::Priority, 0)), "P0's priority");
+        assert_eq!(a.g.player(0).companion_def, Some(lutri), "P0 revealed Lutri");
+        a
+    }
+
+    /// P0's Lutri into the hand (the companion special action, CR 116.2g / 702.139c, known to both players), on
+    /// top of the library and the library shuffled (P1 loses track of it: a cloud of P1's), then manifested face
+    /// down from the library (CR 701.40a, 708.2: a face-down permanent P1 doesn't know) - the engine's own steps
+    /// for each (`companion_to_hand`, `move_card`, `shuffle_library`, manifest's `put_onto_battlefield` entering
+    /// face down), the decision then asked again.
+    fn lutri_manifested(a: &mut crate::az::MtgAz) -> CardIdx {
+        let c = a.g.player(0).companion.expect("a companion");
+        a.g.companion_to_hand(0);
+        a.g.move_card(c, Zone::Library, crate::game::Pos::Top);
+        a.g.shuffle_library(0);
+        a.g.learn(0, c);
+        a.g.entering_face_down = true;
+        a.g.put_onto_battlefield(c, 0);
+        a.g.entering_face_down = false;
+        a.g.keys.clear();
+        a.g.refresh_pending();
+        a.g.check_invariants().unwrap();
+        a.g.check_knowledge().unwrap();
+        c
+    }
+
+    /// The state: the companion's object (outside P0's deck's objects) a face-down permanent P1 doesn't know, its
+    /// identity Lutri in P1's cloud of P0's cards. It is no card of P0's deck - the game's own deck lacks it -,
+    /// so the cards shown to P1 of P0's deck exclude it, and every check of a hidden-decklist world passes (it
+    /// failed "the sampled deck lacks a shown Lutri, the Spellchaser" in every world: `hd_shown` dropped a
+    /// non-deck card's identity from the clouds in a hidden zone only, not on a face-down permanent).
+    #[test]
+    fn a_companion_manifested_face_down_is_not_a_shown_deck_card() {
+        let db = super::super::cards::db();
+        let lutri = db.expect_id(LUTRI).unwrap();
+        for seed in [1u64, 2, 3] {
+            let mut a = match_to_priority(seed);
+            let c = lutri_manifested(&mut a);
+            let g = &a.g;
+            assert_eq!(g.obj(c).zone, Zone::Battlefield, "the companion is a permanent");
+            assert!(g.hidden_obj(c) && !g.knows(1, c), "face down, P1 doesn't know it");
+            assert_eq!(crate::az::sample::card_of(g, c), lutri);
+            assert!(g.clouds().iter().any(|k| k.viewer == 1 && k.owner == 0 && k.defs.contains(&lutri)), "P1's cloud of P0's cards holds Lutri");
+            assert!(!hd_deck(&a, 0).contains(&lutri), "Lutri is no card of P0's deck");
+            assert!(!hd_shown(&a, 1).contains(&lutri), "seed {seed}: Lutri shown to P1 as a card of P0's deck");
+            assert_eq!(hd_lacks(&hd_deck(&a, 0), &hd_shown(&a, 1)), None);
+            assert_eq!(a.to_move(), Some(0));
+            for s in 0..6u64 {
+                check_determinize_hidden(&a, seed, &mut Rng::new(s));
+            }
         }
     }
 }

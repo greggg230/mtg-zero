@@ -143,9 +143,11 @@ fn shown(a: &MtgAz, viewer: u8) -> Vec<u16> {
         v.extend(k.defs.iter().map(|&d| g.db().def(d).card_def(d)));
     }
     v.sort_unstable();
+    // (A card of theirs outside their deck hidden from the viewer - in a hidden zone or face down, CR 708.2 - is
+    // not a deck card: the fuzz's `hd_shown`, ENGINE.md 234.)
     for (i, ob) in g.objs().iter().enumerate() {
         let c = engine::CardIdx::new(i as u32);
-        if ob.owner == o && !r.contains(&i) && matches!(ob.zone, engine::Zone::Hand | engine::Zone::Library | engine::Zone::FaceDown) && !g.knows(viewer, c) {
+        if ob.owner == o && !r.contains(&i) && !g.knows(viewer, c) {
             if let Ok(at) = v.binary_search(&engine::az::sample::card_of(g, c)) {
                 v.remove(at);
             }
