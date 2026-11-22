@@ -2729,7 +2729,7 @@ impl Game {
         // pushed after this one), the caster may activate mana abilities
         // before it is paid (delve's cards, the cost's parts, the mana:
         // 601.2h); `cast_mana.rs`, ENGINE.md 229.
-        self.agenda.push(Task::CastMana { id, card: None, again: false });
+        self.agenda.push(Task::CastMana { id, card: None, again: false, after: 0 });
 
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
             self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST }); // CR 601.2d

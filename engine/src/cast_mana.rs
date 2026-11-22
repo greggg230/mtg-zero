@@ -46,6 +46,10 @@ pub(crate) fn subsets(v: &[CardIdx], k: usize) -> Vec<Vec<CardIdx>> {
     out
 }
 
+/// `Task::CastMana::after`'s mark of a decision of the payment search's step node (its answers' activations order
+/// the next ones, ENGINE.md 229.4).
+const SEARCH_ORDER: u32 = 1 << 31;
+
 /// What the collapse of a pure mana ability reads once per step (`Game::cast_mana_collapsed`).
 struct Collapse {
     /// The checks that do not depend on the ability's permanent: the caster receives priority right after the cast,
@@ -100,7 +104,7 @@ impl Game {
     /// the total cost has no mana (601.2g: "if the total cost includes a mana payment") or nothing may be activated
     /// but `PASS`. In the payment search (`Game::oracle`) it asks only the abilities that may feed the graveyard a
     /// payment reads, and `PASS` asks the payment's castability.
-    pub(crate) fn cast_mana(&mut self, id: u32, card: Option<CardIdx>, again: bool) {
+    pub(crate) fn cast_mana(&mut self, id: u32, card: Option<CardIdx>, again: bool, after: u32) {
         let Some(pos) = self.item_index(id) else { return };
         let StackKind::Spell { card: spell } = self.stack[pos].kind else { return };
         let p = self.stack[pos].controller;
@@ -132,24 +136,24 @@ impl Game {
             Some(Choice::Card(c)) => {
                 let slots = slots_of(c);
                 if slots.len() == 1 {
-                    self.cast_mana_run(id, p, c, slots[0]);
+                    self.cast_mana_run(id, p, c, slots[0], after);
                 } else {
                     let opts = (0..slots.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
-                    self.ask(Task::CastMana { id, card: Some(c), again }, p, DecisionKind::ChooseMode, opts);
+                    self.ask(Task::CastMana { id, card: Some(c), again, after }, p, DecisionKind::ChooseMode, opts);
                 }
             }
             Some(Choice::Number(k)) => {
                 let c = card.expect("the permanent picked");
                 let slot = slots_of(c)[k as usize];
-                self.cast_mana_run(id, p, c, slot);
+                self.cast_mana_run(id, p, c, slot, after);
             }
-            Some(Choice::Ability(c, slot)) => self.cast_mana_run(id, p, c, slot),
+            Some(Choice::Ability(c, slot)) => self.cast_mana_run(id, p, c, slot, after),
             Some(other) => unreachable!("CastMana answer {other:?}"),
             // (A refreshed decision, ENGINE.md 10: the permanent's question again.)
             None if card.is_some() => {
                 let slots = slots_of(card.expect("the permanent"));
                 let opts = (0..slots.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
-                self.ask(Task::CastMana { id, card, again }, p, DecisionKind::ChooseMode, opts);
+                self.ask(Task::CastMana { id, card, again, after }, p, DecisionKind::ChooseMode, opts);
             }
             None => {
                 if self.oracle {
@@ -165,19 +169,25 @@ impl Game {
                     if self.pool_wild[p as usize].0 > 0 {
                         let prods = self.wild_combos(p);
                         self.pool_wild[p as usize] = (0, 0);
-                        self.agenda.push(Task::CastMana { id, card: None, again });
+                        self.agenda.push(Task::CastMana { id, card: None, again, after });
                         self.agenda.push(Task::ManaNowPick { p, prods, only: 0, page: crate::decision::Page::FIRST });
                         return;
                     }
+                    // The feeding abilities in increasing card order (each set of them once, not each order) when none
+                    // has a condition: their activations commute for the search's question (ENGINE.md 229.4).
+                    let conditional = sources.iter().any(|(c, slots)| {
+                        slots.iter().any(|&s| matches!(s, AbilitySlot::Activated(_) | AbilitySlot::Hand(_)) && self.src_ability(*c, s).only_if.is_some())
+                    });
                     let mut opts: Vec<Opt> = sources
                         .iter()
+                        .filter(|(c, _)| conditional || c.get() + 1 >= after & !SEARCH_ORDER)
                         .map(|(c, slots)| match slots[0] {
                             AbilitySlot::Hand(_) => Opt { action: self.ability_action(p, *c, slots[0]), choice: Choice::Ability(*c, slots[0]) },
                             _ => Opt { action: self.perm_action(p, *c), choice: Choice::Card(*c) },
                         })
                         .collect();
                     opts.push(Opt { action: act::YES, choice: Choice::Yes });
-                    self.ask_completed(Task::CastMana { id, card: None, again }, p, DecisionKind::CastMana, opts);
+                    self.ask_completed(Task::CastMana { id, card: None, again, after: after | SEARCH_ORDER }, p, DecisionKind::CastMana, opts);
                     return;
                 }
                 if sources.is_empty() {
@@ -192,7 +202,7 @@ impl Game {
                     })
                     .collect();
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                let task = Task::CastMana { id, card: None, again };
+                let task = Task::CastMana { id, card: None, again, after };
                 // (The options that leave the payment completable, once; only `PASS`: no decision.)
                 let opts = self.completing(&task, opts);
                 if !self.oracle && opts.iter().all(|o| o.choice == Choice::Pass) {
@@ -206,14 +216,16 @@ impl Game {
     /// Activate source `slot` of `c` in spell `id`'s 601.2g step: its total cost locked first (601.2f), the step asked
     /// again after the ability's choices and costs (no state-based actions, no triggered ability put on the stack: no
     /// player receives priority while a spell is cast, CR 601.2, 117.5).
-    fn cast_mana_run(&mut self, id: u32, p: PlayerId, c: CardIdx, slot: AbilitySlot) {
+    fn cast_mana_run(&mut self, id: u32, p: PlayerId, c: CardIdx, slot: AbilitySlot, after: u32) {
         if self.locked_cost(id).is_none() {
             let pos = self.item_index(id).expect("the spell being cast");
             let StackKind::Spell { card } = self.stack[pos].kind else { unreachable!("a spell") };
             let cost = self.total_mana(card, &self.stack[pos]);
             self.cast_lock.push((id, cost));
         }
-        self.agenda.push(Task::CastMana { id, card: None, again: true });
+        // (Activated from a node of the search: the next ones from this card on, ENGINE.md 229.4.)
+        let after = if after & SEARCH_ORDER != 0 { (c.get() + 1) | SEARCH_ORDER } else { 0 };
+        self.agenda.push(Task::CastMana { id, card: None, again: true, after });
         if slot == crate::pay::SAC_FOR {
             // A granted "sacrifice this: add <mana>" (Rain of Filth).
             let mask = self.sac_mana_of(c);
@@ -469,7 +481,7 @@ impl Game {
     /// is open, `before_cast_mana`), then the cost paid? (On a copy with the step's task waiting.)
     fn cast_mana_open_ok(&self, id: u32) -> bool {
         let mut g = self.clone();
-        g.agenda.push(Task::CastMana { id, card: None, again: true });
+        g.agenda.push(Task::CastMana { id, card: None, again: true, after: 0 });
         g.cast_mana_pass_ok(id)
     }
 
@@ -805,7 +817,7 @@ impl Game {
             g.note_granted_alt(card, gr);
         }
         let floor = g.agenda.len();
-        g.agenda.push(Task::CastMana { id, card: None, again: false });
+        g.agenda.push(Task::CastMana { id, card: None, again: false, after: 0 });
         g.payment_completes(floor, p)
     }
 }
