@@ -41540,3 +41540,56 @@ c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890
 (gate 2: 6 games, 2,890 rows, 150 batches); core pytest 723 passed - skipped: 17 live-run-hazard tests (fenced).
 
 Main fast-forwarded 4c77c950 -> 62b9a028 (main had not moved since the branch: the gate stands as run).
+
+## 223. Metagame runs publish by default; a run or a fork that will not publish says so; a copied setting stays a side run (branch `feat/meta3-publish`, 2026-11-21)
+
+Branch `feat/meta3-publish` from e9ff0e24 (legacy-meta3-r1's pinned commit, so the run can move onto it with Python
+changes only). Why: the user (2026-11-21), after a day of meta3 experiments none of which appeared on the Delver AI
+site: "We did work before to make it so that stuff like this should be published without having to remember to do
+that". 163 (the run-owned publisher; forks of a publishing run publish as side runs) and 193 (tools/ab.py) exist, but:
+
+* the `legacy-meta3` preset set `publish={}` (written 2026-11-17 when the publisher showed Delver-mirror runs only; the
+  metagame view landed days later) and legacy-meta3-r1's launcher passes `--publish {}`; r1 got a hand-started
+  publisher instead, so as far as 163 knows r1 does not publish;
+* so every fork of r1 inherits "off" (163's fork hook publishes only forks of a publishing run), and the experiment
+  launchers copied r1's flags, `--publish {}` included (the games2x data experiment, the mirror-only / lr / shrink-and-
+  perturb forks, the low-simulation arms): none appeared without a hand-started publisher;
+* r1's hand publisher runs with `--combo-every 0`, which the `publish` setting did not accept, so r1 could not move to
+  its own publisher as it was;
+* nothing said that a run or a fork would not publish.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 223.1 What changed (mtgz/az/publish.py, mtgz/az/__init__.py)
+
+* **`combo_every`** is a `publish` option (int >= 0; the publisher's `--combo-every`).
+* **`META3_PUBLISH`** = r1's hand publisher's options: `{side: false, every: 8, games: 9, combo_every: 0, census: 0,
+  device: cpu, threads: 4, forks: []}` (9 games = every pairing once; no fork-record file: the metagame lineage keeps
+  none, a fork's charts start from the metrics it copied). `legacy-meta3` and so `legacy-meta3-ddwheel` set it; the
+  smoke presets stay off. A run that saved `publish` keeps what it saved (r1's `{}` until its launcher passes one).
+* **PUBLISH OFF is loud.** `companion()` (the supervisor's hook, every start) with the setting off writes `PUBLISH OFF:
+  <run> will not appear on the Delver AI site ...` to the run's supervisor.log and stderr and returns None (the run goes
+  on, as 163: publishing never stops training). `on_fork` prints `fork_run: PUBLISH OFF - <fork> will NOT appear ...`
+  for a fork of a run that does not publish.
+* **`for_run`**: the run directory name a setting was made for. A run of another name carrying it - a launcher that
+  copied another run's flags, `--publish` included - publishes as a SIDE run titled after itself (its own state dir,
+  no note), said loudly (`PUBLISH SETTING OF ANOTHER RUN`), instead of posting under the other run's title or taking
+  the site's default run. `on_fork` writes the fork's own name into it (and drops a copied `state_dir`); a launcher
+  that passes a main run's `--publish` should name the run in it.
+* An explicit `forks: []` is deliberate (the metagame presets, ab.py's arms): no "names no forks file" note.
+
+### 223.2 Tests
+
+tests/test_run_publisher.py: the metagame presets carry META3_PUBLISH (smokes off; resolved through `--preset
+legacy-meta3-ddwheel`); `combo_every` reaches the command, bad values refused; PUBLISH OFF on stderr and in
+supervisor.log; a copied setting (for_run another run's) becomes a side run titled after the run without the note or
+state dir, the own run unchanged; a fork of an unpublished run says it will not publish; a fork of a metagame run is a
+side run made for itself, `combo_every` kept, no forks-file note.
+
+### 223.3 Turning it on for legacy-meta3-r1
+
+At the run's next start from a checkout with this change (a re-pin onto this branch's commit: Python only, the worker
+build unchanged): its launcher passes `--publish '{..., "title": "<r1's site title>", "for_run": "legacy-meta3-r1",
+"state_dir": "<the hand publisher's state dir>"}'` over META3_PUBLISH (same site record, same history), and the
+hand-started publisher is stopped first. From then on every fork of r1 publishes as a side run with no step to
+remember.

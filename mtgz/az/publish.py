@@ -14,9 +14,16 @@ supervisor's companion hook that turns it into `tools/delverai_publish.py`'s com
                      ['~/delverai/forks.json'] in the Delver presets)
   loop, progress_every   seconds between passes (300) and between progress posts (60)
   sims, min_iter, state_dir, url, key_file, dry_run   as the publisher's flags of the same names
+  combo_every        a metagame run's combo games every N-th generation (the publisher's --combo-every; 0: none)
+  for_run            the run directory name the setting was made for: a run of another name that carries it (a
+                     launcher that copied another run's flags) publishes as a SIDE run titled after itself instead,
+                     said loudly (docs/ENGINE.md 223)
 
-The Delver presets (`delver-mirror`, and so `delver-mirror-bo3` and `delver-mirror-bo3-dealt`) set DELVER_PUBLISH;
-the smoke presets leave it off. On the command line `--publish '<json>'` replaces the dict and `--no-publish` turns
+The Delver presets (`delver-mirror`, and so `delver-mirror-bo3` and `delver-mirror-bo3-dealt`) set DELVER_PUBLISH and
+the metagame presets (`legacy-meta3`, `legacy-meta3-ddwheel`) META3_PUBLISH (since 2026-11-21, docs/ENGINE.md 223);
+the smoke presets leave it off. A run whose setting is off says so loudly at every start (PUBLISH OFF in
+supervisor.log and on stderr), and so does tools/fork_run.py for a fork that will not publish: an experiment that
+nobody will see is never silent. On the command line `--publish '<json>'` replaces the dict and `--no-publish` turns
 it off (`python -m mtgz.az.run` reads it as `--publish {}`); both are saved in config.json like any setting, and a
 run that saved neither takes its preset's (a running run started before this setting existed: on at its next start).
 
@@ -44,16 +51,21 @@ DEFAULT_FORKS = '~/delverai/forks.json'
 # the census of each recorded best-of-three generation)
 DELVER_PUBLISH = {'side': False, 'every': 8, 'games': 6, 'census': 200, 'device': 'cpu', 'threads': 4,
                   'forks': [DEFAULT_FORKS]}
+# the metagame presets' publisher (docs/ENGINE.md 223): the options legacy-meta3-r1's hand-started publisher ran with
+# since 2026-11-17 - 9 games (every pairing once) every 8th generation on the CPU, no combo games, no census (best of
+# one) - and no fork-record file (the metagame lineage has none: a fork's charts start from the metrics it copied)
+META3_PUBLISH = {'side': False, 'every': 8, 'games': 9, 'combo_every': 0, 'census': 0, 'device': 'cpu', 'threads': 4,
+                 'forks': []}
 
 KEYS = {'title': str, 'note': str, 'side': bool, 'every': int, 'games': int, 'census': int, 'device': str,
         'threads': int, 'keep_yardstick': str, 'forks': (str, list), 'loop': (int, float),
         'progress_every': (int, float), 'sims': int, 'min_iter': int, 'state_dir': str, 'url': str, 'key_file': str,
-        'dry_run': bool}
+        'dry_run': bool, 'combo_every': int, 'for_run': str}
 # the publisher's flags for the plain options (key -> flag)
 FLAGS = {'title': '--title', 'note': '--note', 'every': '--every', 'games': '--games', 'census': '--census',
          'device': '--device', 'threads': '--threads', 'keep_yardstick': '--keep-yardstick', 'sims': '--sims',
          'min_iter': '--min-iter', 'state_dir': '--state-dir', 'url': '--url', 'key_file': '--key-file',
-         'progress_every': '--progress-every'}
+         'progress_every': '--progress-every', 'combo_every': '--combo-every'}
 KEY_ENV = 'MTGZ_DELVERAI_KEY'
 KEY_FILE = os.path.join('~', 'delverai', '.upload_key')
 LOG = 'publisher_console.txt'
@@ -86,6 +98,8 @@ def normalize(pub):
     for k in ('every', 'games'):
         if pub.get(k) is not None and pub[k] < 1:
             raise ValueError(f'publish: {k} {pub[k]} must be >= 1')
+    if pub.get('combo_every') is not None and pub['combo_every'] < 0:
+        raise ValueError(f"publish: combo_every {pub['combo_every']} must be >= 0")
     return dict(pub)
 
 
@@ -125,12 +139,42 @@ def check_key(pub):
     raise ValueError(f'publish: no upload key (key_file, ${KEY_ENV} or {KEY_FILE}): the site would refuse every post')
 
 
+def loud(run, msg):
+    """A line the run's people must see: stderr and the run's supervisor.log (the supervisor's own format)."""
+    print(f'supervise: {msg}', file=sys.stderr, flush=True)
+    try:
+        with open(os.path.join(run, 'supervisor.log'), 'a', encoding='utf-8') as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+    except OSError:
+        pass
+
+
+def own_run(run, pub):
+    """`pub` for the run directory `run`: a setting made for another run (`for_run`, e.g. a launcher that copied that
+    run's flags) publishes as a SIDE run titled after this one, said loudly - never under another run's name, never
+    taking the site's default run (docs/ENGINE.md 223)."""
+    name = os.path.basename(os.path.normpath(run))
+    made_for = pub.get('for_run')
+    if not made_for or made_for == name:
+        return pub
+    loud(run, f'PUBLISH SETTING OF ANOTHER RUN: it was made for {made_for}, this run is {name} - publishing as a side '
+              f'run titled "{name}" instead (give this run its own --publish to choose; docs/ENGINE.md 223)')
+    out = dict(pub, side=True, title=name, for_run=name)
+    out.pop('note', None)
+    out.pop('state_dir', None)
+    return out
+
+
 def companion(run, cfg):
     """zero-core's companion hook (GamePackage.companion, docs/az.md 49): the run's publisher, or None when its
-    `publish` setting is off. Raises when it cannot run (a bad setting, no key)."""
+    `publish` setting is off (said loudly: PUBLISH OFF). Raises when it cannot run (a bad setting, no key)."""
     pub = normalize(cfg.get('publish'))
     if pub is None:
+        loud(run, f'PUBLISH OFF: {os.path.basename(os.path.normpath(run))} will not appear on the Delver AI site (its '
+                  f'`publish` setting is {cfg.get("publish")!r}); start it with --publish \'{{"title": "..."}}\' to '
+                  f'publish it (docs/ENGINE.md 163, 223)')
         return None
+    pub = own_run(run, pub)
     check_key(pub)
     return {'name': 'publisher', 'cmd': command(run, pub), 'log': LOG}
 
@@ -182,18 +226,26 @@ def on_fork(source, dest, it, cfg, overrides):
     except ValueError as e:
         print(f'fork_run: the fork\'s publish setting: {e} - left as it is, no fork record', file=sys.stderr)
         return
+    name = os.path.basename(os.path.normpath(dest))
     if pub is None:
+        print(f'fork_run: PUBLISH OFF - {name} will NOT appear on the Delver AI site: '
+              f'{os.path.basename(os.path.normpath(source))}\'s `publish` setting is off ({cfg.get("publish")!r}). '
+              f'Start the fork with --publish \'{{"side": true, "title": "..."}}\' (or --set publish=... here) to show '
+              f'it (docs/ENGINE.md 163, 223)', file=sys.stderr)
         return
     if 'publish' not in overrides:
-        pub = dict(pub, side=True, title=f'{os.path.basename(os.path.normpath(dest))}: a fork of '
-                                         f'{os.path.basename(os.path.normpath(source))} at {int(it)}')
+        pub = dict(pub, side=True, title=f'{name}: a fork of {os.path.basename(os.path.normpath(source))} at {int(it)}')
         pub.pop('note', None)
-        cfg['publish'] = pub
+        pub.pop('state_dir', None)
+    pub['for_run'] = name
+    cfg['publish'] = pub
     files = forks_of(pub)
     if files:
         rec = fork_record(source, dest, it, overrides)
         if append_record(files[0], rec):
             print(f'fork record {rec["name"]} (k {rec["k"]}) appended to {files[0]}')
+    elif pub.get('forks') == []:
+        pass                                   # (no lineage file on purpose: the metagame presets, ab.py's arms)
     else:
         print('fork_run: the fork publishes but names no forks file: its lineage starts at the fork (add a record by '
               'hand, docs/ENGINE.md 163)', file=sys.stderr)
