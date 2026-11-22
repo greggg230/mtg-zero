@@ -43176,3 +43176,33 @@ Re-recorded once with `DIGEST_WRITE=1` on the Mac at f02256a7 (the values above;
 
 Small everywhere (the games differ, so the totals move both ways); EoE's most (convoke and many same-name creatures and
 lands): +1.3% payment decisions, +1.2% options a payment decision.
+
+### 221.9 Checks
+
+* **Full engine suite** on the Mac (`cargo test --release -p engine -p card_ir --no-fail-fast`, incl. `az`'s
+  public-state gate: no new gap - the payment's classes are not part of the input), after the fixes of 221.2 / 221.6:
+  every binary passed (`rules_suite` 469 with the 16 new tests, `cards_suite` 1,533, `az` 57, `misc_suite` 212, `fuzz`
+  19, ...). Pytest on the Mac: the canary library and `test_build` 40 passed after the re-record; the only other
+  failures of the full run are the Mac's known three (`test_artifact_cache`'s cargo dep-info check, `test_deck_scorer`'s
+  fixture reproducibility, `test_run_publisher`'s supervisor test - each failing the same way on main's integration run).
+* **Fuzz** on the Mac (`tools/fuzz_shards.py`, 24 shards, 12 at once; 0c2482fe, the tested engine), 20,000 games each,
+  every one **PASSED**: default (+1,000 matches) 200 s, eoe 544 s, delver (+1,000 matches, +1,000 post-sideboard) 158 s,
+  doomsday 169 s, hogaak_a 111 s, sneak_show 99 s, cross (+1,000 matches, +1,000 post-sideboard) 171 s, hogaak (+1,000
+  matches, +1,000 post-sideboard) 198 s - which covers the 2,000-game regressions of delver, doomsday, sneak_show, cross
+  and the default pool. The `fuzz` profile, 1,000 games + 50 matches: 19 passed. `FUZZ_CHANCE=10`, 600 games + 30
+  matches: 26,849 chance walks, 14,494 replays whose outcome the force changed; 18 passed, the Murktide-count unit test
+  failing as it does whenever `FUZZ_CHANCE` is set (the known artefact). `FUZZ_BELIEF=2`, 600 games + 30 matches:
+  15,804 belief worlds; 19 passed.
+
+### 221.10 For the merge with agent M (222) and open items
+
+* M edits the same payment code; the functions changed here are 221.1. A payment's classes are `payment_classes`
+  (split into twins at its end): a new step that lists a payment's sources (M's 601.2g activations) should take them
+  from there, or split its own with `split_unlike`, so its options and the payment's agree.
+* `RULES_EPOCH` and the canary library: both branches bump the epoch and may re-record; whichever merges second
+  re-records on the merged engine (`delver_rerecord.py rerecord`, the first one's merged main as the old engine; the
+  walk's PayMana rule of 221.6 stays).
+* The digests of 221.7 are this branch's on main 45dbf2e1; a later merge onto main re-checks them (E's 223 is expected
+  to move none).
+* Bug 4 waits for layout v8 (221.4). The loop rule's hash reading twins' raw turn numbers and places is stated in 221.2,
+  not changed.
