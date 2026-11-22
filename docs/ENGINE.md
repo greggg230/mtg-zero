@@ -45645,3 +45645,11 @@ ran).
 Left: more desktop slots for the single-threaded pytest shards (the owner's call); the durations of shards that ran on
 the Mac are still not recorded (167.10), so beside a live run this repo's shards stay as balanced as the last desktop
 run left them; `check_checkpoint_compat` is one ~22 min step.
+
+### 238.7 zero-core pin 688e753 -> 2f7263c: the core's own sharded pytest runner, `smoke_all.sh` builds the games at once
+
+zero-core `main` 2f7263c (its docs/az.md 75; tools, tests and docs only - no crate, no Python package file):
+`tools/pytest_shards.py` (the core's standalone counterpart of 238.3) and `tools/smoke_all.sh` running its pytest
+suites through it and `SMOKE_JOBS` (3) games at once. This gate's build-only step runs the pinned core's
+`smoke_all.sh --with-this-core --build-only`, so the three other games now build at once there (96 s for the three
+against 171 s one after the other, zero-core's measurement).
