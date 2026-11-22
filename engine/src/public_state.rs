@@ -658,7 +658,7 @@ macro_rules! p {
 
 /// Every perturbation (module docs).
 pub fn perturbations() -> Vec<Perturbation> {
-    vec![
+    let mut v = vec![
         // ---- Game ----
         p!("a permanent leaves the battlefield", "Game.battlefield", |a, r| {
             let c = pick(&slots(&a.g), r)?;
@@ -2343,7 +2343,9 @@ pub fn perturbations() -> Vec<Perturbation> {
             task_picked(&mut a.g.agenda[i]).push(c);
             Some(format!("agenda task {i}, around task {}, picks {}", ts[h].0, a.g.name(c)))
         }),
-    ]
+    ];
+    v.extend(v8_perturbations());
+    v
 }
 
 /// The agenda's tasks that can hold picks in progress (`tail_encode::agenda_picks`), innermost
@@ -2734,6 +2736,8 @@ pub const BASE: &str = "(the position as it is)";
 /// layout v6 (the `mtg_eoe` game, checked on the gate's EoE positions).
 pub const V7: u8 = 1;
 pub const V6: u8 = 2;
+/// Layout v8 (the game `mtg_v8`, ENGINE.md 232): the gate's rows since then.
+pub const V8: u8 = 4;
 
 /// A public-state gap the encoding has, found by the gate and waiting on a decision (ENGINE.md
 /// 142; `E:/mtg-zero-scratch/fable-fix/encoding-options.md`, the section `decision` names). The gate
@@ -2883,7 +2887,9 @@ pub fn known_gaps() -> Vec<KnownGap> {
     let effects: Vec<&'static str> = ps.iter().filter(|p| p.field == "Game.effects" && !group.contains(&p.name)).map(|p| p.name).collect();
     let protection: Vec<&'static str> = ps.iter().filter(|p| p.name.starts_with("a creature gains protection from ")).map(|p| p.name).collect();
     // (A hand card promised to a delve is revealed too, so its v6 row is a learned card's: `alike`.)
-    let v7_facts: Vec<&'static str> = V7_FIXED.iter().copied().filter(|&x| x != "a hand card is promised to a delve").collect();
+    let mut v7_facts: Vec<&'static str> = V7_FIXED.iter().copied().filter(|&x| x != "a hand card is promised to a delve").collect();
+    // (Layout v6 lacks layout v8's facts too, ENGINE.md 232.)
+    v7_facts.extend(v8_fixed());
     vec![
         KnownGap {
             name: "layout v6 (mtg_eoe): which protection a permanent has (perm::PROTECTED is one any-of float)",
@@ -2958,13 +2964,23 @@ pub fn known_gaps() -> Vec<KnownGap> {
         KnownGap {
             name: "a framed row (CR 722: the viewer controls the other player's turn) lacks which of the viewer's own hand cards the controlled player knows",
             decision: "encoding-options.md 2.9 (new, 2026-11-13)",
-            layouts: V7 | V6,
+            layouts: V8 | V7 | V6,
             alone: vec![],
             alike: vec![
                 "the other player learns a hand card",
+                // (the same fact for a hand card past the 16th: found by the pairwise pass's partners as ENGINE.md
+                // 232's perturbations reshuffled them)
+                "the other player learns a hand card past the 16th",
                 "the active player is controlled this turn",
                 "the controlled player learns a hand card of its controller",
             ],
+        },
+        KnownGap {
+            name: "layout v7 (the game mtg) lacks layout v8's facts (v8_fixed): a payment's picks and state in progress, a gone object's last known information, the find groups",
+            decision: "the user's decision of 2026-11-21 (ENGINE.md 232): one additive layout v8, the game mtg_v8; a v7 run stays on v7 until it is forked onto v8",
+            layouts: V7,
+            alone: v8_fixed(),
+            alike: vec![],
         },
         KnownGap {
             name: "layout v6 (mtg_eoe, EoE run 2) lacks layout v7's facts (V7_FIXED)",
@@ -2980,7 +2996,10 @@ pub fn known_gaps() -> Vec<KnownGap> {
             layouts: V6,
             // (and a latent ability an effect gave, `Mod::GainLatent`: rare, none of the gate's EoE positions has one)
             alone: vec!["an effect's duration is another", "a permanent gains a latent ability of its card"],
-            alike: effects.into_iter().chain(["an effect ends"]).collect(),
+            // (A copy effect reaches v6's row only through the characteristics it gives too: with a types effect
+            // that adds a type the copied card has, the two read alike - found by the pairwise pass's partners as
+            // ENGINE.md 232's perturbations reshuffled them.)
+            alike: effects.into_iter().chain(["an effect ends", "a permanent becomes a copy of another"]).collect(),
         },
     ]
 }
@@ -3073,6 +3092,332 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
     v
 }
 
+// ---- layout v8's facts (ENGINE.md 232) ------------------------------------------------------
+
+/// The innermost payment in progress (`Task::PayMana`).
+fn pay_mana_mut(g: &mut Game) -> Option<&mut crate::pay::PayMana> {
+    g.agenda.iter_mut().rev().find_map(|t| match t {
+        crate::flow::Task::PayMana(pm) => Some(&mut **pm),
+        _ => None,
+    })
+}
+
+/// A permanent of `p` with an activated ability that the payment `pm` hasn't picked.
+fn unpicked_perm(g: &Game, p: PlayerId, r: &mut Rng) -> Option<CardIdx> {
+    let pm = g.agenda.iter().rev().find_map(|t| match t {
+        crate::flow::Task::PayMana(pm) => Some(pm),
+        _ => None,
+    })?;
+    let cs: Vec<CardIdx> = g
+        .permanents_of(p)
+        .filter(|&c| !g.def_of(c).activated.is_empty() && !pm.chosen.iter().chain(pm.multi.iter().map(|m| &m.0)).any(|s| s.card == c))
+        .collect();
+    pick(&cs, r)
+}
+
+/// The gone objects a reference of the public state names (CR 400.7), each once.
+fn public_stale(g: &Game) -> Vec<crate::ids::ObjRef> {
+    let mut v = Vec::new();
+    g.for_each_public_ref(|x| {
+        if !g.live(x) && !v.contains(&x) {
+            v.push(x);
+        }
+        false
+    });
+    v
+}
+
+/// The perturbations of layout v8's facts (ENGINE.md 232): a payment in progress and its 601.2g
+/// step, a gone object's last known information, the find groups.
+fn v8_perturbations() -> Vec<Perturbation> {
+    use crate::db::AbilitySlot;
+    use crate::pay::Src;
+    vec![
+        // A payment's picks in progress and its state (601.2g-h, ENGINE.md 6, 18, 229.4).
+        p!("a payment picks a permanent's first ability", "Game.agenda", |a, r| {
+            let p = pay_mana_mut(&mut a.g)?.payer;
+            let c = unpicked_perm(&a.g, p, r)?;
+            pay_mana_mut(&mut a.g)?.chosen.push(Src::of(c, AbilitySlot::Activated(0)));
+            Some(format!("P{p}'s payment picks {}", a.g.name(c)))
+        }),
+        p!(rare "a payment's last pick is undone", "Game.agenda", |a, _r| {
+            let pm = pay_mana_mut(&mut a.g)?;
+            if pm.multi.pop().is_none() {
+                pm.chosen.pop()?;
+            }
+            Some("the payment's last pick".into())
+        }),
+        p!(rare "a payment's several-mana pick makes another production", "Game.agenda", |a, _r| {
+            let m = pay_mana_mut(&mut a.g)?.multi.first_mut()?;
+            m.1[5] = m.1[5].wrapping_add(1);
+            Some("the payment's first several-mana pick".into())
+        }),
+        p!("a payment's Phyrexian life is two higher", "Game.agenda", |a, _r| {
+            pay_mana_mut(&mut a.g)?.phyrexian_life += 2;
+            Some("the payment's Phyrexian life".into())
+        }),
+        p!("a payment's cost has one more generic mana", "Game.agenda", |a, _r| {
+            pay_mana_mut(&mut a.g)?.cost.generic += 1;
+            Some("the payment's cost".into())
+        }),
+        p!("a payment spends one more mana of its pool", "Game.agenda", |a, _r| {
+            let pm = pay_mana_mut(&mut a.g)?;
+            pm.vm = Some(pm.vm.map_or(0, |v| v + 1));
+            Some("the payment's pool spent".into())
+        }),
+        p!("a payment's mana may be of any colour (Wizard's Rockets picked)", "Game.agenda", |a, _r| {
+            let pm = pay_mana_mut(&mut a.g)?;
+            pm.convert = !pm.convert;
+            Some("the payment's convert".into())
+        }),
+        p!("a payment has convoke", "Game.agenda", |a, _r| {
+            let pm = pay_mana_mut(&mut a.g)?;
+            pm.convoke = !pm.convoke;
+            Some("the payment's convoke".into())
+        }),
+        p!("a payment has improvise", "Game.agenda", |a, _r| {
+            let pm = pay_mana_mut(&mut a.g)?;
+            pm.improvise = !pm.improvise;
+            Some("the payment's improvise".into())
+        }),
+        p!("a payment's pool was read", "Game.agenda", |a, _r| {
+            let pm = pay_mana_mut(&mut a.g)?;
+            pm.pooled = !pm.pooled;
+            Some("the payment's pooled".into())
+        }),
+        p!("a payment's last pick was of a later class", "Game.agenda", |a, _r| {
+            pay_mana_mut(&mut a.g)?.min_class += 1;
+            Some("the payment's class".into())
+        }),
+        p!("a payment's life after its mana is one higher", "Game.agenda", |a, _r| {
+            pay_mana_mut(&mut a.g)?.life_after += 1;
+            Some("the payment's life after".into())
+        }),
+        p!("a payment activates a source first", "Game.agenda", |a, r| {
+            let p = pay_mana_mut(&mut a.g)?.payer;
+            let c = unpicked_perm(&a.g, p, r)?;
+            pay_mana_mut(&mut a.g)?.forced.push((Src::of(c, AbilitySlot::Activated(0)), false));
+            Some(format!("P{p}'s payment activates {} first", a.g.name(c)))
+        }),
+        p!(rare "the source whose production a payment asks is another", "Game.agenda", |a, r| {
+            let p = pay_mana_mut(&mut a.g)?.payer;
+            let was = pay_mana_mut(&mut a.g)?.now.as_ref()?.0.card;
+            let c = unpicked_perm(&a.g, p, r).filter(|&c| c != was)?;
+            pay_mana_mut(&mut a.g)?.now.as_mut()?.0.card = c;
+            Some(format!("the production of {}", a.g.name(c)))
+        }),
+        p!(rare "a payment's mana chosen one at a time is one more", "Game.agenda", |a, _r| {
+            let pm = pay_mana_mut(&mut a.g)?;
+            pm.now.as_ref()?;
+            let t = pm.now_min as usize;
+            pm.now_taken[t] += 1;
+            Some("the mana taken so far".into())
+        }),
+        p!("a payment asks which source another permanent stands for", "Game.agenda", |a, r| {
+            let p = pay_mana_mut(&mut a.g)?.payer;
+            let c = unpicked_perm(&a.g, p, r)?;
+            pay_mana_mut(&mut a.g)?.which = Some(c);
+            Some(format!("which source {} stands for", a.g.name(c)))
+        }),
+        p!(rare "a shared source's actor is another permanent", "Game.agenda", |a, r| {
+            let p = pay_mana_mut(&mut a.g)?.payer;
+            pay_mana_mut(&mut a.g)?.actors.first()?;
+            let c = unpicked_perm(&a.g, p, r)?;
+            pay_mana_mut(&mut a.g)?.actors[0].1 = c;
+            Some(format!("{} activates the shared source", a.g.name(c)))
+        }),
+        p!("a payment asks which permanent activates a source", "Game.agenda", |a, r| {
+            let p = pay_mana_mut(&mut a.g)?.payer;
+            let c = unpicked_perm(&a.g, p, r)?;
+            pay_mana_mut(&mut a.g)?.actor_for = Some(Src { card: c, slot: AbilitySlot::Activated(0), g: 1 });
+            Some(format!("the actor of {}'s ability", a.g.name(c)))
+        }),
+        p!(rare "a payment's pools to leave lose one", "Game.agenda", |a, _r| {
+            let s = pay_mana_mut(&mut a.g)?.spend.as_mut()?;
+            if s.len() < 2 {
+                return None;
+            }
+            s.pop();
+            Some("the payment's pools".into())
+        }),
+        p!("a payment completes by its search (a cost's parts ordered)", "Game.agenda", |a, _r| {
+            let n = a.g.agenda.len() as u32;
+            let pm = pay_mana_mut(&mut a.g)?;
+            pm.oracle = if pm.oracle.is_some() { None } else { Some(n) };
+            Some("the payment's search floor".into())
+        }),
+        p!("a payment exiles one more card for delve after its abilities", "Game.agenda", |a, _r| {
+            let p = pay_mana_mut(&mut a.g)?.payer;
+            let &c = a.g.players[p as usize].graveyard.first()?;
+            pay_mana_mut(&mut a.g)?.delve_late.push(c);
+            Some(format!("P{p}'s payment exiles {} later", a.g.name(c)))
+        }),
+        // The 601.2g step (ENGINE.md 231).
+        p!("the 601.2g step asks about another permanent", "Game.agenda", |a, r| {
+            let i = a.g.agenda.iter().rposition(|t| matches!(t, crate::flow::Task::CastMana { .. }))?;
+            let crate::flow::Task::CastMana { id, .. } = a.g.agenda[i] else { unreachable!() };
+            let p = a.g.stack[a.g.item_index(id)?].controller;
+            let cs: Vec<CardIdx> = a.g.permanents_of(p).collect();
+            let c = pick(&cs, r)?;
+            let crate::flow::Task::CastMana { card, .. } = &mut a.g.agenda[i] else { unreachable!() };
+            if *card == Some(c) {
+                return None;
+            }
+            *card = Some(c);
+            Some(format!("the step asks about {}", a.g.name(c)))
+        }),
+        p!("the 601.2g step is asked again", "Game.agenda", |a, _r| {
+            let i = a.g.agenda.iter().rposition(|t| matches!(t, crate::flow::Task::CastMana { .. }))?;
+            let crate::flow::Task::CastMana { again, .. } = &mut a.g.agenda[i] else { unreachable!() };
+            *again = !*again;
+            Some("the step's again".into())
+        }),
+        // A gone object's last known information (CR 608.2h), of a gone object the public state names.
+        p!("a gone permanent's last known mana value is one higher", "Game.lki_copy", |a, r| {
+            let s = public_stale(&a.g);
+            let x = pick(&s.iter().copied().filter(|x| a.g.lki_copy.iter().any(|y| y.0 == *x)).collect::<Vec<_>>(), r)?;
+            let e = a.g.lki_copy.iter_mut().rev().find(|y| y.0 == x)?;
+            e.2 += 1;
+            Some(format!("{}'s last known mana value", a.g.name(x.idx)))
+        }),
+        p!("a gone permanent's last known copiable values are another card's", "Game.lki_copy", |a, r| {
+            let s = public_stale(&a.g);
+            let x = pick(&s, r)?;
+            let other = a.g.battlefield.first().map(|&c| a.g.objs[c.i()].def)?;
+            match a.g.lki_copy.iter_mut().rev().find(|y| y.0 == x) {
+                Some(e) if e.1.def != other => e.1.def = other,
+                Some(_) => return None,
+                None => a.g.lki_copy.push((x, crate::copies::CopyVals { def: other, exc: Default::default(), dfc: false }, 0)),
+            }
+            Some(format!("{}'s last known copiable values", a.g.name(x.idx)))
+        }),
+        p!("a gone object's last known power is one higher", "Game.lki_power", |a, r| {
+            let x = pick(&public_stale(&a.g), r)?;
+            let p = a.g.lki_power_of(x).unwrap_or(0) + 1;
+            a.g.lki_power.retain(|e| !(e.0 == x.idx && e.1 == x.inc));
+            a.g.lki_power.push((x.idx, x.inc, p));
+            Some(format!("{}'s last known power", a.g.name(x.idx)))
+        }),
+        p!("a gone permanent's last known toughness is one higher", "Game.lki_toughness", |a, r| {
+            let x = pick(&public_stale(&a.g), r)?;
+            let owner = a.g.objs[x.idx.i()].owner;
+            match a.g.lki_toughness.iter_mut().rev().find(|y| y.0 == x) {
+                Some(e) => e.1 += 1,
+                None => a.g.lki_toughness.push((x, 1, owner)),
+            }
+            Some(format!("{}'s last known toughness", a.g.name(x.idx)))
+        }),
+        p!("a gone permanent dealt damage with deathtouch", "Game.lki_damage", |a, r| {
+            let x = pick(&public_stale(&a.g), r)?;
+            let owner = a.g.objs[x.idx.i()].owner;
+            match a.g.lki_damage.iter_mut().rev().find(|y| y.0 == x) {
+                Some(e) => e.1.deathtouch = !e.1.deathtouch,
+                None => a.g.lki_damage.push((
+                    x,
+                    crate::game::DamageSource { controller: owner, deathtouch: true, lifelink: false, infect: false, spell: false, colors: 0, types: types::CREATURE, obj: Some(x) },
+                )),
+            }
+            Some(format!("{}'s last known deathtouch", a.g.name(x.idx)))
+        }),
+        p!("a gone permanent had one more +1/+1 counter", "Game.lki_counters", |a, r| {
+            let x = pick(&public_stale(&a.g), r)?;
+            let n = a.g.lki_counters.iter().rev().find(|y| y.0 == x && y.1 == Counter::P1P1).map_or(0, |y| y.2);
+            a.g.lki_counters.push((x, Counter::P1P1, n + 1));
+            Some(format!("{}'s last known +1/+1 counters", a.g.name(x.idx)))
+        }),
+        p!("a gone permanent was attached to a permanent", "Game.lki_attached", |a, r| {
+            let x = pick(&public_stale(&a.g), r)?;
+            let h = pick(&slots(&a.g), r)?;
+            let hr = a.g.obj_ref(h);
+            match a.g.lki_attached.iter_mut().find(|y| y.0 == x) {
+                Some(e) if e.1 != hr => e.1 = hr,
+                Some(_) => return None,
+                None => a.g.lki_attached.push((x, hr)),
+            }
+            Some(format!("{} was attached to {}", a.g.name(x.idx), a.g.name(h)))
+        }),
+        p!("a gone object enchanted a permanent (EoE W3)", "W3State.lki_host", |a, r| {
+            let x = pick(&public_stale(&a.g), r)?;
+            let h = pick(&slots(&a.g), r)?;
+            let hr = a.g.obj_ref(h);
+            if a.g.w3.lki_host.iter().rev().find(|y| y.0 == x).is_some_and(|y| y.1 == hr) {
+                return None;
+            }
+            a.g.w3.lki_host.push((x, hr));
+            Some(format!("{} enchanted {}", a.g.name(x.idx), a.g.name(h)))
+        }),
+        p!(rare "a gone spell's last known X is one higher", "Game.spell_lki", |a, r| {
+            let s = public_stale(&a.g);
+            let x = pick(&s.iter().copied().filter(|x| a.g.spell_lki.iter().any(|y| y.0 == *x)).collect::<Vec<_>>(), r)?;
+            let e = a.g.spell_lki.iter_mut().rev().find(|y| y.0 == x)?;
+            e.2.x += 1;
+            Some(format!("{}'s last known X", a.g.name(x.idx)))
+        }),
+        p!("a gone spell is recorded with its item", "Game.spell_lki", |a, r| {
+            let s = public_stale(&a.g);
+            let x = pick(&s.iter().copied().filter(|x| !a.g.spell_lki.iter().any(|y| y.0 == *x)).collect::<Vec<_>>(), r)?;
+            let def = a.g.objs[x.idx.i()].def;
+            let item = a.g.stack.first().cloned()?;
+            a.g.spell_lki.push((x, def, item, 2));
+            Some(format!("{}'s last known item", a.g.name(x.idx)))
+        }),
+        // The groups of places holding search finds (ENGINE.md 223's decision 4).
+        p!("the top two library cards are a group of places holding one find", "Game.find_groups", |a, r| {
+            let p = player(r);
+            let lib = &a.g.players[p as usize].library;
+            if lib.len() < 2 {
+                return None;
+            }
+            let top: Vec<CardIdx> = lib[lib.len() - 2..].to_vec();
+            if top.iter().any(|c| a.g.finds_told.contains(c) || a.g.find_groups.iter().any(|g| g.members.contains(c))) {
+                return None;
+            }
+            let mut members = top;
+            members.sort_unstable();
+            a.g.find_groups.push(crate::hidden::FindGroup { owner: p, members, finds: 1 });
+            Some(format!("P{p}'s top two library cards"))
+        }),
+        p!(rare "a find group holds one more find", "Game.find_groups", |a, r| {
+            let i = r.below(a.g.find_groups.len().max(1) as u32) as usize;
+            let grp = a.g.find_groups.get_mut(i)?;
+            if grp.finds as usize + 1 >= grp.members.len() {
+                return None;
+            }
+            grp.finds += 1;
+            Some(format!("find group {i}"))
+        }),
+        p!(rare "a find group ends", "Game.find_groups", |a, r| {
+            let i = r.below(a.g.find_groups.len().max(1) as u32) as usize;
+            if i >= a.g.find_groups.len() {
+                return None;
+            }
+            a.g.find_groups.remove(i);
+            Some(format!("find group {i}"))
+        }),
+        p!(rare "a find group takes the library card below it", "Game.find_groups", |a, r| {
+            let i = r.below(a.g.find_groups.len().max(1) as u32) as usize;
+            let grp = a.g.find_groups.get(i)?;
+            let lib = &a.g.players[grp.owner as usize].library;
+            let low = lib.iter().position(|c| grp.members.contains(c))?;
+            let below = *lib.get(low.checked_sub(1)?)?;
+            if a.g.finds_told.contains(&below) || a.g.find_groups.iter().any(|g| g.members.contains(&below)) {
+                return None;
+            }
+            let grp = &mut a.g.find_groups[i];
+            grp.members.push(below);
+            grp.members.sort_unstable();
+            Some(format!("find group {i} grows"))
+        }),
+    ]
+}
+
+/// Layout v8's facts (ENGINE.md 232): the perturbations of `v8_perturbations` whose change layout v7
+/// (the game `mtg`) and layout v6 (`mtg_eoe`) leave out - all but the innermost payment's cost, which
+/// their context block's cost floats show (layout v8's `payment` tokens show every part exactly).
+pub fn v8_fixed() -> Vec<&'static str> {
+    v8_perturbations().iter().map(|p| p.name).filter(|&n| n != "a payment's cost has one more generic mana").collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3097,8 +3442,11 @@ mod tests {
         assert!(!c(V6, &["life + 1"], &["a stun counter"]), "unrelated changes are no known gap");
         assert!(!c(V6, &[red], &[red]), "the same perturbations: no difference to cover");
         assert!(c(V6, &[], &["a permanent was harnessed"]) && !c(V7, &[], &["a permanent was harnessed"]), "a v7 fact: a v6 gap only");
-        // (layout v7's one known gap: the framed row's, found 2026-11-13, a decision of its own)
-        assert!(k.iter().filter(|g| g.layouts & V7 != 0).count() == 1, "layout v7's known gaps");
+        // (layout v8's one known gap: the framed row's, found 2026-11-13, a decision of its own; layout v7's: that
+        // one and v8's facts, ENGINE.md 232)
+        assert!(k.iter().filter(|g| g.layouts & V8 != 0).count() == 1, "layout v8's known gaps");
+        assert!(k.iter().filter(|g| g.layouts & V7 != 0).count() == 2, "layout v7's known gaps");
+        assert!(c(V7, &[], &["a payment's Phyrexian life is two higher"]) && !c(V8, &[], &["a payment's Phyrexian life is two higher"]), "a v8 fact: a v7 gap only");
     }
 
     #[test]

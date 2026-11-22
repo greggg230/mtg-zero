@@ -811,6 +811,12 @@ impl<'g> Cx<'g> {
         self.stale.borrow().clone()
     }
 
+    /// The key of stale reference `r` (`rf::STALE_KEY`), met now if it wasn't (layout v8's `lki` tokens of
+    /// the gone objects the public state names that no token of the row wrote: ENGINE.md 232).
+    pub(crate) fn stale_key_of(&self, r: ObjRef) -> usize {
+        self.stale_key(r)
+    }
+
     /// The identity the viewer sees of card `c` where it is now, if any: the
     /// zone readers' (a card of the list, an exile offer, a pick). A reference
     /// reads [`ref_def`](Self::ref_def).
@@ -2208,6 +2214,13 @@ pub fn code_identity(x: &[f32]) -> Option<usize> {
 /// option about no object keeps the generic logit or a static slot (the companion's `PLAYER` id).
 /// `Err` with the first mismatch.
 pub fn check_pointers(g: &Game, viewer: PlayerId, row: &Row) -> Result<usize, String> {
+    check_pointers_layout(g, viewer, row, false)
+}
+
+/// `check_pointers` of a layout v8 row (`v8`, ENGINE.md 232) or v7: in v8 an option of the viewer's payment
+/// decision naming item k (`ChooseMana`, `ChooseMode`, `PayPool`: `tail_v8::pay_overrides`) points at
+/// `pay_options` token k, whose item is k.
+pub fn check_pointers_layout(g: &Game, viewer: PlayerId, row: &Row, v8: bool) -> Result<usize, String> {
     let Some(d) = g.pending.as_ref() else { return Ok(0) };
     let cx = Cx::new(g, viewer);
     let Some(dd) = cx.d else { return Ok(0) };
@@ -2220,6 +2233,26 @@ pub fn check_pointers(g: &Game, viewer: PlayerId, row: &Row) -> Result<usize, St
         let ptr = row.pointer(k, a);
         let what = || format!("{:?} option {a} ({}): {want:?}, pointer {ptr:?}", d.kind, g.describe_choice(dd.choice_of(a).expect("an option")));
         let Some(obj) = want else {
+            // (Layout v8: a payment decision's item, its `pay_options` token.)
+            let mut v8_item = None;
+            if v8 && super::tail_v8::pays_items(g, dd) {
+                v8_item = super::tail_v8::option_item(dd, a);
+            }
+            if let Some(item) = v8_item {
+                if ptr != Some((seg::PAY_OPTIONS, 0, item)) {
+                    return Err(format!("{} should point at pay_options token {item}", what()));
+                }
+                let Some(x) = row.token(seg::PAY_OPTIONS, item) else { return Err(format!("{}: no pay_options token {item}", what())) };
+                let mut k = 0u32;
+                for b in 0..16 {
+                    k |= ((x[CODE + super::tail_v8::po::ITEM_BITS + b] > 0.5) as u32) << b;
+                }
+                if k != item || x[CODE + super::tail_v8::po::PRESENT] != 1.0 {
+                    return Err(format!("{}: pay_options token {item} names item {k}", what()));
+                }
+                checked += 1;
+                continue;
+            }
             // (No object: the generic logit, or `PLAYER`'s static companion slot as before.)
             match ptr {
                 None => continue,

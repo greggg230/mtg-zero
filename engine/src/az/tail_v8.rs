@@ -276,8 +276,9 @@ pub mod fg {
     pub const GROUP: usize = 3;
     pub const GROUP_BITS: usize = 4;
     pub const ZONE: usize = GROUP_BITS + 16;
-    /// The run's zone: a library, face-down exile, a hand (a count: a hand is a bag).
-    pub const ZONES: usize = 3;
+    /// The run's zone: a library, face-down exile, a hand (a count: a hand is a bag), elsewhere (a state
+    /// changed by hand only).
+    pub const ZONES: usize = 4;
     pub const TOP: usize = ZONE + ZONES;
     pub const TOP_BITS: usize = TOP + 1;
     pub const SIZE: usize = TOP_BITS + 16;
@@ -503,6 +504,11 @@ fn po_token(tail: &mut TailBuf, slot: u32, kind: usize, item: usize) -> &mut [f3
     s
 }
 
+/// Is `g`'s pending decision `d` a payment decision whose options name items (`pay_options`)?
+pub(crate) fn pays_items(g: &Game, d: &crate::decision::Decision) -> bool {
+    pay_items(g, d).is_some()
+}
+
 /// The `pay_options` segment (`po::*`).
 fn write_pay_options(cx: &Cx, tail: &mut TailBuf) {
     let Some(d) = cx.d else { return };
@@ -601,7 +607,9 @@ pub(crate) fn group_runs(g: &Game, grp: &crate::hidden::FindGroup) -> (Vec<(usiz
             // (Face-down exile and a hand are bags: a count, ENGINE.md 142.3.)
             Zone::FaceDown => (1, 0),
             Zone::Hand => (2, 0),
-            z => unreachable!("a find group's member in {z:?} (a member leaving its zone ends its group)"),
+            // (Never by the rules: a member leaving its zone ends its group, `move_card`; a state changed by
+            // hand - the public-state gate's moves - may hold one elsewhere, a bag.)
+            _ => (3, 0),
         })
         .collect();
     places.sort_unstable();
@@ -717,6 +725,14 @@ pub(crate) fn lki_of(g: &Game, r: ObjRef) -> Lki<'_> {
 /// key order (the references these tokens write may meet more, taken in turn).
 fn write_lki(cx: &Cx, tail: &mut TailBuf) {
     let g = cx.g;
+    // Every gone object a reference of the public state names (`Game::for_each_public_ref`, the view's), met
+    // now if no token of the row wrote it: its key follows every v7 token's.
+    g.for_each_public_ref(|r| {
+        if !g.live(r) {
+            cx.stale_key_of(r);
+        }
+        false
+    });
     let (mut kc, mut kr) = (0u32, 0u32);
     let mut key = 0usize;
     loop {

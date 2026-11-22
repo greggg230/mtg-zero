@@ -62,6 +62,7 @@ mod hogaak_a;
 pub mod delver_sb;
 mod eoe_w2;
 pub mod public_state;
+pub mod public_state_v8;
 pub mod testkit;
 pub mod layers;
 mod triggers;

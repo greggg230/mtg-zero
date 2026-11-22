@@ -871,7 +871,7 @@ fn wheel_walk(seed: u64) -> WheelSeen {
         let mut s = a.clone();
         s.g.strip_forced_find();
         for v in 0..2 {
-            assert!(Row::of_az(a, v) == Row::of_az(&s, v), "{}: P{v}'s row shows the forced find", what());
+            assert!(Row::of_az_v8(a, v) == Row::of_az_v8(&s, v), "{}: P{v}'s row shows the forced find", what());
         }
         seen.rows += 1;
     };
@@ -1057,7 +1057,7 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
     loop {
         if step % 3 == 0 {
             for v in 0..2 {
-                assert!(Row::of_az(&a, v) == Row::of_az(&b, v), "{}: P{v}'s row differs from the pairing's fixed game", what(step));
+                assert!(Row::of_az_v8(&a, v) == Row::of_az_v8(&b, v), "{}: P{v}'s row differs from the pairing's fixed game", what(step));
             }
         }
         let Some(p) = a.to_move() else {
@@ -1101,7 +1101,7 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
                     let o = 1 - viewer;
                     assert_eq!(hd_deck(&da, o as u8), mains[o], "{}: the opponent's cards are its pairing's main", w());
                 }
-                assert!(Row::of_az(&da, viewer) == Row::of_az(&db, viewer), "{}: the viewer's row", w());
+                assert!(Row::of_az_v8(&da, viewer) == Row::of_az_v8(&db, viewer), "{}: the viewer's row", w());
                 worlds += 1;
             }
         }
@@ -2940,9 +2940,17 @@ fn v6_window(g: &Game) -> bool {
 /// zero-core's driver aborts such a game); the census (`FUZZ_CAP_CENSUS`).
 fn check_row(g: &Game, viewer: u8, row: &crate::az::tail_encode::Row, what: &dyn Fn() -> String) {
     use crate::az::encode::{v6_projection, NUM_FEATURES_V6};
+    use crate::az::tail_encode::seg;
     let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
     check_bounded(&vals, &|| format!("{} (viewer P{viewer})", what()));
-    if row.tail.is_empty() {
+    // Layout v8's row (ENGINE.md 232) is layout v7's plus its own segments' tokens and the overrides into
+    // `pay_options`: its v7 part is the v7 row exactly (a v7 network widened onto v8 reads it alike).
+    let r7 = crate::az::tail_encode::Row::of(g, viewer);
+    let tail7: Vec<_> = row.tail.iter().filter(|t| (t.0 as usize) < seg::N).cloned().collect();
+    let ov7: Vec<(u32, i64)> = row.ov.iter().copied().filter(|&(_, t)| t < 0 || zero_search::tail::unpack_tok(t).0 != seg::PAY_OPTIONS).collect();
+    assert!(r7.head == row.head && r7.tail == tail7 && r7.ov == ov7, "{}: layout v8's row is not layout v7's plus v8's segments (viewer P{viewer})", what());
+    V8_TOKENS.fetch_add(row.tail.len() as u64 - tail7.len() as u64, Ordering::Relaxed);
+    if r7.tail.is_empty() {
         let mut h = vec![0.0f32; crate::az::NUM_FEATURES];
         g.encode_features(viewer, &mut h);
         assert!(h.iter().zip(&row.head).all(|(a, b)| a.to_bits() == b.to_bits()), "{}: encode_features is not encode_row's head (viewer P{viewer})", what());
@@ -2958,7 +2966,7 @@ fn check_row(g: &Game, viewer: u8, row: &crate::az::tail_encode::Row, what: &dyn
         assert!(v6_window(g), "{}: the v6 projection of the v7 head differs from layout v6's encoding at v6 feature {i} outside a page (viewer P{viewer})", what());
         V6_PAGED.fetch_add(1, Ordering::Relaxed);
     }
-    let n = crate::az::tail_encode::check_pointers(g, viewer, row).unwrap_or_else(|e| panic!("{}: {e} (viewer P{viewer})", what()));
+    let n = crate::az::tail_encode::check_pointers_layout(g, viewer, row, true).unwrap_or_else(|e| panic!("{}: {e} (viewer P{viewer})", what()));
     POINTERS.fetch_add(n as u64, Ordering::Relaxed);
     let cap = row.capacity() as u64;
     MAX_CAPACITY.fetch_max(cap, Ordering::Relaxed);
@@ -2971,16 +2979,20 @@ fn check_row(g: &Game, viewer: u8, row: &crate::az::tail_encode::Row, what: &dyn
 /// `viewer`'s whole row of `g` (`buf`: the row as one vector, `Row::flat`, the head first), checked
 /// (`check_row`).
 fn check_encoding(g: &Game, viewer: u8, buf: &mut Vec<f32>, what: &dyn Fn() -> String) {
-    let row = crate::az::tail_encode::Row::of(g, viewer);
+    let row = crate::az::tail_encode::Row::of_v8(g, viewer);
     check_row(g, viewer, &row, what);
     *buf = row.flat();
 }
 
+/// Layout v8's own tokens in the rows checked (ENGINE.md 232).
+static V8_TOKENS: AtomicU64 = AtomicU64::new(0);
+
 /// The rows' report: pointers checked, v6 projections, the limit.
 fn rows_report() -> String {
     format!(
-        "rows: {} options' pointers checked; v6 projection equal on {} rows, {} on pages v6 showed as a window; the most tokens in a row {} (limit {}), {} rows past it",
+        "rows: {} options' pointers checked; layout v8's own tokens {}; v6 projection equal on {} rows, {} on pages v6 showed as a window; the most tokens in a row {} (limit {}), {} rows past it",
         POINTERS.load(Ordering::Relaxed),
+        V8_TOKENS.load(Ordering::Relaxed),
         V6_SAME.load(Ordering::Relaxed),
         V6_PAGED.load(Ordering::Relaxed),
         MAX_CAPACITY.load(Ordering::Relaxed),
@@ -3390,10 +3402,10 @@ pub fn play(seed: u64, checks: bool) -> Played {
             // 65.10).
             // (Layout v7, ENGINE.md 125: the whole row, every option's pointer.)
             let mover = g.to_move().unwrap();
-            let row = crate::az::tail_encode::Row::of(&g, mover);
+            let row = crate::az::tail_encode::Row::of_v8(&g, mover);
             check_row(&g, mover, &row, &|| format!("seed {seed} step {steps}"));
             if census::on() {
-                let other = crate::az::tail_encode::Row::of(&g, 1 - mover);
+                let other = crate::az::tail_encode::Row::of_v8(&g, 1 - mover);
                 census::record(&g, 1 - mover, &other);
             }
             check_graveyard_list(&g, &row, &|| format!("seed {seed} step {steps}"));
@@ -3829,7 +3841,7 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
             assert_eq!(a.outcome(), b.outcome(), "seed {seed} step {step}: same keys, different outcomes");
             return;
         }
-        let (ra, rb) = (crate::az::tail_encode::Row::of(&a, viewer), crate::az::tail_encode::Row::of(&b, viewer));
+        let (ra, rb) = (crate::az::tail_encode::Row::of_v8(&a, viewer), crate::az::tail_encode::Row::of_v8(&b, viewer));
         if let Some(d) = row_difference(&ra, &rb) {
             panic!("seed {seed} step {step}: same keys, different rows of P{viewer} ({d}); {}", tell(&a, &b, &path));
         }
@@ -4936,7 +4948,7 @@ fn check_match_information_set(g: &crate::az::MtgAz, viewer: usize, seed: u64, r
             assert!(!(a.to_move() == Some(viewer) && b.to_move() == Some(viewer)), "match {seed} step {step}: the viewer's options differ");
             return;
         }
-        let (ra, rb) = (crate::az::tail_encode::Row::of_az(&a, viewer), crate::az::tail_encode::Row::of_az(&b, viewer));
+        let (ra, rb) = (crate::az::tail_encode::Row::of_az_v8(&a, viewer), crate::az::tail_encode::Row::of_az_v8(&b, viewer));
         xa = ra.flat();
         xb = rb.flat();
         if let Some(i) = (0..xa.len().min(xb.len())).find(|&i| xa[i] != xb[i]).or((xa.len() != xb.len()).then(|| xa.len().min(xb.len()))) {
@@ -5344,7 +5356,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                 } else {
                     assert_eq!(d.to_move(), Some(p), "match {seed}: determinize changed the decider: {:?} -> {:?}", g.pending_decision(), d.pending_decision());
                 }
-                x1 = crate::az::tail_encode::Row::of_az(&g, viewer).flat();
+                x1 = crate::az::tail_encode::Row::of_az_v8(&g, viewer).flat();
                 x2 = az_row_checked(&d, viewer, &|| format!("match {seed}: a world determinized for P{viewer}"));
                 if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                     panic!("match {seed}: determinize changed the encoding of P{viewer} (mover P{p}) at {i}: {} -> {}", x1[i], x2[i]);
@@ -5371,7 +5383,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                     if viewer == p {
                         assert_eq!(legal, legal2, "match {seed}: a weighted deal changed the decider's actions");
                     }
-                    x2 = crate::az::tail_encode::Row::of_az(&dw, viewer).flat();
+                    x2 = crate::az::tail_encode::Row::of_az_v8(&dw, viewer).flat();
                     if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                         panic!("match {seed}: a weighted deal changed the encoding of P{viewer} at {i}");
                     }
@@ -5902,17 +5914,17 @@ const HD_LONG_TURN: u64 = 500;
 
 /// `viewer`'s whole row of match `a` as one vector (`Row::flat`; layout v7, ENGINE.md 125).
 fn az_encode(a: &crate::az::MtgAz, viewer: u8, buf: &mut Vec<f32>) {
-    *buf = crate::az::tail_encode::Row::of_az(a, viewer as usize).flat();
+    *buf = crate::az::tail_encode::Row::of_az_v8(a, viewer as usize).flat();
 }
 
 /// `viewer`'s whole row of match `a` as one vector, its values bounded; in a game (not between
 /// the games of a match, not the deck choice) the game's row checked (`check_row`).
 fn az_row_checked(a: &crate::az::MtgAz, viewer: usize, what: &dyn Fn() -> String) -> Vec<f32> {
-    let row = crate::az::tail_encode::Row::of_az(a, viewer);
+    let row = crate::az::tail_encode::Row::of_az_v8(a, viewer);
     let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
     check_bounded(&vals, &|| format!("{} (viewer P{viewer})", what()));
     if a.sideboarding().is_none() && a.deck_choice().is_none() && a.g.pending_decision().is_some() {
-        let r = crate::az::tail_encode::Row::of(&a.g, viewer as u8);
+        let r = crate::az::tail_encode::Row::of_v8(&a.g, viewer as u8);
         check_row(&a.g, viewer as u8, &r, what);
     }
     row.flat()
@@ -6030,7 +6042,7 @@ pub fn play_hidden(seed: u64) -> Played {
         let mover = a.to_move().unwrap() as u8;
         az_row_checked(&a, mover as usize, &|| format!("seed {seed} step {steps}"));
         if a.deck_choice().is_none() {
-            let row = crate::az::tail_encode::Row::of(&a.g, mover);
+            let row = crate::az::tail_encode::Row::of_v8(&a.g, mover);
             check_graveyard_list(&a.g, &row, &|| format!("seed {seed} step {steps}"));
         }
         if rng.below(checkpoint_every()) == 0 {
