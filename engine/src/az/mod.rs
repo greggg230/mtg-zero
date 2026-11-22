@@ -35,6 +35,7 @@ pub mod hidden_decks;
 pub mod identity;
 pub mod lab;
 pub mod matches;
+pub mod merge_key;
 pub mod metagame;
 pub mod pools;
 pub mod sample;
@@ -1741,6 +1742,17 @@ impl SearchGame for MtgAz {
         } else {
             KeyObs::Opaque
         }
+    }
+
+    /// Near-tie branches' merge key (`merge_key.rs`, ENGINE.md 226; zero-core docs/search.md 2.11): equal only for
+    /// equivalent states, None where the state cannot be keyed safely. Read only by the near-tie branch rule.
+    fn merge_key(&self) -> Option<u128> {
+        merge_key::merge_key(self)
+    }
+
+    /// Whether `alt` is worth a near-tie branch next to `played` (`merge_key::branch_alt_ok`, ENGINE.md 226).
+    fn branch_alt_ok(&self, played: u16, alt: u16) -> bool {
+        merge_key::branch_alt_ok(self, played, alt)
     }
 }
 

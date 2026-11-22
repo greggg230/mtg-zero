@@ -336,6 +336,21 @@ fn lookup_any(db: &CardDb, name: &str) -> Result<DefId, String> {
 /// The description of `g`'s position from `viewer`'s view (module docs; ENGINE.md 95): everything the
 /// viewer sees and knows, nothing it does not. An error names what the schema does not support.
 pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
+    describe_as(g, viewer, false)
+}
+
+/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 226): the same description, finer where the key
+/// needs it and wider where the key covers the rest itself. A stale reference or a gone token also carries its age
+/// (`"age"`: the card's zone changes since that object, so two earlier objects of one card never read alike); the
+/// sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (the key adds them);
+/// and the description gains the turn's last known information of gone objects (`"lki"`, CR 608.2h) and the turn's
+/// loop actions (`"loops"`, `loops.rs`), both of which the rules read and the build has no key for. Not a buildable
+/// description.
+pub(crate) fn describe_for_key(g: &Game, viewer: PlayerId) -> Result<Value, String> {
+    describe_as(g, viewer, true)
+}
+
+fn describe_as(g: &Game, viewer: PlayerId, key: bool) -> Result<Value, String> {
     if viewer > 1 {
         return Err(format!("describe: viewer {viewer}"));
     }
@@ -345,7 +360,48 @@ pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
         h.sort_by_key(|&c| (g.ident(c), !g.objs[c.i()].known, c.i()));
         hands[p as usize] = h;
     }
-    Describer { g, me: viewer, hands }.run()
+    // (The merge key without a positional graveyard reader among the game's cards: each graveyard by identity, the
+    // order no rule reads - ENGINE.md 125's D5, `lower::graveyard_order` - and references by that place.)
+    let unordered = key && !positional_reader_in(g);
+    let gys: [Vec<CardIdx>; 2] = std::array::from_fn(|p| {
+        let mut v = g.players[p].graveyard.clone();
+        if unordered {
+            v.sort_by_key(|&c| g.ident(c));
+        }
+        v
+    });
+    Describer { g, me: viewer, hands, key, gys }.run()
+}
+
+/// Does a card of the game (its objects, the sideboards) read a graveyard's order (a positional reader, R17:
+/// `lower::graveyard_order`)? Only the card table's readers can; none in the table, none in the game.
+fn positional_reader_in(g: &Game) -> bool {
+    if crate::lower::graveyard_order::readers(g.db).is_empty() {
+        return false;
+    }
+    let r = reader_defs(g.db);
+    g.objs.iter().map(|o| o.def).chain(g.players.iter().flat_map(|p| p.sideboard.iter().copied())).any(|d| r[d as usize])
+}
+
+/// Per definition of `db`: it, its back face or its adventure is a positional graveyard reader (R17); computed
+/// once per card table.
+fn reader_defs(db: &'static CardDb) -> &'static [bool] {
+    static READERS: std::sync::Mutex<Vec<(usize, &'static [bool])>> = std::sync::Mutex::new(Vec::new());
+    let key = db as *const CardDb as usize;
+    let mut v = READERS.lock().unwrap();
+    if let Some(&(_, r)) = v.iter().find(|(k, _)| *k == key) {
+        return r;
+    }
+    let one = |d: DefId| crate::lower::graveyard_order::check_defs(std::iter::once((d, db.def(d)))).map_or(true, |r| !r.is_empty());
+    let flags: Vec<bool> = (0..db.len() as DefId)
+        .map(|d| {
+            let cd = db.def(d);
+            one(d) || cd.back.is_some_and(one) || cd.adventure.is_some_and(one)
+        })
+        .collect();
+    let r: &'static [bool] = Box::leak(flags.into_boxed_slice());
+    v.push((key, r));
+    r
 }
 
 struct Describer<'a> {
@@ -353,6 +409,11 @@ struct Describer<'a> {
     me: PlayerId,
     /// The hand cards described (all of the viewer's, the opponent's the viewer knows), in order.
     hands: [Vec<CardIdx>; 2],
+    /// For the merge key (`describe_for_key`).
+    key: bool,
+    /// Each graveyard in the order described (bottom first; the merge key's: by identity when no rule reads the
+    /// order).
+    gys: [Vec<CardIdx>; 2],
 }
 
 fn unsupported<T>(what: impl std::fmt::Display) -> Result<T, String> {
@@ -365,7 +426,7 @@ impl Describer<'_> {
         let o = &g.objs[c.i()];
         match o.zone {
             Zone::Battlefield => g.battlefield.iter().position(|&x| x == c).map(|i| format!("b{i}")),
-            Zone::Graveyard => g.players[o.owner as usize].graveyard.iter().position(|&x| x == c).map(|i| format!("g{}.{i}", o.owner)),
+            Zone::Graveyard => self.gys[o.owner as usize].iter().position(|&x| x == c).map(|i| format!("g{}.{i}", o.owner)),
             Zone::Exile => g.exile.iter().position(|&x| x == c).map(|i| format!("x{i}")),
             Zone::Stack => g.stack.iter().position(|s| s.kind == StackKind::Spell { card: c }).map(|i| format!("s{i}")),
             Zone::Command => g.command.iter().position(|&x| x == c).map(|i| format!("e{i}")),
@@ -396,6 +457,10 @@ impl Describer<'_> {
                 None => return unsupported(format!("a reference to an earlier object of a card now in a {} the viewer does not see", zone_name(o.zone))),
             }
         };
+        // (The merge key: which earlier object of the card, by its zone changes since.)
+        if self.key {
+            v["age"] = json!(o.inc.wrapping_sub(r.inc));
+        }
         // What the stale reference shows (`Game::ref_lki`, ENGINE.md 156; the encoding writes it): who knew the object
         // as it left (default both) and, where the viewer did, its identity then (default the card's identity now).
         match g.ref_lki.iter().rev().find(|x| x.0 == r) {
@@ -552,8 +617,11 @@ impl Describer<'_> {
         empty(w3.phased.len() + w3.indirect.len(), "phased-out permanents")?;
         empty(g.loyalty.iter().filter(|l| l.extra > 0).count(), "extra loyalty activations")?;
         empty(dungeons.iter().filter(|d| d.obj.is_some() || d.completed > 0).count(), "dungeons")?;
-        empty(known_pools.iter().filter(|k| k.is_some()).count(), "hidden decks (best-of-three)")?;
-        empty(sightings.len(), "the hidden decklists' sightings (ENGINE.md 140.9)")?;
+        // (The merge key adds the known pools and the sightings itself.)
+        if !self.key {
+            empty(known_pools.iter().filter(|k| k.is_some()).count(), "hidden decks (best-of-three)")?;
+            empty(sightings.len(), "the hidden decklists' sightings (ENGINE.md 140.9)")?;
+        }
         empty(found.len() + finds_told.len(), "a library search's finds the other player tells apart (hidden decklists, ENGINE.md 140.9, 223)")?;
         empty(loop_open.is_some() as usize, "a loop action's activation in progress")?;
 
@@ -728,7 +796,71 @@ impl Describer<'_> {
         if !cl.is_empty() {
             out.insert("clouds".into(), Value::Array(cl));
         }
+        if self.key {
+            self.key_extras(&mut out)?;
+        }
         Ok(Value::Object(out))
+    }
+
+    /// What the merge key's description adds (`describe_for_key`): the turn's last known information of gone objects
+    /// (each list's entries by their gone object, which names each entry once - sorted, as the rules look them up by
+    /// object) and the turn's loop actions (their records hold no ids: the loop hash of a view, a battlefield place,
+    /// action ids - sorted, as the loop rule reads them as a set). EoE's last known information and W6's state are
+    /// refused (not in the merge key's pools).
+    fn key_extras(&self, out: &mut Map<String, Value>) -> Result<(), String> {
+        let g = self.g;
+        if !g.w3.lki_host.is_empty() || !g.w3.lki_loss.is_empty() {
+            return unsupported("EoE's last known information (W3)");
+        }
+        if !g.w6.control.is_empty() || g.w6.tokens_turn.iter().any(|&t| t != 0) {
+            return unsupported("EoE's control effects and token turns (W6)");
+        }
+        let mut lki: Vec<String> = Vec::new();
+        for &(r, k, n) in &g.lki_counters {
+            lki.push(json!(["counters", self.obj(r)?, counter_name(g, k), n]).to_string());
+        }
+        for (r, v) in &g.lki_copy {
+            lki.push(json!(["copy", self.obj(*r)?, format!("{v:?}")]).to_string());
+        }
+        for &(r, h) in &g.lki_attached {
+            lki.push(json!(["attached", self.obj(r)?, self.obj(h)?]).to_string());
+        }
+        for (r, d) in &g.lki_damage {
+            let crate::game::DamageSource { controller, deathtouch, lifelink, infect, spell, colors, types, obj } = d;
+            let o = match obj {
+                Some(x) => self.obj(*x)?,
+                None => Value::Null,
+            };
+            lki.push(json!(["damage", self.obj(*r)?, controller, deathtouch, lifelink, infect, spell, format!("{colors:?}"), types, o]).to_string());
+        }
+        for &(r, t, c) in &g.lki_toughness {
+            lki.push(json!(["toughness", self.obj(r)?, t, c]).to_string());
+        }
+        for &(idx, inc, p) in &g.lki_power {
+            // (Kept across turns, one per slot. A card now in a library has no place a reference could name, so
+            // nothing can read its entry: a reference to that object elsewhere would itself be refused.)
+            if g.objs[idx.i()].zone == Zone::Library {
+                continue;
+            }
+            lki.push(json!(["power", self.obj(crate::ids::ObjRef { idx, inc })?, p]).to_string());
+        }
+        for (r, d, item) in &g.spell_lki {
+            lki.push(json!(["spell", self.obj(*r)?, g.db.def(*d).name, self.stack_item(item)?]).to_string());
+        }
+        lki.sort_unstable();
+        out.insert("lki".into(), json!(lki));
+        let mut loops: Vec<String> = Vec::new();
+        for r in &g.loop_taken {
+            let act = match r.act {
+                crate::loops::LoopAct::Activate { place, slot } => json!([place, slot]),
+                crate::loops::LoopAct::MayCopy => json!("copy"),
+            };
+            let path: Vec<Value> = r.path.iter().map(|s| json!([s.options, s.chosen])).collect();
+            loops.push(json!([r.p, r.hash.to_string(), act, path]).to_string());
+        }
+        loops.sort_unstable();
+        out.insert("loops".into(), json!(loops));
+        Ok(())
     }
 
     fn player(&self, p: PlayerId, pl: &crate::game::Player) -> Result<Value, String> {
@@ -746,7 +878,8 @@ impl Describer<'_> {
         if *cant_gain_life || *flash_sorceries || *poison > 0 || *experience > 0 || *gy_play_turn > 0 || *gy_exile_turn > 0 || *city_blessing || *prot_until > 0 {
             return unsupported("a rare player state (can't gain life, sorceries with flash, poison, experience, graveyard play or exile, the city's blessing, protection)");
         }
-        if !sideboard.is_empty() || companion.is_some() || companion_def.is_some() || *companion_used {
+        // (The merge key adds the sideboards itself.)
+        if (!sideboard.is_empty() && !self.key) || companion.is_some() || companion_def.is_some() || *companion_used {
             return unsupported("sideboards and companions");
         }
         if *uncounterable_next > 0 {
@@ -796,7 +929,8 @@ impl Describer<'_> {
             m.insert("library_known".into(), Value::Array(lk));
         }
         let mut gy = Vec::new();
-        for &c in graveyard {
+        debug_assert_eq!(graveyard.len(), self.gys[p as usize].len());
+        for &c in &self.gys[p as usize] {
             if g.is_token(c) {
                 return unsupported("a token in a graveyard (state-based actions pending)");
             }

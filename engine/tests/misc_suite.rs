@@ -50,6 +50,8 @@ mod known_face_key;
 mod lab;
 #[path = "match_worlds.rs"]
 mod match_worlds;
+#[path = "merge_key.rs"]
+mod merge_key;
 #[path = "metagame.rs"]
 mod metagame;
 #[path = "post_board.rs"]
