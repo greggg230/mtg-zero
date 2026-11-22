@@ -360,13 +360,18 @@ fn describe_as(g: &Game, viewer: PlayerId, key: bool) -> Result<Value, String> {
         h.sort_by_key(|&c| (g.ident(c), !g.objs[c.i()].known, c.i()));
         hands[p as usize] = h;
     }
-    // (The merge key without a positional graveyard reader among the game's cards: each graveyard by identity, the
-    // order no rule reads - ENGINE.md 125's D5, `lower::graveyard_order` - and references by that place.)
+    // (The merge key without a positional graveyard reader among the game's cards: each graveyard as its creature
+    // cards in their order, then its other cards by identity - the user's rule, 2026-11-21: "order only matters for
+    // creatures" (ENGINE.md 227); references by that place.)
     let unordered = key && !positional_reader_in(g);
     let gys: [Vec<CardIdx>; 2] = std::array::from_fn(|p| {
         let mut v = g.players[p].graveyard.clone();
         if unordered {
-            v.sort_by_key(|&c| g.ident(c));
+            let creature = |c: &CardIdx| g.db.def(g.objs[c.i()].def).types & crate::db::types::CREATURE != 0;
+            let (mut cr, mut rest): (Vec<CardIdx>, Vec<CardIdx>) = v.into_iter().partition(creature);
+            rest.sort_by_key(|&c| g.ident(c));
+            cr.append(&mut rest);
+            v = cr;
         }
         v
     });
@@ -850,7 +855,9 @@ impl Describer<'_> {
         lki.sort_unstable();
         out.insert("lki".into(), json!(lki));
         let mut loops: Vec<String> = Vec::new();
-        for r in &g.loop_taken {
+        // (A record whose activation sacrificed its source holds that permanent on the battlefield in its hash, so the
+        // loop rule never reads it again this turn: left out - the fuzz checks it, `Game::check_dropped_loop_records`.)
+        for r in g.loop_taken.iter().filter(|r| !r.sac_self) {
             let act = match r.act {
                 crate::loops::LoopAct::Activate { place, slot } => json!([place, slot]),
                 crate::loops::LoopAct::MayCopy => json!("copy"),

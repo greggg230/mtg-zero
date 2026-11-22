@@ -426,7 +426,8 @@ impl Game {
             (slot, &self.db.def(def).activated_def(aslot).effect, self.objs[card.i()].zone)
         {
             let place = self.battlefield.iter().position(|&x| x == card).expect("a permanent") as u32;
-            self.open_loop(p, LoopAct::Activate { place, slot: i });
+            let sac_self = self.db.def(def).activated_def(aslot).cost.sac_self;
+            self.open_loop(p, LoopAct::Activate { place, slot: i }, sac_self);
         }
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {

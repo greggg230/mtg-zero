@@ -146,7 +146,7 @@ fn brainstorm(g: &mut MtgAz, back: [&str; 2], s: Step) {
 }
 
 #[test]
-fn bolt_then_fetch_merges_with_fetch_then_bolt() {
+fn bolt_then_fetch_merges_with_fetch_then_bolt_within_the_turn() {
     let base = built(start("main1", hand(&["Lightning Bolt", "Brainstorm", "Ponder", "Daze"])));
     assert!(key(&base).is_some());
     let mut a = base.clone();
@@ -160,13 +160,14 @@ fn bolt_then_fetch_merges_with_fetch_then_bolt() {
     let (la, lb) = (names(&a, &a.g.player(0).library), names(&b, &b.g.player(0).library));
     assert_ne!(la, lb, "the shuffles came out alike");
     assert_eq!(sorted(la), sorted(lb));
-    // Within the turn the fetch's loop record (loops.rs) holds the view it was activated in, which differs
-    // (Bolt resolved before it or not): no merge yet. The next turn begins without the turn's records.
-    assert_ne!(key(&a), key(&b), "the turn's loop records differ");
+    // The same key within the turn: the fetch's loop record (which holds the view it was activated in, different
+    // in the two orders) is left out, its source sacrificed; Bolt and the fetchland in the graveyard in either order.
+    assert!(key(&a).is_some());
+    assert_eq!(key(&a), key(&b), "Bolt-then-fetch and fetch-then-Bolt merge within the turn");
+    assert!(a.g.check_dropped_loop_records().0 > 0 && a.g.check_dropped_loop_records().1 == 0);
     next_turn(&mut a);
     next_turn(&mut b);
-    assert!(key(&a).is_some());
-    assert_eq!(key(&a), key(&b), "Bolt-then-fetch and fetch-then-Bolt merge at the next turn");
+    assert_eq!(key(&a), key(&b));
 }
 
 #[test]
@@ -189,7 +190,7 @@ fn a_fetch_before_a_draw_does_not_merge_with_one_after() {
 }
 
 #[test]
-fn brainstorm_in_the_draw_step_merges_with_brainstorm_in_the_main_phase() {
+fn brainstorm_in_the_draw_step_merges_with_brainstorm_in_the_main_phase_only_at_the_next_turn() {
     let base = built(start("draw", hand(&["Lightning Bolt", "Brainstorm", "Ponder", "Daze"])));
     let mut a = base.clone();
     brainstorm(&mut a, ["Daze", "Ponder"], Step::Draw);
@@ -198,7 +199,8 @@ fn brainstorm_in_the_draw_step_merges_with_brainstorm_in_the_main_phase() {
     pass_until(&mut b, p0_free(Step::Main1));
     brainstorm(&mut b, ["Daze", "Ponder"], Step::Main1);
     assert_eq!(names(&a, &a.g.player(0).library), names(&b, &b.g.player(0).library));
-    // The draw-step Brainstorm's draws count as draw-step draws (Player::draw_step_draws, encoded) for the turn.
+    // The draw-step Brainstorm's draws count as draw-step draws (Player::draw_step_draws, a network input) for the
+    // turn: they merge only as the next turn begins.
     assert_ne!(key(&a), key(&b), "the turn's draw-step draws differ");
     next_turn(&mut a);
     next_turn(&mut b);
@@ -263,6 +265,27 @@ fn scenario(order: u8, p0_hand: &[&str], p0_library: &[&str]) -> MtgAz {
     };
     az.g = s.hand(1, &["Force of Will", "Brainstorm"]).start();
     az
+}
+
+/// A Scenario position whose P0 graveyard holds `gy` (bottom first).
+fn with_graveyard(gy: &[&str]) -> MtgAz {
+    let mut az = built(start("main1", hand(&["Lightning Bolt", "Brainstorm", "Ponder", "Daze"])));
+    let s = Scenario::new(CardDb::constructed()).at(Step::Main1, 0).turn_number(3);
+    let s = s.hand(0, &["Lightning Bolt"]).library(0, &["Island", "Ponder"]).library(1, &["Island", "Daze"]).battlefield(0, &["Volcanic Island"]);
+    az.g = s.graveyard(0, gy).hand(1, &["Brainstorm"]).start();
+    az
+}
+
+#[test]
+fn graveyards_key_the_order_of_their_creatures_only() {
+    let a = with_graveyard(&["Dragon's Rage Channeler", "Lightning Bolt", "Murktide Regent", "Ponder"]);
+    // the non-creature cards elsewhere among them: the same key
+    let b = with_graveyard(&["Ponder", "Dragon's Rage Channeler", "Murktide Regent", "Lightning Bolt"]);
+    // the creatures the other way round: another key
+    let c = with_graveyard(&["Murktide Regent", "Lightning Bolt", "Dragon's Rage Channeler", "Ponder"]);
+    assert!(key(&a).is_some());
+    assert_eq!(key(&a), key(&b));
+    assert_ne!(key(&a), key(&c));
 }
 
 #[test]
