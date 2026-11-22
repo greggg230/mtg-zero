@@ -44632,16 +44632,21 @@ counters) and D's group fact (223's decision 4, `encoding_needs_fix_D.md` option
 finds" once a scramble mixes finds with other cards). Layout v7's rows stay byte for byte; layout v8 = v7 + six tail-only
 gated segments.
 
-### 232.1 Two design decisions (the user's to confirm)
+### 232.1 Design decisions (the user's answers of 2026-11-22: float32-close widening on rows with v8 tokens accepted, the keyed `lki` segment OK, layout v8 the default for new runs)
 
-1. **v8 is a new game, `mtg_v8`; `mtg` stays layout v7.** zero-core's tail segments are a constant of the game type
-   (`SearchGame::TAILS`) and its token layout is the game's (`GamePackage.tokens`), so the only way a v7 run's config
-   keeps working unchanged is that `mtg` keeps v7. `mtg_v8` (`engine/src/az/v8.rs`: `MtgV8Az`, every `SearchGame`
-   method forwarded to `MtgAz`; the same specs, rules, head, bots, auxiliary targets) is registered in the Python
-   module, the release worker and the game package (`layout_v8.json`, aux heads, readers, self-play specs, specs,
-   evaluation specs; a preset `mtg-v8-smoke`). A run moves by `python tools/fork_run.py <checkpoint> <new run> --game
-   mtg_v8` (zero-core's widen). The presets and the tools that load a checkpoint as `game='mtg'` stay on v7 (moving a
-   preset or a tool is a later, separate decision); no live run is forked here.
+1. **Layout v8 is the default: the game `mtg_v8`. The game name `mtg` stays layout v7, the compatibility layout of what
+   was made before.** zero-core chooses a token layout and an engine game by the game's NAME (`GamePackage.tokens`,
+   `SearchGame::TAILS`), and its encoding guard compares a checkpoint's recorded game with the game it is loaded as
+   (`zero.net.encoding_mismatch`: "game 'mtg' -> ..."). Every run, checkpoint, farm run, campaign and game record made
+   before layout v8 records the name `mtg` - so under zero-core as it is, a v7 run resumes unchanged only if `mtg` stays
+   layout v7 (renaming it would make the guard refuse every old checkpoint, the run's own included). So: `mtg_v8`
+   (`engine/src/az/v8.rs`: `MtgV8Az`, every `SearchGame` method forwarded to `MtgAz`; the same specs, rules, head, bots,
+   auxiliary targets) is every MTG preset's game, the game package's default game (`GamePackage(game='mtg_v8')`), every
+   co-training preset's resolver and what every tool that starts fresh plays (`mtgz.az.layouts.GAME`); `mtg` is what an
+   old run, an old checkpoint and an old record keep. A run moves by `python tools/fork_run.py <checkpoint> <new run>
+   --game mtg_v8` (zero-core's widen, 232.5). Making the name `mtg` itself layout v8 needs a zero-core change (an alias
+   in the encoding guard and the farm's graph check, so that a checkpoint recorded as `mtg` with layout v7 loads as a
+   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (232.9), not taken here.
 2. **E's "widen `rf`" is a segment keyed by the stale key.** The orchestrator's requirement - a v7 network widens onto v8
    computing what it did - rules out wider slots (a wider slot is one input product over more columns: equal to float32
    rounding only, 125.7); appended gated tail-only segments are exact (zero-core docs/az.md 43.8). So the stale object's
@@ -44744,7 +44749,11 @@ constructed 4a03293608edeba2, metagame d72ae0c904a0ffbd, EoE 5ffb850dd963bad0, d
 Re-recorded on purpose (`DIGEST_WRITE=1`) because the full digests now hash layout v8's rows: cube
 **9473f7debc4bceb3 -> c2b04fed925eed67** (2,294 of 2,500 games: their hashed rows hold a payment or last-known-information
 token), constructed **4a03293608edeba2 -> 38ef93512e0a7259** (537 / 570), metagame **d72ae0c904a0ffbd ->
-ed86a2f5ed21c436** (256 / 288); EoE (layout v6), driver (`mtg`) and dealt (the dealt Delver preset, `mtg`) unchanged.
+ed86a2f5ed21c436** (256 / 288). The digests that played the game `mtg` hash the default game's rows now too: the
+driver's (zero-core's driver on `mtg_v8`) **6a03572828250b86 -> cab97c01912f7e3f**, dealt (the dealt Delver preset, now
+`mtg_v8`) **f858b1880091d94f -> cc0d138ac5c80402**, dealt per seat **2719fdd478d14fa3 -> e2a91849b5b9f372**; with
+`DIGEST_ENCODING=v7` each gives main's value again (6a03572828250b86, f858b1880091d94f, 2719fdd478d14fa3). EoE (layout v6)
+unchanged.
 
 ### 232.7 Cost
 
@@ -44799,3 +44808,54 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
   desktop part 49, farm compat identical (the preset as `mtg`); the encoding tier's checkpoint loads and plays (8 games).
   (A first engine run on 191aa9dc failed one timing test of pytest, `test_cells_local_parallel`'s 300 s bound, on a Mac
   under another job's load; it passed on the rerun and in the full Mac pytest.) The next commit adds this paragraph only.
+
+### 232.9 The default and the compatibility layout: who plays which (the orchestrator's rework, 2026-11-22)
+
+**`mtgz.az.layouts`**: `GAME` = `mtg_v8` (the default), `GAME_V7` = `mtg`; `checkpoint_game` / `model_game` (the game a
+checkpoint or a network records), `load` (zero.net.load as that game), `use` / `current` / `load_used` (a tool plays the
+game of the checkpoints it loads - layout v8 until it loads one - and refuses a second layout in one process),
+`same_game` (a pair of networks of two layouts is refused), `record_game` (a record's own game; one written before
+layout v8 names `mtg` or none: v7).
+
+**An old run re-pinned onto this main without a fork** (e.g. legacy-meta3-r1, whose pinned config.json saves `"game":
+"mtg"` and whose checkpoints record game `mtg`, layout v7): `python -m mtgz.az.run --run <it>` resolves DEFAULTS <
+preset < the saved config, so its game stays `mtg` (a preset now says `mtg_v8`, but presets fill only settings a run has
+not saved); zero-core then plays, encodes, trains on and evaluates layout v7 (`package.tokens_of('mtg')`, version 7, 21
+tail segments), loads its own checkpoints as `mtg` (the guard passes), reads its v7 shards, and its farm jobs carry
+`"game": "mtg"`: a worker of this main plays them as `mtg` (the release worker registers both games) - byte for byte
+v7 (farm compat with `--set game="mtg"`: identical, no v8 token in its shards). Nothing to do for it, and nothing
+happens to it: no flag, no rewrite. Mistakes fail loudly: its checkpoint loaded as `mtg_v8` (the encoding guard, exit 78:
+the game and the token layout differ), a v8 network given to a `mtg` job (the worker refuses the graph: "another layout"),
+a run directory given `--game mtg_v8` over its v7 checkpoints (the guard at its start).
+
+**A new run** (any MTG preset, or none: the package's default game) is `mtg_v8`: layout v8 rows, v8 checkpoints (version
+8, 27 tail segments), v8 shards, farm jobs `"game": "mtg_v8"` (farm compat on the default preset: identical; 698 v8 tokens
+in its shards). `tests/test_mtg_az.py::test_old_runs_stay_layout_v7_and_new_runs_are_layout_v8` builds both from the same
+preset and checks the resolved game, the layout, the checkpoint loads and the refusals.
+
+**Call sites changed** (every place that named the game `mtg` to build a game, load a network or record one; each now
+takes the game from the checkpoint, the run or the record, and starts fresh as `mtg_v8`):
+* `mtgz/az/__init__.py`: the package's default game, every MTG preset's game and resolver (`mtg_v8`), `MTG_GAMES`, both
+  layouts' tokens, aux heads, readers, specs, evaluation specs, self-play specs; `mtgz/az/deck_reader.py` (both games).
+* `mtgz/az/farm_campaign.py`: a campaign's game from its checkpoints (`ckpt_game`: the pair must agree) - match and
+  self-play settings, the exports, the state, the spot check's replays, `describe` (an old campaign's state saved `mtg`).
+* `mtgz/az/keep_h2h.py` (either MTG game), `mtgz/az/build.py` (`build_game(game=)`, default the process's).
+* `tools/`: belief_eval, belief_search, combo_stats, delver_archive, delver_blunders, delver_rerecord,
+  delverai_blunder_games, delverai_meta, forks_check, gamedb (records by their own game), gamedb_bauble, gumbel_eval,
+  match_noise, matchup_agreement, mull_floor, position_lab, root_view, search_smoke (88 sites: `load(..., game='mtg')` ->
+  `load_used`, `Game('mtg', ...)` / `Driver('mtg', ...)` / `rowkit.kind('mtg')` / `replay_rows('mtg', ...)` / records'
+  `'game'` -> the loaded checkpoint's game); `tools/rowkit.py` (`kind(game)` without a default); `tools/gate.py`'s
+  search smoke (`mtg_v8`).
+* Unchanged on purpose: zero-core's own loaders (`zero.h2h`, judging, yardsticks, `zero.run`, the farm pool) already
+  take a checkpoint's or a run's recorded game; `tools/farm_build.py` / `tools/farm_campaign.py`'s `--game mtg` is a
+  worker build's repository name (zero-farm PROTOCOL 7: "mtg" for any MTG Zero run), not a layout; `mtg_eoe` (layout v6)
+  as it was.
+
+**Open for the user: the name.** The orchestrator asked for the name `mtg` itself to mean layout v8 (v7 as e.g.
+`mtg_v7`). zero-core refuses that without a change of its own: its encoding guard compares a checkpoint's recorded game
+with the game it is loaded as, and every checkpoint of every old run (each live run's own included) records `mtg`; the
+farm's graphs carry the game too. Doing it needs (a) a zero-core change - an alias table in the game package (`mtg_v7`
+accepts a checkpoint recorded as `mtg` with layout v7), honoured by the guard, `HeldOut`, the farm pool and the worker's
+graph check - pushed and pinned, and (b) each old run started once as `mtg_v7` (its config's game rewritten, e.g. by
+`python -m mtgz.az.run` on seeing v7 checkpoints under `mtg`). This branch takes neither: the old name keeps the old
+layout, the new layout is the default under its own name, and nothing old changes.
