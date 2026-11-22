@@ -674,6 +674,7 @@ impl Game {
         self.lki_attached.clear();
         self.lki_damage.clear();
         self.lki_toughness.clear();
+        self.prune_lki_power();
         self.prune_ref_lki();
         self.w3.lki_host.clear();
         self.w3.lki_loss.clear();

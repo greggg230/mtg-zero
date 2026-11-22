@@ -908,11 +908,14 @@ pub struct Game {
     /// are not kept; at each turn's start only the departures a reference of
     /// the public state still names stay (`Game::for_each_public_ref`).
     pub(crate) ref_lki: Vec<(ObjRef, DefId, u8)>,
-    /// Last known power of the slots that left the battlefield (CR 608.2h),
-    /// the latest departure of each: (slot, its `inc` on the battlefield,
-    /// its power as it left; an amount, the game aborts past
-    /// `num::AMOUNT_MAX`). Read through `Game::lki_power_of`; out of `Obj`
-    /// (rare and wide: objects stay small to copy, ENGINE.md 17).
+    /// Last known power of the objects that left the battlefield (CR 608.2h):
+    /// (slot, its `inc` on the battlefield, its power as it left; an amount,
+    /// the game aborts past `num::AMOUNT_MAX`). Every departure of this turn
+    /// (a slot that leaves, returns and leaves again keeps the first object's
+    /// power for an ability about it, ENGINE.md 223), and of each earlier turn
+    /// the latest of each slot (`prune_lki_power` as a turn begins). Read
+    /// through `Game::lki_power_of`; out of `Obj` (rare and wide: objects stay
+    /// small to copy, ENGINE.md 17).
     pub(crate) lki_power: Vec<(CardIdx, u32, i64)>,
     /// Loyalty activations (CR 606.3) of the slots that have any in their
     /// current incarnation (an entry goes as its object changes zones):
@@ -1557,16 +1560,29 @@ impl Game {
         &self.objs
     }
     /// Object `r`'s power as it last existed on the battlefield (CR
-    /// 608.2h), if `r` is its slot's latest incarnation there to leave.
+    /// 608.2h), if it left this turn, or was its slot's latest incarnation
+    /// there to leave (`lki_power`).
     pub fn lki_power_of(&self, r: ObjRef) -> Option<i64> {
-        self.lki_power.iter().find(|x| x.0 == r.idx).and_then(|&(_, inc, p)| (inc == r.inc).then_some(p))
+        self.lki_power.iter().find(|x| x.0 == r.idx && x.1 == r.inc).map(|x| x.2)
     }
-    /// Slot `idx` left the battlefield as incarnation `inc`, its power `p`.
+    /// Slot `idx` left the battlefield as incarnation `inc`, its power `p`:
+    /// the slot's earlier departures stay (an ability about one of them reads
+    /// that object's power, not the latest's; ENGINE.md 223).
     pub(crate) fn set_lki_power(&mut self, idx: CardIdx, inc: u32, p: i64) {
-        match self.lki_power.iter_mut().find(|x| x.0 == idx) {
-            Some(x) => *x = (idx, inc, p),
+        match self.lki_power.iter_mut().find(|x| x.0 == idx && x.1 == inc) {
+            Some(x) => x.2 = p,
             None => self.lki_power.push((idx, inc, p)),
         }
+    }
+    /// As a turn begins (with the other last known information, `flow.rs`):
+    /// each slot keeps only its latest departure's power, as before a turn's
+    /// several departures were kept (`lki_power`).
+    pub(crate) fn prune_lki_power(&mut self) {
+        if self.lki_power.len() < 2 {
+            return;
+        }
+        let all = std::mem::take(&mut self.lki_power);
+        self.lki_power = all.iter().copied().filter(|&(c, inc, _)| !all.iter().any(|&(c2, inc2, _)| c2 == c && inc2 > inc)).collect();
     }
     /// Permanent `c`'s loyalty activations (CR 606.3); none: all 0.
     pub fn loyalty_of(&self, c: CardIdx) -> Loyalty {
