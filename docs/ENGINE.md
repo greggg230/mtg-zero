@@ -43678,7 +43678,8 @@ card_ir/). The next commit adds this paragraph only (docs).
 **Why.** Lane A's Hogaak write-up (220.1.5) found payment defects outside its card; the user asked for them to be fixed
 now (the fix brief's bugs 2-5; bug 1, 601.2g/h's order, is agent M's, 222; bug 6 agent E's, 223). Branch
 `fix/hogaak-payment` from hogaak-a 29ca2296, main 45dbf2e1 (220.4) merged into it before the digests were explained and
-re-recorded. The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
+re-recorded; main 76973535 (217-222, no engine file) and 52d0bf9b (223, a search's finds by place) merged since, the
+digests checked again on each (221.7). The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
 reachable state, proved here; no docs/shortcuts.md entry), no encoding gap, digests re-recorded on purpose with what
 moved and why, a regression test per bug (CR in the name; castability by brute force), the search impact measured.
 
@@ -43864,7 +43865,7 @@ seven files), so nothing else moved; every part alone:
 | cube (`digests.txt`) | 44372545881ef768 | 64d656111d6fdae4 | 687b6323500faa3e | = main | **14e6735d8eb9cb4a** | 129 of 2,500 (r 95, h 34) |
 | cube `DIGEST_ENCODING=0` | a965c3fc8d3bba8a | | | | **5674f63cc335d204** | |
 | constructed | 91b6cf60576961a7 | = branch | = main | = main | **498c263f7048e81d** | 154 of 570 |
-| metagame | be3766d1f943c95c | = branch | = main | = main | **13bcd5302669c67c** | 36 of 288 |
+| metagame | be3766d1f943c95c; 4039d04b7971975e since 223 | = branch | = main | = main | 13bcd5302669c67c; **0d13940b6d659a83** on 223 | 36 of 288 |
 | EoE | c3a9c786030f42eb | = branch | = main | = main | **7e45b554b95820ed** | 94 of 160 |
 | dealt | f0bfffd26a70a753 | = branch | = main | = main | **fb7532e8a30a63f4** | 26 of 80 |
 | dealt per seat | c67b186ba7d00e51 | = branch | = main | = main | **7da4211ed6ab4f3e** | 11 of 60 |
@@ -43904,6 +43905,11 @@ with a +1/+1 counter, Spirit tokens with different counters), a **timestamp-orde
 `r 0` and per-seat `p 0` are equal (traced: no difference in 499 / 763 steps).
 
 Re-recorded once with `DIGEST_WRITE=1` on the Mac at f02256a7 (the values above; `digests_driver.txt` rewritten equal).
+**Main moved twice since** (both merged): 76973535 changes no engine file; 52d0bf9b (223) moves main's metagame digest
+(be3766d1f943c95c -> 4039d04b7971975e). On the merged code (1768d8a1) the bisect again: every part off = main's seven
+recorded files line for line; on, exactly the same games move in every file as before (the metagame's 36 the same 36),
+and only the metagame's combined digest differs from the values above - re-recorded alone: **0d13940b6d659a83**
+(36 of 288 lines from main's). The traces above were taken before 223's merge; the moved games are the same.
 
 ### 221.8 Search impact
 
