@@ -44320,7 +44320,10 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
   file); `az`, `limits`, `hidden` passed; pytest 164 + 238 + 164 + 171 passed and the desktop part 49 (5 skipped); the
   smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,452 rows, 150 batches);
   `gates/32ff04192975-engine.json`. (Earlier merges' gates, all passed: suite 506797fe, 94b2b780, 60ccf3d4; engine
-  94b2b780, 878d1623, 60ccf3d4.) The next commit adds this paragraph only (docs).
+  94b2b780, 878d1623, 60ccf3d4.) After e73e64a6's merge (228, tools only; this section renumbered 228 -> 229):
+  `gate.py engine --tested-sha 32ff0419 ...` on 293843e5 - **GATE PASSED WITH SKIPS engine 293843e54fc9 in 1442s** (the
+  live-run fence; the Mac's full-suite recheck 2,901 passed, every digest as recorded; `gates/293843e54fc9-engine.json`).
+  The next commit adds this paragraph only (docs).
 
 ### 229.10 For the merge with agent M and open items
 
