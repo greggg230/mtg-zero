@@ -106,7 +106,8 @@ pub fn fields() -> Vec<Field> {
         ff: Derived "the forced find's state (ENGINE.md 180, a self-play training aid): its seed from the game's and a record of the spell's resolutions (public events), the same in every world; deliberately never encoded - neither player is told a resolution was forced (the user's decision)",
         sightings: Hidden "each player's sightings of the other's cards, in order, each blind or a search's find (ENGINE.md 140.9): the viewer's own knowledge, the same in all its worlds; read only by the hidden deck's deal",
         sight_at: Derived "the sightings' clock (ENGINE.md 140.9)",
-        found: Public "which hidden cards are their owner's search's finds the other player still tells apart, in the order of the searches (ENGINE.md 140.9; a tutor's card put on top, a Doomsday pile): layout v7's found tokens (ENGINE.md 142.12)",
+        found: Hidden "the real game's record of its searches' finds for the sightings' order and weight (ENGINE.md 140.9), read only by the hidden deck's deal (`Game::sighted`); not the public fact (`finds_told`, ENGINE.md 223): a Doomsday pile's finds stay in it mixed with the graveyard cards the other player knew, whose places it no longer tells from theirs, and it lists them in the order of the searches - a pile's in its cards' definition order",
+        finds_told: Public "which hidden cards everyone tells apart as their owner's search's finds (ENGINE.md 140.9, 223: a tutor's card put on top, a Doomsday pile of finds only, a find exiled face down, until seen, put into a hand or mixed with a card that is not one): only the set of their places is public, so the rows (layout v7's found tokens, ENGINE.md 142.12) and the view list them by place",
         tokens: Derived "a fast path: tokens created so far",
         first_token: Derived "a fast path: the first slot made as a token or a copy",
         batching: Derived "transient: a simultaneous move in progress",
@@ -2275,26 +2276,24 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         // (ENGINE.md 123's "a card name was chosen as a permanent entered" - Disruptor Flute, Anointed
         // Peacekeeper - is the `Mark` perturbation above, layout v7's: ENGINE.md 125.)
-        // The cards found by their owner's library search that the other player tells apart (ENGINE.md 140.9,
-        // 142.12): a tutor's card put on top of the library.
-        p!("the top library card is its owner's search's find", "Game.found", |a, r| {
+        // The cards found by their owner's library search that everyone tells apart (ENGINE.md 140.9, 142.12,
+        // 223): a tutor's card put on top of the library.
+        p!("the top library card is its owner's search's find", "Game.finds_told", |a, r| {
             let p = player(r);
             let &c = a.g.players[p as usize].library.last()?;
             // (a find the other player has seen is one no longer: `Game::learn`)
-            if a.g.found.iter().any(|x| x.0 == c) || a.g.knows(opp(p), c) {
+            if a.g.finds_told.contains(&c) || a.g.knows(opp(p), c) {
                 return None;
             }
-            let t = a.g.sight_at;
-            a.g.sight_at += 1;
-            a.g.found.push((c, t));
+            a.g.finds_told.push(c);
             Some(format!("P{p}'s top library card"))
         }),
-        p!(rare "a search's find is no longer told apart", "Game.found", |a, r| {
-            let k = r.below(a.g.found.len().max(1) as u32) as usize;
-            if k >= a.g.found.len() {
+        p!(rare "a search's find is no longer told apart", "Game.finds_told", |a, r| {
+            let k = r.below(a.g.finds_told.len().max(1) as u32) as usize;
+            if k >= a.g.finds_told.len() {
                 return None;
             }
-            let (c, _) = a.g.found.remove(k);
+            let c = a.g.finds_told.remove(k);
             Some(format!("P{}'s find {k}", a.g.objs[c.i()].owner))
         }),
         // The picks in progress (ENGINE.md 125, 142.10, the Fable review's X3): one more pick - a card
