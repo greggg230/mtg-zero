@@ -44851,3 +44851,13 @@ the pool's matches), 0 recurrences: default 45,472 record-steps (+ 3,205 in matc
 42,883, delver_dealt 133,162 (+ 11,616), delver 133,162 (+ 11,824), doomsday 82,272, cross 38,443 (+ 5,642), hogaak 55,757
 (+ 5,539). **The meta3 smoke again** (232.7's command): eligible decisions 69.8 / 25.7 / 24.6 a game, branches 2 / 3 / 8,
 merged 1 / 0 / 0 (2 decisions); every record replays (the game database ingested all 96).
+
+**The gates of 9a546cc3** (after the merge; warm worktree, `--no-mac`, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, throttled beside
+the live runs): **GATE PASSED suite 9a546cc35869 in 661s** (the full engine suite 2,923 passed; the 2,000-game fuzz of
+default with 100 matches, default with hidden decklists, delver_dealt with 100 matches + 100 post-sideboard); **GATE PASSED
+WITH SKIPS engine 9a546cc35869 in 801s** (skipped: 7 live-run-hazard tests, fenced): the digests full 9473f7debc4bceb3 and
+encoding-free d3c144b6cc2977e5 (= main's), the formats constructed 4a03293608edeba2, EoE 5ffb850dd963bad0, driver
+6a03572828250b86, metagame d72ae0c904a0ffbd and dealt f858b1880091d94f (= the recorded files), `az` 57, `limits` 13,
+`hidden` 28, pytest 290 + 168 + 172 + 170 passed, the desktop smoke config, farm compat identical on
+`delver-mirror-bo3-dealt` (gate 2: 6 games, 2,468 rows, 150 batches; gate 3: 6 games, 2,598 rows), the suite evidence. The
+next commit adds this paragraph only (docs).
