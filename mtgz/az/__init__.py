@@ -87,7 +87,10 @@ PRESETS = {
     'mtg-smoke': dict(game='mtg', spec=SPEC, players=[2], iters=3, games=16, conc=16, sims=8, sims_fast=2,
                       p_full=0.25, temp_moves=30, arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=128, min_window_samples=0,
                       min_steps=10, lr_warmup_steps=0, yardstick='heuristic', eval_games=8, eval_sims=4,
-                      eval_random_games=4, elo_games=4, ref_games=8, threads=2, max_steps=20_000),
+                      eval_random_games=4, elo_games=4, ref_games=8, threads=2, max_steps=20_000,
+                      # (a few games here, never the farm: no reason needed beside a published farm build either way,
+                      # zero-core docs/az.md 70; every smoke preset made from this one inherits it)
+                      selfplay_local_reason='a smoke run: a few games on this machine'),
     # the first small self-play run (M5a, docs/ENGINE.md 21.6; CPU inference while other
     # projects' runs use the GPU): a few iterations at modest sims, evaluated against the
     # heuristic (the Elo anchor) and random. Rolling self-play keeps 384 games in flight (CPU
@@ -496,7 +499,13 @@ PACKAGE = register(GamePackage(
     settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, **FORCED_FIND_SETTINGS, publish={}, yardsticks={}),
     setting_classes=SETTING_CLASSES,
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
+    # the published farm build of this checkout's commit (docs/ENGINE.md 218, zero-core docs/az.md 70): a run whose
+    # self-play stays here beside one says why (selfplay_local_reason) at its first start
+    farm_build='mtgz.az.farm_builds:published_for_run',
     engine_paths=ENGINE_PATHS,
+    # zero.h2h's farm backend (docs/ENGINE.md 217, zero-core docs/az.md 69): `python -m mtgz.az.h2h` plays on zero-farm
+    # when the farm can play exactly the match (--backend auto, the default), else here - decided before any game
+    h2h_backend='mtgz.az.h2h_farm:BACKEND',
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',

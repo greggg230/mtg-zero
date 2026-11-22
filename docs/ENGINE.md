@@ -41637,8 +41637,9 @@ variants (14) apply to them unchanged.
 ### 215.1 What a campaign lists now
 
 `mtgz.az.farm_campaign.submit(..., alternates='release', variants='gpu=fp16,dml=matmul@amd')` - the defaults, so the
-CLI (`tools/farm_campaign.py submit`), the yardsticks' farm path (`measure_bo1_farm`, `play_pair_farm`: the cells and
-`tools/ab.py judge`) and anything else that calls `submit` get them without a change. Before anything is put
+CLI (`tools/farm_campaign.py submit`), the yardsticks' farm path (`measure_bo1_farm`, `play_pair_farm`: the cells) and
+anything else that calls `submit` get them without a change (not `tools/ab.py judge`, as this said before 217.6: it ran
+local `cells-match` until 217.4). Before anything is put
 (`prepare_alternates`, once per campaign, its result in the state):
 
 1. **The ids.** `alternates='release'`: every alternate the release index (`mtgz.az.farm_builds`, written by
@@ -41988,6 +41989,529 @@ its note. Farm tests on 969fc451: 50 passed, 2 skipped (worker not built). Gate:
 969fc4518db0 in 443s` (skips: the live-run fence only). The first run on 052d5e6b failed only in tests/test_mac_remote.py
 placed on the desktop, where Git Bash rewrote `MTGZ_MAC_HOME` (`/Users/...` -> `C:/Program Files/Git/Users/...`): run
 the gate with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` when a Mac-remote shard can land on the desktop. Docs only.
+## 217. Head-to-heads and judging on the farm by default: zero.h2h `--backend auto | farm | local` (zero-core pin c850a5d -> 1e26188, docs/az.md 69), routes per game, one backend per comparison, `cells-match` / `tools/ab.py judge` on the farm (branch `feat/h2h-backend`, 2026-11-21)
+
+**Why.** The user wants experiments that play many games on zero-farm by default. After 214-216 the farm could play any
+per-side head-to-head, on every route of a release, but only through `tools/farm_campaign.py submit/collect` with build
+ids; sessions reach for `python -m mtgz.az.h2h` because it is one command, and on 2026-11-20 the ISMCTS check (4 x 2,400
+games at 64 simulations, `--chance-k 0`) cost ~4 h of the desktop's GPU and paused a live run for 72 minutes. A review
+the user approved the same day (the maintainer's private notes, sections C and D) added: record the route of every farm
+game, one backend per comparison (a control is re-judged on the treatment's backend), a farm-vs-local estimate on the
+decision line, a larger share for these campaigns, a local top-up that never piles onto a live run, and `tools/ab.py
+judge` on the farm (215.1 claimed it was; it was not - 217.6).
+
+### 217.1 The one command
+
+`python -m mtgz.az.h2h A B [today's flags] [--backend auto|farm|local]`, default `auto` (zero-core docs/az.md 69:
+zero.h2h owns the flag and the output; the game package's `h2h_backend` hook decides and plays - here
+`mtgz.az.h2h_farm`, registered in mtgz/az/__init__.py):
+
+* **auto**: the farm when it can play exactly this match, else here - decided before any game, never a fallback in the
+  middle of a match, one stderr line saying which and why, e.g. `h2h: backend local - --b-lookahead is local-only (...)`,
+  `h2h: backend farm - campaign cmp-h2h-legacy-meta3-r1-1040v1040-573598a9e3, build 45917fd1 + CUDA/DML/macOS (the
+  release of 02e2d16c6e43: the same Rust inputs); estimate: farm ~3 setup + ~30 queue + ~47 play = ~80 min, local ~284
+  min of this machine's CPU`.
+* **farm**: the farm or a refusal (exit 2, `h2h: backend farm refused - <reason>`).
+* **local**: as before (the backend is not asked).
+
+**The conditions** (`h2h_farm.plan`, in this order; the first that fails is the reason):
+
+1. no local-only option: zero.seat_settings.LOCAL_ONLY (`--graphs`, `--a-graphs`, ..., `--lookahead`, `--a-lookahead`,
+   ...), `--precision` other than fp32, `--move-log`. `--device`, `--torch-threads`, `--conc`, `--groups`, `--sparse`,
+   `--max-rows` are local resources: ignored on the farm; `--threads` is the local top-up's.
+2. both checkpoints have their run's config.json next to models/;
+3. this machine can put a campaign: the admin token, data key and farm-release (zero.farm_def's paths);
+4. the checkout's tracked files are clean (`git status --porcelain --untracked-files=no`, the zero-core submodule
+   included): the farm plays the commit's build;
+5. a published build for the checkout's commit (`farm_builds.lookup`: its release, or one of a commit with the same Rust
+   inputs - a Python-only commit reuses its parent's), its signed worker on this machine. Without one, the reason names
+   `python tools/farm_release.py release <sha12>`. `--backend farm` does **not** run that release itself: a release
+   builds, gates and publishes (~20 minutes, the release lock, the Mac), a heavier step than a head-to-head should take
+   on its own; the watcher releases main's heads, and a Python-only branch commit reuses its parent's release;
+6. the farm job seats both sides exactly as the local match (`h2h_farm.job`): the job's settings are A's run's resolved
+   settings with the match's `eval_sims`, `c_puct`, `chance_k`, spec and `max_steps` 5000 (zero.h2h.match's), `sparse`
+   0, `eval_trace` 1; each seat's `set` holds every evaluation-seat setting (zero.seat_settings.SEAT_KEYS) in which that
+   side's own settings - its run's, with zero.h2h's per-side options over them (`h2h.sides_of`) - differ from the job's.
+   So B of another run plays its own run's rule, cache, margin and belief (a case `match_settings` refused before), and
+   one checkpoint on both sides is one network (`[{"net": 1, "set": ...}, {"net": 1, ...}]`). The farm's seats
+   (`zero.farm_eval.seat_dicts`) are compared with the local match's (`h2h._seats` without loading the networks) dict
+   for dict, and the build's own check-config must take the settings and seats (`farm_campaign.job_settings`). Then,
+   when the campaign still needs an export (`missing_exports`: a graph, its fp16 / matmul variants), this Python must
+   have onnx, onnxruntime and onnxscript;
+7. under `auto` only, big enough: games x the sides' mean simulations >= `--farm-min-work` (12,800 = 200 games at 64;
+   a sequential match counts its `--max-games`; 0 = any size). Below it the farm's fixed costs dominate - a checkpoint's
+   first export and GPU variants (~5-8 minutes of this machine), the queue (217.5) - while the match is a few minutes of
+   the desktop's GPU.
+
+**The estimate** (`h2h_farm.estimate`, on the line of a match that passes 1-6): the farm's minutes - setup (0.5 + 2.5
+for each graph still to export + 2.4 for gen 1's first fast-matmul variant, from the export cache), queue and play at the
+farm's measured pace (`farm_history`: the medians of the newest campaigns on this machine that kept a `first_result`
+and played no game locally - their put-to-first-result wait and their game-simulations a minute of play; without any:
+30 minutes and 270 a minute, 215.3's) - against this machine's minutes at its measured local rate (`--device cuda`:
+2,560 game-simulations a minute, the 11-20 check; the CPU: 45 a minute, 217.4's 8-game run beside the live runs).
+
+**The farm path** (`h2h_farm.Runner`). Each batch is an analysis campaign (165, 215): the plain match one, a sequential
+match (`--sprt` / `--target-se` / `--max-games`) one a batch - zero.h2h's `batch_loop` (docs/az.md 69) seeds batch k
+`seed + 7919 k` and stops where a local match would, on the same rows; each batch pays the queue, so a sequential match
+on the farm takes hours of wall time and no desktop GPU (`--backend local` with that reason when the wall time matters).
+The name: `cmp-h2h-<run>-<A>v<B>-<hash10>[-b<k>]`, the hash over both networks' sha256, the job's play settings, seats,
+pairing, seed, games and build - so the same command again resumes the campaign (or returns its collected result)
+instead of playing it again, and never collides with another user's `cmp-*` campaign (the yardsticks' are
+`cmp-<run>-y...` / `cmp-<run>-cells...`); a local state of that name with other inputs, or a coordinator run of that name
+without a state here, is refused. Every alternate of the release (CUDA, DirectML for AMD, macOS when the settings replay
+exactly there) with its GPU variants (215). **Share 0.5** (`--farm-share`; `AUTO_SHARE`): above the campaigns' 0.25 (the
+tool's default stays 0.25) - the alternative to a farm campaign is the desktop's GPU under the live run that trains on it
+(11-20: 72 minutes paused), and the campaign has a deadline. **The deadline** (per batch): `--farm-deadline-h`, else 1 h +
+0.25 s per game-simulation (at most 12 h) after the put; then the games the farm has not delivered are played here by
+the same worker (`--threads`), as every campaign does - each piece holding a slot of the heavy-command throttle
+(`tools/slotd.sh`, 166) while a run's supervisor is live on this machine (`h2h_farm.topup_wrap`, asked before each
+piece; the yardsticks' farm top-ups do the same), so a top-up waits for a slot rather than piling onto a live run's
+iteration. The line names the campaign so `python tools/farm_campaign.py collect <name> --deadline-now` can end the wait.
+
+**The output**: zero.h2h reads the batches' rows as a local match's (docs/az.md 69) - the same keys and meanings (`a`,
+`b`, `game`, `sims`, `chance_k`, `games`, `a_score`, `se`, `a_margin`, `elo_diff`, `unfinished`, `se_games`,
+`variance_ratio`, `pairs`, `elo_se`, `seconds` (here the wall time from the first put), `select_a`, `select_b`, `sims_a` /
+`sims_b`, `batches` / `stop` / `sprt` / `target_se`, `paired`), `merge` null when a side merges (the local driver's
+merged-tree counters), no local-only keys (`graphs_*`, `look`, `perf`, `max_rows`, `precision`, `sparse`), `per_game`
+(a best-of-three's games) not produced; then `backend` 'farm' and the runner's: `campaign` (a list for batches),
+`build`, `routes` (the default build and the alternates the campaign listed), `coverage` {farm, local, failed},
+`machines` (a short hash of each machine id - zero.gamerec.machine_tag, as game records keep it - with its games; 'local'
+for the top-up), `by_route` (217.2), `games_digest`, `spot` {checked, ok}, `routes_note`, `setup_s`, `queue_s` (the put
+to the first game), `wall_s`. A local run's line gains `backend` 'local' (its last key). `--records DIR` writes the
+traced games as a local match writes its own (`src` 'farm', `meta.backend` 'farm'). The backends' games are not
+bit-identical (torch here; the ONNX worker there, its GPU routes on float16 / MatMul variants): the line says which.
+
+**Elsewhere**: `farm_campaign.submit(..., job_class=None)`: an eval batch's lane class for the coordinator's backfill
+lane (zero-farm rev 25, not live yet; rev 24 refuses the field, so nothing passes it): when set, the run PUT's eval batch
+(a samples job's self-play) carries `class` and no `share`; None puts the bodies of before. `tools/farm_campaign.py
+submit` takes `--chance-k` (default 2, zero.h2h's; the 11-20 check used 0), its
+share default stays 0.25 (an explicit campaign is side work); `farm_campaign.pull` keeps `first_result` (the queue's
+wait).
+
+### 217.2 Routes per game
+
+A campaign plays on CPU fp32 (the default build), CUDA fp16 (the CUDA alternate's 'gpu' variant), DirectML fp32-MatMul
+('dml') and the Macs' CPU. `farm_campaign.collect` now names each game's route in games.jsonl - `route` {build, variant,
+label}: the lease's worker build and the model variant it was granted, labelled 'cpu', 'cuda:gpu', 'dml:dml',
+'macos-arm64', 'local' (the top-up), '?' unknown - and the result (and the readout) gain `by_route`: A's score, se and
+Elo per route (zero.h2h.summary of the route's games; paired games stay together - a lease holds whole pairs). The
+results listing of the coordinator's admin API names a result's lease and machine but not the lease's build or variant,
+so `lease_routes` reads them from the coordinator's leases table, read only (`npx wrangler d1 execute zero-farm --remote
+--json --command "SELECT lease_id, build_id, variant, machine_id FROM leases WHERE run = '<run>'"` in the zero-farm
+coordinator checkout: `ZERO_FARM_COORDINATOR` in the environment or ~/.config/zero/local.env, else
+~/zero-farm/coordinator), once per collect and only for the real coordinator (zero.farm_def.URL; a test's fake one: no
+read). Without it the routes are '?' and the log says why. The proper fix is the coordinator's (217.8).
+
+### 217.3 One backend per comparison
+
+Paired games of a lease keep both sides on one route, which protects an A-vs-B difference inside a campaign; a control
+measured on another backend does not. So:
+
+* **zero.h2h** plays both sides in one campaign (one backend) and the line names its backend.
+* **The cells' control** - a pair's reference-vs-reference baseline, against which every cell is judged - is played on
+  the cells' own backend (`yardsticks.resolve_base`): a cached baseline is reused only when it was played on the same
+  backend family ('farm', or 'local' = this machine's torch and the Mac's, which 198 made one on purpose; a baseline
+  that records no backend was played here). Another backend's baseline is kept and a new one is played beside it, under
+  its own key (the baseline's key and the family, hashed); the scheduler (`CellsWant._key`), `measure_base_core` and
+  `measure_cells_core` resolve the same key. A run's series keeps working: a farm run's baselines record 'farm', a local
+  one's 'local'. **Opt-out**: the yardsticks key `cells_reuse_base` true (`cells-match --reuse-control`, `ab.py`
+  `judge.reuse_control`) reuses the cached baseline whatever played it, said in the log and in the row (`base_backend`,
+  and a baseline row's `for_backend`).
+* **A standalone comparison keeps its backend** (`yardsticks.standalone_backend`, `cells-match`): under `auto`, its
+  earlier games - the baselines in its `--cache`, the rows of its `--out` - decide: played here, it stays here; played on
+  the farm, it stays there or is refused (never mixed by default; `--backend local` mixes explicitly).
+
+### 217.4 `cells-match` and `tools/ab.py judge` on the farm
+
+* **`tools/run_yardsticks.py cells-match`**: `--backend auto|farm|local` (default `auto`), `--reuse-control`,
+  `--farm-share` (0.5), `--farm-deadline-h` (1 h + 0.25 s per game-simulation of a chooser match); one stderr line
+  `cells-match: backend X - why`; the JSON gains `backend`. Under `auto` (beyond 217.3's history): the farm conditions of
+  217.1 (keys, a clean released checkout, a run config next to the checkpoint - its rule is both sides') and every chooser
+  match's and baseline's seats the local ones: `farm_campaign.match_job` - `match_settings` of the checkpoint's run with
+  each side's own margin_w / redet / eval_cache as its seat's set, so a reference without a run config (an A/B's copied
+  start) is played as locally (margin 0, redet on, no cache) - and the build's check-config. The farm path is the
+  yardsticks' `play_pair_farm` with the release index's build as its pool (`pool`, `own_base`), each baseline and each
+  cell a campaign `cmp-cm-<kind>-<hash>-c<chooser>` (a baseline named by its cache key, a cell by both networks and the
+  pair: a rerun resumes them).
+* **`tools/ab.py judge`**: one backend per experiment. `judge.backend` ('auto' | 'farm' | 'local') fixes it; null (the
+  default) decides it once: an experiment judged before this section (a match's result or a cached baseline in judge/)
+  stays 'local' (every judge before played here); a new one runs its first match with `--backend auto`, keeps what that
+  match was played on in `judge/backend.json` and passes it explicitly to every later match, which then refuses rather
+  than mixes. `judge.reuse_control` is `--reuse-control`. The edits are in the judge path only (the fork and farm-pause
+  guards are another branch's).
+* **The run's yardsticks are unchanged** (bo1_backend / cells_backend 'auto' = farm when the run has a farm pool and the
+  match is exact, 165): a new farm run's yardsticks go to the farm already, and widening 'auto' to the release index for
+  a run without a pool would flip the backend of existing local series (the user: never). Their farm top-ups now hold a
+  throttle slot beside a live run, and their cells' controls follow 217.3 (the same backend; a run's existing caches
+  keep working).
+
+### 217.5 End to end on the farm (2026-11-21)
+
+The 11-20 ISMCTS check scaled down, through the one command with the default backend, from this branch's clean
+checkout (68267a12; its release: 02e2d16c's build 45917fd1, the same Rust inputs), with the zero-farm environment's
+Python (the system Python has no onnx: 217.9):
+
+    python -m mtgz.az.h2h <legacy-meta3-r1>/models/iter_1040.pt <same> --paired --games 200 --sims 64 --chance-k 0
+        --spec "$(cat <scratch>/spec_dd_vs_delver.json)" --a-infoset-merge 1 --b-infoset-merge 0 --records <scratch>/rec
+
+* **The line**: `h2h: backend farm - campaign cmp-h2h-legacy-meta3-r1-1040v1040-573598a9e3, build 45917fd1 +
+  CUDA/DML/macOS (the release of 02e2d16c6e43: the same Rust inputs); estimate: farm ~3 setup + ~30 queue + ~47 play =
+  ~80 min, local ~284 min of this machine's CPU` (decided in 0.3 s; the 11-20 check's `--device cuda` would read ~5 min
+  of the GPU).
+* **Setup** (13:22:55 to the put at 13:29:35, 6.7 minutes on the desktop beside two live runs and other sessions'
+  gates): gen 1's export cached (214's), its matmul variant exported in 353 s (a new fast-matmul template, 215.3: 140 s
+  unloaded) and its fp16 variant in 0.4 s; the GPU self-tests on the desktop (CUDA alternate 50d28377 on the fp16 graph:
+  max abs 7.07e-3, CPU 2.51e-3; DirectML ffbd8d40 on the MatMul graph: 2.92e-6 / 3.99e-6, both deterministic); the macOS
+  route kept (`check-config --platform macos-arm64`: the settings replay exactly there); min_agent 0.3.5; the run, its
+  signed definition (seats `[{"net": 1, "set": {"eval_infoset_merge": 1}}, {"net": 1}]`), gen 1 and its variants, the
+  batch of 200 games at share 0.5.
+* **Queue**: the first lease 43 s after the put (a Mac on the stable channel - not a canary: rev 24's preemption is
+  canary-gated), the first result after 5.0 minutes (`queue_s` 301: the put to the first credited game).
+* **Leases** (the leases table, read only; machines as their short hashes): two Macs on the macOS build ae6de9d3 (no
+  variant, CPU) - 4 leases, **164 games**: 32 games in 4.7 and 5.0 min, 50 in 6.4 and 8.3 min (about 390-500
+  game-simulations a minute a lease, the batches' p50 2.2-2.9 ms); one NVIDIA PC on the CUDA alternate 50d28377 with
+  the `gpu` variant - 1 lease of 36 games issued at 13:44:48 whose agent ran it on its **CPU** (`stats.provider` 'cpu':
+  the float16 graph on a CPU, p50 39.9 ms a batch, ~15x the Macs') - **28 games** credited in 88 minutes (a 29th held for
+  its pair-mate), given back when the deadline paused the run; nothing on the default CPU build or the DirectML route
+  (no AMD PC leased). 192 of 200 games by about 15:10 (the Macs' 164 by 13:47:41, 18 minutes after the put).
+* **Deadline** (15:22:55, 1 h 53 min after the put: 1 h + 0.25 s x 200 x 64): the run paused, the 8 games the CUDA
+  lease had not delivered ([174, 176), [178, 184)) played here by the same worker, each piece first waiting for a slot of
+  the heavy-command throttle (two live supervisors on the machine: `topup_wrap`). The first `mtgz.az.h2h` process was
+  stopped at the deadline by its session's 2-hour background limit (a tool limit, not the code); **the same command
+  again** found the campaign by its name, resumed it (`resuming (192/200 games in)`, nothing put again, the estimate's
+  setup now ~0: the exports cached) and went on with the top-up. The throttle's 4 slots were held by other sessions'
+  gates and smokes, so the first piece waited about an hour (15:31 to ~16:25; the piece of 2 games then played in ~4 minutes) for a slot - the throttle works as designed, and has no queue
+  (217.9).
+* **Stopped there** (16:30, a wrap-up asked by the maintainer): 194 of 200 games done - 192 by the farm, 2 by the
+  local top-up ([174, 176)), 0 failed; the second top-up piece ([178, 184), 6 games) was still waiting for a throttle
+  slot and was stopped (the process tree killed by its root; no worker left); the coordinator run `paused` (the
+  deadline's pause). The campaign is intact under ~/.zero-farm/campaigns/: **the same command again** resumes it, plays
+  the 6 games here and prints the line, the routes and the records. So the JSON line, `--records`, the digests, the
+  spot check and `by_route` of this campaign were not produced in this section; the line's keys against a local run's
+  are shown by tests/test_h2h_backend.py (the line of a backend's batches = the local line of the same games, key for
+  key) and by the local 8-game run of the same command (`backend` 'local', keys: a, b, game, sims, chance_k, games,
+  a_score, se, a_margin, elo_diff, unfinished, se_games, variance_ratio, pairs, elo_se, seconds, select_a, select_b,
+  merge, paired, backend - a farm line adds its own keys after `backend`, with `merge` null). That local run (the same
+  match, 8 games, the desktop's CPU beside the live runs, 680.6 s): A 0.75 +- 0.14, `select_a`
+  'cq-n4-v50-s0.3-rv-b1m0.25-ism', `select_b` 'cq-n4-v50-s0.3-rv-b1m0.25', merge links 62,498 - 8 records written.
+* **Wall time** so far: 6.7 minutes of setup, 0.7 minute to the first lease, 18 minutes to 82% of the games (the Macs),
+  then 75 minutes of one slow CPU-played CUDA lease until the deadline, then the throttle's queue.
+
+### 217.6 Corrections
+
+* **215.1** listed `tools/ab.py judge` among the callers that got the farm's routes "without a change": it ran local
+  `cells-match` (ab.py's judge, `run_yardsticks.py cells-match` -> `measure_cells_standalone`, local games only) until
+  this section (217.4); 215.1 now says so.
+* Two hints named the wrong command for a farm build: `tools/ab.py`'s docstring (`tools/farm_build.py` -> `python
+  tools/farm_release.py release <sha>`) and `farm_builds.published_pool`'s refusal (`farm_release.py <rev>` ->
+  `farm_release.py release <rev>`).
+
+### 217.7 Tests and gates
+
+* zero-core (docs/az.md 69): tests/test_h2h_backend.py (5) and the earlier h2h tests - passed; privacy 0 findings.
+* Here: tests/test_h2h_farm.py (14): the backend registered with its options; the farm job's seats = the local
+  match's (no options: [net 1, net 2]; per-side options as sets, one network on both seats; B of a run with another
+  cache and rule: its own settings as its set); the local-only reasons; the conditions in order (each reason, the size
+  under auto only, `--backend farm` whatever the size, a sequential match's batches, no onnx only while an export is
+  needed); `release_of`'s command; `tracked_changes` on a scratch repository; deterministic `cmp-h2h-...` names
+  (another seed, games or option: another name; a batch's `-b<k>`); deadlines and work; the runner (one campaign a
+  batch, share 0.5, the release's alternates, the rows as zero.h2h's with records, the line's keys, machine ids only as
+  hashes, a state of other inputs refused); the estimate (the farm's medians, the export cache); the top-up's throttle
+  slot beside a live run; a standalone cells comparison keeping its backend; `submit --chance-k`; `job_class` in the PUT
+  body only when set. tests/test_ab.py `test_the_judge_plays_one_backend_per_experiment`; tests/test_cells_yardstick.py
+  (the farm cells test now with a farm-played control, the opt-out; `test_a_comparisons_control_is_played_on_its_own_
+  backend`). The farm, yardstick, cells, ab and h2h test files: 162 passed, 19 skipped (live-run fence, no local
+  worker).
+* **Gate** of 68267a12 (the code; the warm worktree warm-3, `--baseline-root` warm-2 at main 1e7416c5 with its engine
+  module from the artifact cache): **GATE PASSED WITH SKIPS optin-core 68267a12cf6e in 2149s** - privacy 0 findings;
+  core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each); the digest formats as
+  recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 56ff52ffef1b1913,
+  dealt a890c27da3c7d1a8); farm compat identical (gate 2: 6 games, 2,890 rows, 150 batches; gate 3 identical); cargo
+  test --test az 57 and --test hidden 28 passed; glassroad-zero, caverna-zero and kingdombuilder-zero built against
+  this core; core pytest 743 passed, 71 skipped - skipped: 17 live-run-hazard tests (fenced: live runs on this
+  machine). **Gate** of d951a044 (the code with `job_class`, warm-2): **GATE PASSED WITH SKIPS python d951a04455d1 in 960s** - privacy 0 findings; pytest 133 + 165 + 227 + 225 passed in four shards and 48 in the desktop part; the run-loop smoke 16 games, 0 unfinished - skipped: 8 live-run-hazard tests (fenced: live runs on this machine).
+* **The release** of 02e2d16c (the pin and the first code; `farm_release.py release 02e2d16c --no-speed`, 21 minutes):
+  build 45917fd1fd20906fcf47e9d3 (CUDA alternate 50d28377acfa726241ae2311, DirectML ffbd8d401fafe2df103c7dad, macOS
+  ae6de9d3ae904542992cc76b); FARM GATES PASSED (gate 2: 8 matches, 491 rows, 200 batches identical; gate 3: 12
+  matches, 710 rows identical), the Mac gates passed; speed gate skipped (`--no-speed`: the speed windows need an idle
+  machine). Every later commit of the branch is Python only and reuses it (`lookup`: the same Rust inputs).
+
+### 217.8 A coordinator proposal (not made)
+
+1. **Routes in the results listing.** `GET /v1/admin/run/{run}/results` could give each result its lease's
+   `build_id` and `variant` (a join on `leases` by `lease_id`; two fields). `collect` would then record every game's
+   route from the API it already reads, instead of reading the coordinator's database through wrangler (217.2), which
+   needs the maintainer's Cloudflare login on the collecting machine and a zero-farm checkout.
+2. **The fp16 variant on a CPU.** In 217.5 the CUDA alternate's lease went to an NVIDIA PC whose agent chose its CPU
+   (`stats.provider` 'cpu') and then ran the float16 graph there - 29 games of 36 in 88 minutes, the batches' p50 39.9 ms - while the Macs played the rest at
+   ~2.2-2.9 ms a batch, 390-500 game-simulations a minute a lease. A route granted for a GPU variant that the agent runs on its CPU could fall back to the gen's default
+   float32 graph (an agent change: the lease names both models, PROTOCOL 14.3), or the coordinator could grant the
+   variant only to machines whose bench picked the GPU. Not made here (agent / coordinator).
+3. **The queue** was not the bottleneck this time (217.5: the first lease ~1 minute after the put, a Mac; rev 24's
+   priority lane is canary-gated). The straggler was: one slow lease held the last 18% of the games for 75 minutes.
+   A lease that runs far behind its peers near a batch's end could be re-issued to an idle machine (the first copy of a
+   game wins, `dup_ids`) - the coordinator's call.
+
+### 217.9 Open points
+
+* **The default Python has no onnx.** The farm path exports networks with onnx / onnxruntime / onnxscript, which the
+  desktop's system Python 3.13 lacks (the zero-farm venv has them): `auto` there plays locally with that reason until
+  the campaign's exports are cached (they are for iter_1040 on the Doomsday-vs-Delver spec after 217.5). Installing the
+  three packages in the system Python (the user's call) makes `auto` reach the farm from the default command.
+* **auto as the default** stays on this branch; the coordinator's priority lane (rev 24, canary-gated today) is the
+  condition the maintainer set for merging it as the default.
+* **The yardsticks' auto** is unchanged (217.4): a run without a farm pool still measures here; widening it needs a
+  rule for runs whose series are local (keep them), which this branch did not add.
+* **A sequential match on the farm** pays the queue once a batch (each batch a campaign); fine with the queue measured
+  here, long when the farm is busy.
+* **Exports**: the matmul variant of a new architecture took 353 s on the desktop beside two live runs and another
+  gate (215.3: 140 s), the estimate's 2.4 minutes is low under load.
+* **cells-match's farm path** was tested with fakes and the plan only (no farm cells campaign was played in this
+  section); the yardsticks' own farm cells (215, legacy-meta3-r1) run the same `play_pair_farm`.
+* `job_class` (the coordinator's backfill lane, rev 25) is exposed but passed by nothing yet.
+
+## 218. Farm guards: forks on their own farm runs, a refusing worker stops loudly, inert pool settings said, a reason to stay local; `pool_settings` with the GPU variants and the macOS alternate (zero-core pin c850a5d -> 1694d97, zero-core `feat/farm-guards`, docs/az.md 70; branch `feat/farm-guards`, 2026-11-21)
+
+**Why.** The farm review of 2026-11-21 (the maintainer's notes; section C.2, C.7 and D.6-D.8) found experiments landing
+desktop-only, or worse, without a decision: a fork that kept `selfplay_remote pool:<parent>` published into the parent's
+farm run and `tools/ab.py` would then pause the parent's farm run (ab.py checked only the arms' overrides); a pool whose
+worker refused the settings retried "refused" for a whole A/B while the run played on the desktop; `pool_*` settings
+with `selfplay_remote ''` did nothing and silently turned the farm yardsticks off; the launchers people use are scratch
+scripts that call the run loop or fork_run, which no tool-level check reaches; and a `--pool-build published` run got
+no `pool_variants` (AMD PCs on their CPUs, the CUDA PCs on the float32 graph) and no macOS alternate (the Macs idle).
+
+**The pin** (zero-core docs/az.md 70; Python only, plus one trainer-only key in the worker's settings table, so the
+worker plays and encodes exactly as before - the farm-compat gate below):
+
+* `tools/fork_run.py --source`: every `pool:<farm run>` of the source's self-play (its setting or its
+  `selfplay_remotes` file) becomes the fork's OWN farm run, named after the fork's directory (`--farm own`, default) or
+  `--farm NAME`; a farm evaluation of the source's becomes `pool:<name>-eval`; the source's pool settings kept;
+  `--farm none` keeps the fork on this machine; a `--set` naming the source's farm run is refused. Printed as `FARM:`
+  lines. Every fork gets `fork.json` (`started` once its first start passed every start check, just before its
+  first iteration: a first start refused for any reason stays one).
+* The farm pool: a definitive refusal (`farm_pool.Refused`: the worker's check-config refusing the settings - the
+  keys and their statuses named, not cut off -, no worker, the platform or rolling check, a manifest refusing an
+  alternate) refuses the run's start (exit 78) when met by a new pool's settings check, or stops the pool loudly on
+  its thread (STOPPED + the fix in the log at once and every iteration, `selfplay.pools.<name>.stopped` in the metrics,
+  progress.json `state` 'stopped', the dashboard). Network and coordinator errors stay transient (retried).
+* The run's start: pool settings that do nothing are warned of; without a self-play pool and without a reason, a
+  published farm build of the commit (the game package's `farm_build` hook) refuses a fresh start or a fork's first
+  start (exit 78) and warns on a resume. The reason: the new run setting **`selfplay_local_reason`** (trainer-only),
+  or `$ZERO_SELFPLAY_LOCAL_REASON`.
+
+**This repo.**
+
+* `mtgz.az` registers `farm_build='mtgz.az.farm_builds:published_for_run'`: `lookup('HEAD')` of the checkout the run
+  runs from (an exact release, or a release of the same Rust inputs, 196), described with how to attach it
+  (`--selfplay-remote pool:<farm run> --pool-build published`). A machine without the builds index has none: no check.
+* `mtg-smoke` (and every smoke preset made from it: delver-smoke, delver-bo3-smoke, legacy-meta3-smoke, eoe-smoke, ...)
+  carries `selfplay_local_reason` 'a smoke run: a few games on this machine', so the README's quick start and the
+  gates' run-loop smoke start on a released commit; `tests/conftest.py` sets `ZERO_SELFPLAY_LOCAL_REASON` ('a pytest
+  run') for the runs the tests start (in process or as processes).
+* **`farm_builds.pool_settings(e, alternates=True, cfg=None, log=None)`**: `pool_alternates` is the CUDA alternate,
+  the DirectML one, then the entry's published macOS build (`mac_build`) **only when the run's settings `cfg` pass the
+  farm pool's own platform check** (`mac_check` -> `zero.farm_pool.platform_check` with the release worker:
+  `check-config --platform macos-arm64`, the libm rule, 216.1's reason for leaving it out - a run whose settings it
+  refuses would now have its pool stopped); and **`pool_variants`** names the variant each GPU alternate plays,
+  `VARIANT_OF` = CUDA 'gpu=fp16', DirectML 'dml=matmul@amd' (legacy-meta3-r1's launcher's 'gpu=fp16,dml=matmul@amd',
+  211 / 213.2; left out when the release has neither). A route left out is said through `log` (no published macOS
+  build, a failed macOS part, no run settings, the worker not on this machine, the platform check's refusal).
+  `published_pool` (`--pool-build published`) resolves the run's settings as zero.run will (`run_settings`: its
+  config.json < the flags) when the release has a macOS build and prints what it left out; `tools/ab.py`'s
+  `"pool_build": "published"` checks the source's settings with the arm's overrides; `farm_release.py lookup
+  --pool-args` has no run settings (the macOS build left out, said on stderr). `pool_export` is not set by it (a run's
+  choice: legacy-meta3-r1 runs 'fast').
+* **`tools/ab.py`**: `effective(s, arm, k)` - the arm's forked config.json, else the source's config + the overrides +
+  fork_run's farm rule (`zero.tools.fork_run.fork_farm`) - is what `check` judges (an arm that inherits the source's
+  farm self-plays on its own farm run and needs the spec's `"farm"` and its gates; the plan prints each arm's farm runs
+  and fork_run's notes); `farm_pause` (and `go` after each arm) pauses only the arm's own farm run - one that the
+  source, another arm or any run directory under `runs_dir` names too (`farm_owners`: selfplay_remote, eval_remote or
+  a selfplay_remotes file) raises `FarmNotOwn`: `FARM PAUSE REFUSED`, nothing PUT. The judge path is untouched.
+* **The yardsticks**: `farm_campaign.run_pool_note(cfg)` - pool settings set while selfplay_remote names no pool (the
+  farm path off: `run_pool` is None), or a pool without its build or worker - is logged by the watcher
+  (`tools/run_yardsticks.py watch`) as a `WARNING:` line at its start, next to its settings line.
+
+**Existing runs** (checked read-only on 2026-11-21 under the desktop's runs directory): no run has a fork.json, so
+every resume - live runs after PAUSE included - is a resume (at most warning lines, never refused); every farm run's
+pool state already has its template (`play`), so no settings check runs at a farm run's restart. legacy-meta3-r1 and
+the mirror fork lr3 attach their farm pools (no warning). The paused desktop-only runs would print the published-build
+warning on a resume from a released commit, and the inert-settings warning where they carry pool settings.
+
+**Measured** (the desktop, 2026-11-21, read-only): `lookup('HEAD')` 0.03 s; the pool's settings check on
+legacy-meta3-r1's settings with its release worker f22f63bb 0.23 s (56 play keys), an unknown key refused in 0.04 s
+naming it (`no_such_setting (unknown)`); `pool_settings` of main 1e7416c5's release (5e4023e2) with legacy-meta3-r1's
+settings 0.12 s: `pool_alternates` CUDA 1bf4304c, DirectML 2bc046a8 and macOS cc8db289 (the platform check passed),
+`pool_variants` 'gpu=fp16,dml=matmul@amd'.
+
+**Tests.** `tests/test_farm_release.py` (+3, 3 updated for `pool_variants`): `pool_settings`' variants and macOS
+route (passed, no settings, a libm refusal, not published, failed, no worker here; the variants per alternate);
+`--pool-build published` checking the run's resolved settings (config.json + flags) and leaving the macOS build out on
+a refusal with the reason printed; the `farm_build` hook (none / the release's description) and the run's start
+through it (refused first start, warned resume, a reason). `tests/test_ab.py` (+2): an arm's effective settings (its
+own farm runs, an override kept, an override naming the source's farm refused, a forked arm's config.json), the
+farm-pause guard (the source's farm run refused with nothing PUT, the CLI's `FARM PAUSE REFUSED`, its own paused, one
+another arm or another run's selfplay_remotes file names refused); the yardsticks' note. zero-core's own: docs/az.md 70.
+
+### 218.1 The gate of d5a9d0f0; the pin 1694d97 -> d32f6f8 (docs only)
+
+On d5a9d0f0 (218 with the pin 1694d97), in the warm worktree warm-4, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the automatic
+placement (5 steps on the Mac, 8 on the desktop throttled: two live supervisors here), `--baseline-root` warm-1 at main
+1e7416c5 (built; held through the gate by `warm_pool.py acquire`): **GATE PASSED WITH SKIPS optin-core d5a9d0f00028 in
+2506s** - privacy 0 findings; core tests 215 passed; checkpoint_compat byte identity (visits and cq, 3,185 samples each);
+the digests as recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame
+56ff52ffef1b1913, dealt a890c27da3c7d1a8 over 80 matches); farm compat identical (gate 2: 6 games, 2,890 rows, 150
+batches; gate 3: 6 games, 2,556 rows, 6 decks compared); cargo test --test az 57 and --test hidden 28 passed;
+glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 750 passed, 71 skipped -
+skipped: 17 live-run-hazard tests (fenced: a live run on this machine). An earlier gate run on 7755db6f (the pin
+f93ec16) was stopped after its builds, superseded by 1694d97's fix (a fork's fork.json marked only after every start
+check). The optin-core tier runs no pytest of this repo: the files 218 touches and their neighbours ran by hand on
+7755db6f / d5a9d0f0's code (tests/test_ab.py and tests/test_farm_release.py 35 passed; with the farm, yardstick, cells,
+loop, smoke, publisher, worker-farm and privacy files 175 passed, 22 skipped - the worker not built in that checkout,
+no onnx there, the live-run fence).
+
+This commit moves the pin to d32f6f8, zero-core docs/az.md 70's checks on top of 1694d97 (1694d97..d32f6f8: docs/az.md
+only, so the gate above stands for it). zero-core's own full suite on its branch (the desktop, beside two live runs,
+GPU visible): 790 passed, 31 skipped, 3 failed, none this change's (a CUDA determinism test that fails the same on
+c850a5d with the GPU busy, a CUDA-graph test and a rolling-quota timing test that pass alone; docs/az.md 70); its
+`smoke_all.sh --with-this-core --build-only`: 3 of 3 games, GREEN.
+
+On 296c62f0 (this pin, 218.1's docs), in the warm worktree warm-1, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the automatic
+placement: **GATE PASSED WITH SKIPS python 296c62f04bf5 in 1752s** - privacy 0 findings; build and the release worker;
+pytest 1-of-4 135 passed, 4 skipped, 2-of-4 (the Mac) 170 passed, 2 skipped, 3-of-4 148 passed, 1 skipped, 4-of-4 278
+passed, 6 skipped, the desktop part 48 passed, 5 skipped; the run-loop smoke (mtg-smoke: its `selfplay_local_reason`)
+16 games, 0 unfinished - skipped: 8 live-run-hazard tests (fenced: a live run on this machine). The python tier is
+this repo's pytest, which the optin-core tier above does not run.
+
+### 218.2 Open points
+
+* **Scratch launchers.** A launcher that starts a fresh run, or a fork, without a farm pool from a commit with a
+  published farm build is now refused at its start (exit 78) until it sets `selfplay_local_reason` (or attaches the
+  farm); a run resumed after PAUSE is never refused, only warned.
+* **A stopped pool leaves its farm run as it was**: the coordinator keeps serving the last generation registered before
+  the refusal until someone pauses the farm run (the log says so); the pool does not PUT `paused` itself.
+* **The farm evaluation** (`eval_remote pool:...`, zero-core docs/az.md 65) still retries its SystemExit refusals
+  (zero-core 65's "REFUSED (SystemExit)" retry): only the self-play pool's refusals are classified here.
+* **ab.py** checks an arm's farm use but not its `selfplay_local_reason`: a desktop-only arm beside a published build
+  without one is refused by the run at its first start, and `go` stops there (its supervisor ends 'refused').
+* `pool_settings` does not set `pool_export` (legacy-meta3-r1 runs 'fast'; the fp16 variant is the float16 copy of
+  whichever graph the run exports).
+* Merging with branch `feat/h2h-backend` (217): the zero-core branches meet in `GamePackage.__init__` (`farm_build` and
+  `h2h_backend` added at the same places) and at the end of docs/az.md (69 and 70); here, in `tests/test_ab.py`'s end
+  and the gitlink. All "keep both".
+
+## 219. The farm's Macs fuzz: a macOS fuzz build as each fuzz campaign's alternate, one set of campaigns per engine, failures keyed the same on every platform (branch `feat/backfill`, 2026-11-21)
+
+Why: in the week to 2026-11-21 the two farm Macs had no lease 43% of their time on the farm, because the fuzz
+campaigns were Windows-only (zero-farm PROTOCOL 11.4 already lets a campaign list one worker build per platform; no
+campaign did). Every live run and A/B arm also registered its own four fuzz campaigns even when its engine was main's
+(20+ campaigns of one commit, competing with each other). No rule, card, encoding, search or worker change; behaviour
+digests untouched. Python tools only: tools/farm_campaign.py, tools/fuzz_steward.py, tools/farm_release.py,
+tools/farm_gates.py.
+
+### 219.1 Fuzz campaigns with alternates (`farm_campaign.py create|update --alternate ID`)
+
+* `--alternate ID` (repeatable) names a signed fuzz build of another platform, found like the build (the farm_build dist
+  directories and `<ZERO_BIG_DISK>/zero-farm-builds`) and checked by its manifest only (a Mach-O executable does not start
+  on Windows): a worker, the build's game and profile, another platform than the build's (one per platform), the same
+  engine commit or one with the same farm worker inputs (`farm_builds.rust_key`). The build's own `fuzz-check --mode M
+  --env ... --platform <the alternate's>` must accept the mode there (197.3's libm refusals: `delver_dealt2-matches`,
+  `FUZZ_BELIEF`, ... stay Windows-only). The definition's `builds` are the build and its alternates.
+* **A PUT is the campaign's whole configuration** (the coordinator resets what a PUT leaves out). `FIELDS` now carries
+  `alternates`, `min_agent`, `gpu`, `providers` besides the old nine, and `current_fields` reads them back from GET (each
+  alternate without its `problems`), so `update`, `pause`, `resume` and the steward's share changes
+  (`put_campaign`) keep a campaign's alternates. Before, a steward share change would have dropped any alternate.
+  `update --no-alternates` removes them; `update --alternate ...` replaces the list.
+
+### 219.2 The steward's Macs and one set of campaigns per engine (tools/fuzz_steward.py)
+
+* **One set per engine** (`dedupe`, default on): targets of one engine hash (main and the runs pinned to it, an A/B's
+  arms) share one owner's build, campaigns, pace and local jobs; the others follow it. An owner whose run ends hands
+  everything to a follower; a later target of a retired owner's engine resumes those paused campaigns instead of making
+  four new ones; two owners of one engine in an older state merge (main's campaigns stay, the other's are paused). Only
+  the steward's own state named per-target campaigns, so nothing else changes (campaign names stay
+  `fz-<owner>-<sha7>-<alias>`).
+* **The Mac part** (`mac_farm`, default on): the owner gets a macOS fuzz build of its engine - found (the release's, see
+  219.3, or any signed one of the same engine hash; a found build that may never have been published is published
+  with `farm_build.py --publish-dir`), else built (`farm_build.py --profile fuzz --platform macos-arm64 --publish`: on
+  the Mac, signed here) - and every campaign whose mode macOS may play lists it (`farm_campaign.py update NAME
+  --alternate ID`; new campaigns are created with it). A failed macOS build is logged and tried again after
+  `mac_retry_h` (6 h); the Windows campaigns never wait for it.
+* `find_build` takes a platform (default windows-x64) and never returns another platform's build. Before, a macOS fuzz
+  build of the same commit in a dist directory could have been picked as a Windows target's build.
+* **Failures from a Mac** arrive like a PC's (the campaign's failures; the build id is the macOS build's, and the queue
+  records each seed's platform). They are replayed here on the Windows build of the same engine, and key to the same
+  id as on a PC: `neutral_site` names a chunk crash's `crash exit <code>` the same on both platforms (219.4); the
+  replay compares neutral sites.
+
+### 219.3 The release builds the macOS fuzz build by default (tools/farm_release.py)
+
+`mac_fuzz` now defaults to true (`--no-mac-fuzz` / release.json `"mac_fuzz": false` turn it off): every release's macOS
+part builds and publishes the macOS fuzz build next to the release build (216), and its Mac gates run 197.4(c), the fuzz
+identity, and the new part (d) below. The steward finds that build for main's engine without building one.
+
+### 219.4 Measured: Mac fuzz finds and reports failures the same way (`farm_gates.py --mac` parts c and d)
+
+New part (d) of `farm_gates.py --mac` (with the fuzz workers; `--no-fuzz-faults` skips it): one fuzz job with the
+worker's test faults (zero-core `ZERO_FARM_TEST_FAULT`, taken only by fuzz-profile builds whose process has
+`ZERO_FARM_ALLOW_TEST_FAULTS=1`) on both builds. The faults are a panic, an abort, a stack overflow and a hang at seeds
+first+2/5/8/11, `--seed-timeout 20`. Each side's `fuzz-final.json` (the failures an agent uploads) is read; it passes
+when the same seeds fail on both, nothing else does, and every failure's steward id (site and message, the site
+platform-neutral), mode and repro (the engine commit aside) are equal.
+
+On main 1e7416c5's engine: the Windows fuzz build c37801105831b0c62553f8b2 and the macOS fuzz build
+de486c2e6e785fd5df47f3b0 (signed, not published), with the Mac idle on AC power:
+
+* (c) identity: `games` seeds [1000, 1400), every seed's outcome identical (400 of 400).
+* (d) faults (93 s): the same four seeds fail on both, and the four ids are equal with neutral sites:
+
+| fault | site on Windows | site on the Mac | neutral site | steward id before / after |
+|---|---|---|---|---|
+| panic | `third_party/zero-core/crates/worker/src/fuzz.rs:346` | the same | the same | equal / equal |
+| abort | `crash exit 3221226505` (0xC0000409) | `crash exit -6` (SIGABRT) | `crash abort` | different / equal |
+| stack overflow | `crash exit 3221225725` (0xC00000FD) | `crash exit -6` | `crash stack overflow` | different / equal |
+| hang | `HANG games` | the same | the same | equal / equal |
+
+Without `neutral_site` one crash seen on a PC and on a Mac would have been two queue entries, and a Mac crash's replay
+here would have "failed at another site". A Unix abort and a stack overflow share exit -6; Rust's "has overflowed its
+stack" message, printed on both platforms, tells them apart. The steward's queue held no crash entries, so no id
+changes for an existing entry. The coordinator's own per-campaign site count (`first_of_site`) still sees the raw site.
+
+### 219.5 Tests
+
+* tests/test_farm_campaign.py: the PUT body's new fields, and a macOS alternate created, kept by update / share / pause
+  and by the steward's put pattern, removed and re-added. It is refused, with nothing signed or put, for: a libm-refused
+  mode (`delver_dealt2-matches`), another engine's build, the build's own platform, two of one platform, an unknown
+  build.
+* tests/test_fuzz_steward.py:
+  * neutral sites;
+  * one set per engine (follow, hand-over, pause, reclaim, re-pin, the merge of an older state);
+  * `find_build` per platform, including the release's copies;
+  * the Mac part (a build started, a failure retried only after `mac_retry_h`, the alternates on the three modes macOS
+    may play and not on `dd2m`, a follower never building);
+  * part (d)'s comparison on the measured outputs.
+* tests/test_farm_release.py: the switches' new default. The macOS-part tests keep `mac_fuzz` off in their
+  release.json; they test the release build's mechanics.
+
+Gate: `GATE PASSED WITH SKIPS python bbea9922540f in 1058s` (skips: the live-run fence only).
+
+### 219.6 Switching it on (not done here)
+
+Merge, then restart the steward from main AT ONCE (`python tools/fuzz_steward.py stop`, then the logon task or `run`).
+The order matters: the release watcher runs farm_release.py afresh for each release, so the merge turns `mac_fuzz` on
+for its next release, which puts a macOS fuzz build into a dist directory the steward searches. A steward still running
+the code from before this section has no platform filter in `find_build`: at main's next rebuild it would take that
+Mach-O build as main's Windows fuzz build (`mtg-<sha>-fuzz-macos-arm64` sorts before `mtg-<sha>-fuzz`), and its
+campaign creation would then fail on `info`. At the new steward's first check, main's and the live runs' duplicate
+campaigns merge (the followers' are paused), the owner's macOS build is found or built, and the three Mac-playable
+campaigns list it.
+
+What to watch:
+* a Mac takes a fuzz lease when no run needs it;
+* its seeds are credited;
+* its leases are not given back as starved. The agent's starvation check counts the worker process's CPU only, not its
+  chunk processes; that is the same on Windows, where fuzz works.
+
+The release watcher builds the macOS fuzz build from its next release on (219.3).
 
 ## 220. Legacy Hogaak Tempo: the deck's cards (lanes `hogaak-a`, `hogaak-b`, `hogaak-c`; integrated on `hogaak`, 2026-11-21)
 
@@ -42926,6 +43450,105 @@ on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 
 compared); the suite evidence of 1052673bd712 (`gates/1052673bd712-suite.json`); the Mac's full-suite recheck not
 needed (the tested sha differs in docs only); the checkout unchanged (`gates/93513ea86b60-engine.json`). The next
 commit adds this paragraph only (docs).
+
+## 221. zero-core pin c850a5d -> f1b5a8c: farm match leases in fewer, larger batches on evaluator lanes of their own (zero-core `feat/eval-speed`, docs/az.md 71; branch `feat/eval-speed`, 2026-11-21)
+
+**Why.** Farm match (eval) leases on a PC's CPU spent ~98% of their time in ONNX Runtime at ~2 rows a call: 32 games of a
+cells campaign took 45-60 minutes on one PC (215). The worker played them in the run's own `groups` (legacy-meta3-r1:
+4), both networks on one evaluator thread, one session with the job's 16-20 search threads.
+
+**The pin** (zero-core docs/az.md 71; the worker crate only - no engine, encoding or search change): an eval job's
+batches go to evaluator lanes of their own (on the CPU a lane per network seat, on CUDA one per generation, other GPU
+providers one lane as before); on the CPU a job line without `groups` plays in one group (never the settings'), each
+lane a session of at most 4 threads (macOS's 3). GPU jobs keep their groups. Only the batches change.
+
+**Parity** (2026-11-21, the desktop's CPU beside the live runs, below normal priority, the CPU pack d531424b;
+legacy-meta3-r1 iter_1040 against iter_1024, the yardsticks' best-of-one spec, 32 simulations, paired, traced):
+
+* *Old worker, layouts* (main 1e7416c5's release worker 5e4023e2): games 0-7 in the settings' groups 4 with 4
+  intra-op threads, in groups 1 with 2 threads, and as two leases (0-3, 4-7) in groups 1 with 1 thread: **every row and
+  trace digest identical** - the CPU graph answers a row the same in any batch and on any thread count.
+* *New worker against old* (this core's worker, built here): games 0-7 in its default layout (1 group, 2 lanes x 2
+  threads), with 4 lanes in 2 groups, and with `--lanes one` (the layout before) on games 2-5: **8 of 8 / 8 of 8 / 4 of
+  4 rows and digests identical to the old worker's**.
+* *zero-core's eval gate* (`tools/worker_eval_gate.py`, the new worker against `zero.farm_eval.match_driver`, groups 1,
+  sparse rows, 4 search + 4 ONNX Runtime threads, untraced): **8 of 8 rows identical, 60 batches identical**; both sides'
+  rows equal the old worker's.
+
+### 221.1 Measured on the farm, the gate, and the pin c850a5d -> 0dd8a1f (docs only)
+
+**Test campaigns** (2026-11-21; `tools/farm_campaign.py submit` through a wrapper that can put settings over the match
+settings, `--no-alternates` so every lease played on a PC's CPU; legacy-meta3-r1 iter_1040 against iter_1024, `--bo1
+--sims 32 --seed 11`, 128 games each, 32 or 64 games a lease; all paused when done): the old build (main 1e7416c5's
+release 5e4023e2), the old build with the campaign's `groups` 1, and two measurement builds of this branch released with
+`tools/farm_release.py release <sha> --no-mac --no-speed` from side commits not merged here (two groups / four lanes:
+8506cfa0; one group / two lanes, this layout: 89533c80; farm gates passed for both). Per farm PC from D1's lease stats
+(zero-core docs/az.md 71 has the whole table): two 16-thread PCs **237 -> 645 and 204 -> 655 games/h** with 32-game
+leases (392 -> 1,055 and 335 -> 1,047 leaves/s; leaves per ONNX Runtime call 2.4 -> 6.6-7.3), **768 games/h** (1,243
+leaves/s, 12.4 leaves a call) with 64-game leases; a 20-thread laptop 81 (one wide session) -> 182 games/h. The
+two-group layout lost at both lease sizes (576 / 656 games/h). **Every game identical across the campaigns** - rows and
+trace digests of the same 128 games played by the old and the new builds on four PCs in five layouts.
+
+**A CUDA lease** (a farm PC with an NVIDIA GPU, paused on the coordinator for the 31 minutes of the measurement; the CUDA
+alternates of both builds, float16 variants, 64 games, the job's groups 2): 407 -> 436 games/h (+7%, a lane per
+generation), all 64 rows and digests identical. One group there: 556 games/h, but 59 of 64 games differ (the float16
+GPU graph's answers depend on the batch shape), so GPU jobs keep the agent's groups.
+
+**Gate of 2023ffac** (optin-core, this worktree, baseline main 1e7416c5 in a warm worktree, `--offload local`,
+throttled beside the live run): every step passed - core tests 215, checkpoint_compat byte identity (visits and cq,
+3,185 samples each), the digests as recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver
+6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8), farm compat identical (gate 2: 6 games, 2,890 rows,
+150 batches; gate 3: 6 games, 2,556 rows), az 57 and hidden 28, the three other games built against this core - but
+core pytest 814 passed, 1 failed: `tests/test_measure.py::test_heldout_make_losses_and_guards`, which compares the
+`seconds` of two separate held-out evaluations (0.0 against 0.01 on the loaded machine); it passes alone 3 of 3 and
+this branch changes no Python. So formally GATE FAILED (a pre-existing timing flake). Also: MTG Zero's
+`tests/test_worker_farm.py -k eval` with the gate's worker: 2 passed.
+
+**WIP / not merged** (2026-11-21): main moved to 45dbf2e1 (the Hogaak lanes; no pin change, ENGINE.md 220 - this
+section conflicts only at the end of this file). Left: merge main, the optin-core gate on the merged commit (baseline
+main), then main. The pin 0dd8a1f differs from f1b5a8c by zero-core docs only. zero-core's `feat/farm-guards` also
+takes docs/az.md 70: this branch's section should become 71 at the integration.
+
+## 222. The farm integration: 217 + 218 + 219 + 221 on main together, zero-core pin -> 84bb5e1 (the merge of zero-core `feat/h2h-backend`, `feat/farm-guards`, `feat/eval-speed`; docs/az.md 69, 70, 71; 2026-11-21)
+
+**What merged.** Four branches made beside each other from main 1e7416c5, onto main 45dbf2e1 (the Hogaak lanes, 220):
+`feat/h2h-backend` 32955e7d (217: `--backend auto | farm | local`, `job_class` folded in), `feat/farm-guards` 0c6f972e
+(218), `feat/backfill` d369b948 (219: the Macs fuzz) and `feat/eval-speed` 366518b4 (221). Their zero-core halves
+(each from c850a5d) are one zero-core branch, `integrate/t2-farm` = 84bb5e1: `feat/h2h-backend` 1e26188
+(fast-forward from zero-core main d499716), then `feat/farm-guards` d32f6f8 (59dc7fe: `GamePackage` gets both
+`h2h_backend` and `farm_build` - the docstring, the keyword and the attribute kept both; az.md 69 then 70), then
+`feat/eval-speed` 0dd8a1f (84bb5e1). The pin moves to 84bb5e1, which replaces 221.1's WIP pin to 0dd8a1f; 84bb5e1
+differs from 1e26188 / d32f6f8 / 0dd8a1f by their merges only (the conflict resolutions below; no other code).
+
+**Numbers.** zero-core: eval-speed's section was az.md 70 on its branch, the same number as the guards' - it is
+**docs/az.md 71** now, and its references follow (crates/worker `evaljob.rs`, `job.rs`, `proto.rs`, `tests/evaljob.rs`;
+this file's 221, but for 221.1's historical note). This file: 217, 218, 219 and 221 were free on main (each branch had
+taken its number before 220 landed), so they keep their numbers and every reference to them stays right; the sections
+stand in number order (217-219 before 220). Conflicts, all keep-both: the end of this file (217 / 218 / 219 / 221
+against 220), the end of `tests/test_ab.py` (the judge's backend test and the farm guards' tests) and the gitlink.
+AGENTS.md, `tools/ab.py`, `mtgz/az/farm_campaign.py`, `mtgz/az/__init__.py` and `farm_builds.py` merged by themselves.
+
+**`auto` is the default** (zero.h2h, `cells-match`, `tools/ab.py judge`, as 217 built it). The user had said not
+before the farm's priority lane is live; the lane is live on the coordinator's canary machines only, and asked on
+2026-11-21 the user answered that canary counts.
+
+**What a user meets after this commit.** (1) A FRESH desktop-only start - or a fork's first start - from a commit with
+a published farm build is refused (exit 78) without `selfplay_local_reason` (`--selfplay-local-reason "<why>"`, env
+`ZERO_SELFPLAY_LOCAL_REASON`); a resume only warns (218). Scratch launchers that start such runs need the reason. (2)
+Head-to-heads go to the farm when they can and say so in one line (217). (3) The fuzz steward is restarted with the
+Macs' fuzz build on (219, approved by the user on 2026-11-21) right after main moves. (4) Eval jobs on CPUs play in one
+group on lanes per seat once a release built from this commit reaches the farm (221).
+**Gate** of 37bbfc82 (this section's commit; the warm worktree warm-3, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the system
+Python, the automatic placement - 5 steps on the Mac, 8 on the desktop throttled: four live supervisors here -,
+`--baseline-root` warm-2 at main 45dbf2e1 with its engine module from the artifact cache): **GATE PASSED WITH SKIPS
+optin-core 37bbfc820dfe in 3290s** - privacy 0 findings; core tests 215 passed; checkpoint_compat byte identity (visits
+and cq, 3,185 samples each); the digests as recorded (constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver
+6a03572828250b86, metagame be3766d1f943c95c, dealt f0bfffd26a70a753 over 80 matches); farm compat identical (gate 2: 6
+games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows); cargo test --test az 57 and --test hidden 28 passed;
+glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 755 passed, 71 skipped -
+skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core's timing flake
+(test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
+(docs).
 
 ## 223. A search's finds by place, not by search: the Doomsday-mirror hidden-information leak (branch `fix/dd-mirror-infoset`, 2026-11-21)
 
