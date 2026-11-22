@@ -10,6 +10,7 @@
 fn decisions_and_options_per_game() {
     let n: u64 = std::env::var("MEASURE_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
     let (mut dec, mut opts, mut cm_dec, mut cm_opts, mut multi, mut multi_opts) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let t0 = std::time::Instant::now();
     let mut legal = Vec::new();
     let mut chance = Vec::new();
     for seed in 0..n {
@@ -39,12 +40,14 @@ fn decisions_and_options_per_game() {
     let pool = std::env::var("FUZZ_POOL").unwrap_or_else(|_| "cube".into());
     let f = |a: u64, b: u64| if b == 0 { 0.0 } else { a as f64 / b as f64 };
     println!(
-        "MEASURE pool={pool} games={n} decisions/game={:.2} options/decision={:.3} decisions with 2+ options/game={:.2} their options={:.3} CastMana/game={:.3} its options={:.3}",
+        "MEASURE pool={pool} games={n} decisions/game={:.2} options/decision={:.3} decisions with 2+ options/game={:.2} their options={:.3} CastMana/game={:.3} its options={:.3} seconds={:.2} decisions/s={:.0}",
         f(dec, n),
         f(opts, dec),
         f(multi, n),
         f(multi_opts, multi),
         f(cm_dec, n),
-        f(cm_opts, cm_dec)
+        f(cm_opts, cm_dec),
+        t0.elapsed().as_secs_f64(),
+        dec as f64 / t0.elapsed().as_secs_f64()
     );
 }
