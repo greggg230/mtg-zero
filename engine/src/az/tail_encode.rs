@@ -73,7 +73,7 @@ pub mod seg {
 /// the order the encoder meets them (equal keys: the same gone object, Memory Jar's links and its
 /// delayed trigger); `DIGITS` the identity (`encode::digits`) where the viewer knows it: a
 /// permanent's as its slot shows it, any other card's only where `knows`. A live reference to a
-/// library card the viewer lost track of (`Game::ref_seen_live`, ENGINE.md 233) is written as a
+/// library card the viewer lost track of (`Game::ref_seen_live`, ENGINE.md 235) is written as a
 /// stale one (a key, no zone, no identity): whether it still names its object is not the viewer's
 /// to know. An object named by where it is now (a find by its place, a pick in progress, a
 /// counter's or a face-down card's object: `Cx::write_obj`) is live.
@@ -780,7 +780,7 @@ impl<'g> Cx<'g> {
     ///   object, which may have joined a hand's interchangeable twins or a
     ///   library dealt again in each world.
     /// * **A library card the viewer lost track of** (`Game::ref_seen_live`,
-    ///   ENGINE.md 233): as a stale reference - nothing (it has no departure
+    ///   ENGINE.md 235): as a stale reference - nothing (it has no departure
     ///   recorded), as its departure would record for the viewer.
     pub fn ref_def(&self, r: ObjRef) -> Option<DefId> {
         if !self.live(r) {
@@ -792,7 +792,7 @@ impl<'g> Cx<'g> {
     /// The identity the viewer sees of the object at card slot `c` now, named
     /// by where it is (a find by its place, a pick in progress, a counter's or
     /// a face-down card's object), not by a reference the public state holds:
-    /// [`ref_def`](Self::ref_def)'s live branch (ENGINE.md 233: a library card
+    /// [`ref_def`](Self::ref_def)'s live branch (ENGINE.md 235: a library card
     /// the viewer lost track of is lost only to a reference made before).
     pub fn obj_def(&self, c: CardIdx) -> Option<DefId> {
         self.live_def(self.g.obj_ref(c))
@@ -810,7 +810,7 @@ impl<'g> Cx<'g> {
     }
 
     /// Does reference `r` name an existing object as the knower sees it
-    /// (`Game::ref_seen_live`, ENGINE.md 233)? A library card the knower lost
+    /// (`Game::ref_seen_live`, ENGINE.md 235)? A library card the knower lost
     /// track of is written as a gone object is.
     pub fn live(&self, r: ObjRef) -> bool {
         self.g.ref_seen_live(self.knower, r)
@@ -1586,7 +1586,7 @@ fn write_found(cx: &Cx, tail: &mut TailBuf) {
     }
     for (k, c) in g.finds_by_place().into_iter().enumerate() {
         let x = tail.token(seg::FOUND, k as u32);
-        // (By its place: the object there now, ENGINE.md 233.)
+        // (By its place: the object there now, ENGINE.md 235.)
         if let Some(d) = cx.obj_def(c) {
             code(&mut x[..CODE], g.db, cx.ids, d);
         }

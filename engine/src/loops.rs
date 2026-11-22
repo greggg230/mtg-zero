@@ -148,6 +148,11 @@ pub struct LoopRec {
     pub hash: u64,
     pub act: LoopAct,
     pub path: Vec<LoopStep>,
+    /// The activated ability's cost sacrifices its source (a fetchland, Mishra's Bauble): the loop hash it records
+    /// holds that permanent on the battlefield, so no later state of the turn has it (the near-tie merge key leaves
+    /// such records out, ENGINE.md 233; `Game::check_dropped_loop_records`). A function of the action at the hashed
+    /// state: it changes no record's equality.
+    pub sac_self: bool,
 }
 
 /// An activation that is a loop action, in progress (`Game::loop_open`):
@@ -164,7 +169,7 @@ pub struct LoopOpen {
 pub(crate) struct Canon {
     ts: Vec<u32>,
     /// Whose loop hash (the decider's view): a reference is live as this
-    /// player sees it (`Game::ref_seen_live`, ENGINE.md 233).
+    /// player sees it (`Game::ref_seen_live`, ENGINE.md 235).
     viewer: PlayerId,
 }
 
@@ -236,7 +241,7 @@ impl Game {
     /// `p` answers YES to "may copy this spell" at this state: record it
     /// (module docs; its YES is the whole action).
     pub(crate) fn note_loop(&mut self, p: PlayerId, act: LoopAct, frame: Option<&Frame>) {
-        let rec = LoopRec { p, hash: self.loop_hash(p, frame), act, path: Vec::new() };
+        let rec = LoopRec { p, hash: self.loop_hash(p, frame), act, path: Vec::new(), sac_self: false };
         if !self.loop_taken.contains(&rec) {
             self.loop_taken.push(rec);
         }
@@ -246,9 +251,9 @@ impl Game {
     /// opened with the loop hash of the state now, before anything changes,
     /// and completes when the agenda is back to its length now
     /// (`loop_progress`).
-    pub(crate) fn open_loop(&mut self, p: PlayerId, act: LoopAct) {
+    pub(crate) fn open_loop(&mut self, p: PlayerId, act: LoopAct, sac_self: bool) {
         debug_assert!(self.loop_open.is_none(), "a loop action begun inside another's activation");
-        let rec = LoopRec { p, hash: self.loop_hash(p, None), act, path: Vec::new() };
+        let rec = LoopRec { p, hash: self.loop_hash(p, None), act, path: Vec::new(), sac_self };
         self.loop_open = Some(LoopOpen { rec, depth: self.agenda.len() as u32 });
     }
 
@@ -262,6 +267,25 @@ impl Game {
                 self.loop_taken.push(rec);
             }
         }
+    }
+
+    /// The check behind the merge key's dropped loop records (ENGINE.md 233): for each record of this turn whose
+    /// activation sacrificed its source (`LoopRec::sac_self`), is the loop hash of the state now, for its taker, the
+    /// one it recorded? (The loop rule would read the record only at such a state.) Returns (records checked,
+    /// recurrences); the fuzz counts both at every step and requires no recurrence.
+    #[doc(hidden)]
+    pub fn check_dropped_loop_records(&self) -> (u64, u64) {
+        if self.outcome.is_some() || !self.loop_taken.iter().any(|r| r.sac_self) {
+            return (0, 0);
+        }
+        let mut hashes: [Option<u64>; 2] = [None, None];
+        let (mut n, mut bad) = (0, 0);
+        for r in self.loop_taken.iter().filter(|r| r.sac_self) {
+            let h = *hashes[r.p as usize].get_or_insert_with(|| self.loop_hash(r.p, None));
+            n += 1;
+            bad += (h == r.hash) as u64;
+        }
+        (n, bad)
     }
 
     /// A decision of `player` asked while a loop action's activation is open
@@ -395,7 +419,7 @@ impl Game {
     /// waiting and delayed triggered abilities and the frames name: their
     /// last known information is hashed (`loop_lki`). In order of first
     /// mention. (Gone as `viewer` sees them: a library card it lost track of
-    /// too, ENGINE.md 233.)
+    /// too, ENGINE.md 235.)
     fn loop_stale_refs(&self, viewer: PlayerId, frame: Option<&Frame>) -> Vec<ObjRef> {
         let mut out: Vec<ObjRef> = Vec::new();
         let mut add = |r: ObjRef| {

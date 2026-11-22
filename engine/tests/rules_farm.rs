@@ -473,9 +473,9 @@ fn cr_701_25a_a_surveiled_blightsteel_colossus_waits_where_the_pile_s_order_does
     assert_eq!(seen[0].0, seen[1].0, "P1's view: the order of P0's looked-at cards shows");
 }
 
-// ---- ENGINE.md 233: a reference to a library card its viewer lost track of -------
+// ---- ENGINE.md 235: a reference to a library card its viewer lost track of -------
 
-/// ENGINE.md 233's state: P0 casts Faithless Looting with Ivora, Insatiable Heir on the battlefield and discards
+/// ENGINE.md 235's state: P0 casts Faithless Looting with Ivora, Insatiable Heir on the battlefield and discards
 /// Blightsteel Colossus and an Island; the Colossus' replacement shuffles it into P0's library (CR 614.1a, 701.20a)
 /// while Ivora's discard trigger, on the stack, names it there. Then P0 casts Frantic Search, draws two cards of the
 /// three - the Colossus in some shuffles, not in others - and discards two Islands. The game at the priority after,
@@ -524,7 +524,7 @@ fn shuffled_colossus_then_a_draw(seed: u64) -> (Game, bool) {
     (g.clone(), g.obj(bs).zone == Zone::Hand)
 }
 
-/// CR 701.20a (a shuffle: nobody knows the library's new order), 400.2 (a library is hidden), ENGINE.md 233 (the fuzz
+/// CR 701.20a (a shuffle: nobody knows the library's new order), 400.2 (a library is hidden), ENGINE.md 235 (the fuzz
 /// steward's queue entry 32da3af07aa6: default game 100219136 at e9ff0e24 under the `fuzz` profile, the open-decklist
 /// walk of P0's: "same keys, different views (first at 628 ...: Some(3000) / Some(7777))"): after the shuffle a draw
 /// may take the Colossus Ivora's trigger names or an Island, and the other player can't tell which. Its view and its
@@ -556,11 +556,11 @@ fn cr_701_20a_a_reference_to_a_card_shuffled_into_a_library_does_not_show_whethe
     assert_ne!(kept.2, drawn.2, "P0 knows what it drew");
 }
 
-/// ENGINE.md 233: what a library card's lost track (`Obj::lost`) leaves alone. A card put on top of a library
+/// ENGINE.md 235: what a library card's lost track (`Obj::lost`) leaves alone. A card put on top of a library
 /// stays a tracked object (its place is public), and a one-card "shuffle" leaves its card where it was; after a
 /// shuffle of several cards both players lost track of every card in it, its owner too, until the card leaves.
 #[test]
-fn engine_233_who_loses_track_of_a_library_card() {
+fn engine_235_who_loses_track_of_a_library_card() {
     let (g, drawn) = shuffled_colossus_then_a_draw(0);
     let lib = g.player(0).library.clone();
     for &c in &lib {

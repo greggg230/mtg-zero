@@ -291,7 +291,7 @@ pub fn fields() -> Vec<Field> {
         blocking: Public "the attacker it blocks",
         struck_first: Public "had first strike or double strike as this combat's first combat damage step began (CR 510.4; ENGINE.md 151.5)",
         known: Public "which players know a hidden card: who knows is public (a look, a reveal, a put-back, a shuffle are seen; ENGINE.md 72), what it is is not (leak-tested, ENGINE.md 10)",
-        lost: Derived "which players lost track of a library card among others since it entered (a shuffle, a private rearrangement, an order nobody knows: each is seen; ENGINE.md 233), read only through references (`Game::ref_seen_live`: a reference naming it shows such a player a gone object), as `Game.ref_lki` is",
+        lost: Derived "which players lost track of a library card among others since it entered (a shuffle, a private rearrangement, an order nobody knows: each is seen; ENGINE.md 235), read only through references (`Game::ref_seen_live`: a reference naming it shows such a player a gone object), as `Game.ref_lki` is",
         attached: Public "what it is attached to (CR 301.5, 303.4)",
         evoked: Public "it entered evoked (CR 702.74a)",
         flashback: Public "a spell cast with flashback: exiled when it leaves the stack (CR 702.34a)",

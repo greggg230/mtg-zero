@@ -433,7 +433,7 @@ impl Game {
             blocking,
             struck_first,
             known,
-            // (A library card's alone, ENGINE.md 233: no payment source is one.)
+            // (A library card's alone, ENGINE.md 235: no payment source is one.)
             lost: _,
             attached,
             evoked,

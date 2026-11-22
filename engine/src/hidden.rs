@@ -527,7 +527,7 @@ impl Game {
     }
 
     /// `players` (a bit per player) lose track of which of `cards` is which
-    /// (ENGINE.md 233: a shuffle, a private rearrangement, cards put in an
+    /// (ENGINE.md 235: a shuffle, a private rearrangement, cards put in an
     /// order nobody knows): their library cards' `Obj::lost`. One card alone
     /// is where it was put, so nobody loses track of it.
     pub(crate) fn lose_track(&mut self, cards: &[CardIdx], players: u8) {
@@ -542,7 +542,7 @@ impl Game {
         }
     }
 
-    /// Does `r` name an existing object as `viewer` sees it (ENGINE.md 233)?
+    /// Does `r` name an existing object as `viewer` sees it (ENGINE.md 235)?
     /// Live (CR 400.7), and not a library card `viewer` lost track of
     /// (`Obj::lost`): a draw, a mill or a search may have taken that card or
     /// one it was mixed with, and the viewer can't tell which - in one of its
@@ -1020,7 +1020,7 @@ impl Game {
             if !self.finds_told.is_empty() && domain.iter().any(|&c| !told.contains(&c) && !self.finds_told.contains(&c)) {
                 self.finds_told.retain(|c| !domain.contains(c));
             }
-            // (ENGINE.md 233: which of the domain's cards is which is the owner's alone now.)
+            // (ENGINE.md 235: which of the domain's cards is which is the owner's alone now.)
             let mixed: Vec<CardIdx> = domain.iter().copied().filter(|c| !told.contains(c)).collect();
             self.lose_track(&mixed, 1 << q);
             for c in domain {
@@ -1084,7 +1084,7 @@ impl Game {
         for &c in cards {
             self.objs[c.i()].known &= !(1 << owner);
         }
-        // (ENGINE.md 233: nobody can tell these cards apart by where they are.)
+        // (ENGINE.md 235: nobody can tell these cards apart by where they are.)
         self.lose_track(cards, 0b11);
         self.tidy_clouds();
     }

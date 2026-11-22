@@ -52,6 +52,8 @@ mod lab;
 mod match_worlds;
 #[path = "measure_cast_mana.rs"]
 mod measure_cast_mana;
+#[path = "merge_key.rs"]
+mod merge_key;
 #[path = "metagame.rs"]
 mod metagame;
 #[path = "post_board.rs"]
