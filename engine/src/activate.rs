@@ -1788,16 +1788,21 @@ impl Game {
             // (Of its source's chosen creature type: ENGINE.md 124.2.)
             let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
             let unit_mask = prods.iter().fold(0u8, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)));
-            let units = prods.iter().all(|v| v.iter().map(|&n| n as u32).sum::<u32>() == 1);
+            // (Each production n mana, and every combination of n mana of the mask's types among them - "n mana in any
+            // combination of colors", Cascading Cataracts' - is n units of the mask: a choice of each unit's type.)
+            let per = prods.first().map_or(0, |v| v.iter().map(|&n| n as u32).sum::<u32>());
+            let k = unit_mask.count_ones();
+            let combos = (1..=per as u64).fold(1u64, |c, i| c * (k as u64 + i - 1) / i);
+            let units = per >= 1 && prods.iter().all(|v| v.iter().map(|&n| n as u32).sum::<u32>() == per) && (per == 1 || prods.len() as u64 == combos);
             let (wn, wm) = self.pool_wild[p as usize];
             // (Only for the step's own activation: its next task is the step, the search's leaf or a feeding ability, which
             // read the pool through castability or choose its types first.)
             let step_next = matches!(self.agenda.last(), Some(Task::CastMana { card: None, .. }));
-            if self.oracle && step_next && picks > 0 && only == 0 && units && (wn == 0 || wm == unit_mask) && wn as u32 + picks <= u8::MAX as u32 {
+            if self.oracle && step_next && picks > 0 && only == 0 && units && (wn == 0 || wm == unit_mask) && wn as u32 + picks * per <= u8::MAX as u32 {
                 // (In the payment search, the mana's types not chosen yet: each one mana of a type of the mask, as the
                 // payment's castability counts it, `Game::pool_wild` - the search asks whether some combination
                 // completes the payment; ENGINE.md 229.4.)
-                self.pool_wild[p as usize] = (wn + picks as u8, unit_mask);
+                self.pool_wild[p as usize] = (wn + (picks * per) as u8, unit_mask);
             } else if self.oracle && picks > 1 {
                 // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order
                 // the mana was chosen in, so every order of one combination reaches one state - each combination once,
