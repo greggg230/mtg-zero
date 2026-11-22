@@ -44566,7 +44566,16 @@ cost of the cast reading tapped status).
 dropped; 12 spots gain 18 "CastMana: Pay the cost" (the step the old engine never asked, answered as it behaved);
 `check` 72 / 72. RULES_EPOCH (`tools/position_lab.py`) 1795330000.
 
-**Fuzz** FUZZ_PLACEHOLDER
+**Fuzz** (the Mac, 2d471c97: the final engine, before the four lost seeds were ignored): 20,000 games each of default
+(+ 1,000 matches), doomsday, hogaak_a, hogaak, delver_dealt, eoe, cross (each with matches) and sneak_show **PASSED**;
+default's "rest" failed only the three tests 230.6 ignores (14 passed); FUZZ_CHANCE=10 600, FUZZ_BELIEF=2 600 and the
+`fuzz` profile's 1,000 passed. EoE's two blow-ups of the search (Cascading Cataracts' n-mana combinations, seeds
+12,951 and 16,949) are gone in that run.
+
+**Gates** (f98464c1; 2d471c97 + the ignored seeds and these docs): `gate.py suite` **GATE PASSED** (2,913 engine tests;
+default, default hidden and delver_dealt 2k fuzz); `gate.py engine --tested-sha f98464c1 --expect-digest
+9473f7debc4bceb3 --expect-digest0 d3c144b6cc2977e5` **GATE PASSED WITH SKIPS** (the live-run fence's one pytest; every
+digest as recorded, farm compat identical, pytest 698 passed on the Mac and 49 on the desktop).
 
 ### 230.8 Known follow-ups
 
