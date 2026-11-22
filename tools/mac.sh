@@ -137,7 +137,8 @@ if [ "$BRANCH" = main ]; then WT="\$HOME/mtg-zero"; else WT="\$HOME/mtg-zero-wt/
 # once. \$USERS holds one file per running command, named by its pid: "<sha> <shared|excl> <what>"; a file whose
 # process is gone is dropped. \$LOCK (a directory holding its owner's pid; one whose owner is gone is taken over) is
 # held only while a command looks at \$USERS and syncs the checkout - an older mac.sh holds it for its whole command,
-# and is waited for. \$WANT: the commands waiting for the checkout; a later arrival that could share goes after them.
+# and is waited for. \$WANT: the commands waiting for the checkout, "<since, epoch seconds> <what>" - they go in the
+# order they began to wait, and a later arrival goes after them even where it could share.
 # (bash 3.2: macOS's own)
 LOCK="\$WT.mac-lock"
 USERS="\$WT.mac-users"
@@ -183,7 +184,7 @@ live() {        # live <dir>: the pids of its files whose process is alive (the 
   done
 }
 SAID=""
-WAITED=""
+SINCE=""        # when this command began to wait (its \$WANT file), '' = it has not waited
 while :; do
   take_lock
   OTHERS=""
@@ -195,14 +196,19 @@ while :; do
     OTHERS=1
     if [ "$MODE" = excl ] || [ "\$OMODE" != shared ] || [ "\$OSHA" != "$SHA" ]; then CLASH="\$OWHAT, pid \$p"; fi
   done
-  if [ -z "\$CLASH" ] && [ -n "\$OTHERS" ] && [ -z "\$WAITED" ]; then
+  if [ -z "\$CLASH" ]; then           # whoever has waited longer goes first (a newcomer after every waiter)
     for p in \$(live "\$WANT"); do
-      [ "\$p" = "\$ME" ] || CLASH="\$(cat "\$WANT/\$p" 2>/dev/null || echo '?'), pid \$p, waits for it and goes first"
+      [ "\$p" = "\$ME" ] && continue
+      OSINCE=""; OWHAT=""
+      read -r OSINCE OWHAT < "\$WANT/\$p" || true
+      if [ -z "\$SINCE" ] || [ "\${OSINCE:-0}" -lt "\$SINCE" ]; then CLASH="\$OWHAT, pid \$p, waits for it and goes first"; fi
     done
   fi
   [ -z "\$CLASH" ] && break
-  printf '%s\n' "$BRANCH ${SHA:0:12}" > "\$WANT/\$ME"
-  WAITED=1
+  if [ -z "\$SINCE" ]; then
+    SINCE="\$(date +%s)"
+    printf '%s\n' "\$SINCE $BRANCH ${SHA:0:12}" > "\$WANT/\$ME"
+  fi
   drop_lock
   if [ -z "\$SAID" ]; then
     echo "[mac] \$WT is in use (\$CLASH): waiting for it" >&2
