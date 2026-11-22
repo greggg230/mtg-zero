@@ -42256,6 +42256,9 @@ touches it).
   HOLD (the stew's PAUSE, `reports/gen_000.md`); after the PAUSE was removed `step distil_main` (4 sources: three routed
   to the acting deck's stew, retention 1/4 = the Doomsday mirror's rows of the best-of-one archive by `not_pairing`)
   was REFUSED once more - another live run had started - and ran with it in `beside_runs`; `step judge` (arm M, 24
-  matches) was under way when this was written. Under CPU load the tiny network's best-of-three match took ~40 s.
+  matches) then finished (exit 0): the report's cells table gained the main stew as X, main - deck and main - spec,
+  and the candidate's field rate per net (specialists 75.0%, deck stews 56.2%, main stew 53.1% - a tiny network on 50
+  distillation steps, so only the plumbing is measured); 64 matches in all at 2.531 games a match, 4.68 process-hours.
+  Under CPU load the tiny network's best-of-three match took ~40 s.
 * *Tests*: `tests/test_stew.py` 18, `tests/test_stew_judge.py` 6, `tests/test_stew_control.py` 4 (2 of them start
   processes: `live_run_hazard`).
