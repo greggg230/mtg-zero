@@ -383,6 +383,13 @@ impl Game {
             }
             return keys;
         }
+        // (A cast's 601.2g step asked where a test written before it answers the payment: `PASS` first, the step's
+        // "pay the cost" - no mana ability activated while casting; ENGINE.md 222.)
+        if self.pending.as_ref().is_some_and(|d| d.kind == crate::decision::DecisionKind::CastMana && d.action_of(c).is_none() && d.action_of(Choice::Pass).is_some()) {
+            let mut keys = self.choose(Choice::Pass);
+            keys.extend(self.choose(c));
+            return keys;
+        }
         let d = self.pending.as_ref().unwrap_or_else(|| panic!("no decision; outcome {:?}", self.outcome));
         let a = d.action_of(c).unwrap_or_else(|| {
             panic!(
