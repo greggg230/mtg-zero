@@ -317,7 +317,7 @@ pub mod mr {
 /// the card code where the viewer knows the card (`Cx::ref_def`: its owner, who found it; the other
 /// player knows it only once it is no find): the object (`rf::*`, `Cx::write_ref`: its zone, its
 /// owner, a face-down card's place) and, in a library, its depth from the top + 1 / 64 and in 16
-/// binary digits.
+/// binary digits. Slot k is the k-th told-apart find by place (ENGINE.md 224), not the k-th search.
 pub mod fs {
     use super::rf;
     pub const PRESENT: usize = 0;
@@ -1528,12 +1528,18 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     }
 }
 
-/// The `found` segment (`fs::*`, ENGINE.md 142.12): `Game::found` in the order of the searches.
-/// (A find is a card in a library or exiled face down - it leaves `Game::found` as it goes into a
-/// hand -, so its reference never names a hand card: no holder for `Game::for_each_public_ref`.)
+/// The `found` segment (`fs::*`, ENGINE.md 142.12): the finds everyone tells apart
+/// (`Game::finds_told`) by place, slot k the k-th (`Game::finds_by_place`, ENGINE.md 224: which
+/// search found which is not public after a shuffle or a private rearrangement among them, the set
+/// of their places is). (A find is a card in a library or exiled face down - it leaves them as it
+/// goes into a hand -, so its reference never names a hand card: no holder for
+/// `Game::for_each_public_ref`.)
 fn write_found(cx: &Cx, tail: &mut TailBuf) {
     let g = cx.g;
-    for (k, &(c, _)) in g.found.iter().enumerate() {
+    if g.finds_told.is_empty() {
+        return;
+    }
+    for (k, c) in g.finds_by_place().into_iter().enumerate() {
         let r = g.obj_ref(c);
         let x = tail.token(seg::FOUND, k as u32);
         if let Some(d) = cx.ref_def(r) {

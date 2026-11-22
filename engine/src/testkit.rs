@@ -492,10 +492,11 @@ impl Game {
                 v.extend(p.defs.iter().map(|&d| d as u64));
             }
         }
-        // The cards found by their owner's library search that the other player tells apart (ENGINE.md 140.9,
-        // 142.12), in the order of the searches: each one's owner, zone and depth in a library.
+        // The cards found by their owner's library search that everyone tells apart (ENGINE.md 140.9, 142.12),
+        // by place (ENGINE.md 224: which search found which is not public): each one's owner, zone and depth in a
+        // library.
         v.push(u64::MAX - 95);
-        for &(c, _) in &self.found {
+        for c in self.finds_by_place() {
             let o = &self.objs[c.i()];
             let depth = self.players[o.owner as usize].library.iter().rev().position(|&x| x == c).map_or(u64::MAX, |d| d as u64);
             v.extend([o.owner as u64, h64(&o.zone), depth]);

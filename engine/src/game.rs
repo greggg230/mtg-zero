@@ -690,8 +690,18 @@ pub struct Game {
     /// The clock of `sightings` and of the searches' finds (ENGINE.md 140.9).
     pub(crate) sight_at: u32,
     /// Cards found by their owner's library search that the other player can still tell apart (a card on top of the
-    /// library, a Doomsday pile's), with their search's time (ENGINE.md 140.9).
+    /// library, a Doomsday pile's), with their search's time (ENGINE.md 140.9): the real game's record for the
+    /// sightings' order and weight (`Game::sighted`); kept as 140.9 keeps it (a pile's finds stay marked when mixed
+    /// only with cards the other player knew), so it is not the public fact - `finds_told` is (ENGINE.md 224).
     pub(crate) found: Vec<(CardIdx, u32)>,
+    /// The public fact (ENGINE.md 224): the finds whose places everyone tells apart as their owner's search's finds -
+    /// a card its owner's library search put on top of the library, the finds of a Doomsday pile of finds only,
+    /// a find exiled face down -, until the card is seen, goes into a hand or is mixed by a shuffle or a private
+    /// rearrangement with any card that is not one (the other player then no longer tells which places hold finds).
+    /// Only the set of their places is public, not which search found which: the `found` segment and `view_of`
+    /// show them by place (`Game::finds_by_place`). Kept in every world too (unlike `found`): a search in a world
+    /// marks its finds as the real game's would.
+    pub(crate) finds_told: Vec<CardIdx>,
     /// The state was changed by hand (tests' perturbations, `Game::lose_sightings`): the sightings no longer
     /// describe it, and the deals weigh every seen card blind (ENGINE.md 140.9).
     pub(crate) sightings_lost: bool,
@@ -1335,6 +1345,7 @@ impl Game {
             sightings: Vec::new(),
             sight_at: 0,
             found: Vec::new(),
+            finds_told: Vec::new(),
             sightings_lost: false,
             ff: crate::forced_find::FfState::new(seed),
             tokens: 0,
