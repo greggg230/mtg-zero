@@ -43550,7 +43550,7 @@ skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core
 (test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
 (docs).
 
-## 224. zero-core pin 84bb5e1 -> f8a6211: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good (zero-core `fix/resume-fatal`; 2026-11-21)
+## 226. zero-core pin 84bb5e1 -> 899e0eb: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good; an NVIDIA card's CUDA ordinal by its LUID, a second DXGI listing of a card left out (zero-core `fix/resume-fatal` f8a6211, `fix/cuda-luid-ordinal` 899e0eb; 2026-11-21)
 
 **Why.** On 2026-11-21 a farm GPU lease went dead for 86 minutes after an owner-activity pause: at the `resume` the
 worker could not rebuild its GPU session (CUBLAS_STATUS_ALLOC_FAILED). The resume arm of the worker's control loop
@@ -43570,3 +43570,30 @@ or row change: the worker crate's control path only.
 -> the message, no `resumed`, still yielded until the caller quits; no link -> `resumed`) and
 `with_control_quits_the_job_on_a_failed_resume_and_returns_its_error` (end to end: yield, a failing resume, the job
 quit and joined, the error returned); `cargo test -p zero_worker --lib` 43 passed; clippy: nothing new.
+
+### 226.1 The CUDA ordinal by LUID (zero-core 899e0eb)
+
+**Why.** The farm releases of main 76973535 and 52d0bf9b FAILED at `cuda-selftest`: "Invalid device ID: 1, must be
+between 0 (inclusive) and 1 (exclusive)". The desktop has one NVIDIA card, but its user was on a remote desktop
+session, whose indirect display renders on the GPU - and DXGI then lists the card a second time under a new LUID
+(..f58f at DXGI 0, ..0b3978b9df at DXGI 2, the iGPU between). `gpu::dedup` keeps one adapter per LUID, so both stayed,
+and a CUDA-family provider's ordinal was the adapter's index among NVIDIA adapters: the probe tried the second listing
+as CUDA device 1. The probe code had not changed (the 16:37 release of 45dbf2e1 passed its self-test without the
+session). Any farm PC used over a remote desktop meets the same.
+
+**What.** zero-core `crates/worker/src/gpu.rs`: when DXGI lists two or more NVIDIA adapters, the CUDA driver
+(nvcuda.dll, loaded when asked: cuInit, cuDeviceGetCount, cuDeviceGet, cuDeviceGetLuid) gives each CUDA device's LUID;
+an NVIDIA adapter no CUDA device has the LUID of is left out of `gpu::adapters()` (`cuda_filter`), and
+`session::bind` gives CUDA / TensorRT-RTX the CUDA ordinal of the adapter's LUID (`device_ordinal`) - also right when
+CUDA's device order is not DXGI's (several cards, CUDA_DEVICE_ORDER). One NVIDIA adapter (most PCs): the driver is
+never asked, ordinal 0, as before; a driver that fails, or LUIDs none of which DXGI lists: nothing left out, the rule
+of before. AMD (MIGraphX) and DirectML unchanged.
+
+**Checked.** On the desktop under the remote desktop session, `gpu::adapters()` lists the RTX 5090 once (..f58f) and
+the iGPU; before, three adapters. Test `gpu::tests::a_second_listing_of_an_nvidia_card_goes_and_cuda_names_the_ordinal`
+(that desktop's listing; the second listing's old ordinal 1; no driver answer = before; two cards in CUDA's order; one
+card; AMD). `cargo test -p zero_worker --lib` 44 passed; clippy: nothing new.
+
+**Left (zero-farm agent, not here):** the agent's own DXGI list (agent/src/profile.rs `adapters`) still shows the
+second listing in its profile; a lease or probe sent to that LUID now fails with "no adapter with LUID ... on this PC"
+(before: the CUDA device-id error). The agent could drop it the same way (NVML's device LUIDs).
