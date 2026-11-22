@@ -44220,9 +44220,9 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
 
 * **Full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast` on the Mac, incl. `az`'s public-state
   gate: no new gap - a payment's classes are not part of the input): its first run on the merged code found the stale
-  `leaving_card` name and the three moved tests of 227.6; after them, every binary passed. On the final engine (94b2b780,
-  main 52d0bf9b merged) the suite gate's run: **2,886 passed**, 24 binaries (16 new). Pytest: the engine gate's
-  (below), 740 passed.
+  `leaving_card` name and the three moved tests of 227.6; after them, every binary passed. On the final engine (60ccf3d4,
+  main 50205980 merged) the suite gate's run: **2,896 passed**, 24 binaries (16 new). Pytest: the engine gate's
+  (below), 759 passed.
 * **Fuzz** on the Mac (`tools/fuzz_shards.py`, 24 shards, 12 at once; 0c2482fe, the tested engine), 20,000 games each,
   every one **PASSED**: default (+1,000 matches) 200 s, eoe 544 s, delver (+1,000 matches, +1,000 post-sideboard) 158 s,
   doomsday 169 s, hogaak_a 111 s, sneak_show 99 s, cross (+1,000 matches, +1,000 post-sideboard) 171 s, hogaak (+1,000
@@ -44233,18 +44233,18 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
   15,804 belief worlds; 19 passed.
   (These 20,000-game runs are of 0c2482fe, before main's 223 was merged; the merged engine's are the suite gate's.)
 * **The gates** (this worktree, its Mac steps on the Mac, the desktop's throttled beside the live legacy-meta3 runs;
-  the system Python): `python tools/gate.py suite --fuzz-pools default,eoe,delver_dealt,hogaak,cross` - **GATE PASSED
-  suite 94b2b780df17 in 631s** (privacy 0 findings; the full engine suite 2,886 passed; the sharded 2,000-game fuzz of
-  each pool, with 100 matches + 100 post-sideboard where the pool has them; the checkout unchanged;
-  `gates/94b2b780df17-suite.json`); `python tools/gate.py engine --tested-sha 94b2b780df17 --expect-digest
-  14e6735d8eb9cb4a --expect-digest0 5674f63cc335d204` - **GATE PASSED WITH SKIPS engine 94b2b780df17 in 1261s**
-  (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live run here): the digests full
-  14e6735d8eb9cb4a and encoding-free 5674f63cc335d204 (= expected), the formats constructed 498c263f7048e81d, EoE
-  7e45b554b95820ed, driver 6a03572828250b86, metagame 0d13940b6d659a83 and dealt fb7532e8a30a63f4 (each = the recorded
-  file); `az` 57, `limits` 13, `hidden` 28; pytest on the Mac 124 + 197 + 181 + 189 passed and its desktop part 49
-  passed (5 skipped); the smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,452
-  rows, 150 batches; gate 3: 6 games, 2,598 rows, 6 decks); `gates/94b2b780df17-engine.json`. The next commit adds
-  this paragraph only (docs).
+  the system Python), on the final engine 60ccf3d4 (main 50205980 merged): `python tools/gate.py suite --fuzz-pools
+  default,eoe,delver_dealt,hogaak,cross` - **GATE PASSED suite 60ccf3d4edc6 in 787s** (privacy 0 findings; the full
+  engine suite 2,896 passed; the sharded 2,000-game fuzz of each pool, with 100 matches + 100 post-sideboard where the
+  pool has them; the checkout unchanged; `gates/60ccf3d4edc6-suite.json`); `python tools/gate.py engine --tested-sha
+  60ccf3d4edc6 --expect-digest 14e6735d8eb9cb4a --expect-digest0 5674f63cc335d204` - **GATE PASSED WITH SKIPS engine
+  60ccf3d4edc6 in 1141s** (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live run here): the
+  digests full 14e6735d8eb9cb4a and encoding-free 5674f63cc335d204 (= expected), the formats constructed
+  498c263f7048e81d, EoE 7e45b554b95820ed, driver 6a03572828250b86, metagame 0d13940b6d659a83 and dealt fb7532e8a30a63f4
+  (each = the recorded file); `az` 57, `limits` 13, `hidden` 28; pytest on the Mac 150 + 181 + 181 + 198 passed and its
+  desktop part 49 passed (5 skipped); the smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2:
+  6 games, 2,452 rows, 150 batches); `gates/60ccf3d4edc6-engine.json`. (Earlier merges' gates, all passed: suite
+  506797fe and 94b2b780, engine 94b2b780 and 878d1623.) The next commit adds this paragraph only (docs).
 
 ### 227.10 For the merge with agent M and open items
 
