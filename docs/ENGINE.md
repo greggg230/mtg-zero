@@ -44776,3 +44776,15 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
   three tests gate.py runs on the desktop (`PYTEST_DESKTOP_ONLY`: the artifact cache's Windows paths, the deck scorer's
   bit-for-bit fixtures, the run publisher's supervisor) and `test_presets_leave_shard_sparse_off`, which now names
   `mtg_v8`'s preset as a game with tails (fixed).
+* **The real-checkpoint widen**: a copy of a live meta3 run's checkpoint (legacy-meta3-r1 iteration 1233, layout v7, read
+  only) forked by `python tools/fork_run.py <copy> <scratch run> --game mtg_v8` (the six segments "gate 0"; the run not
+  started) and compared with the original on Delver, Doomsday, Sneak and Show and Hogaak mirror games played in lockstep
+  in both games (CPU, eager): 1,640 of 1,640 rows without a v8 token bit for bit; 136 rows with v8 tokens, 58 bit for bit,
+  the others within 2.7e-6 (232.5: the attention over more keys).
+* **Farm parity of layout v8**: `tools/farm_compat.py --set game="mtg_v8"` (the release worker of this commit, the Delver
+  best-of-three dealt preset as the game `mtg_v8`): gate 2 identical (6 games, 2,468 rows, 150 batches: dense features,
+  tails, overrides) and gate 3 identical (6 games, 2,598 rows): **farm compat: PASSED**. The gates' own farm compat
+  (the preset as `mtg`, layout v7) passed too.
+* `python tools/gate.py suite` on 191aa9dc: **GATE PASSED suite 191aa9dc6771 in 575s** (privacy 0 findings; the full
+  engine suite 2,915 passed in 24 binaries; the 2,000-game fuzz of default, default with hidden decklists and
+  delver_dealt passed).
