@@ -46147,6 +46147,28 @@ touches it).
   it is: the main stew's first distillation (after generation 0's hold) needs them replayed as v8 rows or another
   retention source - decided at the hold.
 
+### 239.4 The merge onto main: lanes 1-3 together, layout v8, the gates
+
+Integration branch `feat/stew-int`: lane 1 (`feat/stew-distill`), lane 2 (`feat/stew`), lane 3 (`feat/pair-sideboarding`,
+240) merged onto main and kept merged with it as main moved (217-238), the stew moved onto layout v8 (239.2's last
+bullet), the sections numbered at the merge (239, 240; zero-core docs/az.md 76). The zero-core pin -> 324b2b7 = zero-core
+`feat/multi-distill-int`: `feat/multi-distill` merged onto zero-core main 61341a7 (conflicts: docs/az.md, and
+`GamePackage`'s hooks - game_aliases and row_selectors both kept), fast-forwarded as zero-core main with this merge.
+
+Fixes found while integrating: the fuzz pool meta_pair's pairing spec carrying a forced find a pairing can never apply
+(240.7); `test_deck_tilt`'s preset list (the pair presets are constructed best-of-three presets with the tilt);
+`test_stew`'s init check (dealt decks per seat parse now); `test_rowselect`'s shards written with the layout record.
+
+**Gates.** `suite` (fuzz pools default, default+hidden, delver_dealt, meta_pair) on c8ae91af: GATE PASSED (the full engine
+suite, each pool 2,000 games). `python` on c8ae91af: GATE PASSED WITH SKIPS (the live-run fence). `engine --tested-sha
+c8ae91af` on 2931eecb (main 15bed950 merged, the sections numbered): GATE PASSED WITH SKIPS (the live-run fence) - the
+digests full c2b04fed925eed67 and encoding-free d3c144b6cc2977e5 (= main's), constructed 38ef93512e0a7259, EoE
+5ffb850dd963bad0, driver cab97c01912f7e3f, metagame ed86a2f5ed21c436, pair 80562a6aa452b765, dealt cc0d138ac5c80402 (each
+= recorded), farm compat identical, the full suite again on the merged sha 2,942 passed. `optin-core --baseline-root`
+<main 15bed950> on 2931eecb: GATE PASSED WITH SKIPS AND FLAKY RETRIES (the live-run fence; zero-core's
+`test_remoteplay::test_a_dying_worker_gives_its_accepted_games_back` passed on its retry alone, as on main's own
+optin-core gates).
+
 ## 240. pb3's sideboarding for every stew specialist: dealt decks from each seat's own 75, the per-pairing matchup model and one choice table per deck, in the best-of-three metagame restricted to a pairing (branch `feat/pair-sideboarding`, 2026-11-21)
 
 Branch `feat/pair-sideboarding` from main 1e7416c5, then main 45dbf2e1 (220, Legacy Hogaak Tempo) merged in (two
@@ -46344,7 +46366,7 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   `pair_json_leaves_out_a_forced_find_the_pairing_can_never_apply` (kept for Delver-Doomsday, the Doomsday mirror and
   Sneak-Doomsday, left out for the other three, each fixed spec parses, the kept form refused). Then `meta_pair` 2,000
   games: PASSED (2,000 games, 100 matches + 100 post-sideboard, the lockstep, tables, dealt 60s and forced
-  resolutions seen); every digest unchanged. The suite gate: 240.11.
+  resolutions seen); every digest unchanged. The gates: 239.4.
 
 ### 240.8 Rows per full best-of-three match (lane 2 sizes an iteration from it)
 
