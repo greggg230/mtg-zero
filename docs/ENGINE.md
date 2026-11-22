@@ -43094,8 +43094,14 @@ matching, and every decision path of every castable cast ends cast; 129 castable
 paths), the delve fix, the zero-mana rule. `cast_mana.rs` unit tests: the collapse's equality, the cost lock. Lane A's
 `cr_601_2g_a_lotus_petal_sacrificed_while_hogaak_is_cast_feeds_escapes_exile` (was "never fed": 220.1.4's reading,
 which this section replaces). `tests/az.rs` `cast_mana_positions` in the public-state gate. Tests of the payment pass
-the step (`Game::pass_cast_mana`; testkit `choose` and `drive_until` pass a step a test answers past). The four
-seed-pinned fuzz tests re-pinned by the scan `scan_seeds_for_the_seed_pinned_tests` (229.7).
+the step (`Game::pass_cast_mana`; testkit `choose` and `drive_until` pass a step a test answers past). The
+seed-pinned fuzz replays: the step changes every game that reaches one (a decision draws from the game's random
+stream), so their steward games are gone. `scan_seeds_for_the_seed_pinned_tests` (ignored; every check, each test's
+checkpoint denominator) re-found the Etali enclosing-picks game: interactions seed 12,471 (seeds 0..24,000 scanned;
+its rows carry the enclosing picks for both viewers, 2 and 2). The other three - a look at a hand card that left the
+hand in its step (hidden-decklist seed 100,017,685), one that came into it and left (default 100,037,121), the
+exponential Ocelot Pride run (default 100,061,919) - were steward finds of farm-scale runs: 12,000 + 12,000 + 20,000
+scanned games (every check) found none; they stay failing until a farm-scale scan re-pins them (229.8).
 
 ### 229.7 Results
 
