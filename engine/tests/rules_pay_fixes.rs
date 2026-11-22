@@ -247,6 +247,27 @@ fn cr_302_6_601_2g_a_land_that_entered_this_turn_is_apart_from_an_older_twin() {
 }
 
 #[test]
+fn cr_601_2h_twins_stay_one_option_whatever_their_card_slot() {
+    // The first card the game holds (slot 0) is one of two alike Swamps: still one option. (A
+    // field that keeps its last card - or card 0 - when unused named it: `Game::leaving_card`
+    // outside a replacement choice, ENGINE.md 221.2.)
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Dark Ritual"])
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+        .at(Step::Main1, 0)
+        .start();
+    let swamps = all_bf(&g, 0, "Swamp");
+    assert_eq!(swamps[0].i(), 0, "the first Swamp is card 0");
+    begin(&mut g, "Dark Ritual");
+    g.drive_until(|g| g.kind() == Some(DecisionKind::PayMana));
+    let n = swamps.iter().filter(|&&c| g.has_option(Choice::Ability(c, AbilitySlot::Activated(0)))).count();
+    assert_eq!(n, 1, "{}", opts(&g));
+}
+
+#[test]
 fn cr_702_126a_605_3a_an_artifact_urza_can_tap_is_offered_for_improvise_too() {
     // Kappa Cannoneer ({5}{U}, improvise) with Urza, Lord High Artificer ("Tap an untapped artifact
     // you control: Add {U}"), an Island and five artifacts: the Island picked first, an artifact
