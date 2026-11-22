@@ -493,7 +493,7 @@ impl Game {
             }
         }
         // The cards found by their owner's library search that everyone tells apart (ENGINE.md 140.9, 142.12),
-        // by place (ENGINE.md 224: which search found which is not public): each one's owner, zone and depth in a
+        // by place (ENGINE.md 223: which search found which is not public): each one's owner, zone and depth in a
         // library.
         v.push(u64::MAX - 95);
         for c in self.finds_by_place() {

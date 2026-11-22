@@ -495,29 +495,29 @@ fn same_seed_and_actions_replay_matches_identically() {
     }
 }
 
-/// ENGINE.md 224: the Doomsday mirror's post-sideboard best-of-three match 163 (one episode a game) passes every check
+/// ENGINE.md 223: the Doomsday mirror's post-sideboard best-of-three match 163 (one episode a game) passes every check
 /// of `play_match_spec`, the information-set walk (`check_match_information_set`) included. Reported by the Hogaak
 /// integration's first FUZZ_POOL=hogaak probe (pre-existing on main 1e7416c5 and 45dbf2e1). A scan:
-/// `ENGINE_224_DECKS=<p0>,<p1>` (files of `data/decks` without `.json`; default the Doomsday 75 twice),
-/// `ENGINE_224_START=1|2` (the first game played, default 2: post-sideboard), `ENGINE_224_SEEDS=a,b,..` or
-/// `ENGINE_224_SEEDS=a..b` (default 163).
+/// `ENGINE_223_DECKS=<p0>,<p1>` (files of `data/decks` without `.json`; default the Doomsday 75 twice),
+/// `ENGINE_223_START=1|2` (the first game played, default 2: post-sideboard), `ENGINE_223_SEEDS=a,b,..` or
+/// `ENGINE_223_SEEDS=a..b` (default 163).
 #[test]
-fn engine_224_doomsday_mirror_post_board_match_163_information_set() {
+fn engine_223_doomsday_mirror_post_board_match_163_information_set() {
     use engine::az::constructed::Decklist;
     let load = |name: &str| {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/decks").join(format!("{name}.json"));
         Decklist::parse(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap()
     };
-    let decks = std::env::var("ENGINE_224_DECKS").unwrap_or("doomsday_8027957,doomsday_8027957".into());
+    let decks = std::env::var("ENGINE_223_DECKS").unwrap_or("doomsday_8027957,doomsday_8027957".into());
     let d: Vec<Decklist> = decks.split(',').map(load).collect();
-    assert_eq!(d.len(), 2, "ENGINE_224_DECKS: two decks");
+    assert_eq!(d.len(), 2, "ENGINE_223_DECKS: two decks");
     let side = |d: &Decklist| -> Vec<String> { d.sideboard.iter().flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect() };
-    let start: u64 = std::env::var("ENGINE_224_START").map(|s| s.parse().unwrap()).unwrap_or(2);
+    let start: u64 = std::env::var("ENGINE_223_START").map(|s| s.parse().unwrap()).unwrap_or(2);
     let v = serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",
         "decks": {"p0": d[0].main_names(), "p1": d[1].main_names(), "p0_sideboard": side(&d[0]), "p1_sideboard": side(&d[1])},
         "start_game": start, "game_episodes": true});
     let sp = engine::az::MtgSpec::parse(&v.to_string()).unwrap();
-    let seeds: Vec<u64> = match std::env::var("ENGINE_224_SEEDS") {
+    let seeds: Vec<u64> = match std::env::var("ENGINE_223_SEEDS") {
         Ok(s) if s.contains("..") => {
             let (a, b) = s.split_once("..").unwrap();
             (a.parse().unwrap()..b.parse().unwrap()).collect()
@@ -529,5 +529,5 @@ fn engine_224_doomsday_mirror_post_board_match_163_information_set() {
     for seed in seeds {
         play_match_spec(seed, &sp, true, &mut HiddenStats::default());
     }
-    println!("ENGINE.md 224 scan: {decks} from game {start}: {n} matches passed");
+    println!("ENGINE.md 223 scan: {decks} from game {start}: {n} matches passed");
 }

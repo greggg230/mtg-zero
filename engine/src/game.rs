@@ -692,9 +692,9 @@ pub struct Game {
     /// Cards found by their owner's library search that the other player can still tell apart (a card on top of the
     /// library, a Doomsday pile's), with their search's time (ENGINE.md 140.9): the real game's record for the
     /// sightings' order and weight (`Game::sighted`); kept as 140.9 keeps it (a pile's finds stay marked when mixed
-    /// only with cards the other player knew), so it is not the public fact - `finds_told` is (ENGINE.md 224).
+    /// only with cards the other player knew), so it is not the public fact - `finds_told` is (ENGINE.md 223).
     pub(crate) found: Vec<(CardIdx, u32)>,
-    /// The public fact (ENGINE.md 224): the finds whose places everyone tells apart as their owner's search's finds -
+    /// The public fact (ENGINE.md 223): the finds whose places everyone tells apart as their owner's search's finds -
     /// a card its owner's library search put on top of the library, the finds of a Doomsday pile of finds only,
     /// a find exiled face down -, until the card is seen, goes into a hand or is mixed by a shuffle or a private
     /// rearrangement with any card that is not one (the other player then no longer tells which places hold finds).

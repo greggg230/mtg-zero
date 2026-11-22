@@ -777,12 +777,12 @@ impl Game {
     /// Card `c`, just found by its owner's library search (CR 701.19; `DecisionKind::SearchLibrary`), is a find the
     /// other player can tell apart (ENGINE.md 140.9) until it is seen, goes into a hand, or is shuffled with cards
     /// that are not finds: its sighting is a search's. Everyone tells its place apart as a find's (`finds_told`,
-    /// ENGINE.md 224), in a world too.
+    /// ENGINE.md 223), in a world too.
     pub(crate) fn found_by_search(&mut self, c: CardIdx) {
         if !self.keeps_sightings() {
             return;
         }
-        // (The public fact, in every world too: ENGINE.md 224.)
+        // (The public fact, in every world too: ENGINE.md 223.)
         if !self.finds_told.contains(&c) {
             self.finds_told.push(c);
         }
@@ -805,7 +805,7 @@ impl Game {
         }
     }
 
-    /// The finds everyone tells apart (`finds_told`, ENGINE.md 224) by place: owner, zone, then the place - the depth
+    /// The finds everyone tells apart (`finds_told`, ENGINE.md 223) by place: owner, zone, then the place - the depth
     /// from the top of a library, the place in exile. Which search found which of them is not public once a shuffle
     /// or a private rearrangement moved them among themselves (the search's order of a Doomsday pile is even its
     /// cards' definition order), but the set of their places always is: the rows and the view list them this way.
@@ -833,7 +833,7 @@ impl Game {
     /// The state was changed by hand, outside the rules (tests' perturbations, `public_state`): the sightings no
     /// longer describe what each player saw, so they are dropped and the deals weigh every seen card blind (ENGINE.md
     /// 140, 140.9). Never called by the engine. The finds (`found`, `finds_told`) stay: which cards everyone tells
-    /// apart as a search's finds is public (`finds_told`, layout v7's `found` tokens: ENGINE.md 142.12, 224), and a
+    /// apart as a search's finds is public (`finds_told`, layout v7's `found` tokens: ENGINE.md 142.12, 223), and a
     /// deal without sightings reads none of it.
     #[doc(hidden)]
     pub fn lose_sightings(&mut self) {
@@ -987,7 +987,7 @@ impl Game {
                     self.found.retain(|x| !domain.contains(&x.0));
                 }
             }
-            // (ENGINE.md 224: the public fact. After the rearrangement the viewer knows none of the domain's cards
+            // (ENGINE.md 223: the public fact. After the rearrangement the viewer knows none of the domain's cards
             // apart - those it knew are a cloud's now -, so finds mixed with any card that is not one are no longer
             // told apart, and among finds only it knows that the domain's places hold them, not which holds which.)
             if !self.finds_told.is_empty() && domain.iter().any(|&c| !told.contains(&c) && !self.finds_told.contains(&c)) {

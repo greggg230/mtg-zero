@@ -811,10 +811,10 @@ fn a_tutors_card_on_top_is_a_found_token() {
 }
 
 
-/// ENGINE.md 224: P0 casts Doomsday (constructed table, whole-deck clouds) keeping `pile` (top first): the library
+/// ENGINE.md 223: P0 casts Doomsday (constructed table, whole-deck clouds) keeping `pile` (top first): the library
 /// picks are `pile`'s cards outside `gy`; `gy` names graveyard cards that join the pile. Returns the game at priority
 /// with the stack empty.
-fn dd_224(pile: &[&str], gy: &[&str]) -> Game {
+fn dd_223(pile: &[&str], gy: &[&str]) -> Game {
 
     let db = CardDb::constructed();
     let lib = ["Brainstorm", "Ponder", "Consider", "Daze", "Thassa's Oracle", "Dark Ritual", "Lotus Petal", "Island", "Underground Sea", "Brainstorm"];
@@ -878,28 +878,28 @@ fn dd_224(pile: &[&str], gy: &[&str]) -> Game {
     g
 }
 
-fn found_224(g: &Game, v: u8) -> Vec<(u32, Vec<f32>)> {
+fn found_223(g: &Game, v: u8) -> Vec<(u32, Vec<f32>)> {
     Row::of(g, v).tokens(seg::FOUND).into_iter().map(|(s, x)| (s, x.to_vec())).collect()
 }
 
-/// ENGINE.md 224: a Doomsday pile of library finds only, ordered in private (`Op::PileTo`). Slot k of the `found`
+/// ENGINE.md 223: a Doomsday pile of library finds only, ordered in private (`Op::PileTo`). Slot k of the `found`
 /// segment is the k-th find by place (its depth k + 1), not the k-th search: the pile's finds are searched in
 /// definition order, so slot-by-search showed the opponent which of the pile's definitions lies where. The
 /// opponent's row is the same whatever the order and in each of its worlds; its owner's row names the card at each
 /// depth. After a shuffle (a fetch land finding nothing) the places still hold the finds (finds only were
 /// shuffled), and no row names a card - the owner no longer knows the order either.
 #[test]
-fn engine_224_a_doomsday_piles_private_order_is_not_in_the_found_tokens() {
+fn engine_223_a_doomsday_piles_private_order_is_not_in_the_found_tokens() {
     use engine::db::AbilitySlot;
     use te::{fs, rf};
     use engine::rng::Rng;
     let a = ["Thassa's Oracle", "Brainstorm", "Ponder", "Consider", "Daze"];
     let b = ["Daze", "Consider", "Thassa's Oracle", "Ponder", "Brainstorm"];
-    let (ga, gb) = (dd_224(&a, &[]), dd_224(&b, &[]));
+    let (ga, gb) = (dd_223(&a, &[]), dd_223(&b, &[]));
     let db = ga.db();
     for (g, order) in [(&ga, &a), (&gb, &b)] {
         for v in 0..2u8 {
-            let t = found_224(g, v);
+            let t = found_223(g, v);
             assert_eq!(t.len(), 5, "P{v}: five finds");
             for (k, (slot, x)) in t.iter().enumerate() {
                 assert_eq!(*slot, k as u32);
@@ -910,11 +910,11 @@ fn engine_224_a_doomsday_piles_private_order_is_not_in_the_found_tokens() {
             }
         }
     }
-    assert_eq!(found_224(&ga, 1), found_224(&gb, 1), "the opponent's row does not show the private order");
+    assert_eq!(found_223(&ga, 1), found_223(&gb, 1), "the opponent's row does not show the private order");
     for s in 0..16 {
         let mut d = ga.clone();
         d.determinize(1, &mut Rng::new(s));
-        assert_eq!(found_224(&d, 1), found_224(&ga, 1), "world {s}: the opponent's found tokens as in the real game");
+        assert_eq!(found_223(&d, 1), found_223(&ga, 1), "world {s}: the opponent's found tokens as in the real game");
     }
     // a fetch land that finds nothing shuffles the five finds
     let mut g = ga.clone();
@@ -937,7 +937,7 @@ fn engine_224_a_doomsday_piles_private_order_is_not_in_the_found_tokens() {
     assert!(g.stack().is_empty() && g.count_in(0, "Polluted Delta", Zone::Graveyard) == 1, "{}", g.log_lines().join("\n"));
     assert_eq!(g.player(0).library.len(), 5);
     for v in 0..2u8 {
-        let t = found_224(&g, v);
+        let t = found_223(&g, v);
         assert_eq!(t.len(), 5, "P{v}: the five places still hold the finds");
         for (k, (_, x)) in t.iter().enumerate() {
             assert_eq!(x[CODE + fs::DEPTH], (k + 1) as f32 / 64.0);
@@ -948,18 +948,18 @@ fn engine_224_a_doomsday_piles_private_order_is_not_in_the_found_tokens() {
         for v in 0..2u8 {
             let mut d = g.clone();
             d.determinize(v, &mut Rng::new(s));
-            assert_eq!(found_224(&d, v), found_224(&g, v), "world {s} of P{v}");
+            assert_eq!(found_223(&d, v), found_223(&g, v), "world {s} of P{v}");
         }
     }
 }
 
-/// ENGINE.md 224: a Doomsday pile with a graveyard pick (a card the opponent saw join the pile). After the private
+/// ENGINE.md 223: a Doomsday pile with a graveyard pick (a card the opponent saw join the pile). After the private
 /// order the opponent no longer tells the pick's place from the library finds', so which places hold finds is not
 /// public: no `found` token in either row (the stricter rule; 140.9's likelihood record is unchanged).
 #[test]
-fn engine_224_a_pile_mixing_finds_with_a_graveyard_pick_has_no_found_token() {
-    let g = dd_224(&["Thassa's Oracle", "Force of Will", "Brainstorm", "Ponder", "Consider"], &["Force of Will"]);
+fn engine_223_a_pile_mixing_finds_with_a_graveyard_pick_has_no_found_token() {
+    let g = dd_223(&["Thassa's Oracle", "Force of Will", "Brainstorm", "Ponder", "Consider"], &["Force of Will"]);
     for v in 0..2u8 {
-        assert!(found_224(&g, v).is_empty(), "P{v}: {:?}", found_224(&g, v));
+        assert!(found_223(&g, v).is_empty(), "P{v}: {:?}", found_223(&g, v));
     }
 }
