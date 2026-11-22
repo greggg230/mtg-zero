@@ -225,7 +225,7 @@ fn the_evaluation_spec_drops_the_tables_the_deals_and_the_forced_find() {
         let sp = parse(&e).unwrap();
         assert!(sp.dealt_decks.is_none() && sp.forced_find.is_none() && sp.seat_tables.iter().all(|t| t.is_none()));
         let mut w = v.clone();
-        if let Some(d) = w["decks"].as_object_mut() {
+        if let Some(d) = w.get_mut("decks").and_then(|d| d.as_object_mut()) {
             d.remove("p0_table");
             d.remove("p1_table");
         }
@@ -421,7 +421,7 @@ fn each_seat_follows_its_own_decks_table_to_its_contexts_60() {
 #[test]
 fn two_75s_deals_are_keyed_privately_each_by_its_own_75() {
     let s = parse(&fixed(0, 1, json!({"dealt_decks": per_seat(1.0, 0, 15), "max_turns": 12, "game_episodes": false}))).unwrap();
-    let (mut checked, mut lens) = (0, [0usize; 2]);
+    let (mut checked, mut lens, mut world_ran_short) = (0, [0usize; 2], 0);
     for seed in 0..scale(30) {
         let mut g = MtgAz::new(&s, seed).unwrap();
         let n_keys = [0, 1].map(|p| g.m.pools[p].list.len().div_ceil(9));
@@ -458,8 +458,17 @@ fn two_75s_deals_are_keyed_privately_each_by_its_own_75() {
                         continue;
                     }
                     let wd: Vec<u64> = wk.iter().copied().filter(|&k| key_kind(k) == KEY_DEALT).collect();
+                    if wd.is_empty() {
+                        // How far one step runs is hidden information: the real step ran on through forced decisions
+                        // to the end of the game (seed 0: P1's mana choice, then nothing but forced passes to the turn
+                        // cap), while in a world whose resampled hand gives a player a real choice the step stops there
+                        // and the game (and its deal) goes on. Only a world whose step ends the game is checked.
+                        world_ran_short += 1;
+                        continue;
+                    }
+                    assert_eq!(w.m.game_no, probe.m.game_no, "seed {seed}: a world that deals starts the real step's next game");
                     for q in 0..2u8 {
-                        assert_eq!(wd.iter().filter(|&&k| key_player(k) == q).count(), n_keys[q as usize]);
+                        assert_eq!(wd.iter().filter(|&&k| key_player(k) == q).count(), n_keys[q as usize], "seed {seed}: viewer P{v}'s world keys all of P{q}'s deal");
                     }
                     for k in wd {
                         assert_eq!(key_payload(k) == HIDDEN, key_player(k) != v, "seed {seed}: viewer P{v}'s world keys P{}'s deal", key_player(k));
@@ -470,6 +479,7 @@ fn two_75s_deals_are_keyed_privately_each_by_its_own_75() {
             g = probe;
         }
     }
+    println!("{checked} worlds of a dealing step checked, {world_ran_short} whose step stopped before the game ended");
     assert!(checked > 0, "no dealing step checked (75 lists of {lens:?} entries)");
 }
 
