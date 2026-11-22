@@ -46485,4 +46485,6 @@ as before (the fixed graph is a new export; the default and fast graphs are byte
 Worker self-test on CUDA passes (fp16, max abs 1.7e-2, deterministic); the worker's answers on the CPU vs the Python
 reference 1.2e-7, vs torch 6.8e-6 (zero-core `tools/onnx_worker_gate.py`).
 
-**Gates.** optin-core on this commit (below).
+**Gates.** optin-core on 06d4d1df: GATE PASSED WITH SKIPS (17 live-run-hazard tests fenced: live runs on the desktop) -
+checkpoint_compat byte identity vs main e3bb4f0b (3,554 samples), digests = the recorded ones, farm compat identical, the
+other games built, core pytest in 6 shards.
