@@ -43549,3 +43549,24 @@ glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; co
 skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core's timing flake
 (test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
 (docs).
+
+## 224. zero-core pin 84bb5e1 -> f8a6211: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good (zero-core `fix/resume-fatal`; 2026-11-21)
+
+**Why.** On 2026-11-21 a farm GPU lease went dead for 86 minutes after an owner-activity pause: at the `resume` the
+worker could not rebuild its GPU session (CUBLAS_STATUS_ALLOC_FAILED). The resume arm of the worker's control loop
+sent a NON-fatal `error` and stayed alive, and the job stayed yielded forever (`job::do_resume` returns at
+`EvalLink::restore()?`, before `set_yielded(false)`): a live process answering pings and playing nothing. Agent 0.3.15's
+watchdog already treats a non-fatal error while resuming plus no progress as a failed worker (after its wait); this is
+the worker's half.
+
+**What.** zero-core `crates/worker/src/proto.rs`: `control()` returns the fatal message of a failed resume (nothing
+emitted there); `with_control` stops reading control lines, quits the job, joins it and returns that error, which the
+serve loops already emit as `{"ev": "error", "fatal": true}` and exit 1 with - the path of a job's own error. A resume
+that works is unchanged (`resumed`). The agent takes a fatal error straight to `worker_failed` (zero-farm
+agent/src/lease.rs), so the lease fails over at once instead of after the watchdog's wait. No engine, encoding, search
+or row change: the worker crate's control path only.
+
+**Tests.** zero-core `proto::tests::a_failed_resume_is_fatal` (the resume arm: a link whose evaluator threads are gone
+-> the message, no `resumed`, still yielded until the caller quits; no link -> `resumed`) and
+`with_control_quits_the_job_on_a_failed_resume_and_returns_its_error` (end to end: yield, a failing resume, the job
+quit and joined, the error returned); `cargo test -p zero_worker --lib` 43 passed; clippy: nothing new.
