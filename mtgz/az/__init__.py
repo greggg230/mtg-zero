@@ -3,7 +3,9 @@ docs/search.md) + what is MTG's, registered here as the process's game package: 
 (engine/src/az, docs/ENGINE.md 21-22, 36: one game of Magic between two random 40-card decks of the
 supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match with sideboarding
 between games, decks built from random card pools), its object layout for zero-core's token
-network (arch 'tokens': `layout_v7.json`, written by the engine's `encode::layout_json`), the game
+network (arch 'tokens': `layout_v7.json`, written by the engine's `encode::layout_json`), the game `mtg_v8`
+(the same game in layout v8, `layout_v8.json`: v7's rows plus a payment's state, a gone object's last known
+information and the find groups, docs/ENGINE.md 232; a v7 network widens onto it with fork_run), the game
 `team_draft` (docs/ENGINE.md 41, 43, 45, DESIGN.md 2.3: a team cube draft and deckbuilding up to
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
