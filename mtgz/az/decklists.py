@@ -155,14 +155,24 @@ def _format_keys(fmt, max_turns, mulligans, game_episodes, start_game):
     return spec
 
 
-def pair_spec(p0, p1, fmt='bo1', max_turns=60, mulligans=True, game_episodes=False, start_game=1):
+def _dealt(dealt_decks):
+    """The spec's `"dealt_decks"` of {'p', 'swaps', 'per_seat'?} (docs/ENGINE.md 154, 168.1)."""
+    out = {'p': dealt_decks['p'], 'swaps': list(dealt_decks['swaps'])}
+    if dealt_decks.get('per_seat'):
+        out['per_seat'] = True
+    return out
+
+
+def pair_spec(p0, p1, fmt='bo1', max_turns=60, mulligans=True, game_episodes=False, start_game=1, dealt_decks=None):
     """The `mtg` spec of one fixed pairing (docs/ENGINE.md 176's evaluation cells): seat 0 plays decklist `p0`, seat 1
     `p1` (names of data/decks/; the same name is that deck's mirror). `fmt` 'bo1': the mains, no sideboards (as
     `mirror_spec`); 'bo3': constructed best-of-three, each seat's main (exactly 60) and its 75's sideboard
     (`game_episodes`, `start_game` as `mirror_bo3_spec`; the engine refuses `start_game` 2 for two different 75s,
-    ENGINE.md 147.4). Its games are exactly the metagame spec's games of that pairing (`metagame_spec`: the engine's
-    `Metagame::pair_json`). JSON."""
+    ENGINE.md 147.4); `dealt_decks` as `metagame_spec`'s. Its games are exactly the metagame spec's games of that pairing
+    (`metagame_spec`: the engine's `Metagame::pair_json`). JSON."""
     spec = _format_keys(fmt, max_turns, mulligans, game_episodes, start_game)
+    if dealt_decks:
+        spec['dealt_decks'] = _dealt(dealt_decks)
     (m0, s0), (m1, s1) = _seat_lists(p0, fmt), _seat_lists(p1, fmt)
     decks = {'p0': m0, 'p1': m1}
     if s0:
@@ -174,7 +184,7 @@ def pair_spec(p0, p1, fmt='bo1', max_turns=60, mulligans=True, game_episodes=Fal
 
 
 def metagame_spec(decks=META3, fmt='bo1', weights=None, max_turns=60, mulligans=True, game_episodes=False,
-                  start_game=1):
+                  start_game=1, dealt_decks=None):
     """The `mtg` spec of a metagame (docs/ENGINE.md 176): `decks` (names of data/decks/, each its own 75) and every
     game's (best-of-three: every match's) ordered pairing (p0's deck, p1's deck) drawn by the engine from that game's
     seed - so every machine that plays a seed plays its pairing. `weights`: None = uniform over the n x n ordered
@@ -182,8 +192,11 @@ def metagame_spec(decks=META3, fmt='bo1', weights=None, max_turns=60, mulligans=
     1, 0 = never played) or an n x n list of integers (row p0's deck, column p1's) - relative integer weights, e.g. 2
     plays a lagging cell twice as often. `fmt` 'bo1': each deck its main (no sideboard, as `mirror_spec`); 'bo3':
     constructed best-of-three, each 75 (`game_episodes`; `start_game` 2 only when every cell of positive weight is a
-    mirror, ENGINE.md 147.4). The engine refuses dealt decks, choice tables, keep_deck and hidden decklists with it.
-    The evaluation spec is the same spec (`evaldecks.eval_spec` keeps it). JSON."""
+    mirror, ENGINE.md 147.4). `dealt_decks` ({'p', 'swaps', 'per_seat'}; best-of-three, docs/ENGINE.md 154, 168.1,
+    223): each seat's 60s dealt from its own 75. A deck's choice table is its entry's "table" (docs/ENGINE.md 223: the
+    matchup model's hook writes them, `matchup.with_tables`). The engine refuses `sideboard_table`, keep_deck and hidden
+    decklists with it. The evaluation spec is the same spec without dealt decks, tables and the forced find
+    (`evaldecks.eval_spec`). JSON."""
     decks = list(decks)
     if len(set(decks)) != len(decks) or not decks:
         raise ValueError(f'metagame decks {decks}: distinct names, at least one')
@@ -210,8 +223,21 @@ def metagame_spec(decks=META3, fmt='bo1', weights=None, max_turns=60, mulligans=
             raise ValueError(f'metagame weights {w}: non-negative integers, at least one positive')
         meta['weights'] = w
     spec = _format_keys(fmt, max_turns, mulligans, game_episodes, start_game)
+    if dealt_decks:
+        spec['dealt_decks'] = _dealt(dealt_decks)
     spec['metagame'] = meta
     return json.dumps(spec, separators=(',', ':'))
+
+
+def pairing_spec(a, b, fmt='bo3', max_turns=60, mulligans=True, game_episodes=True, start_game=1, dealt_decks=None):
+    """A stew specialist's self-play spec (docs/ENGINE.md 223; the stew brief's "the best-of-three metagame restricted
+    to its pairing"): `metagame_spec` of decks [a, b] with weights [[0, 1], [1, 0]] - every match a against b, a's seat
+    drawn from the match's seed - or, for a mirror (a == b), decks [a] with weights [[1]]. Each match is exactly its
+    pairing's fixed spec's match of the seed (`pair_spec`, the engine's `Metagame::pair_json`), the per-deck settings
+    (dealt decks from each seat's own 75, a deck's choice table) passed through. JSON."""
+    decks, w = ([a], [[1]]) if a == b else ([a, b], [[0, 1], [1, 0]])
+    return metagame_spec(decks, fmt=fmt, weights=w, max_turns=max_turns, mulligans=mulligans,
+                         game_episodes=game_episodes, start_game=start_game, dealt_decks=dealt_decks)
 
 
 def mirror_spec(name=IZZET_DELVER, max_turns=60, mulligans=True):

@@ -177,19 +177,27 @@ impl Eq for Share {}
 /// played without a search and recorded as the policy target. The table names all 24 contexts. A self-play setting:
 /// the evaluation spec drops it.
 ///
+/// One choice table per deck (ENGINE.md 223): `"decks": {..., "p0_table": table, "p1_table": table}` (a constructed
+/// best-of-three; not with `"sideboard_table"` or `keep_deck`): seat p sideboards by its own table, whose list must be
+/// exactly seat p's 75 - two different 75s each with its deck's table; in a metagame a deck entry's `"table"` (below).
+/// A self-play setting: the evaluation spec drops them.
+///
 /// A metagame (ENGINE.md 176, `metagame.rs`): `"metagame": {"decks": [{"name", "main", "sideboard"}, ...], "weights":
 /// [[...], ...]}` (with `"constructed": true`, instead of `decks`) plays, in each game (a best-of-three: each match), the
 /// ordered pair (p0's 75, p1's 75) drawn from that game's seed - uniform over the n x n pairs, or by the optional integer
 /// weights (row p0's deck, column p1's) - exactly the game of the same seed whose `decks` are that pair's lists. Best-of-one
 /// or constructed best-of-three; refused with `decks`, `seed`, `start`, `build`, `sealed`, `pools`, `hidden_decklists`,
-/// `dealt_decks`, `sideboard_table`, `keep_deck`, `keep_known`, and `start_game` 2 unless every pair of positive weight is a
+/// `sideboard_table`, `keep_deck`, `keep_known`, and `start_game` 2 unless every pair of positive weight is a
 /// mirror. `MatchState::pairing` names the game's pair (the game log, `record_setup`, the spectator view). Without the key
-/// every spec is what it was.
+/// every spec is what it was. In best-of-three (ENGINE.md 223) `"dealt_decks"` deals each seat from its own 75 and a deck
+/// entry's `"table"` is played by whichever seat plays that deck; `Metagame::pair_json` passes both through, so a
+/// metagame game stays exactly its pairing's fixed game.
 ///
 /// The forced find (ENGINE.md 180, `forced_find.rs`): `"forced_find": {"spell": "Doomsday", "card": "Thassa's Oracle",
-/// "p": p, "unless_in_hand": true}` (constructed best-of-one only; some deck's main must hold both; the spell's resolution
-/// must search a library and graveyard for a pile): with probability p per resolution - a draw from the game's seed and
-/// the resolution's index, the same in every world - the pile's last pick is the card when none was chosen, unless one is
+/// "p": p, "unless_in_hand": true}` (constructed decklists or a metagame; some deck's main must hold both - in best-of-three
+/// some deck's 75, ENGINE.md 223; the spell's resolution must search a library and graveyard for a pile): with probability
+/// p per resolution - a draw from the game's seed and the resolution's index, the same in every world (each game of a
+/// best-of-three match its own seed: its own draws) - the pile's last pick is the card when none was chosen, unless one is
 /// in the caster's hand or none can be found. A self-play training aid, never encoded; the evaluation spec drops it
 /// (`eval_json`). With p 0 it changes nothing; without the key every spec is what it was.
 ///
@@ -258,6 +266,9 @@ pub struct MtgSpec {
     pub dealt_decks: Option<DealtDecks>,
     /// Sideboarding by a choice table (ENGINE.md 168.3): the 24 contexts' 60s of the table's 75.
     pub sideboard_table: Option<std::sync::Arc<sbtable::SideboardTable>>,
+    /// Each seat's own choice table (ENGINE.md 223, `decks.p0_table` / `decks.p1_table`; its list the seat's 75). A
+    /// metagame's tables are its decks' (`metagame::MetaDeck::table`).
+    pub seat_tables: [Option<std::sync::Arc<sbtable::SideboardTable>>; 2],
     /// The other seat's worlds know the `keep_deck` seats keep (ENGINE.md 141): a keeper's deck is its
     /// real one there, never dealt.
     pub keep_known: bool,
@@ -375,6 +386,7 @@ impl Default for MtgSpec {
             keep_deck: [false; 2],
             dealt_decks: None,
             sideboard_table: None,
+            seat_tables: [None, None],
             keep_known: false,
             build: None,
             describe: false,
@@ -383,28 +395,29 @@ impl Default for MtgSpec {
     }
 }
 
-/// Where the forced find can apply (ENGINE.md 180), refused loudly elsewhere: constructed best-of-one self-play (open
-/// decklists or a metagame), not a lab start or a described position (analysis), and some deck's main holds both the
-/// spell and the card (else it could never apply).
+/// Where the forced find can apply (ENGINE.md 180), refused loudly elsewhere: constructed self-play (open decklists or a
+/// metagame; best-of-one, or a constructed best-of-three - ENGINE.md 223: each game of a match carries the option, its
+/// draws from that game's own seed), not a lab start or a described position (analysis), and some deck holds both the
+/// spell and the card (else it could never apply): its main in best-of-one, its 75 (main and sideboard) in best-of-three,
+/// where a 60 of the 75 can board them in.
 fn check_forced_find(s: &MtgSpec, ff: &crate::forced_find::ForcedFind, db: &CardDb) -> Result<(), String> {
     if !s.constructed {
         return Err("mtg spec: forced_find is for constructed decklists (\"constructed\": true; ENGINE.md 180)".into());
     }
-    if s.format != Format::Bo1 {
-        return Err("mtg spec: forced_find is built for best-of-one (\"format\": \"bo1\"); best-of-three is not (ENGINE.md 180)".into());
-    }
     if s.start.is_some() || s.build.is_some() {
         return Err("mtg spec: forced_find is a self-play setting, not with a lab start or a described position (ENGINE.md 180)".into());
     }
-    let mains: Vec<&[DefId]> = match &s.decks {
-        DeckMode::Lists(a, b) => vec![a, b],
-        DeckMode::ListsWithSideboards(p) => p.iter().map(|x| &x.0[..]).collect(),
-        DeckMode::Metagame(m) => m.decks.iter().map(|d| &d.main[..]).collect(),
+    let bo3 = s.format == Format::Bo3;
+    let decks: Vec<Vec<DefId>> = match &s.decks {
+        DeckMode::Lists(a, b) => vec![a.clone(), b.clone()],
+        DeckMode::ListsWithSideboards(p) => p.iter().map(|x| if bo3 { x.0.iter().chain(&x.1).copied().collect() } else { x.0.clone() }).collect(),
+        DeckMode::Metagame(m) => m.decks.iter().map(|d| if bo3 { d.main.iter().chain(&d.sideboard).copied().collect() } else { d.main.clone() }).collect(),
         _ => Vec::new(),
     };
-    if !mains.iter().any(|d| d.contains(&ff.spell) && d.contains(&ff.card)) {
+    if !decks.iter().any(|d| d.contains(&ff.spell) && d.contains(&ff.card)) {
         return Err(format!(
-            "mtg spec: forced_find: no deck's main holds both {} and {}: it could never apply (ENGINE.md 180)",
+            "mtg spec: forced_find: no deck's {} holds both {} and {}: it could never apply (ENGINE.md 180)",
+            if bo3 { "75" } else { "main" },
             db.def(ff.spell).name,
             db.def(ff.card).name
         ));
@@ -416,6 +429,9 @@ fn check_forced_find(s: &MtgSpec, ff: &crate::forced_find::ForcedFind, db: &Card
 /// knowledge (any of the last four makes the match a drafted one).
 const DECKS_KEYS: [&str; 8] =
     ["p0", "p1", "p0_sideboard", "p1_sideboard", "p0_first_picks", "p1_first_picks", "p0_elsewhere", "p1_elsewhere"];
+
+/// The keys of each seat's own choice table in a spec's `decks` object (ENGINE.md 223).
+const SEAT_TABLE_KEYS: [&str; 2] = ["p0_table", "p1_table"];
 
 /// A drafted match's seats are consistent (ENGINE.md 45): each player's first
 /// picks are distinct cards of its pool (deck and sideboard; no basic land),
@@ -495,7 +511,7 @@ impl MtgSpec {
         // A metagame (ENGINE.md 176): its decks are each game's pairing of its 75s; the settings built for one pair of
         // decklists (or for the cube's) are refused, never silently ignored - before any of them is read.
         if obj.contains_key("metagame") {
-            const REFUSED: [(&str, &str); 11] = [
+            const REFUSED: [(&str, &str); 10] = [
                 ("decks", "the metagame's decks are each game's pairing of its 75s"),
                 ("seed", "one match seed would play one pairing in every game"),
                 ("start", "a lab start replays one game's decks"),
@@ -503,8 +519,7 @@ impl MtgSpec {
                 ("sealed", "sealed pools are not constructed 75s"),
                 ("pools", "constructed decks don't come from pools"),
                 ("hidden_decklists", "the 75s are open decklists (no prior for a hidden constructed deck, ENGINE.md 102)"),
-                ("dealt_decks", "dealt decks are built for one pair of 75s (ENGINE.md 154)"),
-                ("sideboard_table", "a choice table is one 75's (ENGINE.md 168.3)"),
+                ("sideboard_table", "a choice table is one 75's: a metagame deck carries its own as its entry's \"table\" (ENGINE.md 168.3, 223)"),
                 ("keep_deck", "keep_deck is the one-pair yardstick's (ENGINE.md 130)"),
                 ("keep_known", "keep_known is the one-pair yardstick's (ENGINE.md 141)"),
             ];
@@ -620,8 +635,14 @@ impl MtgSpec {
                                 }
                             };
                             for key in o.keys() {
-                                if !DECKS_KEYS.contains(&key.as_str()) {
+                                if !DECKS_KEYS.contains(&key.as_str()) && !SEAT_TABLE_KEYS.contains(&key.as_str()) {
                                     return Err(format!("mtg spec: unknown decks key {key:?}"));
+                                }
+                            }
+                            // (ENGINE.md 223: each seat's own choice table; where it applies is checked below)
+                            for (p, key) in SEAT_TABLE_KEYS.iter().enumerate() {
+                                if let Some(t) = o.get(*key) {
+                                    s.seat_tables[p] = Some(std::sync::Arc::new(sbtable::SideboardTable::parse_as(t, db, &format!("decks.{key}"))?));
                                 }
                             }
                             let side = |key: &str| if o.contains_key(key) { list(key) } else { Ok(Vec::new()) };
@@ -732,6 +753,37 @@ impl MtgSpec {
                 return Err("mtg spec: sideboard_table with keep_deck: keep_deck is the evaluation yardstick's, the table a self-play setting (ENGINE.md 168.3)".into());
             }
         }
+        // One choice table per deck (ENGINE.md 223): a seat's own (`decks.pN_table`) or a metagame deck's (`table`).
+        let meta_tables = matches!(&s.decks, DeckMode::Metagame(m) if m.has_tables());
+        if s.seat_tables.iter().any(|t| t.is_some()) || meta_tables {
+            let what = if meta_tables { "a metagame deck's table" } else { "decks.p0_table / decks.p1_table" };
+            if !constructed_bo3 {
+                return Err(format!("mtg spec: {what} is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"; ENGINE.md 168.3, 223)"));
+            }
+            if s.sideboard_table.is_some() {
+                return Err(format!("mtg spec: sideboard_table with {what}: one table for every seat of its 75, or one per deck - not both (ENGINE.md 223)"));
+            }
+            if s.keep_deck.iter().any(|&k| k) {
+                return Err(format!("mtg spec: {what} with keep_deck: keep_deck is the evaluation yardstick's, a table a self-play setting (ENGINE.md 168.3)"));
+            }
+            if s.seat_tables.iter().any(|t| t.is_some()) {
+                let seats: Vec<(&[DefId], &[DefId])> = match &s.decks {
+                    DeckMode::Lists(a, b) => vec![(a, &[]), (b, &[])],
+                    DeckMode::ListsWithSideboards(p) => p.iter().map(|(d, sb)| (&d[..], &sb[..])).collect(),
+                    _ => return Err("mtg spec: decks.p0_table / decks.p1_table need the seats' decklists (decks.p0, decks.p1; ENGINE.md 223)".into()),
+                };
+                for (p, t) in s.seat_tables.iter().enumerate() {
+                    if let Some(t) = t {
+                        if !t.fits(&matches::MatchPool::constructed(seats[p].0, seats[p].1).0) {
+                            return Err(format!(
+                                "mtg spec: decks.p{p}_table (version {:?}) is not of p{p}'s 75: a seat's table lists exactly that seat's main and sideboard (ENGINE.md 223)",
+                                t.version
+                            ));
+                        }
+                    }
+                }
+            }
+        }
         if s.keep_known && !s.keep_deck.iter().any(|&k| k) {
             return Err("mtg spec: keep_known needs keep_deck: it says the other seat's worlds know the keepers keep (ENGINE.md 141)".into());
         }
@@ -821,9 +873,29 @@ impl MtgSpec {
                 }
                 // (ENGINE.md 154: a dealt 60 swaps at most the seat's whole sideboard; either seat may be dealt)
                 if let Some(dd) = &s.dealt_decks {
+                    // (ENGINE.md 223: a metagame deals each seat from its own 75 - every deck of a played pairing)
+                    if let DeckMode::Metagame(m) = &s.decks {
+                        let mut played: Vec<u8> = m.played().flatten().collect();
+                        played.sort_unstable();
+                        played.dedup();
+                        for i in played {
+                            let d = &m.decks[i as usize];
+                            if dd.swaps.1 as usize > d.sideboard.len() {
+                                return Err(format!(
+                                    "mtg spec: dealt_decks.swaps [{}, {}]: metagame deck {:?}'s sideboard has {} cards, a 60 of its 75 swaps at most {} (ENGINE.md 154, 223)",
+                                    dd.swaps.0,
+                                    dd.swaps.1,
+                                    d.name,
+                                    d.sideboard.len(),
+                                    d.sideboard.len()
+                                ));
+                            }
+                        }
+                    }
                     let sides: Vec<usize> = match &s.decks {
                         DeckMode::Lists(..) => vec![0, 0],
                         DeckMode::ListsWithSideboards(p) => p.iter().map(|x| x.1.len()).collect(),
+                        DeckMode::Metagame(_) => Vec::new(),
                         _ => unreachable!("refused above"),
                     };
                     for (p, &n) in sides.iter().enumerate() {
@@ -921,6 +993,19 @@ impl MtgSpec {
         }
     }
 
+    /// The seats' choice tables of the game (match) with seed `seed` (ENGINE.md 168.3, 223): one table for every seat
+    /// whose 75 is its list (`"sideboard_table"`, `pools` the match's), each seat its own (`decks.pN_table`), or in a
+    /// metagame each seat its pairing deck's (`MetaDeck::table`).
+    pub fn seat_tables_of(&self, seed: u64, pools: &[matches::MatchPool; 2]) -> [Option<std::sync::Arc<sbtable::SideboardTable>>; 2] {
+        if let Some(t) = &self.sideboard_table {
+            return [0usize, 1].map(|p| t.fits(&pools[p]).then(|| t.clone()));
+        }
+        match &self.decks {
+            DeckMode::Metagame(m) => m.tables(m.pairing(seed)),
+            _ => self.seat_tables.clone(),
+        }
+    }
+
     /// A metagame's pairing of the game (match) with seed `seed` (ENGINE.md 176); None for every other spec.
     pub fn pairing(&self, seed: u64) -> Option<metagame::Pairing> {
         match &self.decks {
@@ -1003,8 +1088,8 @@ impl MtgSpec {
 
     /// The same spec with the fixed evaluation decks (zero-core uses one
     /// spec for self-play and evaluation; `mtgz.az.run` switches evaluation
-    /// matches to this) and without dealt decks (ENGINE.md 154: a self-play setting), a choice table (168.3) or the
-    /// forced find (180).
+    /// matches to this) and without dealt decks (ENGINE.md 154: a self-play setting), a choice table (168.3; a seat's or a
+    /// metagame deck's own, 223) or the forced find (180).
     /// `mtgz.az.evaldecks.eval_spec` is the same rule.
     pub fn eval_json(json: &str) -> Result<String, String> {
         let mut v: Value = if json.trim().is_empty() { Value::Object(Default::default()) } else {
@@ -1019,6 +1104,17 @@ impl MtgSpec {
         // sideboarding by a choice table, ENGINE.md 168.3)
         o.remove("dealt_decks");
         o.remove("sideboard_table");
+        // (ENGINE.md 223: the per-deck tables - a seat's own, a metagame deck's)
+        if let Some(d) = o.get_mut("decks").and_then(|d| d.as_object_mut()) {
+            for k in SEAT_TABLE_KEYS {
+                d.remove(k);
+            }
+        }
+        if let Some(ds) = o.get_mut("metagame").and_then(|m| m.get_mut("decks")).and_then(|d| d.as_array_mut()) {
+            for d in ds.iter_mut().filter_map(|d| d.as_object_mut()) {
+                d.remove("table");
+            }
+        }
         // (the forced find is a self-play training aid, ENGINE.md 180: evaluation plays every pick of the network's own)
         o.remove("forced_find");
         Ok(v.to_string())
@@ -1110,10 +1206,9 @@ impl MtgAz {
                     az.set_dealt(d, dd.swaps, &seats[d as usize], seed);
                 }
             }
-            // (ENGINE.md 168.3: the seats that sideboard by the choice table - its list is their 75)
-            if let Some(t) = &spec.sideboard_table {
-                az.m.table = [0usize, 1].map(|p| t.fits(&az.m.pools[p]).then(|| t.clone()));
-            }
+            // (ENGINE.md 168.3: the seats that sideboard by the choice table - its list is their 75; ENGINE.md 223: or each
+            // seat by its own deck's table)
+            az.m.table = spec.seat_tables_of(seed, &az.m.pools);
             // (ENGINE.md 141: the other seat's worlds know the keepers keep - the yardstick's informed arm)
             az.m.keep_known = spec.keep_known;
             if spec.start_game == 2 {

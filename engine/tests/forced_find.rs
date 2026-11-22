@@ -470,9 +470,15 @@ fn the_spec_option_and_its_refusals() {
     let delver = json!({"max_turns": 60, "constructed": true,
                         "decks": {"p0": Decklist::izzet_delver().main_names(), "p1": Decklist::izzet_delver().main_names()}});
     refused(&with_ff(delver, wheel(1.0)), "no deck's main holds both");
+    // best-of-three (ENGINE.md 223): every game of the match carries it; refused where no deck's 75 holds both
     let mut bo3 = with_ff(dd_delver(), wheel(1.0));
     bo3["format"] = json!("bo3");
-    refused(&bo3, "best-of-one");
+    let sp3 = parse(&bo3).unwrap();
+    assert_eq!(MtgAz::new_game(&sp3, 2, 5).unwrap().g.forced_find(), sp3.forced_find);
+    let mut delver3 = json!({"max_turns": 60, "constructed": true, "format": "bo3",
+                             "decks": {"p0": Decklist::izzet_delver().main_names(), "p1": Decklist::izzet_delver().main_names()}});
+    delver3["forced_find"] = wheel(1.0);
+    refused(&delver3, "no deck's 75 holds both");
     refused(&json!({"forced_find": wheel(1.0)}), "forced_find");
     // the evaluation spec drops it
     let e: Value = serde_json::from_str(&MtgSpec::eval_json(&with_ff(dd_delver(), wheel(1.0)).to_string()).unwrap()).unwrap();

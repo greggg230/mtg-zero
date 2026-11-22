@@ -10,8 +10,8 @@ ad-hoc shell script. It can never pass a check it did not perform:
     Every step needs its own positive marker ON TOP OF exit 0 (ENGINE.md 91 lists each one): a
     build's "mtgz._engine OK: <this checkout>/mtgz/..." line, cargo's "test result: ok. N passed"
     lines (N > 0, 0 failed), pytest's FINAL summary line (0 failed, 0 errors, N > 0 passed), the
-    digest line over the full 2,000 + 500 games, digest_formats' four lines (constructed, eoe, driver, metagame:
-    ENGINE.md 148.1, 157) and dealt_digests' line (154, 157), check_checkpoint_compat's {"identical": true}
+    digest line over the full 2,000 + 500 games, digest_formats' five lines (constructed, eoe, driver, metagame, pair:
+    ENGINE.md 148.1, 157, 176, 223) and dealt_digests' line (154, 157), check_checkpoint_compat's {"identical": true}
     with samples on both sides, a Mac step's "[mac] ... @ <this sha>" and "[mac] done @ <this sha>"
     lines (the Mac checkout's HEAD before and after the command), "0 failed of N
     configurations" with N the configurations asked for, ... A missing marker fails loudly.
@@ -254,18 +254,18 @@ def make_digest_checker(expect=None, record_only=False):
     return checker
 
 
-# engine/tests/digest_formats.rs's four digests (ENGINE.md 148.1; metagame: ENGINE.md 176)
-FORMATS = ('constructed', 'eoe', 'driver', 'metagame')
-FORMATS_RE = re.compile(r'^(constructed|eoe|driver|metagame): .*; combined digest ([0-9a-f]{16})\s*$', re.M)
+# engine/tests/digest_formats.rs's five digests (ENGINE.md 148.1; metagame: ENGINE.md 176; pair: ENGINE.md 223)
+FORMATS = ('constructed', 'eoe', 'driver', 'metagame', 'pair')
+FORMATS_RE = re.compile(r'^(constructed|eoe|driver|metagame|pair): .*; combined digest ([0-9a-f]{16})\s*$', re.M)
 FORMATS_ARGV = ['cargo', 'test', '--release', '-p', 'engine', '--test', 'digest_formats', '--', '--ignored',
                 '--nocapture']
 
 
 def check_digest_formats(output, rc):
-    """digest_formats' positive evidence (ENGINE.md 148.1, 157, 176): exactly four "<name>: ... combined digest <16
-    hex>" lines, one each of constructed, eoe, driver and metagame (each test compares its lines with the checkout's
+    """digest_formats' positive evidence (ENGINE.md 148.1, 157, 176, 223): exactly five "<name>: ... combined digest <16
+    hex>" lines, one each of constructed, eoe, driver, metagame and pair (each test compares its lines with the checkout's
     own tests/data/digests_<name>.txt and fails on a difference), no "wrote ...digests_" line (DIGEST_WRITE re-records
-    instead of comparing), exactly one "test result: ok. 4 passed" line + exit 0."""
+    instead of comparing), exactly one "test result: ok. 5 passed" line + exit 0."""
     ms = FORMATS_RE.findall(output)
     seen = {}
     for name, d in ms:
@@ -1792,11 +1792,12 @@ def digest_format_steps():
     """The digests beyond the cube table's, each compared with the checkout's own recorded file (a change meant to
     alter play re-records them in its commit, as digests.txt; the caller's DIGEST_* never reach them: step_env):
     engine/tests/digest_formats.rs (ENGINE.md 148.1: constructed best-of-three, the legacy decks, EoE, zero-core's
-    driver; 176: the three-deck metagame) and dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
-    return [Step('digest formats (constructed, EoE, driver, metagame)', list(FORMATS_ARGV), id='digest-formats',
+    driver; 176: the three-deck metagame; 223: a stew specialist's pairing with per-deck tables) and
+    dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
+    return [Step('digest formats (constructed, EoE, driver, metagame, pair)', list(FORMATS_ARGV), id='digest-formats',
                  mac_cmd=True, checker=check_digest_formats,
-                 evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe, driver '
-                          'and metagame, no "wrote ...digests_" line, exactly one "test result: ok. 4 passed" + exit 0'),
+                 evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe, driver, '
+                          'metagame and pair, no "wrote ...digests_" line, exactly one "test result: ok. 5 passed" + exit 0'),
             Step('digest dealt (dealt decks: the dealt preset\'s self-play spec)', list(DEALT_ARGV), id='digest-dealt',
                  mac_cmd=True,
                  checker=check_digest_dealt,
@@ -2286,14 +2287,14 @@ TIERS = {
                'artifact cache when no Rust input changed) + pytest in --pytest-shards shards beside a tiny run-loop smoke '
                '(~5 min).'),
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
-                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s '
+                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s '
                  'recorded files + --test az + checkpoint-load (--checkpoint) + pytest + farm compat (the release worker built, '
                  'tools/farm_compat.py). NO search smoke (~11 min).'),
     'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + a sharded 2,000-game fuzz per '
               f'pool (--fuzz-pools, default {FUZZ_POOLS}; tools/fuzz_shards.py, --fuzz-shards) at once on this commit; its '
               'report gates/<sha>-suite.json is the engine tier\'s evidence for --tested-sha.'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
-               'digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
+               'digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
                'the sharded fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
                'with overlapping engine/card_ir files; the release worker built + farm compat (tools/farm_compat.py) (~13 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
@@ -2305,7 +2306,7 @@ TIERS = {
                    'driver) + feature tests + build-only of the other games + core build + core pytest + the release worker built + '
                    'farm compat (~29 min).'),
     'repin': (tier_repin, 're-pin onto an already-verified commit: own-target build + digest == main\'s recorded value '
-              '+ digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s recorded files + the release worker built + farm compat + 1-config smoke on the run\'s --spec/--preset + mac.sh '
+              '+ digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s recorded files + the release worker built + farm compat + 1-config smoke on the run\'s --spec/--preset + mac.sh '
               '--eval-checkout, in parallel (~8 min).'),
 }
 
@@ -2382,7 +2383,7 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
         if r.extra.get('digest'):
             key = 'encoding_free' if 'encoding-free' in r.id else 'full'
             report['digests'][key] = {'value': r.extra['digest'], 'status': r.status}
-        for name, d in (r.extra.get('formats') or {}).items():          # (constructed, eoe, driver, metagame; dealt)
+        for name, d in (r.extra.get('formats') or {}).items():          # (constructed, eoe, driver, metagame, pair; dealt)
             report['digests'][name] = {'value': d, 'status': r.status}
         if 'passed' in r.extra and 'failed' in r.extra:
             report['test_counts'][r.name] = {k: r.extra[k] for k in ('passed', 'failed', 'errors', 'skipped', 'binaries')

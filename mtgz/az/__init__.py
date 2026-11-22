@@ -304,6 +304,66 @@ PRESETS['legacy-meta3-ddwheel'] = dict(PRESETS['legacy-meta3'], spec=SPEC_META3_
 PRESETS['legacy-meta3-ddwheel-smoke'] = dict(PRESETS['legacy-meta3-smoke'], spec=SPEC_META3_DDWHEEL, eval_spec=SPEC_META3,
                                              forced_find_schedule={'start': 1.0, 'end': 0.5, 'from': 0, 'iters': 2})
 
+# The stew's specialists (docs/ENGINE.md 222, 223): ONE pairing {A, B} of the metagame's 75s, self-played as FULL
+# best-of-three matches (game 1 played, "start_game" 1; each game its own episode) with sideboarding learned pb3's way
+# (docs/ENGINE.md 168): every seat's 60 dealt on its own with probability 0.85 from ITS OWN 75 (swaps uniform over
+# 0..15, then uniform), the rest sideboard - by search until the pairing's matchup model publishes, then by its choice
+# tables (one per deck, keyed by the deck so it follows the deck to its seat; teacher decisions). The spec is the
+# best-of-three metagame restricted to the pairing (decklists.pairing_spec: decks [A, B], weights [[0, 1], [1, 0]]; a
+# mirror decks [A], weights [[1]]), so each match is exactly its pairing's fixed match of the seed. A pairing with the
+# Doomsday deck keeps the meta3 run's forced find (its "forced_find" key; p 0.0 by default: the meta3 run's schedule
+# reached 0 at its iteration 61) beside the dealt decks. The network and training settings are the meta3 run's
+# (legacy-meta3-ddwheel with its launch's settings: the 128 x 8 token network, reuse 2.0, lr 1e-4 flat, 64 / 16
+# simulations, window 6, 30,000 samples at least; the run-specific ones - farm pools, anchors, yardsticks, evaluation
+# cadence, the run's length and seed - are the stew orchestrator's), with best of three's deck tilt and deck target
+# (delver-mirror-bo3's) and pb3's matchup settings (user-approved guards, docs/ENGINE.md 168.6). The evaluation spec is
+# the same spec without dealt decks, tables and the forced find. `games` an iteration: PAIR_GAMES (docs/ENGINE.md
+# 223.8: about the meta3 run's 2,444 best-of-one games' rows; the orchestrator sizes each pairing from 223.8's rows
+# per match).
+_META3_LAUNCH = dict(aux_belief_w=0.25, aux_deck_w=0.5, belief_mix=0.25, blocks=8, conc=1536, cq_c_scale=0.3,
+                     eval_belief_tilt=1.0, eval_cache=8192, eval_leaf_value_view='root', eval_select='cq',
+                     eval_select_c_scale=0.3, eval_select_min_visits=4, groups=4, infer_precision='bf16', lr=1e-4,
+                     lr_min=1e-4, max_steps=60_000, selfplay_belief_tilt=1.0, selfplay_leaf_value_view='root',
+                     selfplay_resign_k=3, selfplay_resign_t=0.02, selfplay_view_samples=0.5, sparse=1, threads=16,
+                     train_prefetch=2, train_static=1, train_tf32=1, value_q=0.6, value_q_warmup=0, window_cache=1,
+                     window_sparse=1, shard_writer_thread=1, shard_writer_queue_mb=2048, game_records=1)
+PAIR_DEALT = {'p': 0.85, 'swaps': [0, 15], 'per_seat': True}
+PAIR_GAMES = 1100
+
+
+def pair_varied_specs(a, b, forced_find_p=0.0, dealt_decks=PAIR_DEALT, max_turns=60):
+    """(the self-play spec, the evaluation spec) of the stew specialist of decks `a`, `b` (names of data/decks/; a == b:
+    the mirror) - docs/ENGINE.md 223: decklists.pairing_spec in best-of-three (game 1 played, one episode per game) with
+    each seat dealt from its own 75 (`dealt_decks`), and the forced find (Doomsday for Thassa's Oracle at
+    `forced_find_p`; None: none) when a deck's 75 holds both (the engine refuses it where it could never apply)."""
+    spec = decklists.pairing_spec(a, b, fmt='bo3', max_turns=max_turns, game_episodes=True, start_game=1,
+                                  dealt_decks=dealt_decks)
+    ff = forced_find_p is not None and any(
+        {'Doomsday', "Thassa's Oracle"} <= set(decklists.names(d['main']) + decklists.names(d['sideboard']))
+        for d in (decklists.load(a), decklists.load(b)))
+    sp = with_forced_find(spec, forced_find_p) if ff else spec
+    return sp, eval_spec(sp)
+
+
+def pair_varied_settings(a, b, forced_find_p=0.0, smoke=False):
+    """The settings of the stew specialist of decks `a`, `b` (docs/ENGINE.md 223): `legacy-pair-bo3-varied`'s (or its
+    CPU smoke's) with the pairing's specs."""
+    sp, ev = pair_varied_specs(a, b, forced_find_p)
+    return dict(PRESETS['legacy-pair-bo3-varied-smoke' if smoke else 'legacy-pair-bo3-varied'], spec=sp, eval_spec=ev)
+
+
+_PAIR_SPEC, _PAIR_EVAL = pair_varied_specs(decklists.IZZET_DELVER, decklists.LEGACY_DOOMSDAY)
+PRESETS['legacy-pair-bo3-varied'] = dict(dict(dict(PRESETS['legacy-meta3-ddwheel'], **_META3_LAUNCH), **_DELVER_BO3),
+                                         **_MATCHUP, spec=_PAIR_SPEC, eval_spec=_PAIR_EVAL, forced_find_schedule={},
+                                         games=PAIR_GAMES)
+# its CPU smoke: mtg-smoke's tiny network and sims on the same spec shape, the forced find at p 1.0 (a Doomsday pile
+# forced whenever it can be), a retrain every iteration from the second (delver-bo3-varied-smoke's matchup settings)
+_PAIR_SMOKE_SPEC, _ = pair_varied_specs(decklists.IZZET_DELVER, decklists.LEGACY_DOOMSDAY, forced_find_p=1.0)
+PRESETS['legacy-pair-bo3-varied-smoke'] = dict(dict(PRESETS['mtg-smoke'], **_DELVER_BO3), spec=_PAIR_SMOKE_SPEC,
+                                               eval_spec=_PAIR_EVAL,
+                                               **dict(_MATCHUP, matchup_every=1, matchup_min_window=2,
+                                                      matchup_val_iters=1, matchup_worlds=1000, matchup_members=5))
+
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,
 # eoe_tokens.txt), so a network of its own: its layout `layout_eoe.json` is layout v6 under the name `eoe` with the EoE
