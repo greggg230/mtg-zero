@@ -44003,3 +44003,201 @@ touches it).
   Under CPU load the tiny network's best-of-three match took ~40 s.
 * *Tests*: `tests/test_stew.py` 18, `tests/test_stew_judge.py` 6, `tests/test_stew_control.py` 4 (2 of them start
   processes: `live_run_hazard`).
+
+## 223. pb3's sideboarding for every stew specialist: dealt decks from each seat's own 75, the per-pairing matchup model and one choice table per deck, in the best-of-three metagame restricted to a pairing (branch `feat/pair-sideboarding`, 2026-11-21)
+
+Branch `feat/pair-sideboarding` from main 1e7416c5, then main 45dbf2e1 (220, Legacy Hogaak Tempo) merged in (two
+conflicts, the fuzz pool lists and the match step: both sides kept); zero-core pinned at c850a5d, unchanged - the
+existing hooks suffice (`SearchGame::teacher_policy`, 168.3; `selfplay_specs`, 168.4; `value_only_decision`, 180.12).
+Section number: the stew brief's (222 is the stew's own, its lanes 1 and 2).
+
+**Why** (the stew brief, section 7; the user's go of 2026-11-21: "everything in the stew is best-of-three"). Each stew
+specialist (one pairing {C, D} of the field, mirrors included; ENGINE.md 222) self-plays full best-of-three matches with
+sideboarding, and learns sideboarding the way the Delver mirror did (pb3, 168), not by its own search (pb1's way stalled:
+the inherited swap held 0.93 of the prior for 130 generations of pb2, 168). pb3's three parts - dealt decks per seat,
+the matchup model, its choice table as teacher decisions - were one shared 75 only; here each works for a pairing of two
+DIFFERENT 75s, inside the best-of-three metagame spec restricted to the pairing (the stew's specialists' spec), and a
+mirror is exactly what it was.
+
+### 223.1 The specs (engine)
+
+| | the fixed two-75 spec (`decks`) | the metagame spec (`metagame`, 176) |
+|---|---|---|
+| dealt decks (`"dealt_decks"`, 154, 168.1) | already per seat from each seat's own 75 (`set_dealt(d, swaps, &seats[d])`); each seat's sideboard at least the range's top | **now accepted** in best-of-three: each seat dealt from ITS OWN 75; every deck of a pairing of positive weight must have the range's top in its sideboard (refused naming the deck); a deck no played pairing holds is never dealt |
+| choice tables (168.3) | **new**: `decks.p0_table` / `decks.p1_table` - each seat its OWN deck's table, its list exactly that seat's 75 (refused otherwise) | **new**: a deck entry's `"table"` (`{"name", "main", "sideboard", "table"}`), its list exactly that deck's 75 - keyed by the deck, so whichever seat plays the deck plays its table |
+| pb3's `"sideboard_table"` | unchanged (every seat whose 75 is its list); refused beside a seat table ("one table for every seat of its 75, or one per deck - not both") | still refused (a metagame deck carries its own) |
+| the forced find (180) | **now accepted in best-of-three** (also the metagame's): each game of the match carries it; the "some deck holds both" check reads each deck's 75 there (a 60 of it can board them in), its main in best-of-one | the same |
+| refused with a table | `keep_deck` (the yardstick's), best-of-one, a drafted spec | `keep_deck`, `keep_known` (refused for a metagame as before), best-of-one |
+
+* **Where a seat's table comes from** (`MtgSpec::seat_tables_of`, `MtgAz::new`): pb3's one table for every seat of its
+  75; else a fixed spec's seat table; else a metagame seat's pairing deck's (`Metagame::tables`). Nothing else changed:
+  `MatchState::table` (per seat, 168.3) carries it, `MtgAz::table_action` plays the canonical path toward the seat's
+  context's 60 (the next game, first, lead, the other seat dealt), the release worker plays it through
+  `teacher_policy` with no code of its own.
+* **`Metagame::pair_json`** passes the per-deck settings through: `dealt_decks` and `forced_find` as they are (every key
+  but `metagame` was copied before), a deck's table as its seat's `decks.pN_table`. So 176's invariant holds with them:
+  a metagame match IS its pairing's fixed match of the seed (`metagame.rs` / `pair_sideboarding.rs` tests, the fuzz's
+  `meta_lockstep` on every match of `FUZZ_POOL=meta_pair`, below).
+* **The evaluation spec** (`MtgSpec::eval_json`, `mtgz.az.evaldecks.eval_spec`) drops the tables in every form (the old
+  `sideboard_table`, a seat's, a metagame deck's), the dealt decks and the forced find: judging measures the network's
+  own sideboarding (168.3). (`eval_spec` had not dropped pb3's `sideboard_table` - the engine's did; no run spec ever
+  held one, the tables arrive by the hook, so nothing changes for a run.)
+* **The game log** (168.2, 176.3): a best-of-three line already carries per seat its 60's copies of its own 75
+  (`"decks"`, against the spec line's per-seat `"lists"` and `"mains"`) and a metagame's pairing; the spec line adds
+  `"tables"` ([seat 0's table's version or null, seat 1's]) only when the spec has per-deck tables (every other spec line
+  is what it was).
+
+**Decisions (the brief left them open; each the exact option, and why).**
+
+1. *Keyed by the deck: in its metagame entry; in a fixed spec per seat.* A list of tables matched by 75 content (pb3's
+   `fits`) would be one rule for both specs, but it is not exact for a metagame: two decks of one 75 under different
+   names would share a table, and a deck without a table would take the other's. In its entry the table IS the named
+   deck's; a fixed spec has no names, its seats are its decks; `pair_json` maps entry -> seat. Exact by construction.
+2. *The forced find in best-of-three: each game its own draws.* 180.1 left it open ("a match's later games would need the
+   draw per game"); they have them already: `next_game` makes every game with its own seed from the match's RNG, and the
+   draw is `split64(that game's seed ^ SALT)` (`Game::empty`), so game 2's draws are independent of game 1's (measured
+   below) and the same in every world of the game (its seed is not reseeded; a search world reaching the next game deals
+   that game's seed afresh, as all chance that has not happened). 180.12's value-only rows apply in every game (the
+   hook reads the game in progress; never at a sideboarding).
+3. *A dealt range past a deck's sideboard is refused, never clamped per deck* (a clamp would deal another swap
+   distribution than the spec says). Every 75 of the stew's field has a 15-card sideboard.
+
+### 223.2 Hidden information
+
+Nothing new is encoded and `MatchState` has no new field. Per seat with two 75s: who is dealt is public (154.2, both
+flags); each deal is `KEY_DEALT` of its seat with as many keys as ITS 75's list needs (public: the 75 is), its payload
+its own 60's copies, `HIDDEN` for the other observer (the same number of keys) - tested with Delver (29 entries: 4 keys)
+against Doomsday (`two_75s_deals_are_keyed_privately_each_by_its_own_75`); the other player's worlds deal each dealt
+seat's 60 from that seat's restricted prior, untilted (154.2); a seat's table is its own policy (`MatchState::table`
+Hidden in the public-state gate, 168.3), never encoded. The forced find stays Derived and unencoded in every game
+(180.4); its draws are the same in every world of a game. The fuzz (`FUZZ_POOL=meta_pair`) runs every check of
+`delver`'s and `meta`'s matches on it: worlds of both viewers, the private-key check (every dealt-deck key of another
+player `HIDDEN`), the information-set walks.
+
+### 223.3 The per-pairing matchup model (`mtgz/az/matchup.py`)
+
+**One pairing per model** (`the_pairing`): the games' spec lines must play one pairing - a mirror (one 75 both seats:
+pb3's case) or two different 75s in either seat order (a metagame restricted to the pairing plays both). Several
+pairings (the stew's main metagame) are refused loudly, as are two metagame names of one 75. C is the deck of the lower
+metagame index (a fixed spec: seat 0's); every game is one row oriented C first.
+
+**A mirror is pb3's model, the same code** (`_mirror_version` = 168.3's fit and table, unchanged). **Two different
+75s** (`select_and_fit_pair`, `pair_choice_tables`):
+
+    z(A, B) = m + w_C . dA - w_D . dB + (dA U_C) W (dB U_D)^T + c_pd pd + c_pdg3 pd g3 + c_g3 g3 + c_lead lead
+              + c_dC dealt_C + c_dD dealt_D,     P(C wins) = sigmoid(z)
+
+dA (dB): C's (D's) 60 as copies minus its own main per entry of its own 75; pd +1 when C starts; lead sign(C's wins - D's)
+before the game. Not antisymmetric: the pairing's base rate m, a game-3 main effect, each deck's dealt flag on its own,
+W unconstrained (U_C and U_D differ). **The reduction**: with C = D and w_C = w_D, U_C = U_D, W = M - M^T, m = c_g3 = 0,
+c_dC = -c_dD it IS pb3's model; for a mirror the code fits pb3's model itself (a mirror's seat labels are arbitrary, so
+the constraints are the symmetry, and pb3's guards and approvals carry over unchanged).
+
+* **The fit is pb3's**: the same time split (the newest `matchup_val_iters` validate), grid (dim 0 or 2; the L2s), the
+  selection rule (near-ties to the simpler), the held-out ensemble (5 bootstrap fits on the training iterations: the
+  guard's number) and the published ensemble (`matchup_members` bootstrap fits on the window), the same seeds and
+  recency weights. **The guard's baseline** is the pairing's base rate + play / draw + game 3 (no deck term): pb3's play
+  / draw baseline plus the base rate a non-mirror has (else the deck model would be credited with the pairing's base
+  rate); a version publishes tables only when the model beats it on the held-out games by `matchup_table_min_gain`.
+* **One table per deck**: deck C's 24 contexts maximise F_C(A) = the members' mean over worlds B of sigmoid(z) - the
+  worlds drawn exactly from D's constructed prior (`sample_prior`; restricted to the dealt range for a dealt opponent) -,
+  deck D's maximise F_D(B) = the mean over worlds A of C's prior of sigmoid(-z); context terms from the decider's side
+  (its play / draw, lead, the other seat's dealt flag, its own dealt flag 0: it chooses); first takes its better side of
+  play and draw, second its worse; pb3's guarded climb (`confident_climb`, `matchup_swap_z` standard errors over the
+  bootstrap members) from each deck's own main. Each table is the spec's `{"version", "list", "choices"}` of its own 75.
+* **Game-1 rows**: whole matches log game 1 (both mains, dA = dB = 0); they inform m and the play / draw terms and are
+  in the fit, as pb3's code fits every logged game (pb3's run started at game 2, so it had none).
+* **What is exact and what is modelled**: 168.3's statements hold per deck unchanged - the belief about a choosing
+  opponent is its constructed prior (the user's approved modelling choice, 120.2, 168.6), F's expectation an unbiased
+  Monte-Carlo estimate over `matchup_worlds` worlds, the climb a guarded local search; the exact alternatives and costs
+  are 168.3's. Nothing approximate is new here (`docs/shortcuts.md` unchanged).
+
+**The mirror regression on pb3's own games** (read-only; `E:/mtg-zero-scratch/stew/lane3/pb3_regression.py`): pb3's
+logged self-play games of iterations 113-144 (61,967 games), fit and tabled at pb3's settings (val 2, half-life 16, 4
+threads, 8,000 worlds, 20 members, min gain 0.005, z 2) by main's code and by this branch's path (`the_pairing` ->
+mirror -> `_mirror_version`): both reproduce pb3's published `matchup/v0144.json` exactly - `list`, `main`, `members`, `report`, `table`, `table_detail` and `dealt_swaps` all equal (gain 0.0659 nats, the selected model dim 0, l2_w 0.001, validation log loss 0.6266; ~5.3 min each on 4 threads): the mirror path is pb3's code path, untouched.
+
+### 223.4 The hook and where the tables go (`with_tables`)
+
+The `selfplay_specs` hook (168.4: one answer per iteration in `used.jsonl`, so the local driver, the Mac's workers and the
+farm's definition play one spec) publishes a version's tables (`version_tables`: a mirror's one `table`, two 75s'
+`tables`) where the engine reads them - each on the deck whose 75 is its list: a metagame deck's entry, a fixed spec's
+seat, and for a fixed mirror pb3's one `"sideboard_table"` (so pb3's spec is what it was). A table that fits no deck, or
+two tables of one 75, are refused; the run's own spec may hold no table (the retrain writes them). The retrain job
+checks every version's tables through the engine's parser (`check_tables`) before publishing.
+
+### 223.5 Specs and presets
+
+* `decklists.pairing_spec(a, b, ...)`: the stew specialist's spec - `metagame_spec([a, b], weights [[0, 1], [1, 0]])`, a
+  mirror `([a], [[1]])` - best-of-three, game 1 played, one episode per game; `metagame_spec` and `pair_spec` take
+  `dealt_decks`.
+* **`legacy-pair-bo3-varied`** = `legacy-meta3-ddwheel` with the meta3 run's launch settings (its supervisor's args minus
+  the run-specific ones: farm pools, anchors, yardsticks, evaluation cadence, length, seed), best of three's deck target
+  and deck tilt (`delver-mirror-bo3`'s), pb3's matchup settings (168.4, the guards user-approved 2026-11-15), the spec
+  `pair_varied_specs(Delver, Doomsday)`: dealt decks per seat 0.85 / [0, 15], the forced find kept at p 0.0 (the meta3
+  run's schedule reached 0 at its iteration 61; `forced_find_schedule` {} holds the spec's p), the evaluation spec without
+  dealt decks, tables and the forced find; `games` PAIR_GAMES (223.8). `pair_varied_settings(a, b)` gives any pairing's
+  settings (the forced find only beside a deck whose 75 holds Doomsday and Thassa's Oracle).
+* **`legacy-pair-bo3-varied-smoke`**: `mtg-smoke`'s tiny network on the same spec shape, the forced find at p 1.0, a
+  retrain every iteration from the second.
+
+### 223.6 The fuzz pool and the digest
+
+* **`FUZZ_POOL=meta_pair`**: `meta`'s games and matches with the specialists' settings in its matches (whole and the
+  mirrors' post-sideboard): per-seat dealt decks (p 0.85 [0, 15], p 1 [0, 15] or p 0.5 [2, 6] by seed), a table per deck
+  in two matches of three (random legal 60s of each deck's own 75), the forced find (p 1, 0.5 or 0.25). Every check of
+  `meta`'s matches - the lockstep with each pairing's fixed match first (now comparing the dealt seats, the seats' tables
+  and their actions, played as teacher decisions) -, every dealt 60 within the range of its own 75, every table seat's
+  60 its own deck's choice for its context; with 100 matches or more table decisions, dealt 60s and forced Doomsday
+  resolutions must have been seen. The release worker knows the pool (`worker/src/fuzz.rs`). Not in the suite tier's
+  default pools: `--fuzz-pools ...,meta_pair`.
+* **`pair_digests`** (`digest_formats.rs`, `tests/data/digests_pair.txt`, a fifth digest_formats line; `gate.py`'s
+  `digest-formats` step now expects five lines and "5 passed"): `legacy-pair-bo3-varied`'s spec (`digest_specs.json`'s
+  `pair`, kept equal to the preset by `tests/test_digest_specs.py`) with a table per deck - 20 matches -, the same with
+  the forced find at p 1 (15), Delver against Sneak and Show (15), the Delver mirror (10), and the fixed two-75 spec of
+  Doomsday against Delver with its seat tables (10); a seat with a table plays its table's action (`play` now takes
+  `table_action` first: no spec of the other digests has a table, so theirs are unchanged).
+
+### 223.7 Checks
+
+* **The engine tests** (`engine/tests/pair_sideboarding.rs`, 8 tests in `misc_suite`, with `metagame.rs`, `forced_find.rs`,
+  `dealt_per_seat.rs`): the whole `misc_suite` 220 passed, 0 failed. Two of the branch's first tests were wrong, not the
+  engine: (1) `two_75s_deals_are_keyed_privately_each_by_its_own_75` stepped each world with the real step's action and
+  expected the world to deal too, but how far one step runs is hidden information - seed 0's action is P1's mana
+  choice, after which the real game had only forced decisions up to the turn cap (12), so the step ended game 1 and
+  dealt; in a world whose resampled hand gives P1 a real choice the step stops there and nothing is dealt yet. The test
+  now checks every world whose step deals (all of each seat's keys, HIDDEN exactly for the other seat's deal, the
+  world's next game the real one's) and counts the others: 88 worlds checked, 28 whose step stopped before the game
+  ended. (2) The evaluation-spec test built its expected value with serde_json's `IndexMut` (`w["decks"]`), which
+  inserts `"decks": null` into a metagame spec; it reads through `get_mut` now.
+* **Python** (with the branch's engine module): `test_pair_sideboarding` (all, the engine-module ones included),
+  `test_forced_find`, `test_metagame`, `test_dealt_decks`, `test_matchup`, `test_digest_specs`, `test_gate`: 133 passed.
+  `test_metagame::test_the_engine_parses_and_refuses` expected dealt decks in a best-of-three metagame to be refused;
+  they are accepted now (223.1), so the test checks that they parse and that best of one still refuses them.
+* **Digests**: every existing digest_formats digest equal to main's 220 values - constructed 91b6cf60576961a7, metagame
+  be3766d1f943c95c, EoE c3a9c786030f42eb, the driver 6a03572828250b86 -; the pair digest recorded
+  **f82ab8148a4870a9** (`DIGEST_WRITE=1 ... pair_digests`, then re-run equal, 70 matches). The cube's (44372545881ef768 /
+  encoding-free a965c3fc8d3bba8a) and the dealt digests (f0bfffd26a70a753, per seat c67b186ba7d00e51): the engine gate.
+* **Farm compatibility on the specialists' preset** (`tools/farm_compat.py --preset legacy-pair-bo3-varied`, the
+  branch's release worker; the gate's own farm-compat step runs the Delver preset): PASSED - gate 2 (worker vs the
+  Python remote worker) identical, 6 matches, 3,056 rows, 150 batches; gate 3 (records -> trainer rows) identical, 3,349
+  rows, 6 decks. And with a published table phase (`--set spec=` the pairing spec with a 24-context table per deck and
+  the forced find at p 1, `E:/mtg-zero-scratch/stew/lane3/table_spec.py`): PASSED - gate 2 identical, 2,980 rows, 150
+  batches; gate 3 identical, 2,839 rows.
+* **The CPU smoke** (`legacy-pair-bo3-varied-smoke`, 4 iterations x 16 matches): iterations 1-2 self-play with no table, the retrain of v0002 (the games of iterations 1-2: 88 games) and v0003 as subprocesses, versions published with `"model": "pair"`; at the preset's guard (`matchup_table_min_gain` 0.005) neither published a table - held-out log loss 0.711 vs play / draw 0.577, gain -0.134 nats on 88 games of a tiny network - and iteration 4's chosen-60 seats sideboarded by search, as the guard says. Run again with `--matchup-table-min-gain -10` (the tables forced through, `E:/mtg-zero-scratch/stew/lane3/smoke2`): v0002 and v0003 each published two tables (one per deck), iteration 4's self-play sideboarded by them ("the chosen-60 seats sideboard by the matchup model's choice tables v0002.json"), and the game log's spec lines of those matches carry `"tables": ["v0002", "v0002"]`. The stew's row selector (222.1) on this smoke's rows - two different 75s, dealt per seat, post-board 60s hidden: 19,204 rows, 8,979 Delver acting and 10,225 Doomsday acting, 0 undecided.
+* **The fuzz** (`meta_pair` 2,000 games, beside `meta` and `delver_dealt`) and the suite: the suite gate (223.11).
+
+### 223.8 Rows per full best-of-three match (lane 2 sizes an iteration from it)
+
+Not measured again here: lane 2 measured decisions per full best-of-three match with the meta3 run's checkpoint against itself (222.3: the Delver mirror 810.5, Delver-Doomsday 689.5, Delver-Sneak 576.4, against 287.2 a best-of-one game of the meta3 mix), and rows follow decisions at fixed run settings, so an iteration of the meta3 run's rows (2,444 games) is 2,444 x 287.2 / d3 matches: 866 / 1,018 / 1,218. `PAIR_GAMES` (the preset's pairing, Delver-Doomsday) = 1,018; the stew sets each pairing's own `games` from the same table (its `pair_settings`).
+
+### 223.9 Card support of the stew's 75s
+
+`test_every_card_of_the_stew_75s_is_supported_in_best_of_three`: every ordered pairing of Delver, Doomsday, Sneak and Show and Legacy Hogaak Tempo (220) - its self-play spec, its evaluation spec and the dealt `pair_spec` - parses in the engine (`mtg_spec_check`): passed.
+
+### 223.10 Open, decisions for the maintainer
+
+* forced_find p in the preset is 0.0 (the meta3 run's schedule ended at its iteration 61); the stew's first config drops the
+  forced find for its specialists (equivalent at p 0) - a later stew may set it (it works in best of three now).
+* `tools/matchup_agreement.py` and `tools/delverai_matchup.py` are mirror-only (they read `table`); not adapted.
+* The farm fuzz steward has no `meta_pair` mode yet (the worker knows the pool).
