@@ -3,7 +3,7 @@ self-test, the farm gates on a reference run, publish, and the index launchers l
 
     python tools/farm_release.py release <commit | worktree> [--force] [--regate] [--no-publish] [--no-slot]
         [--speed-baseline <build id>] [--speed-minutes 3] [--speed-tolerance 0.05] [--speed-cuda] [--no-speed]
-        [--no-mac] [--no-mac-gates] [--no-mac-publish] [--mac-fuzz] [--speed-mac]
+        [--no-mac] [--no-mac-gates] [--no-mac-publish] [--no-mac-fuzz] [--speed-mac]
     python tools/farm_release.py lookup <commit> [--json | --pool-args]
     python tools/farm_release.py list [N]
     python tools/farm_release.py reference --config <run>/config.json --checkpoint <run>/models/iter_N.pt
@@ -70,11 +70,13 @@ Windows, CUDA and DirectML builds are published whatever happens on the Mac:
 12. **mac-build**: `farm_build.py --root <release worktree> --profile release --platform macos-arm64 --runtime-id
    <mac_runtime>` at the commit the entry's build was built at (`built_at`: so its manifest's engine_commit is the
    Windows build's) - built on the Mac in its one farm checkout under that checkout's lock at nice 15, signed here -
-   and with `mac_fuzz` (`--mac-fuzz`) the macOS fuzz build (`--profile fuzz --platform macos-arm64`), each copied to
+   and with `mac_fuzz` (default true since docs/ENGINE.md 219: tools/fuzz_steward.py lists it as the macOS alternate of
+   the engine's fuzz campaigns; `--no-mac-fuzz`) the macOS fuzz build (`--profile fuzz --platform macos-arm64`), each copied to
    ~/mtgz-macfarm/builds/<build_id>/ on the Mac;
 13. **mac-gates** (`mac_gates`, default true; `--no-mac-gates`): `farm_gates.py --mac` with that worker and pack on the
    reference (farm parity on the Mac, the reference export's records replayed here with 0 refused and rows identical;
-   with `mac_fuzz` also a fuzz chunk on both fuzz builds, outcomes identical);
+   with `mac_fuzz` also a fuzz chunk on both fuzz builds, outcomes identical, and the same faults injected into both
+   (ENGINE.md 219.3: every failure reported with the same seed, platform-neutral site and steward id);
 14. **speed-mac** (`mac_speed`, default FALSE: its windows need an idle Mac, and the Mac is a farm machine and a run's
    evaluation host; `--speed-mac`): step 8b's Mac windows (the previous macOS build from the index or
    `--speed-mac-baseline`, `speed.mac_baseline` in release.json) into `releases/<sha12>/speed-mac/`;
@@ -111,7 +113,7 @@ machine (`<builds>/.release.lock`).
 
 Settings: `<builds>/release.json` (machine-local, untracked; `config` prints what is in force): cpu_runtime,
 cuda_runtime, cuda_min_agent, dml_runtime, dml_min_agent, mac_runtime, mac_min_agent, the macOS part's switches `mac`
-(true), `mac_gates` (true), `mac_publish` (true), `mac_fuzz` (false), `mac_speed` (false) - each overridden for one run by
+(true), `mac_gates` (true), `mac_publish` (true), `mac_fuzz` (true), `mac_speed` (false) - each overridden for one run by
 its flag (`--mac` / `--no-mac`, `--mac-gates` / `--no-mac-gates`, ..., `--speed-mac` / `--no-speed-mac`) -, python (the
 gates' interpreter: torch + onnx + onnxruntime; default this one), url,
 reference {config, checkpoint, export} (default `<builds>/reference/`, written by `reference`), speed (the speed gate:
@@ -153,7 +155,7 @@ DEFAULTS = {
     'mac': True,                                   # build it (and backfill entries without one)
     'mac_gates': True,                             # farm_gates.py --mac on the reference
     'mac_publish': True,                           # publish the macOS builds (what campaigns list)
-    'mac_fuzz': False,                             # the macOS fuzz build too
+    'mac_fuzz': True,                              # the macOS fuzz build too (the steward's Mac campaigns: ENGINE.md 219)
     'mac_speed': False,                            # the speed gate's Mac windows (they need an idle Mac)
     'python': None,
     'url': 'https://farm.greggg230.com',
@@ -173,7 +175,7 @@ class Failed(Exception):
 
 def mac_switches(a, s):
     """The macOS part's switches of one run: each flag given (`--mac` / `--no-mac`, ...) wins, else release.json's
-    value (DEFAULTS: on, gates, publish; no fuzz, no Mac speed windows)."""
+    value (DEFAULTS: on, gates, publish, the fuzz build; no Mac speed windows)."""
     for arg, key in MAC_SWITCHES:
         if getattr(a, arg, None) is None:
             setattr(a, arg, bool(s.get(key)))
@@ -983,7 +985,7 @@ def parser():
     r.add_argument('--mac', action=on_off, default=None, help='the macOS part (module docs 11-17; default release.json '
                    '"mac", true): built, gated, published, recorded - and backfilled into an entry without one')
     r.add_argument('--mac-fuzz', action=on_off, default=None, help='the macOS fuzz build too (default release.json '
-                   '"mac_fuzz", false)')
+                   '"mac_fuzz", true)')
     r.add_argument('--mac-gates', action=on_off, default=None, help='tools/farm_gates.py --mac on the reference (default '
                    'release.json "mac_gates", true)')
     r.add_argument('--mac-run', action='append', default=[], help='the macOS part: RUN=<config.json> whose change the plan prints')
