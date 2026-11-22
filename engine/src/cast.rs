@@ -412,10 +412,15 @@ impl Game {
             // castable for an alternative cost (601.2b); the mana cost
             // may be payable too (asked on casting)
         } else if let Some(extras) = &extras {
-            if !extras.iter().any(|x| payable(x)) {
+            // (Or with mana abilities activated while it is cast that feed
+            // its graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 222.4.)
+            if !extras.iter().any(|x| payable(x)) && !self.feed_castable(p, c, crate::game::CastFrom::Hand, 0) {
                 return false;
             }
-        } else if !payable(&Default::default()) && !self.target_discount_castable(p, c, crate::game::CastFrom::Hand, cls) {
+        } else if !payable(&Default::default())
+            && !self.target_discount_castable(p, c, crate::game::CastFrom::Hand, cls)
+            && !self.feed_castable(p, c, crate::game::CastFrom::Hand, 0)
+        {
             return false;
         }
         if let Some(ab) = &def.spell {
@@ -891,7 +896,10 @@ impl Game {
         // other cost, CR 118.9a.)
         let warp_only = self.warp_only(p, card, from);
         let free = !warp_only && self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
-        let plain = !warp_only && (self.route_payable(p, card, from, classes) || self.target_discount_castable(p, card, from, classes));
+        // (Or with mana abilities activated while it is cast that feed its
+        // graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 222.4.)
+        let plain = !warp_only
+            && (self.route_payable(p, card, from, classes) || self.target_discount_castable(p, card, from, classes) || self.feed_castable(p, card, from, 0));
         if !(alt_ok || free || plain) {
             return false;
         }
@@ -2407,12 +2415,15 @@ impl Game {
         if a.emerge.is_some() {
             // A permanent to sacrifice that leaves the reduced mana and
             // `rest` (retrace's land discard) payable (`emerge_options`).
-            return !self.emerge_options(p, card, k, classes, from).is_empty();
+            return !self.emerge_options(p, card, k, classes, from).is_empty() || self.feed_castable(p, card, from, k as u8 + 1);
         }
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
         // (A card cast from hand is on the stack while its cost is paid.)
         // (Escalate's discards with it: `escalate_any`.)
+        // (Or with mana abilities activated while it is cast that feed its
+        // graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 222.4.)
         self.escalate_any(p, card, Some(rest), |r| self.cost_payable(p, card, r.expect("a cost"), &mana, classes, Some(card), from))
+            || self.feed_castable(p, card, from, k as u8 + 1)
     }
 
     /// The non-mana part of alternative cost `k` of `card` cast the way
@@ -2556,7 +2567,7 @@ impl Game {
                 let plain = match from {
                     crate::game::CastFrom::Hand => self.normal_payable(p, card, &classes),
                     _ => self.route_payable(p, card, from, &classes),
-                };
+                } || self.feed_castable(p, card, from, 0);
                 if plain_targets && plain {
                     opts.push(Opt { action: act::NUMBER, choice: Choice::Number(0) });
                 }

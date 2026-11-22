@@ -24,7 +24,7 @@ fn scen() -> Scenario {
 }
 
 fn cube() -> Scenario {
-    Scenario::new(CardDb::powerlsv()).spec(|s| s.auto_single = false).library(0, &["Island"; 12]).library(1, &["Island"; 12])
+    Scenario::new(CardDb::cube()).spec(|s| s.auto_single = false).library(0, &["Island"; 12]).library(1, &["Island"; 12])
 }
 
 fn opts(g: &Game) -> String {
@@ -347,7 +347,7 @@ fn cr_602_5_timing_restricted_mana_abilities_are_never_offered_while_casting() {
     // sorcery", "as an instant", "only during your turn", "only if ...", exhaust): the 601.2g step honours each as
     // activation with priority does, with a spell on the stack (no sorcery timing) and no priority.
     let mut found = Vec::new();
-    for t in [CardDb::powerlsv(), CardDb::constructed(), CardDb::eoe()] {
+    for t in [CardDb::cube(), CardDb::constructed(), CardDb::eoe()] {
         for d in 0..t.len() as u16 {
             let def = t.def(d);
             for ad in def.activated.iter().chain(def.hand_abilities.iter()) {

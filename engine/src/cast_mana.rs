@@ -465,4 +465,171 @@ impl Game {
     fn ability_reads_tapped(ab: &AbilityDef) -> bool {
         ab.targets.iter().any(|t| crate::cost_order::filter_reads_tapped(&t.filter)) || ab.modes.as_ref().is_some_and(|m| m.list.iter().any(Self::ability_reads_tapped))
     }
+
+    /// Castability through the 601.2g step (ENGINE.md 222.4): can `p` cast spell `card` the way `from` says, for its
+    /// mana cost (`alt` 0) or alternative cost `alt` - 1, with the help of mana abilities activated while it is cast
+    /// that put cards into `p`'s graveyard for its delve or its cost's "exile n cards from your graveyard" and that the
+    /// payment's own castability does not count: one with a mana cost of its own for a spell whose mana can't be spent
+    /// (Chromatic Star's {1} paid by another mana ability, its mana floating: Hogaak), any for such a spell's exile
+    /// (escape), one with a mana cost or a discard for another spell's exile, one that discards or whose last counter
+    /// sacrifices it for delve. Asked after the castability of the payment alone says no, and only when such an
+    /// ability exists (`feed_gap`).
+    ///
+    /// Exact by construction: the spell is put on the stack of a copy of the game the way casting it would (each
+    /// announcement castability considers: each additional cost option, escalate's discards, a spree mode, emerge's
+    /// permanent; X its least) and the cast's own 601.2g step is searched (`payment_completes`, as `Game::completing`
+    /// searches it while casting): every subset and order of the feeding abilities (`cast_mana_feeder`) with every way
+    /// to pay their costs (their payments' own decisions: which permanents pay a Star's {1}, a creature tapped for it
+    /// then not convoking), down to the payment's castability after the step (`cast_mana_pass_ok`: the total cost locked
+    /// as the first activation determined it, CR 601.2f). The same search the step makes when the spell is cast, so
+    /// castability and the cast agree.
+    pub(crate) fn feed_castable(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, alt: u8) -> bool {
+        if from == crate::eoe_c::FREE_CAST || !self.feed_gap(p, card, from, alt) {
+            return false;
+        }
+        let def = self.def_of(card);
+        // The additional cost options castability considers (`options_payable`: a kicker option needs its mode's
+        // targets); one cost for an alternative cost (`alt_payable`).
+        let options: Vec<u8> = if alt > 0 || def.additional.is_empty() {
+            vec![0]
+        } else {
+            (0..def.additional.len() as u8)
+                .filter(|&k| self.route_extra(card, from, k).is_some())
+                .filter(|&k| !def.kicker || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| self.spell_targets_available(&m.list[k as usize], p, card)))
+                .collect()
+        };
+        // The modes chosen as castability considers them: escalate's discards (`escalate_any`: e more modes with
+        // targets), one spree mode with its targets (`spree_extras`); none otherwise.
+        let mut modes: Vec<Vec<u8>> = vec![Vec::new()];
+        if let Some(m) = def.spell.as_ref().and_then(|ab| ab.modes.as_ref()) {
+            let with: Vec<u8> = (0..m.list.len() as u8).filter(|&i| self.spell_targets_available(&m.list[i as usize], p, card)).collect();
+            if m.escalate_discard {
+                let n = with.len().min(m.max as usize).max(1);
+                modes = (1..=n).map(|k| with[..k.min(with.len())].to_vec()).collect();
+            } else if !m.costs.is_empty() {
+                modes = with.iter().map(|&i| vec![i]).collect();
+            }
+        }
+        // Emerge's permanent, chosen as its cost is determined (CR 702.119a, 601.2f): each candidate.
+        let mut noted: Vec<Vec<crate::ids::ObjRef>> = vec![Vec::new()];
+        if alt > 0 {
+            if let Some(f) = self.alt_at(card, alt as usize - 1).and_then(|(a, _)| a.emerge.clone()) {
+                let s = crate::db::SacCost { filter: f, n: 1, another: false };
+                noted = self.sacrifice_candidates(p, card, &s).into_iter().map(|x| vec![self.obj_ref(x)]).collect();
+            }
+        }
+        for &option in &options {
+            for m in &modes {
+                for n in &noted {
+                    if self.feed_search(p, card, from, alt, option, m, n) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Is there a mana ability the 601.2g step may activate that puts a card into `p`'s graveyard which spell `card`'s
+    /// payment (cast the way `from` and `alt` say) reads and its castability does not count (`feed_castable`)? Its
+    /// cost reads the graveyard (delve, an exile from it); `p` has such an ability (whether it may be activated now is
+    /// the search's).
+    fn feed_gap(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, alt: u8) -> bool {
+        let def = self.def_of(card);
+        let exile = if alt > 0 {
+            self.alt_rest(card, from, alt as usize - 1).is_some_and(|r| r.exile_graveyard > 0)
+        } else {
+            (0..def.additional.len().max(1) as u8).any(|k| self.route_extra(card, from, k).is_some_and(|r| r.exile_graveyard > 0))
+        };
+        if !def.delve && !exile {
+            return false;
+        }
+        let no_mana = def.casting.no_mana;
+        // What castability counts (`delve_classes`, `no_mana_feeders`, `cost_payable_with`'s `delve_sources`): of a
+        // spell that spends mana, delve: an ability that sacrifices (its source or another permanent), exile: one that
+        // sacrifices its own source with no mana cost; of a spell of no mana, delve: one that sacrifices with no mana
+        // cost, exile: none.
+        let counted = |ad: &ActivatedDef, own: bool| {
+            let k = &ad.cost;
+            let sacs = k.sac_self || k.sacrifice.is_some();
+            let free = k.mana.is_zero() && !ad.x;
+            if exile && (no_mana || !(own && k.sac_self && free)) {
+                return false;
+            }
+            !def.delve || if no_mana { sacs && free } else { sacs }
+        };
+        let gap = |ad: &ActivatedDef, slot: AbilitySlot, own: bool| ad.mana().is_some() && !ad.instant_only && Self::cast_mana_feeder(ad, slot) && !counted(ad, own);
+        let rain = self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_)));
+        for c in self.permanents_of(p) {
+            let d = self.abilities(c);
+            if d.activated.iter().enumerate().any(|(i, ad)| gap(ad, AbilitySlot::Activated(i as u8), true)) {
+                return true;
+            }
+            if self.granted_activated(c).into_iter().any(|g| gap(self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot)), AbilitySlot::Activated(g.slot), false)) {
+                return true;
+            }
+            // (A granted "sacrifice this: add <mana>", Rain of Filth's: counted for delve as a sacrifice slot.)
+            if rain && (exile || no_mana) && self.sac_mana_of(c) != 0 {
+                return true;
+            }
+        }
+        self.players[p as usize].hand.iter().any(|&c| self.def_of(c).hand_abilities.iter().enumerate().any(|(i, ad)| gap(ad, AbilitySlot::Hand(i as u8), true)))
+    }
+
+    /// One announcement of `feed_castable`: on a copy of the game, spell `card` on the stack (put there, or already
+    /// there while its alternative cost is chosen) with alternative cost `alt`, additional cost option `option`,
+    /// modes `modes`, emerge's permanent `noted` and its least X; its 601.2g step searched.
+    #[allow(clippy::too_many_arguments)]
+    fn feed_search(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, alt: u8, option: u8, modes: &[u8], noted: &[crate::ids::ObjRef]) -> bool {
+        let mut g = self.clone();
+        g.pending = None;
+        g.answer = None;
+        g.page = None;
+        let def = self.def_of(card);
+        let x = def.x_min as u32;
+        let granter = (alt as usize > def.alt_costs.len()).then(|| self.granted_alts(card)[alt as usize - 1 - def.alt_costs.len()].0);
+        let id = match g.stack.iter().position(|s| s.kind == StackKind::Spell { card }) {
+            Some(pos) => {
+                let it = &mut g.stack[pos];
+                (it.alt, it.cost_option, it.x) = (alt, option, x);
+                it.modes = modes.to_vec();
+                it.noted = noted.to_vec();
+                it.id
+            }
+            None => {
+                let origin = g.objs[card.i()].zone;
+                g.move_card_to_stack(card, p);
+                let id = g.new_stack_id();
+                g.stack.push(crate::game::StackItem {
+                    id,
+                    kind: StackKind::Spell { card },
+                    controller: p,
+                    targets: Vec::new(),
+                    cost_option: option,
+                    modes: modes.to_vec(),
+                    ev: Default::default(),
+                    alt,
+                    from,
+                    delved: 0,
+                    delve_floor: 0,
+                    discarded_land: false,
+                    x,
+                    division: Vec::new(),
+                    attack_as: None,
+                    noted: noted.to_vec(),
+                    flips: 0,
+                    origin,
+                    times: 0,
+                    spliced: Vec::new(),
+                });
+                id
+            }
+        };
+        if let Some(gr) = granter {
+            g.note_granted_alt(card, gr);
+        }
+        let floor = g.agenda.len();
+        g.agenda.push(Task::CastMana { id, card: None, again: false });
+        g.payment_completes(floor, p)
+    }
 }
