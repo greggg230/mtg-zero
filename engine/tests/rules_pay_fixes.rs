@@ -510,6 +510,7 @@ fn cr_601_2f_702_51a_702_126a_castability_and_the_payment_agree_on_random_boards
         }
         paths_n += ws.len();
     }
+    println!("castable boards {castable_n} of 600, payment paths {paths_n}, cost choices {alt_n}");
     assert!(castable_n >= 200 && paths_n >= 1500 && alt_n >= 60, "castable boards {castable_n}, payment paths {paths_n}, cost choices {alt_n}");
 }
 
