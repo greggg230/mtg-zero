@@ -338,14 +338,24 @@ pub(crate) fn filter_reads_tapped(f: &Filter) -> bool {
     filter_reads(f).tapped
 }
 
+/// Does filter `f` read nothing the rest of a cast may change (`RestReach`) but by taking objects: no tapped status, no
+/// counters, no count of permanents, no colour; types and abilities (which `RestReach::chars` says may change or not);
+/// power and toughness only while `unsettled` is false (ENGINE.md 236)?
+pub(crate) fn filter_settled(f: &Filter, unsettled: bool) -> bool {
+    let r = filter_reads(f);
+    !r.tapped && !r.counters && !r.counts && r.kinds & !(kind::TYPES | kind::ABILITIES | kind::PT) == 0 && !(unsettled && r.kinds & kind::PT != 0)
+}
+
 /// What the rest of a spell's cast may change of the permanents' mana abilities, from its 601.2g step on
 /// (`Game::cast_rest_reach`; ENGINE.md 231.3): `leave`, the permanents it may remove; `chars`, whether a continuous
 /// effect may change some permanent's types or abilities; `unsettled`, whether a permanent may lose counters or a
-/// toughness change (a state-based action could then remove a permanent).
+/// toughness change (a state-based action could then remove a permanent); `counters`, the permanents that may lose (or
+/// gain) counters (ENGINE.md 236).
 pub(crate) struct RestReach {
     pub leave: Vec<CardIdx>,
     pub chars: bool,
     pub unsettled: bool,
+    pub counters: Vec<CardIdx>,
 }
 
 /// What paying parts of a cost may change (`Game::order_free`), or the mana
@@ -904,7 +914,12 @@ impl Game {
         // planeswalker's loyalty, a battle's defense (CR 704.5f-g, 704.5i, 704.5v) - or a continuous effect does,
         // which `chars_may_change` counts (`Change`'s power and toughness).)
         let fragile = |x: CardIdx| self.is_creature(x) || self.is_type(x, crate::db::types::PLANESWALKER) || self.is_type(x, crate::db::types::BATTLE);
-        RestReach { unsettled: w.counters.iter().any(|&x| fragile(x)) || ch.0 & kind::PT != 0, chars: ch.0 & (kind::TYPES | kind::ABILITIES) != 0, leave: w.leave }
+        RestReach {
+            unsettled: w.counters.iter().any(|&x| fragile(x)) || ch.0 & kind::PT != 0,
+            chars: ch.0 & (kind::TYPES | kind::ABILITIES) != 0,
+            leave: w.leave,
+            counters: w.counters,
+        }
     }
 
     /// The first part of `parts` in the order `part::DOMINANT`.

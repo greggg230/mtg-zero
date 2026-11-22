@@ -2173,6 +2173,22 @@ impl Game {
         std::borrow::Cow::Owned(c)
     }
 
+    /// Does spell `card`'s castability (`spell_payable` of its total cost, `item` as cast) read the pool through the
+    /// class model alone, once (`can_pay_with`'s candidates, `add_pool`)? When its total cost has no part besides its
+    /// mana, or its other parts are not emerge's nor teamwork's (whose checks read the mana again) and their order is free
+    /// with its mana (`cost_order_free`: else a search of the payment, reading the pool's types). The payment search's
+    /// mana of no chosen type is then exactly a unit of its types (ENGINE.md 236, `Game::wild_any`).
+    pub(crate) fn spell_rest_free(&self, card: CardIdx, item: &StackItem) -> bool {
+        let Some(rest) = self.spell_rest(card, item) else { return true };
+        if rest.crew > 0 || item.alt > 0 && self.item_alt(card, item).is_some_and(|(a, _)| a.emerge.is_some()) {
+            return false;
+        }
+        let p = item.controller;
+        let cost = Self::with_life(&rest, self.life_later(card, item));
+        let reduced = self.delve_reduced_with(card, p, self.total_mana(card, item), self.escape_exiles(card, item.from), Some(&rest));
+        self.cost_order_free(p, card, &cost, &reduced, None, self.spend_allow_from(card, item.from), 0, true, None)
+    }
+
     /// Can the caster of `item` pay spell `card`'s total cost with `cost`
     /// its mana (an X, a mode's or the times' mana announced: CR 601.2b-f)?
     /// The whole cost as `cast_pay` pays it (`spell_payable`).
@@ -2727,7 +2743,7 @@ impl Game {
         // pushed after this one), the caster may activate mana abilities
         // before it is paid (delve's cards, the cost's parts, the mana:
         // 601.2h); `cast_mana.rs`, ENGINE.md 231.
-        self.agenda.push(Task::CastMana { id, card: None, again: false, after: 0 });
+        self.agenda.push(Task::CastMana { id, card: None, again: false, after: 0, sac: None });
 
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
             self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST }); // CR 601.2d

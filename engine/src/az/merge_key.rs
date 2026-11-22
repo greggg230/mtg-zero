@@ -103,9 +103,9 @@ pub fn merge_key(a: &MtgAz) -> Option<u128> {
     if g.outcome.is_some() || g.observer.is_some() || g.spec.forced_find.is_some() {
         return None;
     }
-    // (The payment search's transient wild pool, ENGINE.md 231.4: (0, 0) at every decision - anything else is not a
+    // (The payment search's transient wild pool, ENGINE.md 231.4, 236: empty outside the search - anything else is not a
     // state the key knows. A locked cast cost is refused by `describe`.)
-    if g.pool_wild.iter().any(|&w| w != (0, 0)) || !g.cast_lock.is_empty() {
+    if g.pool_wild.iter().any(|w| w.iter().any(|&n| n != 0)) || !g.cast_lock.is_empty() {
         return None;
     }
     if !g.found.is_empty() || !g.finds_told.is_empty() || g.loop_open.is_some() {

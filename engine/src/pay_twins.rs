@@ -287,9 +287,9 @@ impl Named<'_> {
             Task::ConvokePay { id: _, picked } => self.cards(picked),
             Task::ManaNow { src, step: _ } => self.card(src.card),
             Task::ChooseCreatureType { card, step: _ } => self.card(*card),
-            // (The step's permanent picked for its ability; `after`, the payment search's order mark, names no object:
-            // a card index, a bound only, ENGINE.md 231.4.)
-            Task::CastMana { id: _, card, again: _, after: _ } => {
+            // (The step's permanent picked for its ability; `after` and `sac`, the payment search's order marks, name no
+            // object: card indices, bounds only, ENGINE.md 231.4, 236.)
+            Task::CastMana { id: _, card, again: _, after: _, sac: _ } => {
                 if let Some(c) = card {
                     self.card(*c);
                 }
