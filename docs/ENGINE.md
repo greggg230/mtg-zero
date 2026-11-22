@@ -43957,7 +43957,7 @@ the gate) built by a later encoding change, not here.
 `resolve.rs`: `Amount::EventSpellMv`. `loops.rs`: `loop_lki`. `flow.rs`: `start_turn` (one line). No payment code
 (`pay.rs`, `cost_order.rs`, `hogaak_a.rs`) is touched.
 
-## 227. Near-tie branches, the game side: the merge key and the alternative check (`SearchGame::merge_key`, `branch_alt_ok`; zero-core pin 84bb5e1 -> 92568b5; branch `feat/neartie-merge-key`, 2026-11-21)
+## 227. Near-tie branches, the game side: the merge key and the alternative check (`SearchGame::merge_key`, `branch_alt_ok`), branch games in the game database (zero-core pin 84bb5e1 -> eca650e; branch `feat/neartie-merge-key`, 2026-11-21)
 
 **Why.** zero-core's near-tie branch rule (its docs/search.md 2.11, built on a zero-core branch of its own) replays a
 self-play game from a decision where the move played and a runner-up were within 2 pp of root Q, with the runner-up
@@ -43984,10 +43984,11 @@ A stable 128-bit hash (`StableHash`: two SplitMix64 lanes over little-endian 64-
      `lki_toughness`, `spell_lki`, and `lki_power` - kept across turns - but for a card now in a library, which no
      reference can name), each entry by its gone object, sorted (the rules look entries up by object, one each); and the
      turn's **loop actions** (`loop_taken`, `loops.rs`: a view's loop hash, a battlefield place, action ids - no ids),
-     sorted. The rules read both and the build has no key for them;
-   * the **graveyards by identity** when no card of the game (its objects, the sideboards, their faces) is a positional
-     graveyard reader (R17, `lower::graveyard_order`; a per-table flag, computed once), references to graveyard cards by
-     that place; else in their order (227.2);
+     sorted, **but those whose activation sacrificed its source** (`LoopRec::sac_self`: a fetchland, a Bauble; 227.2).
+     The rules read both and the build has no key for them;
+   * each **graveyard as its creature cards in their order, then its other cards by identity** (the user's rule, 227.2),
+     references to graveyard cards by that place; the whole order when a card of the game (its objects, the sideboards,
+     their faces) is a positional graveyard reader (R17, `lower::graveyard_order`; a per-table flag, computed once);
    * the sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (item 2 keys them);
      EoE's W3 last known information and W6 state are refused.
 2. **The hidden parts as multisets**: each library's cards at the positions nobody knows, each hand's cards with who knows
@@ -44021,20 +44022,26 @@ turns, companions, dungeons, ...).
 
 ### 227.2 Decisions
 
-* **Graveyard order: by identity unless a card of the game reads it.** The rules read a graveyard's order only through the
-  card table's positional readers (R17: Shallow Grave's "the top creature card"), and the network sees it only there
-  (`graveyard_order` tokens) and in the list block of a decision about graveyard cards (65.10; 125's D5: graveyards are
-  bags of identities). Keeping the order would never merge Bolt-then-fetch with fetch-then-Bolt (Bolt and the fetchland
-  reach the graveyard in the other order, for the rest of the game). With no reader in the game the key takes the
-  graveyards as multisets. The one residual: a later graveyard-card decision (delve) lists the graveyard in order, so the
-  two lines' rows there list the same cards in another order. With a reader in the game the order is kept.
-* **Within a turn the turn's records keep sequencing ties apart; they merge as the next turn begins.** A fetchland or a
-  Bauble activation is a loop action (`loops.rs`): its record holds the loop hash of the view it was taken in, which
-  differs between the two orders, and the loop rule may read it again in the turn. A Brainstorm cast in the draw step
-  counts its draws as draw-step draws (`draw_step_draws`, encoded), one cast in the main phase does not. Dropping either
-  would be a guess, so the key keeps them; the lines merge at the next turn's first decision, once the turn's counters,
-  last known information and loop records are gone. The driver checks each decision of the branch against every key its
-  game reached after the branch point, so this costs the rest of the turn, not the merge.
+* **Graveyards: the creatures' order, the rest as a multiset (the user, 2026-11-21: "order only matters for
+  creatures").** The rules read a graveyard's order only through the card table's positional readers (R17: Shallow
+  Grave's "the top creature card"), and the network sees it only there (`graveyard_order` tokens) and in the list block of
+  a decision about graveyard cards (65.10; 125's D5: graveyards are bags of identities). Keeping the whole order would
+  never merge Bolt-then-fetch with fetch-then-Bolt (Bolt and the fetchland reach the graveyard in the other order, for
+  the rest of the game). **The stated approximation:** the relative order of the non-creature cards (and of a creature
+  among them) is not keyed, though a later graveyard-card decision (delve) lists the whole graveyard in order, so two
+  merged lines' rows there may list the same cards in another order. With a positional reader in the game the whole
+  order is kept. (The first version of this section keyed every graveyard as a multiset; the user's rule keeps the
+  creatures' order.)
+* **The convergence rule (agreed 2026-11-21): the key is both seats' network rows, the hidden cards as multisets, and the
+  rules-only state that can still change future legality or outcomes.** So **draw-step draws stay** (`draw_step_draws`,
+  a network input, g5::DRAW_STEP): a Brainstorm cast in the draw step and one cast in the main phase merge only as the
+  next turn begins. **Loop records whose activation sacrificed its source are left out** (`LoopRec::sac_self`: fetchlands,
+  Mishra's and Urza's Baubles): the record's loop hash holds that permanent on the battlefield, untapped, before its
+  costs, so no later state of the turn has it, and the loop rule reads a record only at a state with its hash. That is
+  an argument, so it is checked: `Game::check_dropped_loop_records` compares, after every step of every fuzz game, hidden-
+  deck game and match, each such record's hash with the loop hash of the state for its taker, and the fuzz's end-of-run
+  check requires no recurrence (227.7). Every other loop record stays (a loop action whose source stays on the
+  battlefield can come back to its state). Bolt-then-fetch and fetch-then-Bolt now merge within the turn.
 * **Best-of-three: keyed.** One episode per game (the presets' match, 121) keys the game with the match's state (item 3),
   the sideboards, the known pools and the sightings; sideboarding and the deck choice have no key.
 
@@ -44063,10 +44070,12 @@ descriptions and their JSON most of the rest. For scale, 64 x (clone + determini
 
 Two lines from one built Delver-mirror position (95), played by option label (`Game::reseed_rng`, a test hook, gives a
 line its own shuffles, as a branch's differ from its game's):
-* `bolt_then_fetch_merges_with_fetch_then_bolt`: different true library orders, the same multiset; apart within the turn
-  (the loop records), the same key at the next turn's first decision;
+* `bolt_then_fetch_merges_with_fetch_then_bolt_within_the_turn`: different true library orders, the same multiset, the same
+  key once both have resolved (the fetch's record left out: its source sacrificed) and at the next turn;
+* `graveyards_key_the_order_of_their_creatures_only` (non-creature cards moved among them: the same key; the creatures
+  swapped: another);
 * `a_fetch_before_a_draw_does_not_merge_with_one_after` (Brainstorm's draws: the hands differ);
-* `brainstorm_in_the_draw_step_merges_with_brainstorm_in_the_main_phase` (apart for the turn: the draw-step draws);
+* `brainstorm_in_the_draw_step_merges_with_brainstorm_in_the_main_phase_only_at_the_next_turn` (the draw-step draws);
 * `a_brainstorm_put_back_then_a_shuffle_merges_only_with_the_same_knowledge`: the put-back's order, shuffled away, merges;
   the opponent's Bauble look at P0's top card before the Brainstorm vs after it (the same cards everywhere, a cloud in one
   line) does not;
@@ -44113,3 +44122,40 @@ games, 2,609 rows); the suite evidence of d51092a3b6ab. The first run of this ga
 `MTGZ_MAC_HOME` (a `/Users/...` path) reached Windows Python rewritten by the MSYS path conversion (reproduced alone
 through slotd.sh; passes without it, and with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, which the second run set). A tooling
 gap of `--no-mac` gates on Windows, not fixed here. The next commit adds this paragraph only (docs).
+
+### 227.7 The user's decisions, the re-pin and the integration (2026-11-21)
+
+* **Graveyards** (227.1, 227.2): the creatures' order, the rest as a multiset (the user's rule).
+* **Loop records** (227.2): those whose activation sacrificed its source are left out of the key, so fetch and Bauble
+  sequencing merges within the turn; draw-step draws stay (a network input). **The check**
+  (`Game::check_dropped_loop_records`, the fuzz's `loopdrop_*` / `match_loopdrop_*` counters and their end-of-run
+  check): each record left out, compared after every later step of its turn with the loop hash of the state for its
+  taker, 2,000 games (and 100 matches + 100 post-sideboard where the pool plays them) per pool - **0 recurrences** in
+  default 43,672 record-steps (+ 2,854 in matches), default with hidden decklists 43,882, delver_dealt 132,943 (+ 11,799),
+  delver 132,943 (+ 11,764), doomsday 80,510, cross 38,589 (+ 6,388), hogaak 56,360 (+ 5,686). The check stays in the fuzz
+  (a recurrence fails the run).
+* **zero-core pin 92568b5 -> eca650e** (zero-core `feat/neartie-branches`: the near-tie rule in the driver, records/2,
+  the farm worker's branch games and the farm gates with branches; zero-core docs/search.md 2.11.1, docs/az.md 72), and
+  origin/main merged (main's 224-226; ENGINE.md 226's last known mana values - `lki_copy` and `spell_lki` gained a mana
+  value - keyed with their entries).
+* **The game database** (`tools/gamedb.py`, docs/gamedb.md "Branch games"; tests/test_gamedb_branches.py): branch games
+  get their own ids (the branch point hashed), a merged branch is checked against its game's record, the games rows carry
+  `is_branch`, `branch_from`, `branch_alt`, `branch_merged`, `branch_tag`, `branch_gap` (a merged one: winner by the
+  borrowed result, method `merged`, turns at the merge), a branch's events and combo rows count from its branch point, and
+  the behaviour series leave branch games out unless `include_branches`.
+* **`tools/farm_compat.py`**: gate 3's game count is the games plus their branches (a branch is a record of its own);
+  without branches unchanged.
+
+**The integration smoke** (CPU, below-normal priority, a scratch run outside any live run): `python -m mtgz.az.run --preset
+legacy-meta3-smoke --rolling 1 --iters 3 --games 32 --sims 32 --p-full 1.0 --game-records 1 --selfplay-branch 0.2
+--selfplay-branch-rule neartie` (a fresh tiny network, evaluations off). Per iteration: **eligible near-tie decisions
+69.8 / 30.3 / 20.0 a game**; branches 2 / 4 / 6 (of 30 / 28 / 26 games); **merged 1 / 1 / 1** (3 of 12 branches, 25%), after
+2, 2 and 6 decisions; mean gap 0.008-0.011. By the branch point's decision tag (`1 + DecisionKind`): Priority 7 branches
+(3 merged: 2, 2, 6 decisions), and one each of a mulligan's bottom card, a target, a yes/no, a library search and a put-on-
+top (none merged). **Every record replays**: the game database ingested all 96 (84 games, 12 branches, the 3 merged ones
+checked against their games' results). **The farm gates with branching** (`tools/farm_compat.py --preset legacy-meta3 --set
+selfplay_branch=1.0 --set selfplay_branch_rule="neartie" --games 40`, the uniform evaluator): gate 2 (the native worker vs
+the Python remote worker, every branch played on both sides) identical, 40 games, 15,474 rows, 150 batches; gate 3 (the
+worker's records/2 replayed by the trainer's path, each branch with its game's record) identical, 80 records (40 branches,
+1 merged: its merge key and its game's result re-checked by `replay_branch`), 15,777 rows. (With 12 games and p 0.5:
+gate 2 identical, gate 3 identical with 9 branches, none merged.)
