@@ -46403,3 +46403,11 @@ Not measured again here: lane 2 measured decisions per full best-of-three match 
   forced find for its specialists (equivalent at p 0) - a later stew may set it (it works in best of three now).
 * `tools/matchup_agreement.py` and `tools/delverai_matchup.py` are mirror-only (they read `table`); not adapted.
 * The farm fuzz steward has no `meta_pair` mode yet (the worker knows the pool).
+
+### 238.10 zero-core pin 61341a7 -> 1b7d4ee, and the core's pytest in six shards
+
+zero-core `main` 1b7d4ee: its docs/az.md 76 - `NetEvaluator`'s eager path on CUDA sums a leaf's options with
+`segment_reduce` instead of `index_add_`, whose order of additions on CUDA changed a prior's last bit from call to
+call (the CPU path, the CUDA graphs and the ONNX export untouched: this repo's digests and gates run on the CPU) - and
+75.2, a test's bar. `--core-pytest-shards` defaults to 6 (4): with the desktop's eight slots the four shards of 7 to 12
+minutes each were the core tiers' longest steps (238.8).

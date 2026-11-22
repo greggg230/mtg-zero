@@ -40,7 +40,7 @@ ad-hoc shell script. It can never pass a check it did not perform:
   * **A timeout bounds the step** - the command and every process it started (tools/proctree.py).
   * **The core's own suite** (search-core, optin-core): zero-core's engine module built with its
     tools/build_py.sh, then its pytest as its own step ("core pytest"; in --core-pytest-shards parallel steps over
-    disjoint parts, default 4: ENGINE.md 238). If the ONLY failures are in
+    disjoint parts, default 6: ENGINE.md 238). If the ONLY failures are in
     tests/test_remoteplay.py (it times real threads: zero-core AGENTS.md), each failed test is
     rerun alone once; the step passes only if every one passes alone, recorded as "flaky, passed
     on retry" in the report and the final line. Any other failure fails the step.
@@ -2586,8 +2586,8 @@ def build_parser():
     ap.add_argument('--fuzz-shards', type=int, default=None, help='suite tier: shards per fuzz loop (default 8)')
     ap.add_argument('--pytest-shards', type=int, default=4, help='pytest as this many parallel steps over disjoint test '
                     'files (default 4; 1: one step)')
-    ap.add_argument('--core-pytest-shards', type=int, default=4, help='search-core/optin-core: zero-core\'s pytest as '
-                    'this many parallel steps over disjoint parts (default 4; 1: one step)')
+    ap.add_argument('--core-pytest-shards', type=int, default=6, help='search-core/optin-core: zero-core\'s pytest as '
+                    'this many parallel steps over disjoint parts (default 6; 1: one step)')
     ap.add_argument('--expect-digest', type=hex16, default=None, help='encoding/engine/repin (required): the full '
                     'combined digest the digest step must equal')
     ap.add_argument('--expect-digest0', type=hex16, default=None, help='encoding/engine (required): the '
