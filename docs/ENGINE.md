@@ -45677,6 +45677,24 @@ checkpoint_compat identical in 540 s (1,808 s); the four core shards 641 to 871 
 build-only step 149 s; the module, the worker and the core module from the artifact cache (the pin changed no Rust
 input).
 
+### 238.9 The seconds of shards that ran on the Mac reach the durations file
+
+Beside a live run every pytest shard runs on the Mac, and its junit file stayed there (167.10's deferred item): the
+durations file was only ever updated by a gate without a live run, so the shards drifted apart (238.5's four: 73 / 86 /
+101 / 114 s). A Mac shard's command now writes its junit file under the Mac checkout's `gates/tmp`, prints the tests'
+seconds as one line after pytest's own output (`python tools/gate.py --junit-seconds <file>`: "GATE_PYTEST_SECONDS
+{...}", nothing when the file is unreadable) and removes it; the shard's checker (`recording(check_pytest)`) merges that
+line into `pytest_durations.json` once the shard passed (`merge_durations`: the desktop's own `record_durations` is the
+junit reader plus the same merge). A shard's result is still pytest's final summary line alone. The Mac's seconds and
+the desktop's are different clocks; a gate's shards all run on one of them, so one gate's seconds balance the next
+gate's shards on either.
+
+Checked (164e0604, beside two live runs; this paragraph is the next commit, docs only): `tests/test_gate.py` 103 passed
+(new: the line's round trip, a failed shard recording nothing, the merge keeping other files' seconds); **GATE PASSED
+WITH SKIPS python 164e0604f82c in 319s** (the desktop's one fenced test; the Mac was also running another repo's tests)
+- each of its four Mac shards printed its line, `pytest_durations.json` was rewritten at the gate's end, and the next
+plan's shards are 16 / 19 / 19 / 27 files where this gate's were 20 / 24 / 18 / 20.
+
 ## 239. The stew: specialists, deck stews and a main stew, distilled upward (branches `feat/stew-distill`, `feat/stew`, zero-core `feat/multi-distill`; 2026-11-21)
 
 ### 239.1 Several teachers, each on its own rows: `tools/distill.py --sources` and the MTG row selector (zero-core pin c850a5d -> ae3bc6c, zero-core `feat/multi-distill`, docs/az.md 76)

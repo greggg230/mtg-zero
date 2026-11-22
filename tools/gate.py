@@ -1667,20 +1667,26 @@ def junit_node(tc):
     return '::'.join([f, *parts[k + 1:], tc.get('name') or '']), f
 
 
-def record_durations(xml_path, name=PYTEST_DURATIONS):
-    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s `name` (this repo's
-    pytest_durations.json, the core suite's CORE_PYTEST_DURATIONS; under a lock file: the shards finish at about the same time). Best effort: a missing or unreadable file changes
-    nothing. A split file's parts each add their tests; the file's own total is written by the part that ran it whole
-    or, for a split file, summed from its tests' latest seconds."""
+def junit_seconds(xml_path):
+    """A junit file -> {test node id: seconds}, or None when it is missing or unreadable."""
     import xml.etree.ElementTree as ET
     try:
         root = ET.parse(xml_path).getroot()
     except (OSError, ET.ParseError):
-        return
+        return None
     tests = {}
     for tc in root.iter('testcase'):
         node, _ = junit_node(tc)
         tests[node] = tests.get(node, 0.0) + float(tc.get('time') or 0)
+    return tests
+
+
+def merge_durations(tests, name=PYTEST_DURATIONS):
+    """{test node id: seconds} into durations_dir()'s `name` (this repo's pytest_durations.json, the core suite's
+    CORE_PYTEST_DURATIONS), each touched file's total = the sum of its tests' latest seconds, under a lock file (the
+    shards finish at about the same time). Best effort: a failure changes nothing."""
+    if not tests:
+        return
     lock = os.path.join(durations_dir(), name + '.lock')
     for _ in range(100):
         try:
@@ -1688,22 +1694,76 @@ def record_durations(xml_path, name=PYTEST_DURATIONS):
             break
         except FileExistsError:
             time.sleep(0.1)
+        except OSError:
+            return
     else:
         return
     try:
         d = read_durations(name)
-        d.update({k: round(v, 2) for k, v in tests.items()})
+        d.update({k: round(float(v), 2) for k, v in tests.items()})
         for f in {n.split('::')[0] for n in tests}:
             d[f] = round(sum(v for k, v in d.items() if k.startswith(f + '::')), 2)
         with open(os.path.join(durations_dir(), name), 'w', encoding='utf-8') as fh:
             json.dump(d, fh, indent=1, sort_keys=True)
+    except (OSError, ValueError, TypeError):
+        pass
     finally:
         os.close(fd)
         os.remove(lock)
+
+
+def record_durations(xml_path, name=PYTEST_DURATIONS):
+    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s `name` (merge_durations);
+    the junit file is removed. Best effort: a missing or unreadable file changes nothing. A split file's parts each add
+    their tests; the file's own total is summed from its tests' latest seconds."""
+    tests = junit_seconds(xml_path)
+    if tests is None:
+        return
+    merge_durations(tests, name)
     try:
         os.remove(xml_path)
     except OSError:
         pass
+
+
+# A shard that ran on the Mac leaves its junit file there: its command prints the tests' seconds as one line after
+# pytest's own output (`python tools/gate.py --junit-seconds <file>`), and its checker records them once the shard
+# passed (ENGINE.md 238.9) - so the shards stay balanced beside a live run, when every shard runs on the Mac.
+SECONDS_PREFIX = 'GATE_PYTEST_SECONDS '
+
+
+def print_junit_seconds(xml_path):
+    """`gate.py --junit-seconds <file>`: the junit file's {test: seconds} as one SECONDS_PREFIX line (nothing when the
+    file is missing or unreadable: the shard's own result is pytest's summary, never this)."""
+    tests = junit_seconds(xml_path)
+    if tests:
+        print(SECONDS_PREFIX + json.dumps({k: round(v, 2) for k, v in tests.items()}, separators=(',', ':')), flush=True)
+    return 0
+
+
+def parse_seconds(output):
+    """The last SECONDS_PREFIX line of a step's output -> {test: seconds}, or {} (none, or not a JSON object of
+    numbers)."""
+    found = {}
+    for line in output.splitlines():
+        if line.startswith(SECONDS_PREFIX):
+            try:
+                d = json.loads(line[len(SECONDS_PREFIX):])
+            except ValueError:
+                continue
+            if isinstance(d, dict) and all(isinstance(v, (int, float)) for v in d.values()):
+                found = d
+    return found
+
+
+def recording(checker, name=PYTEST_DURATIONS):
+    """`checker`, and after a pass the seconds the step printed (parse_seconds) merged into the durations file."""
+    def check(output, rc):
+        res = checker(output, rc)
+        if res[0]:
+            merge_durations(parse_seconds(output), name)
+        return res
+    return check
 
 
 def pytest_step(name='pytest', step_id='pytest', ctx=None):
@@ -1746,15 +1806,17 @@ def pytest_step(name='pytest', step_id='pytest', ctx=None):
         # (its own --basetemp under the Mac checkout's gates/tmp, removed after: the shards run at once there too)
         mac_base = f'gates/tmp/pytest-{ctx.sha_short}-{tag}-{uuid.uuid4().hex[:8]}'
         mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={d}' for d in mac_desel],
-                          f'--basetemp={mac_base}'])
-        # (pytest makes the basetemp itself, not its parents: a new Mac checkout has no gates/tmp yet)
-        mac = f'{{ mkdir -p gates/tmp && {mac}; rc=$?; rm -rf {mac_base}; exit $rc; }}'
+                          f'--basetemp={mac_base}', f'--junitxml={mac_base}.xml'])
+        # (pytest makes the basetemp itself, not its parents: a new Mac checkout has no gates/tmp yet; the tests'
+        # seconds printed for the durations file here: `recording`)
+        mac = (f'{{ mkdir -p gates/tmp && {mac}; rc=$?; python tools/gate.py --junit-seconds {mac_base}.xml; '
+               f'rm -rf {mac_base} {mac_base}.xml; exit $rc; }}')
         nfiles = len({e.split('::')[0] for e in entries})
         s = Step(f'{name} {tag} ({nfiles} files)',
                  [python_exe(), '-m', 'pytest', *entries, *PYTEST_ARGS, *[f'--deselect={d}' for d in desel],
                   f'--basetemp={base}', f'--junitxml={xml}'],
                  id=f'{step_id}-{tag}', checker=check_pytest, heavy=True,
-                 mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None,
+                 mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None, mac_checker=recording(check_pytest),
                  cleanup=lambda base=base, xml=xml: (record_durations(xml), shutil.rmtree(base, ignore_errors=True)),
                  evidence=ev)
         if on_mac and first:
@@ -2582,6 +2644,9 @@ def build_parser():
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) == 2 and argv[0] == '--junit-seconds':         # (a Mac pytest shard's own call: no tier, no checkout)
+        return print_junit_seconds(argv[1])
     args = build_parser().parse_args(argv)
     try:
         check_options(args)
