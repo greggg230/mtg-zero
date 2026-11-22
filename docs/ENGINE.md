@@ -42979,12 +42979,13 @@ information**, in the real game too.
 * `check_match_information_set` reports where two rows differ (`Row::locate`: a head segment's slot and float, a tail
   token's segment, slot and float, or an override) and handles rows of different lengths.
 
-**What the strict rule gives up (decision 4, the user's; not changed).** Once finds are mixed with other cards, the rows
+**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8).** Once finds are mixed with other cards, the rows
 no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
 already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
 encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
-layout v8 question (P's payment segment, E's stale-reference LKI block): a group-level finds fact in v8 (recommended), or
-counting a pile's graveyard picks as told members without a layout change (partial, not recommended). Also noted, not
+layout v8 question (P's payment segment, E's stale-reference LKI block): a group-level finds fact in v8, or counting a
+pile's graveyard picks as told members without a layout change (partial). **The user chose the group fact in the single
+additive v8** (one token per group of places: owner, zone, the places, how many hold search finds and other cards). Also noted, not
 changed: 140.9's likelihood reads the real mark when a find and a mixed-in known card share an identity (pre-existing);
 open-decklist games record no finds at all (A1's rule), so no cube or game-1 row has the fact.
 
@@ -43030,3 +43031,9 @@ post-sideboard scan** (the repro test as a scan, every check of `play_match_spec
 and Doomsday piles are the deck's core. So it trained on this leak: the opponent's row after a pile ordered by
 definition rank, and both rows after a shuffle of a library of finds only. The fix moves encodings only in those
 states. A checkpoint keeps its layout (no layout change), so a run can re-pin onto the fix with no fork.
+
+**The suite gate** (on 1115a8bf, this section's commit, in its worktree; steps on the Mac beside the live legacy-meta3 runs):
+`python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,doomsday,cross,hogaak,delver` - **GATE PASSED
+suite 1115a8bff898 in 978s**: privacy 0 findings; the full engine suite 2,870 passed (24 binaries); the sharded 2,000-game
+fuzz of each pool passed (the default with 100 matches; default with hidden decklists; delver_dealt, cross, hogaak and
+delver each with 100 matches + 100 post-sideboard; doomsday games only).
