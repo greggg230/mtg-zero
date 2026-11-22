@@ -150,7 +150,7 @@ pub struct LoopRec {
     pub path: Vec<LoopStep>,
     /// The activated ability's cost sacrifices its source (a fetchland, Mishra's Bauble): the loop hash it records
     /// holds that permanent on the battlefield, so no later state of the turn has it (the near-tie merge key leaves
-    /// such records out, ENGINE.md 227; `Game::check_dropped_loop_records`). A function of the action at the hashed
+    /// such records out, ENGINE.md 229; `Game::check_dropped_loop_records`). A function of the action at the hashed
     /// state: it changes no record's equality.
     pub sac_self: bool,
 }
@@ -266,7 +266,7 @@ impl Game {
         }
     }
 
-    /// The check behind the merge key's dropped loop records (ENGINE.md 227): for each record of this turn whose
+    /// The check behind the merge key's dropped loop records (ENGINE.md 229): for each record of this turn whose
     /// activation sacrificed its source (`LoopRec::sac_self`), is the loop hash of the state now, for its taker, the
     /// one it recorded? (The loop rule would read the record only at such a state.) Returns (records checked,
     /// recurrences); the fuzz counts both at every step and requires no recurrence.

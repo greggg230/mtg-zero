@@ -1,4 +1,4 @@
-//! Near-tie branched games (zero-core's near-tie branch rule, docs/search.md 2.11; ENGINE.md 227): the game side of
+//! Near-tie branched games (zero-core's near-tie branch rule, docs/search.md 2.11; ENGINE.md 229): the game side of
 //! the two `SearchGame` hooks.
 //!
 //! * **`merge_key`**: a branch replayed from a near-tie decision with the runner-up forced ends where it reaches a

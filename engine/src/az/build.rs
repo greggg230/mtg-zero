@@ -339,7 +339,7 @@ pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
     describe_as(g, viewer, false)
 }
 
-/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 227): the same description, finer where the key
+/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 229): the same description, finer where the key
 /// needs it and wider where the key covers the rest itself. A stale reference or a gone token also carries its age
 /// (`"age"`: the card's zone changes since that object, so two earlier objects of one card never read alike); the
 /// sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (the key adds them);
@@ -362,7 +362,7 @@ fn describe_as(g: &Game, viewer: PlayerId, key: bool) -> Result<Value, String> {
     }
     // (The merge key without a positional graveyard reader among the game's cards: each graveyard as its creature
     // cards in their order, then its other cards by identity - the user's rule, 2026-11-21: "order only matters for
-    // creatures" (ENGINE.md 227); references by that place.)
+    // creatures" (ENGINE.md 229); references by that place.)
     let unordered = key && !positional_reader_in(g);
     let gys: [Vec<CardIdx>; 2] = std::array::from_fn(|p| {
         let mut v = g.players[p].graveyard.clone();

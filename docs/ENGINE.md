@@ -43957,7 +43957,82 @@ the gate) built by a later encoding change, not here.
 `resolve.rs`: `Amount::EventSpellMv`. `loops.rs`: `loop_lki`. `flow.rs`: `start_turn` (one line). No payment code
 (`pay.rs`, `cost_order.rs`, `hogaak_a.rs`) is touched.
 
-## 227. Near-tie branches, the game side: the merge key and the alternative check (`SearchGame::merge_key`, `branch_alt_ok`), branch games in the game database (zero-core pin 84bb5e1 -> eca650e; branch `feat/neartie-merge-key`, 2026-11-21)
+## 227. zero-core pin 84bb5e1 -> 899e0eb: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good; an NVIDIA card's CUDA ordinal by its LUID, a second DXGI listing of a card left out (zero-core `fix/resume-fatal` f8a6211, `fix/cuda-luid-ordinal` 899e0eb; 2026-11-21)
+
+**Why.** On 2026-11-21 a farm GPU lease went dead for 86 minutes after an owner-activity pause: at the `resume` the
+worker could not rebuild its GPU session (CUBLAS_STATUS_ALLOC_FAILED). The resume arm of the worker's control loop
+sent a NON-fatal `error` and stayed alive, and the job stayed yielded forever (`job::do_resume` returns at
+`EvalLink::restore()?`, before `set_yielded(false)`): a live process answering pings and playing nothing. Agent 0.3.15's
+watchdog already treats a non-fatal error while resuming plus no progress as a failed worker (after its wait); this is
+the worker's half.
+
+**What.** zero-core `crates/worker/src/proto.rs`: `control()` returns the fatal message of a failed resume (nothing
+emitted there); `with_control` stops reading control lines, quits the job, joins it and returns that error, which the
+serve loops already emit as `{"ev": "error", "fatal": true}` and exit 1 with - the path of a job's own error. A resume
+that works is unchanged (`resumed`). The agent takes a fatal error straight to `worker_failed` (zero-farm
+agent/src/lease.rs), so the lease fails over at once instead of after the watchdog's wait. No engine, encoding, search
+or row change: the worker crate's control path only.
+
+**Tests.** zero-core `proto::tests::a_failed_resume_is_fatal` (the resume arm: a link whose evaluator threads are gone
+-> the message, no `resumed`, still yielded until the caller quits; no link -> `resumed`) and
+`with_control_quits_the_job_on_a_failed_resume_and_returns_its_error` (end to end: yield, a failing resume, the job
+quit and joined, the error returned); `cargo test -p zero_worker --lib` 43 passed; clippy: nothing new.
+
+### 227.1 The CUDA ordinal by LUID (zero-core 899e0eb)
+
+**Why.** The farm releases of main 76973535 and 52d0bf9b FAILED at `cuda-selftest`: "Invalid device ID: 1, must be
+between 0 (inclusive) and 1 (exclusive)". The desktop has one NVIDIA card, but its user was on a remote desktop
+session, whose indirect display renders on the GPU - and DXGI then lists the card a second time under a new LUID
+(..f58f at DXGI 0, ..0b3978b9df at DXGI 2, the iGPU between). `gpu::dedup` keeps one adapter per LUID, so both stayed,
+and a CUDA-family provider's ordinal was the adapter's index among NVIDIA adapters: the probe tried the second listing
+as CUDA device 1. The probe code had not changed (the 16:37 release of 45dbf2e1 passed its self-test without the
+session). Any farm PC used over a remote desktop meets the same.
+
+**What.** zero-core `crates/worker/src/gpu.rs`: when DXGI lists two or more NVIDIA adapters, the CUDA driver
+(nvcuda.dll, loaded when asked: cuInit, cuDeviceGetCount, cuDeviceGet, cuDeviceGetLuid) gives each CUDA device's LUID;
+an NVIDIA adapter no CUDA device has the LUID of is left out of `gpu::adapters()` (`cuda_filter`), and
+`session::bind` gives CUDA / TensorRT-RTX the CUDA ordinal of the adapter's LUID (`device_ordinal`) - also right when
+CUDA's device order is not DXGI's (several cards, CUDA_DEVICE_ORDER). One NVIDIA adapter (most PCs): the driver is
+never asked, ordinal 0, as before; a driver that fails, or LUIDs none of which DXGI lists: nothing left out, the rule
+of before. AMD (MIGraphX) and DirectML unchanged.
+
+**Checked.** On the desktop under the remote desktop session, `gpu::adapters()` lists the RTX 5090 once (..f58f) and
+the iGPU; before, three adapters. Test `gpu::tests::a_second_listing_of_an_nvidia_card_goes_and_cuda_names_the_ordinal`
+(that desktop's listing; the second listing's old ordinal 1; no driver answer = before; two cards in CUDA's order; one
+card; AMD). `cargo test -p zero_worker --lib` 44 passed; clippy: nothing new.
+
+**Left (zero-farm agent, not here):** the agent's own DXGI list (agent/src/profile.rs `adapters`) still shows the
+second listing in its profile; a lease or probe sent to that LUID now fails with "no adapter with LUID ... on this PC"
+(before: the CUDA device-id error). The agent could drop it the same way (NVML's device LUIDs).
+**Gate** of c4057736 (this section's code merged with main 50205980; the warm worktree warm-2, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`,
+the system Python, `--baseline-root` warm-1 at main 50205980 with its engine module from the artifact cache): **GATE
+PASSED WITH SKIPS optin-core c40577368190 in 1784s** - privacy 0 findings; core tests 215 passed; checkpoint_compat
+byte identity (visits and cq, 3,185 samples each); the digests as recorded (constructed 91b6cf60576961a7, EoE
+c3a9c786030f42eb, driver 6a03572828250b86, metagame 4039d04b7971975e, dealt f0bfffd26a70a753 over 80 matches); farm
+compat identical (gate 2: 6 games, 2,773 rows, 150 batches; gate 3 identical); cargo test --test az 57 and --test
+hidden 28 passed; the other three games built against this core; core pytest 755 passed, 71 skipped - skipped: 17
+live-run-hazard tests (fenced: live runs on this machine). Earlier gates of this branch: 699d413f (the resume fix
+alone, PASSED WITH SKIPS AND FLAKY RETRIES - test_remoteplay::test_a_dying_worker_gives_its_accepted_games_back passed
+on retry) and a412d697 (both fixes on main a99e9ca7, PASSED WITH SKIPS). The next commit adds this paragraph only (docs).
+
+## 228. The Mac farm gates' faults part: the local fuzz build names its commit (ZERO_FARM_ENGINE_COMMIT), so a release keeps its macOS build (tools/farm_release.py; 2026-11-21)
+
+**Why.** The release of main 50205980 (the first with 219 merged) was published WITHOUT its macOS build: `mac-gates`
+FAILED at part (d), "4 keyed differently", although the four injected faults matched on every key that is behaviour
+(neutral site, failure id, mode). The difference was the repro's commit: the Mac's published fuzz build reads it from
+its manifest.json (`(at 50205980e573)`, normalised to `(at <commit>)` by `farm_gates.fault_failures`), while
+`Release.local_fuzz_worker` is a bare `cargo build --profile fuzz` with no manifest, so its failures said
+`(at unknown)`. Every release from 219 on would lose its macOS part the same way.
+
+**What.** `Release.mac_gates` runs farm_gates.py with `ZERO_FARM_ENGINE_COMMIT` = the release worktree's HEAD - the
+worker's own fallback when there is no manifest (zero-core crates/worker/src/fuzz.rs `build_identity`) - so both sides'
+repros name the commit. The comparison is unchanged: a build with no identity still fails it. Test
+`tests/test_farm_release.py::test_the_mac_gates_name_the_commit_for_the_local_fuzz_build` (the environment and command
+given to the gates; `fault_failures` equal for a 12-character and a full sha, different for "unknown");
+`tests/test_farm_release.py` 19 passed. Python tools only: no build, engine, encoding or worker change. The next
+release (or `farm_release.py release 50205980`) backfills the missing macOS part.
+
+## 229. Near-tie branches, the game side: the merge key and the alternative check (`SearchGame::merge_key`, `branch_alt_ok`), branch games in the game database (zero-core pin 84bb5e1 -> eca650e; branch `feat/neartie-merge-key`, 2026-11-21)
 
 **Why.** zero-core's near-tie branch rule (its docs/search.md 2.11, built on a zero-core branch of its own) replays a
 self-play game from a decision where the move played and a runner-up were within 2 pp of root Q, with the runner-up
@@ -43969,7 +44044,7 @@ false merge labels a branch's rows with another future's outcome; a missed merge
 key cannot settle is None. Nothing calls either hook unless the driver's near-tie rule is on: with it off, play is byte
 for byte as before (227.6).
 
-### 227.1 The key (`engine/src/az/merge_key.rs`)
+### 229.1 The key (`engine/src/az/merge_key.rs`)
 
 A stable 128-bit hash (`StableHash`: two SplitMix64 lanes over little-endian 64-bit words, the length mixed in; no
 `HashMap`, no process state, the same on every platform) of, in order:
@@ -43984,9 +44059,9 @@ A stable 128-bit hash (`StableHash`: two SplitMix64 lanes over little-endian 64-
      `lki_toughness`, `spell_lki`, and `lki_power` - kept across turns - but for a card now in a library, which no
      reference can name), each entry by its gone object, sorted (the rules look entries up by object, one each); and the
      turn's **loop actions** (`loop_taken`, `loops.rs`: a view's loop hash, a battlefield place, action ids - no ids),
-     sorted, **but those whose activation sacrificed its source** (`LoopRec::sac_self`: a fetchland, a Bauble; 227.2).
+     sorted, **but those whose activation sacrificed its source** (`LoopRec::sac_self`: a fetchland, a Bauble; 229.2).
      The rules read both and the build has no key for them;
-   * each **graveyard as its creature cards in their order, then its other cards by identity** (the user's rule, 227.2),
+   * each **graveyard as its creature cards in their order, then its other cards by identity** (the user's rule, 229.2),
      references to graveyard cards by that place; the whole order when a card of the game (its objects, the sideboards,
      their faces) is a positional graveyard reader (R17, `lower::graveyard_order`; a per-table flag, computed once);
    * the sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (item 2 keys them);
@@ -44020,7 +44095,7 @@ player saw in the other's library that its owner never did, after a shuffle), a 
 see, and the rare states `describe` does not cover (face-down cards, copies, links, permissions, waiting triggers, extra
 turns, companions, dungeons, ...).
 
-### 227.2 Decisions
+### 229.2 Decisions
 
 * **Graveyards: the creatures' order, the rest as a multiset (the user, 2026-11-21: "order only matters for
   creatures").** The rules read a graveyard's order only through the card table's positional readers (R17: Shallow
@@ -44045,7 +44120,7 @@ turns, companions, dungeons, ...).
 * **Best-of-three: keyed.** One episode per game (the presets' match, 121) keys the game with the match's state (item 3),
   the sideboards, the known pools and the sightings; sideboarding and the deck choice have no key.
 
-### 227.3 The alternative check (`merge_key::branch_alt_ok`)
+### 229.3 The alternative check (`merge_key::branch_alt_ok`)
 
 False for the same action; for decisions not worth a branch by their kind (`PayMana`, `PayPool`, `ChooseMana`,
 `ActivateMana`, `OrderTriggers`); at priority for opening the mana-ability window (`YES`, "Activate mana abilities") or
@@ -44056,7 +44131,7 @@ effect, a mark, a link, an attachment or a stack target (the opponent's two unta
 target). True otherwise, including every sideboarding and deck-choice option. (Priority and the hand-card choices already
 offer one option for twin hand cards: the engine's canonical hand.)
 
-### 227.4 Cost
+### 229.4 Cost
 
 `merge_key_cost` (ignored; `--ignored --nocapture`): 20 games each, moves half the heuristic's, half random, the key at
 every decision; release, on the desktop beside the live runs (noisy, about +-30%). **Delver mirror: 6,025 decisions,
@@ -44066,7 +44141,7 @@ descriptions and their JSON most of the rest. For scale, 64 x (clone + determini
 64-simulation search's game side without its steps and its network - took 0.9-1.2 ms in the same runs; with the network a
 64-simulation search takes several milliseconds on a GPU and far more on a CPU.
 
-### 227.5 Tests (`engine/tests/merge_key.rs`, in `misc_suite`)
+### 229.5 Tests (`engine/tests/merge_key.rs`, in `misc_suite`)
 
 Two lines from one built Delver-mirror position (95), played by option label (`Game::reseed_rng`, a test hook, gives a
 line its own shuffles, as a branch's differ from its game's):
@@ -44088,7 +44163,7 @@ line its own shuffles, as a branch's differ from its game's):
 * `branch_alt_ok_excludes_twins_and_mana_details` (the same action, the mana window, Wasteland's twin targets vs P0's own
   land, `ActivateMana`, `ChooseMana`, Bolt's two player targets).
 
-### 227.6 Checks
+### 229.6 Checks
 
 With the near-tie rule off nothing calls either hook, and `describe` outside its key mode is unchanged (the graveyard
 order and the references as before; the build round trip `misc_suite build::` 6 passed). On c3c0b6dd (desktop, CPU,
@@ -44123,9 +44198,9 @@ games, 2,609 rows); the suite evidence of d51092a3b6ab. The first run of this ga
 through slotd.sh; passes without it, and with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, which the second run set). A tooling
 gap of `--no-mac` gates on Windows, not fixed here. The next commit adds this paragraph only (docs).
 
-### 227.7 The user's decisions, the re-pin and the integration (2026-11-21)
+### 229.7 The user's decisions, the re-pin and the integration (2026-11-21)
 
-* **Graveyards** (227.1, 227.2): the creatures' order, the rest as a multiset (the user's rule).
+* **Graveyards** (227.1, 229.2): the creatures' order, the rest as a multiset (the user's rule).
 * **Loop records** (227.2): those whose activation sacrificed its source are left out of the key, so fetch and Bauble
   sequencing merges within the turn; draw-step draws stay (a network input). **The check**
   (`Game::check_dropped_loop_records`, the fuzz's `loopdrop_*` / `match_loopdrop_*` counters and their end-of-run

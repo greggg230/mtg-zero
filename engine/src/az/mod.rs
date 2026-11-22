@@ -1744,13 +1744,13 @@ impl SearchGame for MtgAz {
         }
     }
 
-    /// Near-tie branches' merge key (`merge_key.rs`, ENGINE.md 227; zero-core docs/search.md 2.11): equal only for
+    /// Near-tie branches' merge key (`merge_key.rs`, ENGINE.md 229; zero-core docs/search.md 2.11): equal only for
     /// equivalent states, None where the state cannot be keyed safely. Read only by the near-tie branch rule.
     fn merge_key(&self) -> Option<u128> {
         merge_key::merge_key(self)
     }
 
-    /// Whether `alt` is worth a near-tie branch next to `played` (`merge_key::branch_alt_ok`, ENGINE.md 227).
+    /// Whether `alt` is worth a near-tie branch next to `played` (`merge_key::branch_alt_ok`, ENGINE.md 229).
     fn branch_alt_ok(&self, played: u16, alt: u16) -> bool {
         merge_key::branch_alt_ok(self, played, alt)
     }
