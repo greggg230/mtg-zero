@@ -44004,3 +44004,13 @@ card; AMD). `cargo test -p zero_worker --lib` 44 passed; clippy: nothing new.
 **Left (zero-farm agent, not here):** the agent's own DXGI list (agent/src/profile.rs `adapters`) still shows the
 second listing in its profile; a lease or probe sent to that LUID now fails with "no adapter with LUID ... on this PC"
 (before: the CUDA device-id error). The agent could drop it the same way (NVML's device LUIDs).
+**Gate** of c4057736 (this section's code merged with main 50205980; the warm worktree warm-2, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`,
+the system Python, `--baseline-root` warm-1 at main 50205980 with its engine module from the artifact cache): **GATE
+PASSED WITH SKIPS optin-core c40577368190 in 1784s** - privacy 0 findings; core tests 215 passed; checkpoint_compat
+byte identity (visits and cq, 3,185 samples each); the digests as recorded (constructed 91b6cf60576961a7, EoE
+c3a9c786030f42eb, driver 6a03572828250b86, metagame 4039d04b7971975e, dealt f0bfffd26a70a753 over 80 matches); farm
+compat identical (gate 2: 6 games, 2,773 rows, 150 batches; gate 3 identical); cargo test --test az 57 and --test
+hidden 28 passed; the other three games built against this core; core pytest 755 passed, 71 skipped - skipped: 17
+live-run-hazard tests (fenced: live runs on this machine). Earlier gates of this branch: 699d413f (the resume fix
+alone, PASSED WITH SKIPS AND FLAKY RETRIES - test_remoteplay::test_a_dying_worker_gives_its_accepted_games_back passed
+on retry) and a412d697 (both fixes on main a99e9ca7, PASSED WITH SKIPS). The next commit adds this paragraph only (docs).
