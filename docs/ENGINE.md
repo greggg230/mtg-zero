@@ -43660,3 +43660,15 @@ states. A checkpoint keeps its layout (no layout change), so a run can re-pin on
 suite 1115a8bff898 in 978s**: privacy 0 findings; the full engine suite 2,870 passed (24 binaries); the sharded 2,000-game
 fuzz of each pool passed (the default with 100 matches; default with hidden decklists; delver_dealt, cross, hogaak and
 delver each with 100 matches + 100 post-sideboard; doomsday games only).
+
+**The engine gate** (on 6048fb79 = this branch merged with main 76973535, zero-core pin 84bb5e1; in the branch's worktree,
+steps on the Mac and the desktop's throttled beside the live legacy-meta3 runs): `python tools/gate.py engine --tested-sha
+1115a8bff898 --expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine
+6048fb7978fd in 1355s** (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live runs): privacy 0
+findings; the build and the release worker; the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (=
+expected); the formats constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame
+4039d04b7971975e and dealt f0bfffd26a70a753 (each = the checkout's recorded file); `az` 57, `limits` 13, `hidden` 28
+passed; pytest on the Mac 214 + 114 + 143 + 196 passed and the desktop part 49 (5 skipped); the desktop smoke config;
+**farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609
+rows); the suite evidence of 1115a8bff898; the Mac's full-suite recheck not needed (main's 21 files outside engine/ and
+card_ir/). The next commit adds this paragraph only (docs).
