@@ -620,18 +620,6 @@ thread_local! {
     pub static POOL_OVERRIDE: std::cell::Cell<Option<PoolMode>> = const { std::cell::Cell::new(None) };
 }
 
-thread_local! {
-    /// A regression replay's random player answers a cast's 601.2g step `PASS` (when offered) without a draw from the
-    /// game's random stream, so a game the fuzz steward found before the step existed is played as it was (ENGINE.md
-    /// 229.6: the seed-pinned replays whose rare scenarios no affordable scan re-finds); every other fuzz game draws.
-    pub static STEP_PASS_OVERRIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// `STEP_PASS_OVERRIDE`'s answer for the pending decision of `g`, if it applies.
-fn step_pass(g: &Game, legal: &[u16]) -> Option<u16> {
-    (STEP_PASS_OVERRIDE.with(|c| c.get()) && g.kind() == Some(DecisionKind::CastMana) && legal.contains(&crate::act::PASS)).then_some(crate::act::PASS)
-}
-
 pub fn pool_mode() -> PoolMode {
     if let Some(m) = POOL_OVERRIDE.with(|c| c.get()) {
         return m;
@@ -3390,8 +3378,6 @@ pub fn play(seed: u64, checks: bool) -> Played {
         // the boards grow through the 60 turns.)
         let a = if exp && g.kind() == Some(DecisionKind::DeclareAttackers) && rng.below(4) != 0 && legal.contains(&crate::act::PASS) {
             crate::act::PASS
-        } else if let Some(pass) = step_pass(&g, &legal) {
-            pass
         } else if let Some(next) = names_next_page(&g, &mut rng) {
             next
         } else {
@@ -6032,8 +6018,6 @@ pub fn play_hidden(seed: u64) -> Played {
                 HD_LONG_TURNS.fetch_add(1, Ordering::Relaxed);
             }
             crate::act::PASS
-        } else if let Some(pass) = step_pass(&a.g, &legal) {
-            pass
         } else if let Some(next) = names_next_page(&a.g, &mut rng) {
             next
         } else {

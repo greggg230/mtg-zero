@@ -159,8 +159,6 @@ fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
     }
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
-    // (Its steward game as found, before the 601.2g step existed: ENGINE.md 229.6.)
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(true));
     let r = std::panic::catch_unwind(|| {
         let seed = 100_017_685u64;
         let looks0 = PK_LEFT_HAND_LOOKS.load(Relaxed);
@@ -170,7 +168,6 @@ fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
     });
     POOL_OVERRIDE.with(|c| c.set(None));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(false));
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
@@ -197,8 +194,6 @@ fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
     // (the run's own pool and modes, read before the overrides: another pool's seeds are other games)
     let (match_part, game_part) = (!hidden_decks_mode(), pool_mode() == PoolMode::Default && !sealed_mode());
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
-    // (Its steward game as found, before the 601.2g step existed: ENGINE.md 229.6.)
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(true));
     let r = std::panic::catch_unwind(|| {
         if match_part {
             POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::DelverDealtPerSeat)));
@@ -225,7 +220,6 @@ fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
     });
     POOL_OVERRIDE.with(|c| c.set(None));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(false));
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
@@ -305,12 +299,9 @@ fn an_exponential_run_of_ocelot_pride_copies_ends_default_seed_100061919() {
     }
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
-    // (Its steward game as found, before the 601.2g step existed: ENGINE.md 229.6.)
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(true));
     let r = std::panic::catch_unwind(|| play(100_061_919, true));
     POOL_OVERRIDE.with(|c| c.set(None));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(false));
     let p = r.unwrap_or_else(|e| std::panic::resume_unwind(e));
     assert!(p.turns >= 37, "the game reached the end step of turn 37: {} turns", p.turns);
 }
@@ -424,8 +415,6 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Interactions)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(40)));
-    // (Its steward game as found, before the 601.2g step existed: ENGINE.md 229.6.)
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(true));
     for seed in [5682, 6025, 7790, 12725] {
         let p = play(seed, true);
         let mut g = new_game(seed);
@@ -450,7 +439,6 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
     }
     POOL_OVERRIDE.with(|c| c.set(None));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
-    engine::fuzz::games::STEP_PASS_OVERRIDE.with(|c| c.set(false));
 }
 
 #[test]
