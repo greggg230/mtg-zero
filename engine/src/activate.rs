@@ -593,7 +593,10 @@ impl Game {
             pm
         };
         // (The mana, and what it may change, come first: ENGINE.md 100.4.10.)
-        let forced = self.exile_sources(p, card, cost, exclude);
+        // (A delve spell's `mana` is less the graveyard's cards: its total cost
+        // has a mana payment whenever delve may pay some of it, ENGINE.md 231.)
+        let paid = if cast && self.def_of(card).delve { crate::mana::ManaCost { generic: 1, ..Default::default() } } else { *mana };
+        let forced = self.exile_sources(p, card, cost, exclude, &paid);
         let paying = !(mana.is_zero() && forced.is_empty());
         let delve = cast && self.def_of(card).delve;
         if self.order_free_with(&o, || if paying || delve { self.mana_writes(&new_pm(Vec::new()), delve) } else { Default::default() }) {
@@ -705,7 +708,10 @@ impl Game {
         if short > 0 {
             // (Not for a spell whose mana can't be spent: its payment activates
             // no mana source, ENGINE.md 220.1.)
-            let d: Vec<CardIdx> = if allow.no_mana {
+            // (Nor for a cost of no mana: no mana ability is activated while
+            // paying it, CR 601.2g, 605.3a; ENGINE.md 231.)
+            let spell_delve = self.objs[card.i()].zone != Zone::Battlefield && self.def_of(card).delve;
+            let d: Vec<CardIdx> = if allow.no_mana || (mana.is_zero() && !spell_delve) {
                 Vec::new()
             } else {
                 self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c)).collect()
@@ -1007,7 +1013,7 @@ impl Game {
         let mut pm = PayMana::new(p, mana);
         pm.keep = Keep { exclude, allow: self.ability_allow(card), ..Keep::default() };
         pm.waterbend = ad.cost.waterbend;
-        let forced = self.exile_sources(p, card, &ad.cost, exclude);
+        let forced = self.exile_sources(p, card, &ad.cost, exclude, &mana);
         let paying = !(mana.is_zero() && forced.is_empty());
         // (The mana, and what it may change, come first: ENGINE.md 100.4.10;
         // as castability decides it, `cost_payable_order`.)
@@ -1038,7 +1044,7 @@ impl Game {
             pm.keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
         }
         pm.waterbend = ad.cost.waterbend;
-        pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
+        pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad), &mana);
         self.agenda.push(Task::PayMana(Box::new(pm)));
     }
 
@@ -1056,8 +1062,14 @@ impl Game {
 
     /// The mana sources a payment activates first so that they are in the
     /// graveyard for `cost`'s "exile n cards from your graveyard" (CR
-    /// 601.2g-h; the first in canonical order: Lotus Petals alike).
-    pub(crate) fn exile_sources(&self, p: PlayerId, card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Vec<(crate::pay::Src, bool)> {
+    /// 601.2g-h; the first in canonical order: Lotus Petals alike). None for
+    /// a cost whose mana, `mana`, is nothing: mana abilities are activated
+    /// while paying a cost only if it includes a mana payment (CR 601.2g,
+    /// 602.2b, 605.3a; ENGINE.md 231: an escape of X = 0).
+    pub(crate) fn exile_sources(&self, p: PlayerId, card: CardIdx, cost: &Cost, exclude: Option<CardIdx>, mana: &crate::mana::ManaCost) -> Vec<(crate::pay::Src, bool)> {
+        if mana.is_zero() {
+            return Vec::new();
+        }
         // (The cost's own discards are graveyard cards by then: ruling
         // bea302d9.)
         let short = self.exile_short(p, card, cost).saturating_sub(self.discards_feed(p, card, cost));
@@ -1773,11 +1785,47 @@ impl Game {
         if !prods.is_empty() {
             // X mana in any combination: one mana, one choice, X times.
             let picks = if matches!(prod, crate::db::ManaProd::ComboX { .. }) { x } else { 1 };
-            for _ in 0..picks {
-                // (Its restriction and its rider go with the mana, CR 106.6.)
-                // (Of its source's chosen creature type: ENGINE.md 124.2.)
-                let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
-                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only, page: crate::decision::Page::FIRST });
+            // (Its restriction and its rider go with the mana, CR 106.6.)
+            // (Of its source's chosen creature type: ENGINE.md 124.2.)
+            let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
+            let unit_mask = prods.iter().fold(0u8, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)));
+            // (Each production n mana, and every combination of n mana of the mask's types among them - "n mana in any
+            // combination of colors", Cascading Cataracts' - is n units of the mask: a choice of each unit's type.)
+            let per = prods.first().map_or(0, |v| v.iter().map(|&n| n as u32).sum::<u32>());
+            let k = unit_mask.count_ones();
+            let combos = (1..=per as u64).fold(1u64, |c, i| c * (k as u64 + i - 1) / i);
+            let units = per >= 1 && prods.iter().all(|v| v.iter().map(|&n| n as u32).sum::<u32>() == per) && (per == 1 || prods.len() as u64 == combos);
+            let (wn, wm) = self.pool_wild[p as usize];
+            // (Only for the step's own activation: its next task is the step, the search's leaf or a feeding ability, which
+            // read the pool through castability or choose its types first.)
+            let step_next = matches!(self.agenda.last(), Some(Task::CastMana { card: None, .. }));
+            if self.oracle && step_next && picks > 0 && only == 0 && units && (wn == 0 || wm == unit_mask) && wn as u32 + picks * per <= u8::MAX as u32 {
+                // (In the payment search, the mana's types not chosen yet: each one mana of a type of the mask, as the
+                // payment's castability counts it, `Game::pool_wild` - the search asks whether some combination
+                // completes the payment; ENGINE.md 231.4.)
+                self.pool_wild[p as usize] = (wn + (picks * per) as u8, unit_mask);
+            } else if self.oracle && picks > 1 {
+                // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order
+                // the mana was chosen in, so every order of one combination reaches one state - each combination once,
+                // not each sequence; ENGINE.md 231.4.)
+                let mut combos: Vec<[u8; 6]> = vec![[0; 6]];
+                for _ in 0..picks {
+                    let mut next: Vec<[u8; 6]> = Vec::new();
+                    for c in &combos {
+                        for v in &prods {
+                            let s: [u8; 6] = std::array::from_fn(|t| c[t].saturating_add(v[t]));
+                            if !next.contains(&s) {
+                                next.push(s);
+                            }
+                        }
+                    }
+                    combos = next;
+                }
+                self.agenda.push(Task::ManaNowPick { p, prods: combos, only, page: crate::decision::Page::FIRST });
+            } else {
+                for _ in 0..picks {
+                    self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only, page: crate::decision::Page::FIRST });
+                }
             }
         }
     }
@@ -2033,7 +2081,7 @@ impl Game {
     /// activated by `p` with priority now (CR 605.3a, 117.1d): its timing,
     /// its restrictions, its whole cost, and some mana to make (what a
     /// sacrificed land could make is read as it is sacrificed).
-    fn mana_ability_now(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, classes: &[Class], sorcery_ok: bool, locks: u16) -> bool {
+    pub(crate) fn mana_ability_now(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, classes: &[Class], sorcery_ok: bool, locks: u16) -> bool {
         if ad.sorcery && !sorcery_ok || !self.activation_ready(p, card, ad, locks) {
             return false;
         }

@@ -1,4 +1,4 @@
-//! Near-tie branches' merge key and alternative check (ENGINE.md 229, `az/merge_key.rs`; zero-core docs/search.md
+//! Near-tie branches' merge key and alternative check (ENGINE.md 232, `az/merge_key.rs`; zero-core docs/search.md
 //! 2.11): two lines from one built Delver-mirror position (`build`, ENGINE.md 95), played by option label, keyed at
 //! their decisions - the branch's view of its game. Equal keys must mean equivalent states (a false merge labels a
 //! branch's rows with another future's outcome); a missed merge only costs compute.
@@ -451,3 +451,40 @@ fn merge_key_cost() {
 }
 
 
+
+#[test]
+fn branch_alt_ok_excludes_the_cast_mana_step_and_its_mana_ability_modes() {
+    // The 601.2g step (`CastMana`, ENGINE.md 231) and a mode it or the mana-ability window asks (which of a
+    // permanent's mana abilities) are mana details: found in random games of the fuzz's pool (the cube).
+    let mut az = built(start("main1", hand(&["Lightning Bolt", "Brainstorm", "Ponder", "Daze"])));
+    let (mut cast_mana, mut mana_mode) = (0, 0);
+    let mut legal = Vec::new();
+    for seed in 0..400u64 {
+        az.g = engine::fuzz::games::new_game(seed);
+        let mut r = Rng::new(seed ^ 0xC457);
+        for _ in 0..3000 {
+            if az.g.is_over() {
+                break;
+            }
+            az.legal_actions(&mut legal);
+            if legal.len() >= 2 {
+                let k = az.g.kind();
+                let ask = az.g.agenda_tail(1);
+                if k == Some(engine::DecisionKind::CastMana) {
+                    cast_mana += 1;
+                    assert!(!az.branch_alt_ok(legal[0], legal[1]));
+                } else if k == Some(engine::DecisionKind::ChooseMode) && (ask.contains("CastMana") || ask.contains("ActivateMana") || ask.contains("ManaNow")) {
+                    mana_mode += 1;
+                    assert!(!az.branch_alt_ok(legal[0], legal[1]));
+                }
+            }
+            let a = legal[r.below(legal.len() as u32) as usize];
+            az.g.apply(a, &mut Vec::new()).unwrap();
+        }
+        if cast_mana >= 5 && mana_mode >= 1 {
+            break;
+        }
+    }
+    assert!(cast_mana > 0, "no CastMana decision in the games");
+    println!("CastMana decisions {cast_mana}, mana-ability modes {mana_mode}");
+}

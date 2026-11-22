@@ -50,6 +50,8 @@ mod known_face_key;
 mod lab;
 #[path = "match_worlds.rs"]
 mod match_worlds;
+#[path = "measure_cast_mana.rs"]
+mod measure_cast_mana;
 #[path = "merge_key.rs"]
 mod merge_key;
 #[path = "metagame.rs"]

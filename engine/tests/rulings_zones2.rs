@@ -1268,6 +1268,7 @@ fn retraced_spells_resolved_or_countered_return_to_the_graveyard_and_can_be_retr
     let cat = g.card(0, "Test Cat", Zone::Graveyard);
     g.choose(Choice::Cast(cat));
     g.drive_until(|g| at_priority(g) && g.turn().priority == 1 || !at_priority(g) && g.kind() != Some(DecisionKind::Priority));
+    g.pass_cast_mana();
     while g.pending_decision().unwrap().player == 0 && !at_priority(&g) {
         let c = first_non_pass(&g).unwrap();
         g.choose(c);

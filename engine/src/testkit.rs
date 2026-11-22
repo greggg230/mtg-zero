@@ -23,6 +23,8 @@ pub struct Scenario {
     step: Step,
     active: PlayerId,
     number: u32,
+    /// Permanents that entered this turn (`battlefield_new`).
+    new_perms: Vec<CardIdx>,
 }
 
 impl Scenario {
@@ -30,7 +32,7 @@ impl Scenario {
     /// single-option decisions auto-answered, logging on.
     pub fn new(db: &'static CardDb) -> Scenario {
         let spec = GameSpec { mulligans: false, log: true, ..GameSpec::default() };
-        Scenario { g: Game::empty(db, spec, 1), step: Step::Main1, active: 0, number: 3 }
+        Scenario { g: Game::empty(db, spec, 1), step: Step::Main1, active: 0, number: 3, new_perms: Vec::new() }
     }
 
     pub fn spec(mut self, f: impl FnOnce(&mut GameSpec)) -> Self {
@@ -100,6 +102,17 @@ impl Scenario {
                 self.g.add_counters(c, crate::db::Counter::Loyalty, n.max(0) as crate::num::Count);
             }
         }
+        self
+    }
+
+    /// Permanents that entered the battlefield this turn under `p`'s
+    /// control (summoning sick, CR 302.6; "entered this turn"): as
+    /// [`battlefield`](Self::battlefield), the turn's number set at `start`.
+    pub fn battlefield_new(mut self, p: PlayerId, names: &[&str]) -> Self {
+        let before = self.g.battlefield.len();
+        self = self.battlefield(p, names);
+        let added: Vec<CardIdx> = self.g.battlefield[before..].to_vec();
+        self.new_perms.extend(added);
         self
     }
 
@@ -253,6 +266,10 @@ impl Scenario {
         g.turn.starting = if self.number % 2 == 1 { self.active } else { 1 - self.active };
         g.turn.step = self.step;
         g.turn.normal = self.active;
+        for &c in &self.new_perms {
+            g.objs[c.i()].control_since = self.number;
+            g.objs[c.i()].entered = self.number as u16;
+        }
         g.players[self.active as usize].last_turn = self.number;
         g.players[1 - self.active as usize].last_turn = self.number.saturating_sub(1);
         // Turns begun so far: the starting player has had the odd ones.
@@ -325,6 +342,12 @@ impl Game {
         self.objs[c.i()].tapped = tapped;
     }
 
+    /// Mark `n` damage on permanent `c` directly (CR 120.3e): a test's setup,
+    /// not a game action (no event, no state-based check).
+    pub fn set_damage(&mut self, c: CardIdx, n: u64) {
+        self.objs[c.i()].damage = n;
+    }
+
     /// Player `p` gains control of permanent `c` (as a control-changing
     /// effect does, CR 613.1b): a test's setup; the pending decision is
     /// asked again.
@@ -383,6 +406,13 @@ impl Game {
             }
             return keys;
         }
+        // (A cast's 601.2g step asked where a test written before it answers the payment: `PASS` first, the step's
+        // "pay the cost" - no mana ability activated while casting; ENGINE.md 231.)
+        if self.pending.as_ref().is_some_and(|d| d.kind == crate::decision::DecisionKind::CastMana && d.action_of(c).is_none() && d.action_of(Choice::Pass).is_some()) {
+            let mut keys = self.choose(Choice::Pass);
+            keys.extend(self.choose(c));
+            return keys;
+        }
         let d = self.pending.as_ref().unwrap_or_else(|| panic!("no decision; outcome {:?}", self.outcome));
         let a = d.action_of(c).unwrap_or_else(|| {
             panic!(
@@ -425,6 +455,14 @@ impl Game {
     /// holds or a real decision other than priority is pending. Meant for
     /// games with `auto_single = false`, where it stops exactly at `stop`.
     /// Returns the chance keys.
+    /// A cast's 601.2g step pending (ENGINE.md 231): `PASS` - the cost paid with no mana ability activated while
+    /// casting (tests of the payment that follows).
+    pub fn pass_cast_mana(&mut self) {
+        while self.pending.as_ref().is_some_and(|d| d.kind == DecisionKind::CastMana && d.action_of(Choice::Pass).is_some()) {
+            self.choose(Choice::Pass);
+        }
+    }
+
     pub fn drive_until(&mut self, stop: impl Fn(&Game) -> bool) -> Vec<u64> {
         let mut keys = Vec::new();
         for _ in 0..100_000 {
@@ -432,9 +470,11 @@ impl Game {
                 return keys;
             }
             let Some(d) = &self.pending else { return keys };
+            // (A cast's 601.2g step: `PASS`, the cost paid with no mana ability activated while casting - the default,
+            // as passing priority is; ENGINE.md 231.)
             let c = if d.options.len() == 1 {
                 d.options[0].choice
-            } else if d.kind == DecisionKind::Priority {
+            } else if d.kind == DecisionKind::Priority || (d.kind == DecisionKind::CastMana && d.action_of(Choice::Pass).is_some()) {
                 Choice::Pass
             } else {
                 return keys;
@@ -445,7 +485,7 @@ impl Game {
     }
 
     /// Reseed the engine's RNG (tests: two lines from one position whose later shuffles come out differently, as
-    /// a branch's and its game's do; ENGINE.md 229).
+    /// a branch's and its game's do; ENGINE.md 232).
     #[doc(hidden)]
     pub fn reseed_rng(&mut self, seed: u64) {
         self.rng = crate::rng::Rng::new(seed);
@@ -661,6 +701,8 @@ impl Game {
             // division, splices, a ninjutsu attack, a trigger's event and
             // noted permanents (objects by place, a stack item by position).
             v.extend([s.cost_option as u64, s.alt as u64, h64(&s.from), s.delved as u64, s.x as u64, s.origin as u64]);
+            // (Its total cost locked by a mana ability activated while it is cast, CR 601.2f-g: ENGINE.md 231.)
+            v.push(self.locked_cost(s.id).map_or(u64::MAX, |c| h64(&c)));
             v.extend(s.division.iter().map(|&n| n as u64));
             v.extend(s.spliced.iter().map(|&d| d as u64));
             v.push(s.attack_as.map_or(u64::MAX, |a| a.map_or(u64::MAX - 1, live_place)));

@@ -3688,14 +3688,14 @@ fn check_options_complete(g: &Game, seed: u64, world: &str) {
 /// viewer). The games' run prints both and, with 200 games or more, needs compared states: a walk that
 /// ended at its first action every time would pass silently otherwise.
 static IS_WALKS: AtomicU64 = AtomicU64::new(0);
-/// The near-tie merge key's dropped loop records (ENGINE.md 229, `Game::check_dropped_loop_records`): records checked
+/// The near-tie merge key's dropped loop records (ENGINE.md 232, `Game::check_dropped_loop_records`): records checked
 /// at every step of every game and match, and the times one's loop hash came back (none allowed).
 static LOOPDROP_CHECKED: AtomicU64 = AtomicU64::new(0);
 static LOOPDROP_RECUR: AtomicU64 = AtomicU64::new(0);
 static MATCH_LOOPDROP_CHECKED: AtomicU64 = AtomicU64::new(0);
 static MATCH_LOOPDROP_RECUR: AtomicU64 = AtomicU64::new(0);
 
-/// Count `g`'s dropped loop records (ENGINE.md 229) after a step.
+/// Count `g`'s dropped loop records (ENGINE.md 232) after a step.
 fn count_dropped_loop_records(g: &Game, matches: bool) {
     let (n, bad) = g.check_dropped_loop_records();
     if n > 0 {
@@ -3705,10 +3705,10 @@ fn count_dropped_loop_records(g: &Game, matches: bool) {
     }
 }
 
-/// The end-of-run check of the dropped loop records (ENGINE.md 229): none came back.
+/// The end-of-run check of the dropped loop records (ENGINE.md 232): none came back.
 fn check_dropped_loops(kind: &str, checked: u64, recur: u64) {
     println!("{kind}: loop records the merge key drops (their source sacrificed): {checked} checked after steps, {recur} recurrences");
-    assert_eq!(recur, 0, "{kind}: a dropped loop record's hash came back {recur} times in {checked} checks (ENGINE.md 229)");
+    assert_eq!(recur, 0, "{kind}: a dropped loop record's hash came back {recur} times in {checked} checks (ENGINE.md 232)");
 }
 static IS_STEPS: AtomicU64 = AtomicU64::new(0);
 /// ENGINE.md 160, 161: two worlds of `viewer`'s whose keys of one step differ only by the other player's forced answers

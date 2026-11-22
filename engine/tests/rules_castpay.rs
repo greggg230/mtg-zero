@@ -206,6 +206,25 @@ fn cr_106_6_wizards_rockets_does_not_turn_mishras_workshop_mana_into_colours() {
 /// left to pay and finished without the second, and the exile found two
 /// cards for three (`ChooseGraveyardCard` without options, a panic). Found
 /// by the agreement fuzz (49.4, board 85480).
+/// With priority, activate every mana ability of the permanents named `name` (`ActivateMana`, opened by `YES`; their
+/// mana floats), the rest of each activation answered with its first option.
+fn float_all(g: &mut Game, name: &str) {
+    g.choose(Choice::Yes);
+    for _ in 0..50 {
+        if g.kind() == Some(DecisionKind::Priority) {
+            return;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::ActivateMana) => {
+                g.offered().into_iter().find(|c| matches!(c, Choice::Card(x) | Choice::Ability(x, _) if g.name(*x) == name)).unwrap_or(Choice::Pass)
+            }
+            _ => g.offered()[0],
+        };
+        g.choose(c);
+    }
+    panic!("no priority: {:?}", g.options_desc());
+}
+
 #[test]
 fn cr_601_2h_two_lotus_petals_for_psychic_frogs_graveyard_cost() {
     use engine::db::AbilitySlot;
@@ -216,6 +235,10 @@ fn cr_601_2h_two_lotus_petals_for_psychic_frogs_graveyard_cost() {
         .start();
     let frog = g.card(0, "Psychic Frog", Zone::Battlefield);
     let exile3 = Choice::Ability(frog, AbilitySlot::Activated(1));
+    // (Not while the ability is activated: its cost has no mana payment, so no mana ability then - CR 601.2g, 602.2b,
+    // 605.3a; ENGINE.md 231. The Petals floated first with priority, their cards are graveyard cards.)
+    assert!(!g.has_option(exile3), "{:?}", g.options_desc());
+    float_all(&mut g, "Lotus Petal");
     assert!(g.has_option(exile3), "{:?}", g.options_desc());
     g.choose(exile3);
     let mut budget = 2_000;
@@ -224,9 +247,10 @@ fn cr_601_2h_two_lotus_petals_for_psychic_frogs_graveyard_cost() {
     assert_eq!(g.count_in(0, "Lotus Petal", Zone::Exile), 2, "{}", log(&g));
     assert_eq!(g.count_in(0, "Lightning Bolt", Zone::Exile), 1, "{}", log(&g));
     assert_eq!(g.player(0).pool.total(), 2, "the Petals' mana: {}", log(&g));
-    // One Petal: two cards for three, not offered.
-    let g = scen().battlefield(0, &["Psychic Frog", "Lotus Petal"]).graveyard(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
+    // One Petal, floated: two cards for three, not offered.
+    let mut g = scen().battlefield(0, &["Psychic Frog", "Lotus Petal"]).graveyard(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
     let frog = g.card(0, "Psychic Frog", Zone::Battlefield);
+    float_all(&mut g, "Lotus Petal");
     assert!(!g.has_option(Choice::Ability(frog, AbilitySlot::Activated(1))));
 }
 

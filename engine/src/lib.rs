@@ -8,6 +8,7 @@
 mod activate;
 pub mod az;
 mod cast;
+mod cast_mana;
 mod cost_order;
 mod combat;
 mod companion;
@@ -27,6 +28,7 @@ mod loops;
 pub mod mana;
 pub mod num;
 mod pay;
+mod pay_twins;
 pub mod program;
 mod resolve;
 mod resolve_ext;

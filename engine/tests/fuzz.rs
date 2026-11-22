@@ -149,8 +149,10 @@ fn a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game() {
 /// and the check, which read the hand after the step, failed "P1's private key (kind 3) carries the card's identity
 /// (337) in a world of P0". The engine keyed nothing private (the card was the viewer's own); the check now reads the
 /// hand the look saw. Replayed at the `fuzz` profile's denominator (4) in every profile, every check of `play_hidden`;
-/// it must check a look at a card that left the hand in its step (positive evidence).
+/// it must check a look at a card that left the hand in its step (positive evidence). Ignored since ENGINE.md 231 (the
+/// game is gone, 231.8).
 #[test]
+#[ignore = "seed lost: ENGINE.md 231's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 231.6; a farm-scale scan re-pins it (231.8)"]
 fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
     use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_LEFT_HAND_LOOKS};
     use std::sync::atomic::Ordering::Relaxed;
@@ -185,14 +187,15 @@ fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
 /// The engine keyed nothing private: each card was the viewer's own. The check now recognises the look by the step's
 /// record of it (`Game::hand_looks`). Replayed at the `fuzz` profile's denominator (4) in every profile with every check;
 /// each must check its kind of look (positive evidence): a card that came into the hand in the step (the first two), one
-/// that changed zones after the look (the last two).
+/// that changed zones after the look (the last two). (The default-pool and hidden-decklist games are
+/// `the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483`, ignored since ENGINE.md 231: the match only.)
 #[test]
 fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
     use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENTERED_HAND_LOOKS, PK_LEFT_HAND_LOOKS};
     use std::sync::atomic::Ordering::Relaxed;
     let counts = || (PK_ENTERED_HAND_LOOKS.load(Relaxed), PK_LEFT_HAND_LOOKS.load(Relaxed));
     // (the run's own pool and modes, read before the overrides: another pool's seeds are other games)
-    let (match_part, game_part) = (!hidden_decks_mode(), pool_mode() == PoolMode::Default && !sealed_mode());
+    let match_part = !hidden_decks_mode();
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
     let r = std::panic::catch_unwind(|| {
         if match_part {
@@ -204,19 +207,39 @@ fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
                 .unwrap_or_else(|e| panic!("delver_dealt2 match {seed} failed (rerun: FUZZ_POOL=delver_dealt2 FUZZ_FIRST={seed} FUZZ_MATCHES=1, fuzz profile): {e:?}"));
             assert!(counts().0 > e0, "match {seed} checked no look at a card that came into the viewer's hand in its step");
         }
-        if game_part {
-            POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
-            let seed = 100_037_121u64;
-            let (e0, l0) = counts();
-            std::panic::catch_unwind(|| play(seed, true))
-                .unwrap_or_else(|e| panic!("default-pool seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
-            assert!(counts().0 > e0 && counts().1 > l0, "seed {seed} checked no look at a card that came into the viewer's hand and left it in its step");
-            let seed = 100_098_483u64;
-            let (_, l0) = counts();
-            std::panic::catch_unwind(|| play_hidden(seed))
-                .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
-            assert!(counts().1 > l0, "seed {seed} checked no look at a card that changed zones after the look in its step");
-        }
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
+/// ENGINE.md 206's default-pool game 100,037,121 and hidden-decklist game 100,098,483 (see
+/// `a_look_at_the_viewers_hand_that_its_step_changes_around_the_look`): a look at a card that came into the viewer's hand
+/// and left it in the same step, one at a card that changed zones after the look. Ignored since ENGINE.md 231 (the games
+/// are gone; until a scan re-pins them only the delver_dealt2 match's look, a card that came into the hand, is replayed:
+/// 231.8).
+#[test]
+#[ignore = "seed lost: ENGINE.md 231's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 231.6; a farm-scale scan re-pins it (231.8)"]
+fn the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483() {
+    use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENTERED_HAND_LOOKS, PK_LEFT_HAND_LOOKS};
+    use std::sync::atomic::Ordering::Relaxed;
+    if pool_mode() != PoolMode::Default || sealed_mode() {
+        return;
+    }
+    let counts = || (PK_ENTERED_HAND_LOOKS.load(Relaxed), PK_LEFT_HAND_LOOKS.load(Relaxed));
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        let seed = 100_037_121u64;
+        let (e0, l0) = counts();
+        std::panic::catch_unwind(|| play(seed, true))
+            .unwrap_or_else(|e| panic!("default-pool seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+        assert!(counts().0 > e0 && counts().1 > l0, "seed {seed} checked no look at a card that came into the viewer's hand and left it in its step");
+        let seed = 100_098_483u64;
+        let (_, l0) = counts();
+        std::panic::catch_unwind(|| play_hidden(seed))
+            .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+        assert!(counts().1 > l0, "seed {seed} checked no look at a card that changed zones after the look in its step");
     });
     POOL_OVERRIDE.with(|c| c.set(None));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
@@ -290,8 +313,10 @@ fn a_game_won_in_the_middle_of_a_resolution_leaves_its_spell_on_the_stack() {
 /// - billions of tokens, made one at a time at a cost growing with the copies (the completion check's paths through the
 /// ordering never ended). Token creation now ends the game aborted at the permanents a row can show
 /// (`rules_numbers::cr_111_2_tokens_past_the_permanents_a_row_can_show_end_the_game_aborted`): the game plays to its end with
-/// every check, at the `fuzz` profile's denominator (4) in every profile.
+/// every check, at the `fuzz` profile's denominator (4) in every profile. Ignored since ENGINE.md 231 (the game is gone;
+/// the token limit itself stays tested by that rules_numbers scenario until a scan re-pins it, 231.8).
 #[test]
+#[ignore = "seed lost: ENGINE.md 231's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 231.6; a farm-scale scan re-pins it (231.8)"]
 fn an_exponential_run_of_ocelot_pride_copies_ends_default_seed_100061919() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     if pool_mode() != PoolMode::Default || sealed_mode() || hidden_decks_mode() {
@@ -415,7 +440,10 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Interactions)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(40)));
-    for seed in [5682, 6025, 7790, 12725] {
+    // (ENGINE.md 231.6: the 601.2g step changed these games; the scan `scan_seeds_for_the_seed_pinned_tests` re-found
+    // 12,471 in interactions seeds 0..24,000 (every check, the checkpoint at 40), its rows with the enclosing picks for
+    // both viewers.)
+    for seed in [12471] {
         let p = play(seed, true);
         let mut g = new_game(seed);
         let mut keys = Vec::new();
@@ -433,7 +461,7 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
         assert_eq!(g.fingerprint(), p.fingerprint, "seed {seed}: the replay");
         println!("seed {seed}: an enclosing task's pick tokens by viewer {deep:?}");
         assert!(deep[0] + deep[1] > 0, "seed {seed}: no enclosing task's pick token");
-        if seed == 5682 {
+        if seed == 12471 {
             assert!(deep[0] > 0 && deep[1] > 0, "seed {seed}: {deep:?}");
         }
     }
@@ -493,6 +521,72 @@ fn same_seed_and_actions_replay_matches_identically() {
             assert_eq!(play_match_spec(seed, &sp, false, &mut HiddenStats::default()).fingerprint, a.fingerprint);
         }
     }
+}
+
+/// ENGINE.md 231: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
+/// games (a new decision draws from each game's random stream). Ignored; `SCAN_KIND` = `left_look` (hidden-decklist
+/// default games with a look at a card that left the viewer's hand in its step), `entered_look` (default games with a
+/// look at a card that came into the hand and left it in its step), `etali` (interactions games whose rows carry an
+/// enclosing task's pick tokens for both viewers), `ocelot` (default games that end aborted at the permanents a row can
+/// show: an exponential token run); `SCAN_FROM`, `SCAN_N`. Each kind under its test's checkpoint denominator, every
+/// check on (the games the tests replay). Prints each matching seed.
+#[test]
+#[ignore]
+fn scan_seeds_for_the_seed_pinned_tests() {
+    use engine::az::encode::CODE;
+    use engine::az::tail_encode::{lk, seg, Row};
+    use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENTERED_HAND_LOOKS, PK_LEFT_HAND_LOOKS};
+    use std::sync::atomic::Ordering::Relaxed;
+    let kind = std::env::var("SCAN_KIND").expect("SCAN_KIND");
+    let from: u64 = std::env::var("SCAN_FROM").ok().and_then(|s| s.parse().ok()).unwrap_or(100_000_000);
+    let n: u64 = std::env::var("SCAN_N").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);
+    // (`SCAN_CHECKS=0`: the games without the checks, a pre-filter for the kinds the checks don't count - the games are
+    // the same, the checks read copies; each hit is then replayed by its test with every check.)
+    let checks = std::env::var("SCAN_CHECKS").map_or(true, |v| v != "0");
+    let pool = if kind == "etali" { PoolMode::Interactions } else { PoolMode::Default };
+    POOL_OVERRIDE.with(|c| c.set(Some(pool)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(if kind == "etali" { 40 } else { 4 })));
+    for seed in from..from + n {
+        let (e0, l0) = (PK_ENTERED_HAND_LOOKS.load(Relaxed), PK_LEFT_HAND_LOOKS.load(Relaxed));
+        let hit = match kind.as_str() {
+            "left_look" => std::panic::catch_unwind(|| play_hidden(seed)).is_ok() && PK_LEFT_HAND_LOOKS.load(Relaxed) > l0,
+            "entered_look" => std::panic::catch_unwind(|| play(seed, true)).is_ok() && PK_ENTERED_HAND_LOOKS.load(Relaxed) > e0 && PK_LEFT_HAND_LOOKS.load(Relaxed) > l0,
+            "ocelot" => std::panic::catch_unwind(|| play(seed, checks)).is_ok_and(|p| p.outcome.reason == engine::game::EndReason::Aborted),
+            "etali" => std::panic::catch_unwind(|| {
+                let p = play(seed, checks);
+                let mut g = new_game(seed);
+                let mut keys = Vec::new();
+                let mut deep = [0u32; 2];
+                for &x in &p.actions {
+                    for v in 0..2u8 {
+                        deep[v as usize] += Row::of(&g, v)
+                            .tokens(seg::LINKS)
+                            .iter()
+                            .filter(|(_, t)| (t[CODE + lk::KIND + lk::K_PICKED] == 1.0 || t[CODE + lk::KIND + lk::K_PICKED_DEF] == 1.0) && t[CODE + lk::DEPTH] > 0.0)
+                            .count() as u32;
+                    }
+                    g.apply(x, &mut keys).unwrap();
+                }
+                if std::env::var("SCAN_VERBOSE").is_ok() {
+                    println!("seed {seed}: deep {deep:?} turns {}", p.turns);
+                }
+                if deep[0] + deep[1] > 0 {
+                    println!("SCAN etali_any seed {seed} deep {deep:?}");
+                }
+                deep[0] > 0 && deep[1] > 0
+            })
+            .unwrap_or_else(|e| {
+                println!("seed {seed}: panicked {e:?}");
+                false
+            }),
+            other => panic!("SCAN_KIND={other}"),
+        };
+        if hit {
+            println!("SCAN {kind} seed {seed}");
+        }
+    }
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
 }
 
 /// ENGINE.md 223: the Doomsday mirror's post-sideboard best-of-three match 163 (one episode a game) passes every check

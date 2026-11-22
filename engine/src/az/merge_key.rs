@@ -1,4 +1,4 @@
-//! Near-tie branched games (zero-core's near-tie branch rule, docs/search.md 2.11; ENGINE.md 229): the game side of
+//! Near-tie branched games (zero-core's near-tie branch rule, docs/search.md 2.11; ENGINE.md 232): the game side of
 //! the two `SearchGame` hooks.
 //!
 //! * **`merge_key`**: a branch replayed from a near-tie decision with the runner-up forced ends where it reaches a
@@ -101,6 +101,11 @@ pub fn merge_key(a: &MtgAz) -> Option<u128> {
         return None;
     }
     if g.outcome.is_some() || g.observer.is_some() || g.spec.forced_find.is_some() {
+        return None;
+    }
+    // (The payment search's transient wild pool, ENGINE.md 231.4: (0, 0) at every decision - anything else is not a
+    // state the key knows. A locked cast cost is refused by `describe`.)
+    if g.pool_wild.iter().any(|&w| w != (0, 0)) || !g.cast_lock.is_empty() {
         return None;
     }
     if !g.found.is_empty() || !g.finds_told.is_empty() || g.loop_open.is_some() {
@@ -211,7 +216,9 @@ fn hidden(g: &Game, h: &mut StableHash) {
 
 /// Whether `alt` is a real alternative to `played` at the pending decision (module docs): false for the same
 /// action, for decisions that are not worth a branch - the mana payment's (`PayMana`, `PayPool`), a mana colour
-/// (`ChooseMana`), activating a mana ability (`ActivateMana`), the order of triggers (`OrderTriggers`) - for opening
+/// (`ChooseMana`), activating a mana ability (`ActivateMana`, and while a spell is cast, `CastMana`: CR 601.2g,
+/// ENGINE.md 231), which mana ability or how much X (a `ChooseMode` those ask), the order of triggers
+/// (`OrderTriggers`) - for opening
 /// the mana-ability window at priority ("Activate mana abilities") or tapping a permanent for mana there, and for
 /// two options that are the same card doing the same thing (`equivalent`). True otherwise, including every
 /// sideboarding and deck-choice option.
@@ -224,7 +231,17 @@ pub fn branch_alt_ok(a: &MtgAz, played: u16, alt: u16) -> bool {
     }
     let g = &a.g;
     let Some(d) = g.pending_decision() else { return true };
-    if matches!(d.kind, DecisionKind::PayMana | DecisionKind::PayPool | DecisionKind::ChooseMana | DecisionKind::ActivateMana | DecisionKind::OrderTriggers) {
+    if matches!(
+        d.kind,
+        DecisionKind::PayMana | DecisionKind::PayPool | DecisionKind::ChooseMana | DecisionKind::ActivateMana | DecisionKind::CastMana | DecisionKind::OrderTriggers
+    ) {
+        return false;
+    }
+    // (Which of a permanent's mana abilities, or how much of a mana ability's X: a mode asked by the mana-ability
+    // window, the 601.2g step or a mana ability's resolution - a mana detail too.)
+    if d.kind == DecisionKind::ChooseMode
+        && matches!(g.agenda.last(), Some(crate::flow::Task::ActivateMana { .. } | crate::flow::Task::CastMana { .. } | crate::flow::Task::ManaNow { .. }))
+    {
         return false;
     }
     let choice = |x: u16| d.options.iter().find(|o| o.action == x).map(|o| o.choice);

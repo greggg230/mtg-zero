@@ -1408,7 +1408,9 @@ fn task_code(t: &Task) -> usize {
         | Task::Opening { .. }
         // (A creature type chosen as it enters: ENGINE.md 124.2.)
         | Task::ChooseCreatureType { .. } => 16,
-        Task::CastPay { .. } | Task::ActPay { .. } => 17,
+        // (A cast's mana abilities before its cost is paid, CR 601.2g: its
+        // payment's, ENGINE.md 231.)
+        Task::CastPay { .. } | Task::ActPay { .. } | Task::CastMana { .. } => 17,
         Task::AttackTarget { .. } => 19,
         Task::ChooseFace { .. } => 20,
         Task::EnterAsCopy { .. } => 21,
@@ -3001,7 +3003,9 @@ impl Game {
                 | Task::ChooseTimes { id, .. }
                 | Task::Splice { id }
                 // Delve's picks: the spell being cast (ENGINE.md 65).
-                | Task::Delve { id } => stack_item(*id),
+                | Task::Delve { id }
+                // Its mana abilities before its cost is paid (ENGINE.md 231).
+                | Task::CastMana { id, .. } => stack_item(*id),
                 _ => None,
             }
         };
@@ -3026,7 +3030,9 @@ impl Game {
             // Delve's picks (CR 702.66a): the spell, and its mana cost left
             // after the cards chosen so far, in PayMana's cost floats (each
             // pick lowers the generic part by one; ENGINE.md 65).
-            Task::Delve { id } => {
+            // (A cast's mana abilities before its cost is paid, CR 601.2g: the
+            // spell and its total cost, ENGINE.md 231.)
+            Task::Delve { id } | Task::CastMana { id, .. } => {
                 card = frame_card(task);
                 if let Some(i) = self.item_index(*id) {
                     let item = &self.stack[i];

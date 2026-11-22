@@ -849,6 +849,16 @@ pub struct Game {
     pub(crate) repl_decided: bool,
     /// The route chosen for the cast about to begin (`Task::ChooseRoute`).
     pub(crate) route_choice: Option<crate::cast::Route>,
+    /// The total cost of a spell being cast, locked as it was determined (CR 601.2f) once a mana ability is activated
+    /// during its cast (601.2g: `Task::CastMana`), by stack id: what the ability changes (an artifact sacrificed, a
+    /// creature gone) no longer changes the cost (`Game::total_mana`; ENGINE.md 231). Cleared as the spell becomes cast.
+    pub(crate) cast_lock: Vec<(u32, crate::mana::ManaCost)>,
+    /// The payment search's mana of "X mana in any combination of <types>" (Wizard's Rockets) activated in a cast's
+    /// 601.2g step, per player: (how many, the types each may be) - each one mana of a type of the mask, its type not
+    /// chosen yet (`Game::oracle` copies only; ENGINE.md 231.4: the search asks whether some combination completes the
+    /// payment, so the payment's castability counts each as a unit of those types, `add_pool`, and a later choice that
+    /// needs the pool's types chooses them first). Always (0, 0) outside the search.
+    pub(crate) pool_wild: [(u8, crate::mana::ManaMask); 2],
     /// The entering permanent's spell's delayed ability k (dash, warp) and
     /// the definition holding it: its own (`None`) or the one whose granted
     /// alternative cost it was cast for (ENGINE.md 99.15).
@@ -1397,6 +1407,8 @@ impl Game {
             discard_entered: false,
             repl_decided: false,
             route_choice: None,
+            cast_lock: Vec::new(),
+            pool_wild: [(0, 0); 2],
             entering_dash: None,
             entering_warp: false,
             miracle_cast: None,

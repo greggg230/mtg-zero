@@ -195,11 +195,12 @@ fn encode_sparse_is_the_rows_non_zeros_with_the_same_key() {
     use zero_search::lookahead::{obs_hash, obs_hash_sparse};
     let names = engine::az::constructed::Decklist::izzet_delver().main_names();
     let mirror = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
-    let mut gs = states(scale(12), 5, 5);
+    // (14 games of each: at least 300 rows without a tail - 12 gave 280 once ENGINE.md 229 moved the games.)
+    let mut gs = states(scale(14), 5, 5);
     let sp = MtgSpec::parse(&mirror).unwrap();
     let mut rng = Rng::new(6);
     let mut h = Heuristic::new(6);
-    for s in 0..scale(12) {
+    for s in 0..scale(14) {
         let mut g = MtgAz::new_game(&sp, 2, 6000 + s).unwrap();
         let mut keys = Vec::new();
         while g.to_move().is_some() {
@@ -1363,6 +1364,82 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The 601.2g step's positions (ENGINE.md 231): Hogaak castable only through a Chromatic Star activated while it is
+/// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
+/// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
+fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    const HOGAAK: &str = "Hogaak, Arisen Necropolis";
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [(HOGAAK, 4), ("Chromatic Star", 4), ("Lotus Petal", 4), ("Elvish Spirit Guide", 4), ("Island", 22), ("Swamp", 22)] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 8])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Chromatic Star", "Elvish Spirit Guide", "Elvish Spirit Guide", "Swamp"])
+        .graveyard(0, &["Island", "Swamp", "Island"])
+        .hand(0, &[HOGAAK])
+        .battlefield(0, &["Lotus Petal"])
+        .battlefield(1, &["Island", "Elvish Spirit Guide"])
+        .at(Step::Main1, 0)
+        .start();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 222).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let mut out = vec![("cast_mana", wrap(&g))];
+    let h = g.card(0, HOGAAK, Zone::Hand);
+    assert!(g.has_option(Choice::Cast(h)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(h));
+    let mut steps = 0;
+    for _ in 0..40 {
+        let Some(d) = g.pending_decision() else { break };
+        if d.kind == DecisionKind::Priority {
+            break;
+        }
+        steps += (d.kind == DecisionKind::CastMana) as usize;
+        out.push(("cast_mana", wrap(&g)));
+        // The Star first (then the Petal, then PASS); the fewest graveyard cards; the first creature.
+        let star = d.options.iter().find(|o| matches!(o.choice, Choice::Card(c) if g.name(c) == "Chromatic Star")).map(|o| o.choice);
+        let c = match d.kind {
+            DecisionKind::CastMana => star.unwrap_or(d.options.iter().find(|o| o.choice != Choice::Pass).unwrap_or(&d.options[0]).choice),
+            DecisionKind::ChooseGraveyardCard if d.options.iter().any(|o| o.choice == Choice::Pass) => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert!(steps >= 2 && out.len() >= 8, "the step's positions: {steps} steps, {} positions
+{}", out.len(), g.log_lines().join("
+"));
+    out
+}
+
+/// An Edge of Eternities position with a card its owner exiled face up (ENGINE.md 231): the witness of layout v6's
+/// known gap "an exiled card is turned face down" (v6 shows the owner its own face-down card as an exiled one; no
+/// permanent, so the gate's permanent perturbations add nothing here). The
+/// gate's sampled EoE positions held one by chance; the 601.2g step changed their games (231.7), so it is built here.
+fn eoe_exile_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::Step;
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60}"#).unwrap();
+    let g = Scenario::new(CardDb::eoe())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Plains"; 8])
+        .library(1, &["Plains"; 8])
+        .exile(0, &["Rig for War"])
+        .at(Step::Main1, 0)
+        .start();
+    let mut a = MtgAz::new_game(&sp, 2, 229).unwrap();
+    a.g = g;
+    vec![("eoe", a)]
+}
+
 fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     let mut x = g.g.view_of(v);
     x.push(u64::MAX - 77);
@@ -1451,6 +1528,8 @@ fn public_state_reaches_the_encoding() {
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(cast_mana_positions());
+    pos.extend(eoe_exile_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1666,6 +1745,8 @@ fn public_states_encode_apart() {
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(cast_mana_positions());
+    pos.extend(eoe_exile_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();

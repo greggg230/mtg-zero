@@ -304,6 +304,9 @@ impl Game {
             (K::Priority, Choice::Yes) => "Activate mana abilities".into(),
             (K::ActivateMana, Choice::Card(i)) => format!("Activate a mana ability of {}", nm(i)),
             (K::ActivateMana, Choice::Pass) => "Done activating mana abilities".into(),
+            // Mana abilities while casting a spell (CR 601.2g; ENGINE.md 231).
+            (K::CastMana, Choice::Card(i)) => format!("Activate a mana ability of {} while casting", nm(i)),
+            (K::CastMana, Choice::Pass) => "Pay the cost".into(),
             (K::PayMana, Choice::Pass) => "Pay the rest from the pool".into(),
             (_, Choice::Ability(i, slot)) => {
                 let d = self.def_of(i);
@@ -319,6 +322,7 @@ impl Game {
                 match (kind, loyalty) {
                     (K::PayMana, _) => format!("Tap {} for mana", nm(i)),
                     (K::ActivateMana, _) => format!("Activate the mana ability of {}", nm(i)),
+                    (K::CastMana, _) => format!("Activate the mana ability of {} while casting", nm(i)),
                     (K::Sacrifice, _) => format!("Tap {} for mana, then sacrifice it", nm(i)),
                     (K::BounceCost, _) => format!("Tap {} for mana, then return it to hand", nm(i)),
                     (K::Priority, _) if taps_for_mana => format!("Tap {} for mana", nm(i)),

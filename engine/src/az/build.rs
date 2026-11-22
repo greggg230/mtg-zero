@@ -339,7 +339,7 @@ pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
     describe_as(g, viewer, false)
 }
 
-/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 229): the same description, finer where the key
+/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 232): the same description, finer where the key
 /// needs it and wider where the key covers the rest itself. A stale reference or a gone token also carries its age
 /// (`"age"`: the card's zone changes since that object, so two earlier objects of one card never read alike); the
 /// sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (the key adds them);
@@ -362,7 +362,7 @@ fn describe_as(g: &Game, viewer: PlayerId, key: bool) -> Result<Value, String> {
     }
     // (The merge key without a positional graveyard reader among the game's cards: each graveyard as its creature
     // cards in their order, then its other cards by identity - the user's rule, 2026-11-21: "order only matters for
-    // creatures" (ENGINE.md 229); references by that place.)
+    // creatures" (ENGINE.md 232); references by that place.)
     let unordered = key && !positional_reader_in(g);
     let gys: [Vec<CardIdx>; 2] = std::array::from_fn(|p| {
         let mut v = g.players[p].graveyard.clone();
@@ -584,7 +584,7 @@ impl Describer<'_> {
             observer: _, keys, forced: _, forced_at: _, decisions: _, no_auto: _, effects, any_loss: _, counters: _, n_static: _,
             n_self_types: _, leaving: _, links, delayed, resolved, permissions, combat_damage_now: _, quiet_leave: _, monarch,
             lki_counters: _, entering_escaped: _, entering_x: _, entering_sunburst: _, entering_exiled: _, entering_mods: _,
-            entering_counters: _, entering_tapped: _, discard_entered: _, repl_decided: _, route_choice: _, entering_dash: _,
+            entering_counters: _, entering_tapped: _, discard_entered: _, repl_decided: _, route_choice: _, cast_lock, pool_wild: _, entering_dash: _,
             entering_warp: _, miracle_cast, entering_face: _, day, done_once, discarded, temp_triggers, gy_exile, copies,
             copy_objs, lki_copy: _, lki_damage: _, spell_lki: _, entering_copy: _, entering_times: _, enter_note: _, defer_enters: _,
             pile_moving: _, pile_shuffles: _, prepared, seen: _, initiative, dungeons, rules_srcs,
@@ -616,6 +616,7 @@ impl Describer<'_> {
         empty(miracle_cast.is_some() as usize, "a miracle in progress")?;
         empty(page.is_some() as usize, "a paged decision (more than 95 permanents)")?;
         empty(releasing.len() + gy_arrivals.len() + held.len() + entries.len(), "a simultaneous move or entry in progress")?;
+        empty(cast_lock.len(), "a spell's total cost locked by a mana ability during its cast (ENGINE.md 231)")?;
         empty(next_turn_controller.iter().flatten().count() + turn_controller.is_some() as usize, "a player controlling another's turn")?;
         empty(pool_restr.len(), "mana with a spending restriction")?;
         empty((0..2u8).map(|p| g.lands_entered_this_turn(p) as usize).sum::<usize>(), "the lands entered this turn (Bioengineered Future)")?;

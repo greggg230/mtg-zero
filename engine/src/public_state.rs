@@ -155,6 +155,8 @@ pub fn fields() -> Vec<Field> {
         discard_entered: Derived "transient: Mox Diamond's answer, consumed by its entering",
         repl_decided: Derived "transient: a replacement choice made for the next move",
         route_choice: Derived "transient: the route of the cast about to begin (its decision's context)",
+        cast_lock: Public "the total cost of a spell being cast, locked at its first mana ability during the cast (CR 601.2f-g): the cost floats of its 601.2g step's and delve's decisions (ENGINE.md 231)",
+        pool_wild: Derived "transient: the payment search's copies only, (0, 0) in every state a decision is asked in (ENGINE.md 231.4)",
         entering_dash: Derived "transient: set and cleared around one move",
         entering_warp: Derived "transient: set and cleared around one move",
         miracle_cast: Derived "transient: the card a miracle trigger is casting (its decisions' context)",
@@ -950,6 +952,21 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.gy_exile.push(c);
             Some(a.g.name(c).to_string())
         }),
+        // The total cost of the spell a casting decision is about, locked (CR 601.2f-g; ENGINE.md 231): one more
+        // generic mana, read by the decision's cost floats (its 601.2g step's, delve's, convoke's).
+        p!("the total cost of the spell being paid for is locked one higher", "Game.cast_lock", |a, _r| {
+            let id = match a.g.agenda.last()? {
+                crate::flow::Task::CastMana { id, .. } | crate::flow::Task::Delve { id } | crate::flow::Task::ConvokePay { id, .. } => *id,
+                _ => return None,
+            };
+            let i = a.g.item_index(id)?;
+            let StackKind::Spell { card } = a.g.stack[i].kind else { return None };
+            let mut cost = a.g.total_mana(card, &a.g.stack[i]);
+            cost.generic += 1;
+            a.g.cast_lock.retain(|x| x.0 != id);
+            a.g.cast_lock.push((id, cost));
+            Some(format!("{} costs {{1}} more", a.g.name(card)))
+        }),
         p!("a permanent becomes a copy of another", "Game.copies", |a, r| {
             let ss = slots(&a.g);
             let c = pick(&ss, r)?;
@@ -1073,10 +1090,15 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         // ENGINE.md 100.5: a triggered ability an effect gave a permanent
         // (`Mark::Granted`, CR 613.1f; EoE W3). (The first permanent in the
-        // encoded slots; no draw from the gate's random stream.)
+        // encoded slots, when its definition has one - slot 0 names it: else a
+        // mark naming no ability, which triggers nothing and is no state the
+        // engine reaches, ENGINE.md 231; no draw from the gate's random stream.)
         p!("a permanent gained a triggered ability", "Game.marks", |a, _r| {
             let c = *slots(&a.g).first()?;
             let (def, ts) = (a.g.objs[c.i()].def, a.g.next_ts);
+            if a.g.db.def(def).triggers.is_empty() {
+                return None;
+            }
             a.g.w3.granted = true;
             mark(&mut a.g, c, crate::game::Mark::Granted { def, slot: 0, this_turn: true, ts })
         }),

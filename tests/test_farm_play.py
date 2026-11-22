@@ -48,6 +48,7 @@ def test_match_settings_give_the_local_matchs_seats(tmp_path):
     a, b = Y.model_path(run, 16), Y.model_path(run, 0)
     s, rule = C.match_settings(a, 64, spec, tilts=Y.bo1_tilts(cfg), ckpt_b=b)
     assert s['eval_trace'] == 1 and s['eval_sims'] == 64 and s['sparse'] == 0 and s['chance_k'] == 2
+    assert s['groups'] == C.EVAL_GROUPS == 1, "a GPU lease's batches hold every game in flight (docs/ENGINE.md 230)"
     assert json.loads(s['eval_spec']) == json.loads(spec)
     assert 'deck' not in (s.get('eval_belief_tilts') or {})
     seat = Y.bo1_seat(a)
