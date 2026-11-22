@@ -2032,7 +2032,7 @@ impl Game {
     /// activated by `p` with priority now (CR 605.3a, 117.1d): its timing,
     /// its restrictions, its whole cost, and some mana to make (what a
     /// sacrificed land could make is read as it is sacrificed).
-    fn mana_ability_now(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, classes: &[Class], sorcery_ok: bool, locks: u16) -> bool {
+    pub(crate) fn mana_ability_now(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, classes: &[Class], sorcery_ok: bool, locks: u16) -> bool {
         if ad.sorcery && !sorcery_ok || !self.activation_ready(p, card, ad, locks) {
             return false;
         }

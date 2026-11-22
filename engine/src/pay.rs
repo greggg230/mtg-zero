@@ -1532,10 +1532,14 @@ impl Game {
     /// or with `Allow::no_mana` only the alternatives to mana (convoke's and
     /// improvise's taps, `IMPROVISE`; ENGINE.md 220.1).
     pub(crate) fn spendable_classes<'a>(classes: &'a [Class], allow: crate::doomsday_b::Allow) -> std::borrow::Cow<'a, [Class]> {
-        if !allow.no_mana || classes.iter().all(|cl| cl.members.first().is_some_and(|s| s.slot == IMPROVISE)) {
+        // (And the cards mana abilities activated during its cast put into the
+        // graveyard for its delve, no mana with them: `Game::no_mana_feeders`,
+        // ENGINE.md 222.4.)
+        let kept = |cl: &Class| cl.members.first().is_some_and(|s| s.slot == IMPROVISE) || cl.delve;
+        if !allow.no_mana || classes.iter().all(kept) {
             return std::borrow::Cow::Borrowed(classes);
         }
-        std::borrow::Cow::Owned(classes.iter().filter(|cl| cl.members.first().is_some_and(|s| s.slot == IMPROVISE)).cloned().collect())
+        std::borrow::Cow::Owned(classes.iter().filter(|cl| kept(cl)).cloned().collect())
     }
 
     /// A card in hand with a mana ability (a Spirit Guide).

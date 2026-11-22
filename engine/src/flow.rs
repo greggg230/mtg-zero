@@ -102,6 +102,10 @@ pub(crate) enum Task {
     /// `card`: the permanent whose ability is asked next; `again`: one was
     /// activated, so `PASS` ends it; ENGINE.md 100.4.3).
     ActivateMana { p: PlayerId, card: Option<CardIdx>, again: bool },
+    /// CR 601.2g: mana abilities activated while spell `id` is cast, its total cost determined (601.2f) and not yet
+    /// paid (601.2h) (`DecisionKind::CastMana`; `card`: the permanent whose ability is asked next; `again`: one was
+    /// activated; `cast_mana.rs`, ENGINE.md 222).
+    CastMana { id: u32, card: Option<CardIdx>, again: bool },
     /// Devour land (CR 702.82a): the lands chosen so far, in battlefield
     /// order (ENGINE.md 99.12).
     Devour { card: CardIdx, picked: Vec<CardIdx> },
@@ -481,6 +485,7 @@ impl Game {
             Task::ManaNow { src, step } => self.mana_now(src, step),
             Task::ManaNowPick { p, prods, only, page } => self.mana_now_pick(p, prods, only, page),
             Task::ActivateMana { p, card, again } => self.activate_mana(p, card, again),
+            Task::CastMana { id, card, again } => self.cast_mana(id, card, again),
             Task::ManaNowCosts { src, sac, x, taps } => self.mana_now_costs(src, sac, x, taps),
             Task::AsEnters { card, page } => self.as_enters(card, page),
             Task::ChooseCreatureType { card, step } => self.choose_creature_type(card, step),

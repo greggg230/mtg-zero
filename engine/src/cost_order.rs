@@ -327,6 +327,21 @@ fn filter_reads(f: &Filter) -> Reads {
     }
 }
 
+/// Does filter `f` read whether a permanent is tapped (`filter_reads`; ENGINE.md 222.3)?
+pub(crate) fn filter_reads_tapped(f: &Filter) -> bool {
+    filter_reads(f).tapped
+}
+
+/// What the rest of a spell's cast may change of the permanents' mana abilities, from its 601.2g step on
+/// (`Game::cast_rest_reach`; ENGINE.md 222.3): `leave`, the permanents it may remove; `chars`, whether a continuous
+/// effect may change some permanent's types or abilities; `unsettled`, whether a permanent may lose counters or a
+/// toughness change (a state-based action could then remove a permanent).
+pub(crate) struct RestReach {
+    pub leave: Vec<CardIdx>,
+    pub chars: bool,
+    pub unsettled: bool,
+}
+
 /// What paying parts of a cost may change (`Game::order_free`), or the mana
 /// payment before them (`Game::mana_writes`).
 #[derive(Clone, Default, Debug)]
@@ -782,6 +797,69 @@ impl Game {
             | Cond::LandsPlayedAtLeast(_)
             | Cond::AttackedWithSubtype(_) => false,
         }
+    }
+
+    /// Does condition `k` read whether a permanent is tapped (`cond_reads`; ENGINE.md 222.3)?
+    pub(crate) fn cond_reads_tapped(&self, k: &Cond) -> bool {
+        self.cond_reads(k, CardIdx::new(0), &Writes { tapped: vec![CardIdx::new(0)], ..Writes::default() })
+    }
+
+    /// What the rest of spell `card`'s cast (`item`) may change from its 601.2g step on (ENGINE.md 222.3): the step's
+    /// other mana abilities and the payment's mana (`mana_writes` over every source `p` has, convoke's and improvise's
+    /// taps, delve's exiles, the life paid after the mana), every mana ability `p` may activate (a sacrifice of
+    /// another permanent: any of `p`'s may leave; of its own; a counter removed), the cost's other parts
+    /// (`part_view`), emerge's permanent; and what that may change (`chars_may_change`).
+    pub(crate) fn cast_rest_reach(&self, p: PlayerId, card: CardIdx, item: &crate::game::StackItem) -> RestReach {
+        let def = self.def_of(card);
+        let mut pm = crate::pay::PayMana::new(p, self.total_mana(card, item));
+        pm.improvise = def.improvise;
+        pm.convoke = def.casting.convoke;
+        pm.life_after = self.life_later(card, item);
+        let mut w = self.mana_writes(&pm, def.delve);
+        let mut any_leaves = false;
+        for c in self.permanents_of(p).chain(self.players[p as usize].hand.iter().copied()) {
+            let d = self.abilities(c);
+            let granted = self.granted_activated(c);
+            let ads = d.activated.iter().chain(d.hand_abilities.iter()).chain(granted.iter().map(|g| self.db.def(g.def).activated_def(crate::db::AbilitySlot::Activated(g.slot))));
+            for ad in ads.filter(|ad| ad.mana().is_some()) {
+                let k = &ad.cost;
+                if k.sacrifice.is_some() || k.bounce.is_some() {
+                    any_leaves = true;
+                }
+                if k.sac_self || ad.mana().is_some_and(|m| m.sac_if_no.is_some()) {
+                    w.leave.push(c);
+                }
+                if k.remove_counters.is_some() || k.remove_counter_from.is_some() {
+                    w.counters.push(c);
+                }
+                if k.life > 0 || ad.mana().is_some_and(|m| m.damage_to_you > 0 || m.opp_life > 0) {
+                    w.life = true;
+                }
+                if k.discard > 0 || k.discard_hand || k.discard_self || k.exile_self || k.discard_also.is_some() || k.exile_from_hand.is_some() || k.exile_graveyard > 0 {
+                    w.zones = true;
+                }
+            }
+        }
+        if any_leaves || self.seen & crate::game::SEEN_SAC_MANA != 0 {
+            w.leave.extend(self.permanents_of(p));
+            w.zones = true;
+        }
+        let emerge = if item.alt > 0 {
+            self.item_alt(card, item).and_then(|(a, _)| a.emerge.as_ref().and(item.noted.first().copied())).filter(|r| self.live(*r)).map(|r| r.idx)
+        } else {
+            None
+        };
+        if let Some(rest) = self.spell_rest(card, item) {
+            let o = Order::new(p, card, &rest, 0, 0, 0).with_moves(emerge, None);
+            for k in bits(o.left()) {
+                w.add(&self.part_view(&o, k).1);
+            }
+        }
+        if let Some(e) = emerge {
+            w.leave.push(e);
+        }
+        let ch = self.chars_may_change(p, &w, false);
+        RestReach { unsettled: !w.counters.is_empty() || ch.0 & kind::PT != 0, chars: ch.0 & (kind::TYPES | kind::ABILITIES) != 0, leave: w.leave }
     }
 
     /// The first part of `parts` in the order `part::DOMINANT`.
@@ -1245,11 +1323,14 @@ impl Game {
         if self.oracle {
             return None;
         }
-        match task {
+        let own = match task {
             Task::PayCosts { order: Some(o), .. } => Some((o.floor as usize, o.p)),
             Task::PayMana(pm) => pm.oracle.map(|f| (f as usize, pm.payer)),
             _ => None,
-        }
+        };
+        // (A cast's mana abilities before its cost is paid, CR 601.2g: the
+        // step's options and its abilities' decisions, ENGINE.md 222.)
+        own.or_else(|| self.cast_mana_floor(task))
     }
 
     /// `options` of `task` that leave its payment completable (all of them

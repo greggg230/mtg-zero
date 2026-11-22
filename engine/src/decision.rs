@@ -240,6 +240,10 @@ pub enum DecisionKind {
     /// `NUMBER` + j = play candidate deck j of the decider's pool (0 the builder's best guess);
     /// hidden from the other player.
     ChooseDeck,
+    /// CR 601.2g: activate a mana ability while casting a spell, its total cost determined and not yet paid (the
+    /// asking task `CastMana`; `MY_PERM` = a permanent with such abilities, then `ChooseMode` for which; `HAND_ABILITY`
+    /// = a card's in hand; `PASS` = pay the cost; ENGINE.md 222).
+    CastMana,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

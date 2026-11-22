@@ -6,6 +6,8 @@
 
 #[path = "rules_activated.rs"]
 mod rules_activated;
+#[path = "rules_cast_mana.rs"]
+mod rules_cast_mana;
 #[path = "rules_castpay.rs"]
 mod rules_castpay;
 #[path = "rules_chance.rs"]
