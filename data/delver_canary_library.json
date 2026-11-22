@@ -2,11 +2,11 @@
  "format": "delver-canary-library/1",
  "what": "Delver mirror canary spots with their right answers (tools/delver_blunders.py, docs/blunders.md 6a)",
  "engine": {
-  "checkout": "~/mtg-zero-wt/fix_hogaak-payment",
-  "commit": "93c38f844c324136c2b78f9bd4df3766b4ededad",
+  "checkout": "~/mtg-zero-wt/fix_hogaak-midcast-mana",
+  "commit": "a4729c4230de047f39db32704d3731677ff4cd18",
   "branch": "HEAD",
   "dirty": false,
-  "engine_sha256": "395f72ca524c5a74",
+  "engine_sha256": "77f298c4fafd5ee2",
   "digest": null
  },
  "reference": {
@@ -167,7 +167,7 @@
    "value": 0.7677,
    "pos": "743eca7c0769a556",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 43,
     "inserted": {}
    }
@@ -239,7 +239,7 @@
    "value": 0.6971,
    "pos": "282c985dbbf643e5",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 41,
     "inserted": {}
    }
@@ -317,7 +317,7 @@
    "value": 0.8464,
    "pos": "c74e44d1e8c4a19e",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 47,
     "inserted": {}
    }
@@ -437,7 +437,7 @@
    "value": 0.362,
    "pos": "5d08a3f8b6937abd",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 89,
     "inserted": {}
    }
@@ -523,7 +523,7 @@
    "value": 0.4957,
    "pos": "cfe95e62b2bdc903",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 55,
     "inserted": {}
    }
@@ -607,13 +607,9 @@
    "value": 0.6351,
    "pos": "6f4139399e84f3e9",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 52,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      47
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 53,
+    "inserted": {}
    }
   },
   {
@@ -802,13 +798,9 @@
    "value": 0.3435,
    "pos": "8705f953c8d7088f",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 159,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      132
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 160,
+    "inserted": {}
    }
   },
   {
@@ -942,13 +934,9 @@
    "value": 0.1058,
    "pos": "c59dec649895955e",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 104,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      73
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 105,
+    "inserted": {}
    }
   },
   {
@@ -1003,7 +991,7 @@
    "value": 0.7261,
    "pos": "a9c712d51daadc61",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 26,
     "inserted": {}
    }
@@ -1101,13 +1089,9 @@
    "value": 0.6206,
    "pos": "3d38e505b88f7328",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 66,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      21
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 67,
+    "inserted": {}
    }
   },
   {
@@ -1370,13 +1354,9 @@
    "value": 0.5071,
    "pos": "dff47129118c532e",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 233,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      21
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 234,
+    "inserted": {}
    }
   },
   {
@@ -1455,7 +1435,7 @@
    "value": 0.5081,
    "pos": "b7aa0629bbffc903",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 50,
     "inserted": {}
    }
@@ -1576,7 +1556,7 @@
    "value": 0.3288,
    "pos": "82c31b8c135a6624",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 90,
     "inserted": {}
    }
@@ -1724,13 +1704,9 @@
    "value": 0.1641,
    "pos": "dde11437df99920c",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 116,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      14
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 117,
+    "inserted": {}
    }
   },
   {
@@ -1865,7 +1841,7 @@
    "value": 0.6845,
    "pos": "51a918fae1b7ac17",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 106,
     "inserted": {}
    }
@@ -1977,7 +1953,7 @@
    "value": 0.5924,
    "pos": "4e5a6384b36731c4",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 81,
     "inserted": {}
    }
@@ -2066,7 +2042,7 @@
    "value": 0.545,
    "pos": "24f7bbd717b141c3",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 58,
     "inserted": {}
    }
@@ -2343,7 +2319,7 @@
    "value": 0.1132,
    "pos": "d219742a2bc44c36",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 246,
     "inserted": {}
    }
@@ -2421,7 +2397,7 @@
    "value": 0.2741,
    "pos": "6a6b89bfb4a144ff",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 47,
     "inserted": {}
    }
@@ -2628,14 +2604,9 @@
    "value": 0.2895,
    "pos": "c3b0eae7e4ac5d43",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 174,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      79,
-      127
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 176,
+    "inserted": {}
    }
   },
   {
@@ -2844,14 +2815,9 @@
    "value": 0.2921,
    "pos": "9253991b6cd5d3c7",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 178,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      79,
-      127
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 180,
+    "inserted": {}
    }
   },
   {
@@ -2931,7 +2897,7 @@
    "value": 0.7493,
    "pos": "4a54e4d11c46df71",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 51,
     "inserted": {}
    }
@@ -3217,13 +3183,9 @@
    "value": 0.3719,
    "pos": "e8061991af9a8a54",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 254,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      137
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 255,
+    "inserted": {}
    }
   },
   {
@@ -3342,6 +3304,7 @@
     36,
     40,
     0,
+    0,
     36,
     325,
     0,
@@ -3393,9 +3356,13 @@
    "value": 0.6809,
    "pos": "8c68932827e9b71e",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 141,
-    "inserted": {}
+    "inserted": {
+     "CastMana: Pay the cost": [
+      107
+     ]
+    }
    }
   },
   {
@@ -3517,7 +3484,7 @@
    "value": 0.2771,
    "pos": "7652003ec78102b3",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 93,
     "inserted": {}
    }
@@ -3848,13 +3815,9 @@
    "value": 0.5601,
    "pos": "d7526ca255f666b0",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 299,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      77
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 300,
+    "inserted": {}
    }
   },
   {
@@ -3952,6 +3915,7 @@
     0,
     378,
     38,
+    0,
     341,
     344,
     345,
@@ -4076,9 +4040,13 @@
    "value": 0.2405,
    "pos": "d89c45b3561fd0b0",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 193,
-    "inserted": {}
+    "inserted": {
+     "CastMana: Pay the cost": [
+      87
+     ]
+    }
    }
   },
   {
@@ -4250,6 +4218,7 @@
     0,
     36,
     37,
+    0,
     341,
     343,
     344,
@@ -4282,13 +4251,11 @@
    "value": 0.5251,
    "pos": "7aff668b367f3334",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 172,
+    "epoch": 1795330000,
+    "old_steps": 175,
     "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      39,
-      76,
-      86
+     "CastMana: Pay the cost": [
+      161
      ]
     }
    }
@@ -4343,6 +4310,7 @@
     0,
     380,
     40,
+    0,
     340,
     342,
     0,
@@ -4569,9 +4537,13 @@
    },
    "pos": "1846d22cb6bc040a",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 243,
-    "inserted": {}
+    "inserted": {
+     "CastMana: Pay the cost": [
+      42
+     ]
+    }
    }
   },
   {
@@ -4670,7 +4642,7 @@
    },
    "pos": "644f3f5f78226edb",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 62,
     "inserted": {}
    }
@@ -4854,13 +4826,9 @@
    },
    "pos": "b2dcfa4af1452590",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 145,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      138
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 146,
+    "inserted": {}
    }
   },
   {
@@ -5205,13 +5173,9 @@
    },
    "pos": "5f993187bf14180c",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 308,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      89
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 309,
+    "inserted": {}
    }
   },
   {
@@ -5342,7 +5306,7 @@
    },
    "pos": "c1b43cea287714c8",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 95,
     "inserted": {}
    }
@@ -5694,13 +5658,9 @@
    },
    "pos": "04cae10d039a23c0",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 313,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      161
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 314,
+    "inserted": {}
    }
   },
   {
@@ -5884,15 +5844,9 @@
    },
    "pos": "09290f56a4512831",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 145,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      24,
-      58,
-      69
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 148,
+    "inserted": {}
    }
   },
   {
@@ -6037,13 +5991,9 @@
    },
    "pos": "44dd06a8943a5ba3",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 108,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      100
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 109,
+    "inserted": {}
    }
   },
   {
@@ -6169,6 +6119,7 @@
     0,
     40,
     40,
+    0,
     341,
     342,
     343,
@@ -6183,6 +6134,7 @@
     0,
     376,
     37,
+    0,
     340,
     341,
     342,
@@ -6227,12 +6179,12 @@
    },
    "pos": "c087a074b1df2f3b",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 146,
+    "epoch": 1795330000,
+    "old_steps": 148,
     "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      100,
-      134
+     "CastMana: Pay the cost": [
+      115,
+      130
      ]
     }
    }
@@ -6416,6 +6368,7 @@
     0,
     36,
     38,
+    0,
     341,
     342,
     345,
@@ -6523,6 +6476,7 @@
     36,
     0,
     36,
+    0,
     343,
     346,
     349,
@@ -6654,11 +6608,12 @@
    },
    "pos": "1b45d4c02406e5ae",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 383,
+    "epoch": 1795330000,
+    "old_steps": 384,
     "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      255
+     "CastMana: Pay the cost": [
+      171,
+      279
      ]
     }
    }
@@ -6896,13 +6851,9 @@
    },
    "pos": "79e15dfa49a82262",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 199,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      67
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 200,
+    "inserted": {}
    }
   },
   {
@@ -7112,6 +7063,7 @@
     0,
     38,
     39,
+    0,
     340,
     346,
     347,
@@ -7238,9 +7190,13 @@
    },
    "pos": "4b39b511c1c2c806",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 300,
-    "inserted": {}
+    "inserted": {
+     "CastMana: Pay the cost": [
+      199
+     ]
+    }
    }
   },
   {
@@ -7373,7 +7329,7 @@
    },
    "pos": "1f8613d57e338f57",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 97,
     "inserted": {}
    }
@@ -7495,6 +7451,7 @@
     0,
     36,
     37,
+    0,
     342,
     345,
     0,
@@ -7527,6 +7484,7 @@
     0,
     0,
     37,
+    0,
     340,
     341,
     342,
@@ -7602,11 +7560,12 @@
    },
    "pos": "c134f7243934e540",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 190,
+    "epoch": 1795330000,
+    "old_steps": 191,
     "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      81
+     "CastMana: Pay the cost": [
+      109,
+      142
      ]
     }
    }
@@ -7837,18 +7796,9 @@
    },
    "pos": "98eb85a550e2b6c2",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 187,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      84,
-      126,
-      130,
-      134,
-      165,
-      169
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 193,
+    "inserted": {}
    }
   },
   {
@@ -7911,6 +7861,7 @@
     0,
     38,
     38,
+    0,
     0,
     37,
     0,
@@ -8024,9 +7975,13 @@
    },
    "pos": "45d8930bcaad89a0",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 140,
-    "inserted": {}
+    "inserted": {
+     "CastMana: Pay the cost": [
+      52
+     ]
+    }
    }
   },
   {
@@ -8356,7 +8311,7 @@
    },
    "pos": "34df8446eb3725cc",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 294,
     "inserted": {}
    }
@@ -8542,6 +8497,7 @@
     0,
     36,
     36,
+    0,
     340,
     343,
     347,
@@ -8661,12 +8617,11 @@
    },
    "pos": "2a792a9a177a3250",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 264,
+    "epoch": 1795330000,
+    "old_steps": 266,
     "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      178,
-      251
+     "CastMana: Pay the cost": [
+      173
      ]
     }
    }
@@ -8852,6 +8807,7 @@
     0,
     36,
     36,
+    0,
     340,
     343,
     347,
@@ -8991,12 +8947,11 @@
    },
    "pos": "06c473f5b14f27e4",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 285,
+    "epoch": 1795330000,
+    "old_steps": 287,
     "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      178,
-      251
+     "CastMana: Pay the cost": [
+      173
      ]
     }
    }
@@ -9252,7 +9207,7 @@
    },
    "pos": "7d5279ca44f63762",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 218,
     "inserted": {}
    }
@@ -9573,7 +9528,7 @@
    },
    "pos": "89509c7a54812a73",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 283,
     "inserted": {}
    }
@@ -10249,13 +10204,9 @@
    },
    "pos": "0e80a7c26705cd55",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 636,
-    "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      82
-     ]
-    }
+    "epoch": 1795330000,
+    "old_steps": 637,
+    "inserted": {}
    }
   },
   {
@@ -10333,6 +10284,7 @@
     0,
     381,
     38,
+    0,
     340,
     341,
     342,
@@ -10368,6 +10320,7 @@
     0,
     0,
     36,
+    0,
     340,
     341,
     342,
@@ -10459,6 +10412,7 @@
     0,
     38,
     38,
+    0,
     340,
     341,
     342,
@@ -10476,6 +10430,7 @@
     0,
     0,
     37,
+    0,
     340,
     344,
     346,
@@ -10705,15 +10660,14 @@
    },
    "pos": "6bc7526c158281cc",
    "rerecord": {
-    "epoch": 1795312390,
-    "old_steps": 408,
+    "epoch": 1795330000,
+    "old_steps": 413,
     "inserted": {
-     "PayMana: Tap Volcanic Island for mana": [
-      26,
-      47,
-      72,
-      138,
-      144
+     "CastMana: Pay the cost": [
+      67,
+      103,
+      195,
+      213
      ]
     }
    }
@@ -10764,7 +10718,7 @@
    },
    "pos": "a90acae7e0da17e8",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 4,
     "inserted": {}
    }
@@ -10815,7 +10769,7 @@
    },
    "pos": "0939b0a4df91500a",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 4,
     "inserted": {}
    }
@@ -10906,7 +10860,7 @@
    },
    "pos": "db4281a02da0ef35",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 44,
     "inserted": {}
    }
@@ -10957,7 +10911,7 @@
    },
    "pos": "319455502e8ae21e",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 4,
     "inserted": {}
    }
@@ -11027,7 +10981,7 @@
    },
    "pos": "77d292bbd2e2bb79",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 23,
     "inserted": {}
    }
@@ -11134,7 +11088,7 @@
    },
    "pos": "acbc4cbe123f78c2",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 60,
     "inserted": {}
    }
@@ -11190,7 +11144,7 @@
    },
    "pos": "fdcf98b452afbff8",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 7,
     "inserted": {}
    }
@@ -11242,7 +11196,7 @@
    },
    "pos": "ef1ad0f8b77fd1e2",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 3,
     "inserted": {}
    }
@@ -11355,7 +11309,7 @@
    "added": "2026-11-03",
    "pos": "ceda7efd3a470f55",
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 88,
     "inserted": {}
    }
@@ -11429,7 +11383,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 26,
     "inserted": {}
    }
@@ -11768,7 +11722,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 292,
     "inserted": {}
    }
@@ -11838,7 +11792,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 25,
     "inserted": {}
    }
@@ -11897,7 +11851,7 @@
     "note": "user: blunder - fetch unusable before Mishra's delayed draw"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 8,
     "inserted": {}
    }
@@ -11961,7 +11915,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 17,
     "inserted": {}
    }
@@ -12024,7 +11978,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 20,
     "inserted": {}
    }
@@ -12092,7 +12046,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 21,
     "inserted": {}
    }
@@ -12180,7 +12134,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 45,
     "inserted": {}
    }
@@ -12235,7 +12189,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 12,
     "inserted": {}
    }
@@ -12321,7 +12275,7 @@
     "note": "user: blunder - fetch unusable before Mishra's delayed draw"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 33,
     "inserted": {}
    }
@@ -12407,7 +12361,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 39,
     "inserted": {}
    }
@@ -12569,7 +12523,7 @@
     "date": "2026-11-18"
    },
    "rerecord": {
-    "epoch": 1795312390,
+    "epoch": 1795330000,
     "old_steps": 115,
     "inserted": {}
    }
@@ -12752,7 +12706,7 @@
   }
  },
  "live_rule": "spots only in undecided games: the decider's raw value at the spot, by the network that played it, between 0.10 and 0.90",
- "rules_epoch": 1795312390,
+ "rules_epoch": 1795330000,
  "recorded": [
   {
    "engine": {
@@ -12972,6 +12926,22 @@
    "spots": 72,
    "dropped": [],
    "replaces": "93c38f844c32:data/delver_canary_library.json"
+  },
+  {
+   "engine": {
+    "checkout": "~/mtg-zero-wt/fix_hogaak-midcast-mana",
+    "commit": "a4729c4230de047f39db32704d3731677ff4cd18",
+    "branch": "HEAD",
+    "dirty": false,
+    "engine_sha256": "77f298c4fafd5ee2",
+    "digest": null
+   },
+   "rules_epoch": 1795330000,
+   "date": "2026-11-22",
+   "how": "tools/delver_rerecord.py rerecord (docs/ENGINE.md 100.8)",
+   "spots": 72,
+   "dropped": [],
+   "replaces": "a4729c4230de:data/delver_canary_library.json"
   }
  ]
 }
