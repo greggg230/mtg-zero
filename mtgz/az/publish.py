@@ -72,6 +72,31 @@ LOG = 'publisher_console.txt'
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def upload_key(key_file=None):
+    """The site's upload key: `key_file`, else $MTGZ_DELVERAI_KEY, else ~/delverai/.upload_key (SystemExit: none)."""
+    if key_file:
+        with open(os.path.expanduser(key_file)) as f:
+            return f.read().strip()
+    if os.environ.get(KEY_ENV):
+        return os.environ[KEY_ENV].strip()
+    if os.path.exists(os.path.expanduser(KEY_FILE)):
+        with open(os.path.expanduser(KEY_FILE)) as f:
+            return f.read().strip()
+    raise SystemExit(f'no upload key: --key-file, ${KEY_ENV} or {KEY_FILE}')
+
+
+def post(url, body, key, timeout=60):
+    """POST `body` (bytes: JSON) to the site's `url` with the upload key -> the site's answer (dict). Raises
+    urllib.error.HTTPError / URLError when the site refuses or cannot be reached (mtgz.az.replays.post, the
+    publishers', the reference-match records')."""
+    import urllib.request
+    req = urllib.request.Request(url, data=body, method='POST',
+                                 headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {key}',
+                                          'User-Agent': 'mtgz-delverai/1'})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
 def no_publish(argv):
     """`--no-publish` -> `--publish {}` in a run's command line (`python -m mtgz.az.run` does it: the setting off,
     saved in config.json like any flag)."""

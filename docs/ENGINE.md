@@ -42979,3 +42979,110 @@ build unchanged): its launcher passes `--publish '{..., "title": "<r1's site tit
 "state_dir": "<the hand publisher's state dir>"}'` over META3_PUBLISH (same site record, same history), and the
 hand-started publisher is stopped first. From then on every fork of r1 publishes as a side run with no step to
 remember.
+
+## 2XX. Judging publishes by default: reference matches from the cells yardstick, farm campaigns' head-to-heads, ab.py's outside reference (branch `feat/judging-publish`, 2026-11-21)
+
+Branch `feat/judging-publish` from 00cfd372 (`feat/meta3-publish` merged with main: 221's loud PUBLISH OFF is the
+pattern followed here). Why: the user (2026-11-21, after 221): "Experiments should appear on Delver AI without anyone
+remembering to wire it up." 221 made the runs and their forks publish; the measurements of an experiment still did
+not:
+
+* the reference-match chart of a run's page (delverai's record `refmatch.<run>`: the run's checkpoints against a
+  fixed network from outside the run - the metagame runs' Delver mirror against pb1@262) was fed only by a
+  hand-written sidecar per experiment that measured with `run_yardsticks.py one --kind cells --ref LABEL --pair X,X`
+  and ran delverai's tools/upload_refmatch.py from the site's checkout when a file `UPLOAD` existed (none did for the
+  shrink-and-perturb fork: nothing appeared);
+* `tools/farm_campaign.py collect` printed a head-to-head nobody posted;
+* `tools/ab.py` judged arms only against each other and the start: a single-arm experiment (one fork trained on,
+  judged against a fixed network) did not fit it at all.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 2XX.1 The reference-match record in this repo (mtgz/az/site_refmatch.py)
+
+The record is built here, not by shelling out to the site's checkout, field for field the one upload_refmatch.py
+builds (`{run: "refmatch.<run>", kind: "refmatch", for_run, updated, series: [{key, label, title, note, ref: {run,
+gen}, deck, deck_label, format, games, sims, rows: [{iter, games, score, se, elo, elo_se, unfinished, note?}]}],
+marks?, iters: []}`; se from the deals' pentanomial, elo / elo_se the cell's): the shrink-and-perturb sidecar's
+upload.json and rows.jsonl give a byte-identical JSON record through both. It is posted with mtgz.az.publish's key and
+POST (`upload_key` / `post` moved there from mtgz.az.replays, which re-exports them: one copy, light enough for the
+yardsticks' watcher). Each post replaces the record whole, so it is rebuilt every time from every row on disk:
+`<run>/yardsticks.jsonl` (the watcher's), `<run>/yardsticks/refmatch_rows.jsonl` (rows measured by hand: the watcher
+stays the only writer of its file) and any `--rows` files. A row counts when it is a 'cells' result of a mirror pair
+X,X against a registered reference with that reference's network (ref_sha); the newest row of a generation wins.
+
+* **An outside reference** is a cells reference that is not the gen-over-gen kind, not frozen from the run
+  (`cells-freeze` entries carry an iteration) and no file under the run directory (generation 0 is not one).
+* **Registration**: <run>/yardsticks/refmatch.json keeps per reference label its network (sha256[:12], at the first
+  measurement; a row of another network under the label is left out and said; a new network needs a new label), the
+  reference's run and generation (default: from its checkpoint's path `<run>/models/iter_N.pt`) and the human fields
+  the flags gave - `--series-label` (default `<run>@<gen>`), `--title`, `--note`, `--deck-label` (default
+  data/decks/<deck>.json's name), `--ref-run`, `--ref-gen`, `--mark ITER=LABEL`, `--row-note ITER=TEXT` - kept for
+  every later post, derived defaults otherwise.
+* **Checked as the site checks** (refmatchProblem: names, lengths, counts, at most 8 series and 2,000 rows, no local
+  path in any string) before the post, and **a record with no row is refused** (RefmatchError, exit 3): a publish
+  that posts nothing is a failure, never a quiet no-op.
+
+### 2XX.2 Who posts it (tools/run_yardsticks.py; the yardsticks setting `refmatch_publish`)
+
+* **`one RUN --kind cells --ref LABEL --pair X,X --iter N` by hand, against an outside reference: posts by default.**
+  Before any game it checks that the post can work (an upload key; a mirror pair - the record shows mirrors only, a
+  non-mirror pair needs `--no-publish`; the label's network), registers the reference with the flags' fields; after
+  the games it prints the result line as always (stdout; a sidecar parsing it is unchanged), keeps the row in
+  refmatch_rows.jsonl and posts (its lines on stderr). `--no-publish`: a loud `PUBLISH OFF: refmatch.<run> is not
+  posted (--no-publish) ...` with the command that posts later, the row kept. A failed post: `PUBLISH FAILED` with
+  the retry command, exit 3 after the result line. `--publish-dry-run` prints the record.
+* **`watch`**: after each mirror cells result against an outside reference it appended, the watcher posts (the new
+  yardsticks setting `refmatch_publish`, default true; false: `PUBLISH OFF` at each such result and at the watcher's
+  start). A failed post is said (`PUBLISH FAILED`) and the lane goes on; the next result posts again. The watcher's
+  measurement children carry `MTGZ_YARDSTICK_CHILD=1` and never post themselves (their command line is unchanged).
+  At its start the watcher names the outside references it will post for, or says why it cannot (no key).
+* **`refmatch RUN [--ref LABEL --ref-ckpt PATH] [--rows FILE ...] [--dry-run] [fields]`**: the record rebuilt and
+  posted now - after `--no-publish`, to change a field, or to adopt a sidecar's rows (an unregistered label takes its
+  network from `--ref-ckpt` or from the rows' own ref_sha when they agree).
+
+So a sidecar like the shrink-and-perturb fork's (`one` from the run's own worktree) posts on its own once its
+worktree carries this commit, without its `UPLOAD` file or the site's checkout; a run whose yardsticks setting names
+an outside reference in its ladder posts from its watcher.
+
+### 2XX.3 farm_campaign.py collect posts its head-to-head
+
+After `collect` (or `submit --wait`) printed its result, the campaign's readout (zero.h2h's summary, A = seats[0])
+goes to the Head-to-heads tab through mtgz.az.site_h2h (the site's uploader, as 193) **by default**: experiment
+`--publish`, default the campaign's farm run name (`cmp-<name>`); `--title`, default `Farm campaign <name>`, and a
+derived description (site_h2h.check gained `default_title` / `default_description`: used only for an experiment that
+is not on the site yet, so a later match never trips the uploader's "another title" refusal); the sides by
+`--a-label` / `--b-label`, default each checkpoint's run and generation (one checkpoint with a set per side: each
+side's move-rule tag after the name; the same tag on both sides is refused - give labels); the match key
+`--publish-key`, default the farm run name. The check runs **before any waiting** (no uploader or key: refused, as
+`ab.py go`). `--no-publish`: `PUBLISH OFF` on stderr. A self-play or samples campaign, or an unpaired one, has
+nothing the tab can show: `PUBLISH SKIPPED` with the reason. No readout after a collect, or a failed post:
+`PUBLISH FAILED`, exit 3 after the result (a collected campaign returns its result at once, so `collect NAME` again
+retries the post).
+
+### 2XX.4 ab.py: an outside reference and single-arm experiments
+
+The spec's optional `"reference": {"path": CKPT, "label": "pb1@262"}` (label default: the checkpoint's run and
+generation), or `--ref CKPT [--ref-label L]` on judge / go / check / publish (kept in ab_state.json, so a later
+`publish` rebuilds the same manifest): every arm's last checkpoint is also judged against it with the cells
+(`<arm>_vs_ref.json`, cells-match `--ref-label ref`), published as each arm's overall match against the reference
+(key rank 7) and one match per cell (rank 3) - the tab lists treatments vs control (9), arms vs the reference (7),
+arms vs the start (5), then the cells. With a reference **one arm is enough**: it is the control, there are no
+treatments. The judge was already publishing by default (193); its opt-outs are now loud: `--no-publish` or
+`"publish": {"h2h": false}` print `PUBLISH OFF: h2h.<id> ... post them later: python tools/ab.py publish SPEC` at the
+judge and at the start of `go`. report.json names the reference's label.
+
+### 2XX.5 Tests
+
+tests/test_site_refmatch.py: outside vs own references (generation 0, a file of the run, frozen, gen over gen); the
+record from every mirror row of the registered network (the newest row of a generation; non-mirror, foreign-network,
+unregistered and failed rows left out; upload_refmatch.py's field order; derived and given fields; marks and row
+notes); no row, a local path and a re-used label refused; the POST faked (url, key, the whole record; dry run posts
+nothing); `one` by hand posting by default, the fields kept for the next post, `--no-publish` loud with the row kept,
+the watcher's child not posting; refusals before any game (a non-mirror pair, no key), a failed post exit 3 with the
+row kept, an own reference silent; the watcher posting after a mirror result, not after a non-mirror or own one,
+PUBLISH OFF / FAILED said and never raised; `refmatch` adopting a sidecar's rows. tests/test_judging_publish.py:
+ab.py's single-arm experiment with a reference (matches, manifest keys and labels, no path sent), the command line's
+reference kept for a later publish, the judge's PUBLISH OFF; farm_campaign.py collect's default post through a fake
+uploader (experiment, title, labels, key, the saved result), PUBLISH OFF / SKIPPED / FAILED, the per-side labels, no
+key refused before waiting. The site is never contacted.

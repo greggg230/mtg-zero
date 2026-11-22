@@ -106,6 +106,9 @@ other, against the reference piloting both on the same seeds (common random numb
   cells_base_elo   the first reference's anchored Elo (1000, zero.elo's anchor)
   cells_cache      the reference-vs-reference baselines' cache directory (default <run>/yardsticks/cells_base)
   cells_boot       bootstrap resamples of each cell's paired seeds (1000; 0 = the delta method only)
+  refmatch_publish a mirror cells result against a reference from OUTSIDE the run (a cells_refs 'LABEL=PATH' that is
+                   no file of the run) posts the run's reference-match record refmatch.<run> on delverai
+                   (mtgz.az.site_refmatch, docs/ENGINE.md 2XX; true; false: PUBLISH OFF, said at each such result)
 
 The reference pool and the joint fit (docs/ENGINE.md 186; mtgz.az.cells_fit; off unless cells_mode is 'pool'):
 
@@ -189,7 +192,9 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             'cells_mac_jobs': 4, 'cells_mac_threads': 4, 'cells_mac_groups': 2, 'cells_mac_torch_threads': 2,
             'cells_mac_nice': 10,
             # the cells' local games in parallel (docs/ENGINE.md 199)
-            'cells_local_jobs': 1, 'cells_local_split': False}
+            'cells_local_jobs': 1, 'cells_local_split': False,
+            # cells against an outside reference posted as the run's reference-match record (docs/ENGINE.md 2XX)
+            'refmatch_publish': True}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)
 DELVER_YARDSTICKS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter0'], 'blunders': True}
@@ -207,7 +212,7 @@ KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': 
         'cells_mode': str, 'cells_pool_active': int, 'cells_promote_every': int, 'cells_auto_promote': bool,
         'cells_main_share': _NUM, 'cells_gen0_share': _NUM, 'cells_fit_boot': int,
         'cells_mac_jobs': int, 'cells_mac_threads': int, 'cells_mac_groups': int, 'cells_mac_torch_threads': int,
-        'cells_mac_nice': int, 'cells_local_jobs': int, 'cells_local_split': bool}
+        'cells_mac_nice': int, 'cells_local_jobs': int, 'cells_local_split': bool, 'refmatch_publish': bool}
 # a kind's cadence setting (docs/ENGINE.md 182)
 EVERY = {'bo1': 'bo1_every', 'blunders': 'blunders_every', 'cells': 'cells_every', 'cells_gen': 'cells_gen_every'}
 SEQ_SEED = 7919                           # batch k's seed offset (zero.h2h.sequential's)

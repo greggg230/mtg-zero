@@ -9,7 +9,8 @@ with its own setting overrides, trained one after the other on this machine, the
   python tools/ab.py launch  SPEC ARM      # one arm's supervisor (hidden), returns at once
   python tools/ab.py status  SPEC          # each arm's checkpoint, supervisor and last metrics
   python tools/ab.py stop    SPEC          # PAUSE_NEXT each live arm at its boundary (pause_run.py --wait), then STOP
-  python tools/ab.py judge   SPEC [--no-publish]   # the cells matches + the metrics table -> <out>/judge/, published
+  python tools/ab.py judge   SPEC [--no-publish] [--ref CKPT --ref-label L]   # the cells matches + the metrics
+                                           #   table -> <out>/judge/, published (--ref: an outside reference too)
   python tools/ab.py publish SPEC [--dry-run] [--replace]  # (again) the judge's results to the Head-to-heads tab
   python tools/ab.py farm-gates SPEC [ARM]  # tools/farm_gates.py on each farm arm's config + checkpoint K (its worker)
   python tools/ab.py farm-pause SPEC ARM    # the arm's coordinator farm run -> "paused" (go does it after each arm)
@@ -22,6 +23,8 @@ THE SPEC (JSON):
     "iterations": 28,                         # each arm trains K+1 .. K+iterations
     "arms": {"ctrl": {"p_full_rule": "random"}, "adapt": {...}},           # name -> setting overrides (--set)
     "control": "ctrl",                        # default: the first arm; every other arm is a treatment
+    "reference": {"path": "E:/.../iter_0262.pt", "label": "pb1@262"},     # optional: a network from OUTSIDE the
+                                              #   experiment every arm is judged against too (one arm is enough then)
     "labels": {"ctrl": "Coin (control)", "adapt": "Prior-uncertainty budget"},   # names on the site (default: names)
     "common": {"selfplay_remote": "", ...},   # overrides of every arm (not `publish`, not `iters`: ab.py's)
     "runs_dir": "E:/mtg-zero/runs",           # default: the source run's parent
@@ -54,7 +57,16 @@ THE JUDGE (<out>/judge/): for each treatment T, cells-match T's last checkpoint 
 .json; the start copied to judge/start_iter_KKKK.pt); then report.json / report.md (the matches' summaries, each arm's
 metrics over its iterations). One baseline cache (judge/cells_base) for all of them.
 
-PUBLISHING (default on; `--no-publish`, or "publish": {"h2h": false}): the judge posts one Head-to-heads experiment
+AN OUTSIDE REFERENCE (docs/ENGINE.md 2XX; "reference" in the spec, or `--ref CKPT --ref-label LABEL` on judge / go /
+check / publish, kept in ab_state.json for a later `publish`): a fixed checkpoint from outside the experiment - e.g.
+pb1@262, generation 262 of delver-bo3-pb1 - that every arm's last checkpoint is also judged against (<arm>_vs_ref
+.json: the arm pilots each deck against the reference piloting each deck; label default: its run and generation). With
+a reference the spec may have ONE arm (a single-arm experiment: a fork trained on, judged against a fixed yardstick;
+that arm is the control, there are no treatments). Published as each arm's overall match against the reference and
+one match per cell (keys ranked 7 / 3).
+
+PUBLISHING (default on; `--no-publish`, or "publish": {"h2h": false}, said loudly: PUBLISH OFF on stderr at go and at
+the judge, with the command that posts later): the judge posts one Head-to-heads experiment
 h2h.<id> through delverai's tools/upload_h2h.py --manifest (mtgz.az.site_h2h finds it): for each treatment the overall
 match (the mean of the cells) and one match per cell (treatment piloting each deck against the control piloting each
 deck), and each arm's overall match against the start. A cell's Elo difference is the treatment's GAIN over the control
@@ -105,13 +117,14 @@ TERMINAL = ('done', 'stopped', 'refused', 'gave_up', 'paused')
 
 
 # ------------------------------------------------------------------ the spec
-def load_spec(path):
+def load_spec(path, ref_given=False):
+    """The spec file -> normalized; `ref_given`: an outside reference comes from the command line (one arm is enough)."""
     with open(path, encoding='utf-8') as f:
         spec = json.load(f)
-    return normalize(spec, os.path.dirname(os.path.abspath(path)))
+    return normalize(spec, os.path.dirname(os.path.abspath(path)), ref_given)
 
 
-def normalize(spec, base='.'):
+def normalize(spec, base='.', ref_given=False):
     """The spec with its defaults filled in -> dict; SystemExit naming what is wrong."""
     s = dict(spec)
     for k in ('id', 'title', 'source', 'iterations', 'arms'):
@@ -119,8 +132,9 @@ def normalize(spec, base='.'):
             raise SystemExit(f'spec: no {k!r}')
     if not S.NAME_RE.match(str(s['id'])):
         raise SystemExit(f"spec: id {s['id']!r}: letters, digits, . _ - (at most 60)")
-    if not isinstance(s['arms'], dict) or len(s['arms']) < 2:
-        raise SystemExit('spec: arms {name: overrides} - at least two')
+    s['reference'] = reference_of(s.get('reference'))
+    if not isinstance(s['arms'], dict) or len(s['arms']) < (1 if s['reference'] or ref_given else 2):
+        raise SystemExit('spec: arms {name: overrides} - at least two (or one with an outside "reference")')
     for name, ov in [('common', s.get('common') or {})] + list(s['arms'].items()):
         if not isinstance(ov, dict):
             raise SystemExit(f'spec: {name}: a JSON object of setting overrides')
@@ -168,6 +182,40 @@ def normalize(spec, base='.'):
     pub['link'] = pub['link'] or os.path.basename(os.path.normpath(src['run']))
     s['publish'] = pub
     return s
+
+
+def reference_of(r):
+    """The spec's outside reference -> {'path', 'label'} or None; SystemExit for a bad one (docs/ENGINE.md 2XX)."""
+    if r is None:
+        return None
+    if not isinstance(r, dict) or not isinstance(r.get('path'), str) or not r['path'] or set(r) - {'path', 'label'}:
+        raise SystemExit('spec: reference {"path": CKPT, "label": "pb1@262"} (label optional)')
+    label = r.get('label') or S.checkpoint_label(r['path'])
+    if not isinstance(label, str) or not label.strip() or len(label) > 60:
+        raise SystemExit(f'spec: reference label {label!r}: a name of at most 60 characters')
+    return {'path': r['path'], 'label': label.strip()}
+
+
+def with_reference(s, path=None, label=None):
+    """The spec with the outside reference of the command line (`--ref`, saved in ab_state.json for a later publish),
+    else the spec's, else the one a judge saved -> s."""
+    st = jload(state_path(s), {}) or {}
+    if path:
+        s['reference'] = reference_of({'path': path, 'label': label} if label else {'path': path})
+        if st.get('reference') != s['reference']:
+            jsave(state_path(s), dict(st, reference=s['reference']))
+    elif label:
+        raise SystemExit('--ref-label without --ref CKPT')
+    elif not s.get('reference') and st.get('reference'):
+        s['reference'] = reference_of(st['reference'])
+    return s
+
+
+def publish_off(s, why):
+    """The loud line of a judge that will not post (stderr)."""
+    print(f"PUBLISH OFF: h2h.{s['id']} ({why}) - the judge's results will NOT appear on the Delver AI site's "
+          f"Head-to-heads tab; post them later: python tools/ab.py publish SPEC (docs/ENGINE.md 193, 2XX)",
+          file=sys.stderr, flush=True)
 
 
 def worktree(s, arm=None):
@@ -332,6 +380,10 @@ def check(s):
         if farm_run(ov) and s['farm'] is None:
             raise SystemExit(f'{arm} self-plays on the farm ({farm_run(ov)}): the spec needs "farm": {{...}} (the gates)')
     print(f"code: {wt} at {head[:12]}; python {python(s)}; out {s['out']}")
+    if s['reference']:
+        ok = os.path.isfile(s['reference']['path'])
+        print(f"outside reference: {s['reference']['label']!r} ({s['reference']['path']}{'' if ok else ': MISSING'}): "
+              f"every arm judged against it too")
     pub = s['publish']
     if pub['h2h'] or pub['live']:
         up = S.uploader_path()
@@ -469,6 +521,8 @@ def judge_matches(s, k):
     """The judge's cells matches -> [(key, A arm, B arm or 'start')]: each treatment against the control, then (with
     vs_start) every arm against the start."""
     out = [(f"{t}_vs_{s['control']}", t, s['control']) for t in s['treatments']]
+    if s.get('reference'):
+        out += [(f'{a}_vs_ref', a, 'ref') for a in s['arms']]
     if s['judge']['vs_start']:
         out += [(f'{a}_vs_start', a, 'start') for a in s['arms']]
     return out
@@ -484,9 +538,17 @@ def judge(s, publish=True):
         shutil.copyfile(os.path.join(run_dir(s, s['control']), 'models', f'iter_{k:04d}.pt'), start)
     fin = {a: os.path.join(run_dir(s, a), 'models', f'iter_{last:04d}.pt') for a in s['arms']}
     fin['start'] = start
+    if s.get('reference'):
+        fin['ref'] = s['reference']['path']
+        if not os.path.isfile(fin['ref']):
+            raise SystemExit(f"the outside reference {s['reference']['label']!r}: no checkpoint {fin['ref']}")
     for a in s['arms']:
         if not os.path.isfile(fin[a]):
             raise SystemExit(f'{a}: no checkpoint {last} yet ({fin[a]})')
+    if not publish:
+        publish_off(s, '--no-publish')
+    elif not s['publish']['h2h']:
+        publish_off(s, 'the spec\'s "publish": {"h2h": false}')
     env = dict(os.environ)
     env.pop('CUDA_VISIBLE_DEVICES', None)
     j = s['judge']
@@ -517,6 +579,8 @@ def judge(s, publish=True):
         res[key] = (jload(jp) or {})['summary']
     rep = {'id': s['id'], 'k': k, 'iters': s['iterations'], 'control': s['control'], 'matches': res,
            'arms': {a: summarize(s, a, k) for a in s['arms']}}
+    if s.get('reference'):
+        rep['reference'] = {'label': s['reference']['label']}
     jsave(os.path.join(out, 'report.json'), rep)
     lines = [f"# {s['title']} (A/B {s['id']}: K {k}, {s['iterations']} iterations each)", '']
     for a, m in rep['arms'].items():
@@ -559,6 +623,13 @@ def manifest(s, k, arms_metrics=None, date=None):
         c = s['control']
         ms.append({'experiment': s['id'], 'cells': os.path.join(jd, f'{t}_vs_{c}.json'), 'a_label': lab(t),
                    'b_label': lab(c), 'key_prefix': f'9-{t}-vs-{c}.', 'cell_key_prefix': f'1-{t}-vs-{c}.'})
+    ref = s.get('reference')
+    if ref:
+        desc += (f" Each arm is also judged against {ref['label']}, a fixed network from outside the experiment "
+                 f"(its gain over it in each seat).")
+        for a in s['arms']:
+            ms.append({'experiment': s['id'], 'cells': os.path.join(jd, f'{a}_vs_ref.json'), 'a_label': lab(a),
+                       'b_label': ref['label'], 'key_prefix': f'7-{a}-vs-ref.', 'cell_key_prefix': f'3-{a}-vs-ref.'})
     if s['judge']['vs_start']:
         for a in s['arms']:
             e = {'experiment': s['id'], 'cells': os.path.join(jd, f'{a}_vs_start.json'), 'a_label': lab(a),
@@ -691,6 +762,10 @@ def farm_pause(s, arm, client=None):
 
 def go(s, publish=True, judge_too=True):
     k, live = check(s)
+    if judge_too and not publish:
+        publish_off(s, 'go --no-publish')
+    elif judge_too and not s['publish']['h2h']:
+        publish_off(s, 'the spec\'s "publish": {"h2h": false}')
     if publish and s['publish']['h2h'] and not (os.path.isfile(S.uploader_path()) and S.has_key()):
         raise SystemExit(f'the judge publishes (publish.h2h) but the uploader ({S.uploader_path()}) or the upload key '
                          f'is missing: fix it, or go --no-publish (then ab.py publish SPEC later)')
@@ -729,12 +804,21 @@ def main(argv=None):
     ap.add_argument('--no-publish', action='store_true', help='go / judge: do not post to the Head-to-heads tab')
     ap.add_argument('--dry-run', action='store_true', help='publish: print the record, post nothing')
     ap.add_argument('--replace', action='store_true', help='publish: replace matches already on the site')
+    ap.add_argument('--ref', default=None, metavar='CKPT', help='judge / go / check / publish: an outside reference '
+                    'every arm is judged against too (docs/ENGINE.md 2XX; kept for a later publish)')
+    ap.add_argument('--ref-label', default=None, help="--ref's name on the site (default: its run and generation)")
     a = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(errors='replace')
     except (AttributeError, ValueError):
         pass
-    s = load_spec(a.spec)
+    s = load_spec(a.spec, True)                # (one arm: checked below, once a saved --ref counts too)
+    if a.ref or a.ref_label:
+        if a.cmd not in ('judge', 'go', 'check', 'publish'):
+            ap.error('--ref: judge, go, check or publish')
+    s = with_reference(s, a.ref, a.ref_label)
+    if len(s['arms']) < 2 and not s['reference']:
+        raise SystemExit('spec: one arm needs an outside reference ("reference" in the spec, or --ref CKPT)')
     if a.cmd == 'check':
         check(s)
     elif a.cmd == 'fork':
