@@ -1363,7 +1363,7 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
-/// The 601.2g step's positions (ENGINE.md 229): Hogaak castable only through a Chromatic Star activated while it is
+/// The 601.2g step's positions (ENGINE.md 230): Hogaak castable only through a Chromatic Star activated while it is
 /// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
 /// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
 fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {
@@ -1419,9 +1419,9 @@ fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
-/// An Edge of Eternities position with a card its owner exiled face up (ENGINE.md 229): the witness of layout v6's
+/// An Edge of Eternities position with a card its owner exiled face up (ENGINE.md 230): the witness of layout v6's
 /// known gap "an exiled card is turned face down" (v6 shows the owner its own face-down card as an exiled one). The
-/// gate's sampled EoE positions held one by chance; the 601.2g step changed their games (229.7), so it is built here.
+/// gate's sampled EoE positions held one by chance; the 601.2g step changed their games (230.7), so it is built here.
 fn eoe_exile_positions() -> Vec<(&'static str, MtgAz)> {
     use engine::testkit::Scenario;
     use engine::Step;

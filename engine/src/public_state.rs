@@ -154,8 +154,8 @@ pub fn fields() -> Vec<Field> {
         discard_entered: Derived "transient: Mox Diamond's answer, consumed by its entering",
         repl_decided: Derived "transient: a replacement choice made for the next move",
         route_choice: Derived "transient: the route of the cast about to begin (its decision's context)",
-        cast_lock: Public "the total cost of a spell being cast, locked at its first mana ability during the cast (CR 601.2f-g): the cost floats of its 601.2g step's and delve's decisions (ENGINE.md 229)",
-        pool_wild: Derived "transient: the payment search's copies only, (0, 0) in every state a decision is asked in (ENGINE.md 229.4)",
+        cast_lock: Public "the total cost of a spell being cast, locked at its first mana ability during the cast (CR 601.2f-g): the cost floats of its 601.2g step's and delve's decisions (ENGINE.md 230)",
+        pool_wild: Derived "transient: the payment search's copies only, (0, 0) in every state a decision is asked in (ENGINE.md 230.4)",
         entering_dash: Derived "transient: set and cleared around one move",
         entering_warp: Derived "transient: set and cleared around one move",
         miracle_cast: Derived "transient: the card a miracle trigger is casting (its decisions' context)",
@@ -951,7 +951,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.gy_exile.push(c);
             Some(a.g.name(c).to_string())
         }),
-        // The total cost of the spell a casting decision is about, locked (CR 601.2f-g; ENGINE.md 229): one more
+        // The total cost of the spell a casting decision is about, locked (CR 601.2f-g; ENGINE.md 230): one more
         // generic mana, read by the decision's cost floats (its 601.2g step's, delve's, convoke's).
         p!("the total cost of the spell being paid for is locked one higher", "Game.cast_lock", |a, _r| {
             let id = match a.g.agenda.last()? {

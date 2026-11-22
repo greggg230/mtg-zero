@@ -1,4 +1,4 @@
-//! Mana abilities while a spell is cast (CR 601.2g-h; ENGINE.md 229): after the total cost is determined (601.2f)
+//! Mana abilities while a spell is cast (CR 601.2g-h; ENGINE.md 230): after the total cost is determined (601.2f)
 //! the caster may activate mana abilities, then pays the cost in any order (601.2h). A card a mana ability puts
 //! into the graveyard then is delve's to exile for that same spell; a mana ability whose mana isn't needed may be
 //! activated then, its triggered ability waiting until the spell is cast (601.2i, 603.3: above it); an "activate
@@ -320,7 +320,7 @@ fn cr_605_3a_lions_eye_diamond_activated_with_priority_before_the_cast_feeds_del
 #[test]
 fn cr_601_2g_plain_lands_are_left_to_the_priority_after_the_cast() {
     // A basic land's {T}: add one mana, nothing else: activated during the cast with its mana unspent it is the same
-    // as activated with the priority right after it (the collapse, ENGINE.md 229.3): no 601.2g decision.
+    // as activated with the priority right after it (the collapse, ENGINE.md 230.3): no 601.2g decision.
     let mut g = cube().battlefield(0, &["Mountain", "Mountain", "Island"]).hand(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
     let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
     g.choose(Choice::Cast(bolt));
@@ -376,7 +376,7 @@ fn cr_602_5_601_2g_timing_restricted_mana_abilities_while_casting_as_while_payin
                     // (`exact`: every mana ability of the card has an "only if" or "only during your turn": the
                     // card is offered exactly when one of them may be activated. A card with an unrestricted one
                     // besides - a Verge's first, a plain "{T}: add" the step leaves to the priority after the cast,
-                    // ENGINE.md 229.3 - is offered while casting only if the payment may activate it.)
+                    // ENGINE.md 230.3 - is offered while casting only if the payment may activate it.)
                     let all = def.activated.iter().filter(|a| a.mana().is_some()).all(|a| a.only_if.is_some() || a.your_turn);
                     found.push((t, def.name.clone(), ad.instant_only || ad.sorcery, all));
                 }
@@ -438,7 +438,7 @@ fn cr_601_2g_hogaak_is_castable_only_through_a_chromatic_star_its_cost_paid_by_a
     // Four graveyard cards and two green creatures: Hogaak's {5} is one card short. Chromatic Star ({1}, {T},
     // sacrifice: one mana) activated while Hogaak is cast, its {1} paid by the Swamp (no mana pays Hogaak, CR 113.6e,
     // but a mana ability's cost is another payment: 605.3a), is the fifth card delve exiles. Castability counts it
-    // (`feed_castable`, ENGINE.md 229.4); without a mana source for the Star's {1} Hogaak isn't castable.
+    // (`feed_castable`, ENGINE.md 230.4); without a mana source for the Star's {1} Hogaak isn't castable.
     let board = |swamp: bool| {
         let mut b = vec!["Chromatic Star", GREEN, GREEN];
         if swamp {
@@ -648,7 +648,7 @@ fn cr_702_66a_a_source_delved_isnt_also_tapped_by_another_ability() {
     // {U}") and Wizard's Rockets, five graveyard cards. Urza tapping the Rockets for {U} pays one mana; the Rockets
     // delved (sacrificed by their own ability as the payment begins, CR 601.2g-h) is one card - not both. With the
     // Rockets chosen in delve, the rest needs all five graveyard cards: `PASS` is never offered after four (before,
-    // delve counted Urza's tap of the Rockets and the payment then had no way to pay; ENGINE.md 229, cube board 2213).
+    // delve counted Urza's tap of the Rockets and the payment then had no way to pay; ENGINE.md 230, cube board 2213).
     let mut g = cube()
         .battlefield(0, &["Island", "Island", "Urza, Lord High Artificer", "Wizard's Rockets"])
         .graveyard(0, &["Ponder", "Brainstorm", "Lightning Bolt", "Mountain", "Swamp"])
@@ -684,7 +684,7 @@ fn cr_702_66a_a_source_delved_isnt_also_tapped_by_another_ability() {
 fn cr_605_3a_no_mana_ability_while_paying_a_cost_of_no_mana() {
     // Walking Ballista escaped by Underworld Breach for X = 0: its total cost has no mana payment, so no mana ability
     // may be activated while it is paid (CR 601.2g, 605.3a): a Lotus Petal can't be sacrificed to be the third card
-    // escape exiles. (Before, the payment activated the Petal first for the exile; ENGINE.md 229.) With a third
+    // escape exiles. (Before, the payment activated the Petal first for the exile; ENGINE.md 230.) With a third
     // graveyard card it escapes.
     let board = |third: bool| {
         let mut gy = vec!["Walking Ballista", "Ponder", "Brainstorm"];
@@ -711,7 +711,7 @@ fn cr_601_2g_a_land_a_mana_ability_may_sacrifice_is_offered_an_artifact_it_cant_
     // Squandered Resources ("sacrifice a land: add one mana of any type that land could produce") may sacrifice the
     // Mountain during the cast, so the Mountain's "{T}: add {R}" activated in the step (then sacrificed) is no outcome
     // the priority after the cast has: offered. Mind Stone isn't a land: Squandered can't take it, its "{T}: add {C}"
-    // stays collapsed (ENGINE.md 229.3, the tightening). Chromatic Star makes the step ask.
+    // stays collapsed (ENGINE.md 230.3, the tightening). Chromatic Star makes the step ask.
     let mut g = cube()
         .battlefield(0, &["Squandered Resources", "Mind Stone", "Mountain", "Chromatic Star"])
         .hand(0, &["Lightning Bolt"])

@@ -415,7 +415,7 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Interactions)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(40)));
-    // (ENGINE.md 229.6: the 601.2g step changed these games; the scan `scan_seeds_for_the_seed_pinned_tests` re-found
+    // (ENGINE.md 230.6: the 601.2g step changed these games; the scan `scan_seeds_for_the_seed_pinned_tests` re-found
     // 12,471 in interactions seeds 0..24,000 (every check, the checkpoint at 40), its rows with the enclosing picks for
     // both viewers.)
     for seed in [12471] {
@@ -498,7 +498,7 @@ fn same_seed_and_actions_replay_matches_identically() {
     }
 }
 
-/// ENGINE.md 229: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
+/// ENGINE.md 230: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
 /// games (a new decision draws from each game's random stream). Ignored; `SCAN_KIND` = `left_look` (hidden-decklist
 /// default games with a look at a card that left the viewer's hand in its step), `entered_look` (default games with a
 /// look at a card that came into the hand and left it in its step), `etali` (interactions games whose rows carry an

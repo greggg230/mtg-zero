@@ -104,9 +104,9 @@ pub(crate) enum Task {
     ActivateMana { p: PlayerId, card: Option<CardIdx>, again: bool },
     /// CR 601.2g: mana abilities activated while spell `id` is cast, its total cost determined (601.2f) and not yet
     /// paid (601.2h) (`DecisionKind::CastMana`; `card`: the permanent whose ability is asked next; `again`: one was
-    /// activated; `cast_mana.rs`, ENGINE.md 229).
+    /// activated; `cast_mana.rs`, ENGINE.md 230).
     /// (`after`: in the payment search, the card of the feeding ability the step activated last, its raw index - the
-    /// next ones in increasing card order, ENGINE.md 229.4; 0 otherwise.)
+    /// next ones in increasing card order, ENGINE.md 230.4; 0 otherwise.)
     CastMana { id: u32, card: Option<CardIdx>, again: bool, after: u32 },
     /// Devour land (CR 702.82a): the lands chosen so far, in battlefield
     /// order (ENGINE.md 99.12).
@@ -329,7 +329,7 @@ impl Game {
         self.ask_options(task, player, kind, options);
     }
 
-    /// [`ask`](Self::ask) of options already filtered by `completing` (the 601.2g step's, ENGINE.md 229).
+    /// [`ask`](Self::ask) of options already filtered by `completing` (the 601.2g step's, ENGINE.md 230).
     pub(crate) fn ask_completed(&mut self, task: Task, player: PlayerId, kind: DecisionKind, options: Vec<Opt>) {
         if self.perms_past_slots(player, &options) {
             let page = self.page.unwrap_or(crate::decision::Page::FIRST);

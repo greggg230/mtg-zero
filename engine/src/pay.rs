@@ -1534,7 +1534,7 @@ impl Game {
     pub(crate) fn spendable_classes<'a>(classes: &'a [Class], allow: crate::doomsday_b::Allow) -> std::borrow::Cow<'a, [Class]> {
         // (And the cards mana abilities activated during its cast put into the
         // graveyard for its delve, no mana with them: `Game::no_mana_feeders`,
-        // ENGINE.md 229.4.)
+        // ENGINE.md 230.4.)
         let kept = |cl: &Class| cl.members.first().is_some_and(|s| s.slot == IMPROVISE) || cl.delve;
         if !allow.no_mana || classes.iter().all(kept) {
             return std::borrow::Cow::Borrowed(classes);
@@ -1842,7 +1842,7 @@ impl Game {
     /// add, ENGINE.md 100.4.5).
     fn add_pool(&self, p: PlayerId, any: crate::doomsday_b::Allow, c: &mut Cands) {
         // (The payment search's mana whose type isn't chosen yet, one of a mask each: `Game::pool_wild`, ENGINE.md
-        // 229.4.)
+        // 230.4.)
         let (wild, mask) = self.pool_wild[p as usize];
         if wild > 0 && !any.no_mana {
             for _ in 0..wild {
