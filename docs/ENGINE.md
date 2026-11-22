@@ -43518,7 +43518,7 @@ takes docs/az.md 70: this branch's section should become 71 at the integration.
 (fast-forward from zero-core main d499716), then `feat/farm-guards` d32f6f8 (59dc7fe: `GamePackage` gets both
 `h2h_backend` and `farm_build` - the docstring, the keyword and the attribute kept both; az.md 69 then 70), then
 `feat/eval-speed` 0dd8a1f (84bb5e1). The pin moves to 84bb5e1, which replaces 221.1's WIP pin to 0dd8a1f; 84bb5e1
-differs from 1e26188 / d32f6f8 / 0dd8a1f by their merges only (no code written at the merge).
+differs from 1e26188 / d32f6f8 / 0dd8a1f by their merges only (the conflict resolutions below; no other code).
 
 **Numbers.** zero-core: eval-speed's section was az.md 70 on its branch, the same number as the guards' - it is
 **docs/az.md 71** now, and its references follow (crates/worker `evaljob.rs`, `job.rs`, `proto.rs`, `tests/evaljob.rs`;
@@ -43538,3 +43538,14 @@ a published farm build is refused (exit 78) without `selfplay_local_reason` (`--
 Head-to-heads go to the farm when they can and say so in one line (217). (3) The fuzz steward is restarted with the
 Macs' fuzz build on (219, approved by the user on 2026-11-21) right after main moves. (4) Eval jobs on CPUs play in one
 group on lanes per seat once a release built from this commit reaches the farm (221).
+**Gate** of 37bbfc82 (this section's commit; the warm worktree warm-3, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`, the system
+Python, the automatic placement - 5 steps on the Mac, 8 on the desktop throttled: four live supervisors here -,
+`--baseline-root` warm-2 at main 45dbf2e1 with its engine module from the artifact cache): **GATE PASSED WITH SKIPS
+optin-core 37bbfc820dfe in 3290s** - privacy 0 findings; core tests 215 passed; checkpoint_compat byte identity (visits
+and cq, 3,185 samples each); the digests as recorded (constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver
+6a03572828250b86, metagame be3766d1f943c95c, dealt f0bfffd26a70a753 over 80 matches); farm compat identical (gate 2: 6
+games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows); cargo test --test az 57 and --test hidden 28 passed;
+glassroad-zero, caverna-zero and kingdombuilder-zero built against this core; core pytest 755 passed, 71 skipped -
+skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core's timing flake
+(test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
+(docs).
