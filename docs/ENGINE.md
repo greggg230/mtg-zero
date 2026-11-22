@@ -45520,3 +45520,37 @@ Mac's full pytest of 9d01c425 had three failures, none of this change: `test_run
 (a timing flake under load), and `test_artifact_cache::test_check_scope_reads_cargo_dep_info` and
 `test_deck_scorer::test_the_engines_fixtures_are_reproducible` fail the same on the Mac at origin/main c6ba3909 (they pass
 on the desktop).
+
+## 237. zero-core pin 6e54da5 -> 61909fa: the probe's graph-derived expectation resolves the graph's game (the farm release's DirectML self-test after layout v8; zero-core `fix/probe-alias` 61909fa, docs/az.md 73.1; 2026-11-22)
+
+**Why.** The farm release of 1d327d07 (the first with layout v8, section 236) failed at its DirectML self-test
+(`tools/farm_release.py` step 6b): `reference: a network of game Some("mtg"), the job plays "mtg_v7" (docs/az.md 73)`.
+That step re-exports the release's reference checkpoint (a v7 checkpoint recorded as plain `mtg`) with the release's
+code, so the new graph names its game `mtg_v7`, and checks it with `probe-providers --model ... --reference ...` against
+the reference set exported before the change (`mtg`, no `game_layout`). The probe and `eval-batches` have no job: their
+expectation was the graph's own metadata (zero-core `session::expect_of`) with no knowledge of the worker's registered
+games, so the alias rule (`mtg` without a record = `mtg_v7`) never applied and the pair was refused. Jobs
+(`Expect::of_entry`) were never affected; the CUDA self-test (the old export, `mtg` against `mtg`) passed. Every farm
+release since layout v8 would fail the same way.
+
+**What.** zero-core: `SessionSpec::games` and `probe::Opts::games` carry the worker's registry (`cli_with` passes
+`Worker::games` to `probe-providers` and `eval-batches`); with no job expectation, the graph's game and layout record are
+resolved in it (`resolve_game`) and the expectation takes that entry's name, layout revision and `before_of`, so a graph
+and its reference set pass exactly when a job of that entry would accept them: a graph `mtg_v7` (or `mtg` without a
+record) takes a set `mtg` without a record or `mtg_v7`, never `mtg` layout 8; a graph `mtg` layout 8 takes only `mtg`
+layout 8; a game the registry does not resolve keeps strict equality as before. No engine, encoding, search or self-play
+change: the worker's jobs, shards and records are unchanged (digests unmoved); the farm build changes only in what these
+two commands accept.
+
+**Reproduced and fixed** (scratch copies of the release's reference files and runtime packs, nothing written under the
+farm builds directory): the release's own worker (`mtg-1d327d0-release-rt2713f148`) on the release's re-exported
+`model_fm.onnx` against the reference `reference.npz` with `--providers dml,cpu --reps 2` - exit 2, `providers: []`,
+`FAIL cpu: reference: a network of game Some("mtg"), the job plays "mtg_v7"`, the release's failure; this branch's
+`mtgz-worker` on the same files - exit 0, `providers: ["dml","cpu"]`, cpu max abs 3.0e-6, dml max abs 4.5e-6 (NVIDIA)
+and 3.9e-6 (Intel), deterministic. The CUDA self-test's pair (the old `model.onnx` against the same set, `--providers
+cuda,cpu`) passes with this worker too (cuda max abs 2.4e-6, cpu 3.6e-6).
+
+**Tests.** zero-core `session::tests::a_graph_derived_expectation_resolves_the_graphs_game_in_the_registry` (the
+stand-in alias `toy` layout 2 / before `toy_old`: every pairing above through `expect_of`, the graph's own game check and
+`selftest::check_meta`; plain games unchanged; an empty registry still refuses the release's pair); zero_worker lib 49
+passed.
