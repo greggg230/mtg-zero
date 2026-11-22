@@ -20,12 +20,13 @@
 //!   facts the rules read of them, summoning sickness, CR 302.6, and "entered this turn"), its
 //!   counters (122), its marks (`Game::marks`, compared as a multiset), token and copy status
 //!   (111, 707), a face-down permanent's identity (708) and what its controller knows of it, its
-//!   loyalty activations this turn (606.3);
+//!   loyalty activations this turn (606.3), and its other records of this turn keyed by it alone:
+//!   how many times its abilities resolved, its once-each-turn actions done, whether it attacked;
 //! * nothing else in the state names either of them (`Game::named_objects`: every holder of an
 //!   object reference - the stack, the agenda's tasks, triggers waiting, delayed and temporary
 //!   triggers, continuous and copy effects, links, marks that name an object, attachments, blocks,
-//!   attacks on a planeswalker, the creatures that attacked this turn, permissions, the
-//!   resolution counts, ... - but the payment's own task, which holds its picks); and
+//!   attacks on a planeswalker, permissions, ... - but the payment's own task, which holds its
+//!   picks); and
 //! * neither has an ability whose continuous effects its timestamp orders (CR 613.7: static
 //!   abilities, a Painter's colour, granted abilities, an Aura's control; `ts_sensitive`): the
 //!   only place a permanent's timestamp is read besides the canonical order of a simultaneous
@@ -88,20 +89,28 @@ struct Own {
     copy_obj: bool,
     face_down: Option<DefId>,
     loyalty: (u16, u32, u32),
+    /// Its own records of this turn, keyed by the permanent alone (no other object): how many
+    /// times its abilities resolved (`Game::resolved`: "the second time this ability has
+    /// resolved this turn"), and whether it attacked under each player's control
+    /// (`Player::attacked_with`).
+    resolved: u32,
+    attacked_with: [bool; 2],
 }
 
-/// A permanent's [`Own`] facts, its counters (sorted) and its marks (a multiset).
+/// A permanent's [`Own`] facts, its counters (sorted), its marks (a multiset) and its optional
+/// actions done this turn that may be done only once each turn (`Game::done_once`, sorted).
 #[derive(Debug)]
 pub(crate) struct Twin {
     own: Own,
     counters: Vec<(Counter, Count)>,
     marks: Vec<Mark>,
+    done_once: Vec<u8>,
 }
 
 impl Twin {
     /// Are two permanents with these facts twins (given that nothing names them)?
     fn same(&self, o: &Twin) -> bool {
-        if self.own != o.own || self.counters != o.counters || self.marks.len() != o.marks.len() {
+        if self.own != o.own || self.counters != o.counters || self.done_once != o.done_once || self.marks.len() != o.marks.len() {
             return false;
         }
         let mut used = vec![false; o.marks.len()];
@@ -455,14 +464,17 @@ impl Game {
                 copy_obj: false,
                 face_down: None,
                 loyalty: (0, 0, 0),
+                resolved: 0,
+                attacked_with: [false; 2],
             };
-            return Some(Twin { own, counters: Vec::new(), marks: Vec::new() });
+            return Some(Twin { own, counters: Vec::new(), marks: Vec::new(), done_once: Vec::new() });
         }
         if named.binary_search(&c).is_ok() || self.ts_sensitive(c) {
             return None;
         }
         let face_down = self.face_down_ids.iter().find(|x| x.0 == c).map(|x| x.1);
         let l = self.loyalty_of(c);
+        let r = self.obj_ref(c);
         let own = Own {
             def,
             owner,
@@ -490,12 +502,15 @@ impl Game {
             copy_obj: self.is_copy_obj(c),
             face_down,
             loyalty: (l.turn, l.used, l.extra),
+            resolved: self.resolved.iter().filter(|x| x.0 == r).map(|x| x.1).sum(),
+            attacked_with: [0, 1].map(|p: usize| self.players[p].attacked_with.contains(&r)),
         };
         let mut counters: Vec<(Counter, Count)> = self.counters.iter().filter(|x| x.0 == c).map(|x| (x.1, x.2)).collect();
         counters.sort_unstable();
-        let r = self.obj_ref(c);
         let marks: Vec<Mark> = self.marks.iter().filter(|x| x.0 == r).map(|x| x.1).collect();
-        Some(Twin { own, counters, marks })
+        let mut done_once: Vec<u8> = self.done_once.iter().filter(|x| x.0 == r).map(|x| x.1).collect();
+        done_once.sort_unstable();
+        Some(Twin { own, counters, marks, done_once })
     }
 
     /// Does permanent `c` have an ability whose continuous effects its timestamp orders (CR
@@ -578,7 +593,8 @@ impl Game {
             leaving,
             links,
             delayed,
-            resolved,
+            // (Each object's own: `twin_of`.)
+            resolved: _,
             permissions,
             combat_damage_now: _,
             quiet_leave: _,
@@ -590,7 +606,7 @@ impl Game {
             entering_exiled: _,
             entering_mods: _,
             leaving_to: _,
-            leaving_choice: _,
+            leaving_choice,
             leaving_card,
             resolving_adventure: _,
             ts_group: _,
@@ -605,7 +621,8 @@ impl Game {
             miracle_cast,
             entering_face: _,
             day: _,
-            done_once,
+            // (Each object's own: `twin_of`.)
+            done_once: _,
             discarded,
             void_turn: _,
             temp_triggers,
@@ -683,7 +700,8 @@ impl Game {
                 artifact_entered: _,
                 life_gained: _,
                 cant_gain_life: _,
-                attacked_with,
+                // (Each object's own: `twin_of`.)
+                attacked_with: _,
                 draw_step_draws: _,
                 spells_game: _,
                 energy: _,
@@ -701,11 +719,10 @@ impl Game {
                 companion_used: _,
                 uncounterable_next: _,
             } = pl;
-            for &r in attacked_with {
-                n.obj(r);
-            }
-            if let Some(c) = companion {
-                n.card(*c);
+            // (The companion slot names its card only while it is the public card in no zone;
+            // once in the game the slot is a card like any other, CR 702.139a, 116.2g.)
+            if let Some(c) = companion.filter(|c| self.objs[c.i()].zone == Zone::Nowhere) {
+                n.card(c);
             }
         }
         for s in stack {
@@ -755,16 +772,17 @@ impl Game {
             n.obj(d.source);
             n.ev(&d.ev);
         }
-        for &(r, _) in resolved {
-            n.obj(r);
-        }
         for pm in permissions {
             n.obj(pm.card);
         }
         for &(r, _, _) in lki_counters {
             n.obj(r);
         }
-        n.card(*leaving_card);
+        // (The card whose leave event waits for a replacement choice: only while one does,
+        // `leaving_choice`; the field keeps its last card - or card 0 - otherwise.)
+        if *leaving_choice != 0 {
+            n.card(*leaving_card);
+        }
         for h in held {
             n.card(h.card);
             n.obj(h.f.t.source);
@@ -782,9 +800,6 @@ impl Game {
         }
         if let Some(c) = miracle_cast {
             n.card(*c);
-        }
-        for &(r, _) in done_once {
-            n.obj(r);
         }
         for &r in discarded {
             n.obj(r);
