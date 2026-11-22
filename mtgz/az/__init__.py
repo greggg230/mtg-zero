@@ -317,9 +317,10 @@ PRESETS['legacy-meta3-ddwheel-smoke'] = dict(PRESETS['legacy-meta3-smoke'], spec
 # simulations, window 6, 30,000 samples at least; the run-specific ones - farm pools, anchors, yardsticks, evaluation
 # cadence, the run's length and seed - are the stew orchestrator's), with best of three's deck tilt and deck target
 # (delver-mirror-bo3's) and pb3's matchup settings (user-approved guards, docs/ENGINE.md 168.6). The evaluation spec is
-# the same spec without dealt decks, tables and the forced find. `games` an iteration: PAIR_GAMES (docs/ENGINE.md
-# 223.8: about the meta3 run's 2,444 best-of-one games' rows; the orchestrator sizes each pairing from 223.8's rows
-# per match).
+# the same spec without dealt decks, tables and the forced find. `games` an iteration: PAIR_GAMES matches of the
+# preset's pairing, Delver-Doomsday (docs/ENGINE.md 222.3's measured decisions per match: 287.2 a best-of-one meta3
+# game vs 689.5 a best-of-three Delver-Doomsday match, so 2,444 x 287.2 / 689.5 ~ 1,018 matches give an iteration of the
+# meta3 run's rows; the stew sizes each of its pairings from the same table).
 _META3_LAUNCH = dict(aux_belief_w=0.25, aux_deck_w=0.5, belief_mix=0.25, blocks=8, conc=1536, cq_c_scale=0.3,
                      eval_belief_tilt=1.0, eval_cache=8192, eval_leaf_value_view='root', eval_select='cq',
                      eval_select_c_scale=0.3, eval_select_min_visits=4, groups=4, infer_precision='bf16', lr=1e-4,
@@ -328,7 +329,7 @@ _META3_LAUNCH = dict(aux_belief_w=0.25, aux_deck_w=0.5, belief_mix=0.25, blocks=
                      train_prefetch=2, train_static=1, train_tf32=1, value_q=0.6, value_q_warmup=0, window_cache=1,
                      window_sparse=1, shard_writer_thread=1, shard_writer_queue_mb=2048, game_records=1)
 PAIR_DEALT = {'p': 0.85, 'swaps': [0, 15], 'per_seat': True}
-PAIR_GAMES = 1100
+PAIR_GAMES = 1018
 
 
 def pair_varied_specs(a, b, forced_find_p=0.0, dealt_decks=PAIR_DEALT, max_turns=60):
