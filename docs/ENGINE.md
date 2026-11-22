@@ -45669,3 +45669,10 @@ tiers' checkpoint_compat step runs each target's self-play and the match of both
 instead of two processes one after the other, with the same printed lines (make_compat_checker reads them unchanged)
 and the same digests - this gate's command on one checkout against itself: 384 s against the 1,808 s of 238.7's gate,
 visits 4c42f1160eca9121, cq 88ab3306d3beba12, the match f2a5103266c05aa6, each the gate's own value.
+
+`python tools/gate.py optin-core --baseline-root <a warm worktree of main 73dcf783, its module built>` on 790dc7b6 (the
+pin commit; this paragraph is the next commit, docs only): **GATE PASSED WITH SKIPS optin-core 790dc7b6e0fa in 984s**
+(the skips: the core's live-run-hazard tests, fenced) - against 2,378 s for 238.7's gate and 1,833 s for 236.10's.
+checkpoint_compat identical in 540 s (1,808 s); the four core shards 641 to 871 s, now the tier's longest steps; the
+build-only step 149 s; the module, the worker and the core module from the artifact cache (the pin changed no Rust
+input).
