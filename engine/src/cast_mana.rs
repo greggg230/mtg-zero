@@ -90,6 +90,11 @@ impl Game {
         let StackKind::Spell { card: spell } = self.stack[pos].kind else { return };
         let p = self.stack[pos].controller;
         if !again && self.answer.is_none() && self.total_mana(spell, &self.stack[pos]).is_zero() {
+            // (No step: in the search, whether the payment can be completed as it is - castability's question,
+            // `feed_castable`, for a spell of no mana: an escape of X = 0.)
+            if self.oracle && !self.cast_mana_pass_ok(id) {
+                self.oracle_dead = true;
+            }
             return;
         }
         // (In the payment search only the feeding abilities are offered; an answer, or the question of a permanent's
