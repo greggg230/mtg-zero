@@ -1,4 +1,4 @@
-"""tools/gamedb.py reads branch games (zero-core records/2; docs/gamedb.md "Branch games", docs/ENGINE.md 232): a branch
+"""tools/gamedb.py reads branch games (zero-core records/2; docs/gamedb.md "Branch games", docs/ENGINE.md 233): a branch
 shares its game's gid and seed and its first `branch.from` actions; a merged near-tie branch ends at a position of a game
 in progress with its game's result. Random-move Delver games (imported as a self-play iteration) with branch records
 made from them: their game ids differ from their games', their games rows carry the branch columns, a merged branch's

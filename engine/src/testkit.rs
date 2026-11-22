@@ -485,7 +485,7 @@ impl Game {
     }
 
     /// Reseed the engine's RNG (tests: two lines from one position whose later shuffles come out differently, as
-    /// a branch's and its game's do; ENGINE.md 232).
+    /// a branch's and its game's do; ENGINE.md 233).
     #[doc(hidden)]
     pub fn reseed_rng(&mut self, seed: u64) {
         self.rng = crate::rng::Rng::new(seed);

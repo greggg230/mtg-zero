@@ -1,4 +1,4 @@
-//! Near-tie branches' merge key and alternative check (ENGINE.md 232, `az/merge_key.rs`; zero-core docs/search.md
+//! Near-tie branches' merge key and alternative check (ENGINE.md 233, `az/merge_key.rs`; zero-core docs/search.md
 //! 2.11): two lines from one built Delver-mirror position (`build`, ENGINE.md 95), played by option label, keyed at
 //! their decisions - the branch's view of its game. Equal keys must mean equivalent states (a false merge labels a
 //! branch's rows with another future's outcome); a missed merge only costs compute.

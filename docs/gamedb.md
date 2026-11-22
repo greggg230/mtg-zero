@@ -204,7 +204,7 @@ Every view holds every kind: add `WHERE kind = 'selfplay'` (or another) for one 
 were written for self-play. Rates over the combo tables and `events` use detailed games only: with `--sample` below 1, count the denominators
 from `games WHERE detailed` (every query below does that implicitly by joining the detailed tables).
 
-## Branch games (zero-core records/2; ENGINE.md 232)
+## Branch games (zero-core records/2; ENGINE.md 233)
 
 A self-play run with `selfplay_branch` writes branch games beside their games (zero-core docs/az.md 72.7): a branch
 carries its game's gid and seed, every action from the game's start (its first `branch.from` are its game's), and a
