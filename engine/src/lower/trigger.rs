@@ -107,6 +107,9 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         // "Whenever an instant or sorcery card leaves your graveyard"
         // (Murktide Regent; ENGINE.md 54).
         Some(E::LeavesGraveyard) => Some(EventKind::LeavesGraveyard),
+        // "Whenever one or more permanent cards are put into your graveyard
+        // from anywhere" (Moonshadow; ENGINE.md 220.3).
+        Some(E::CardPutIntoGraveyard) => Some(EventKind::PutIntoGraveyard),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None

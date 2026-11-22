@@ -813,10 +813,11 @@ impl Heuristic {
                 }
             }
             K::Sacrifice | K::BounceCost => Self::least_valuable(g, d),
-            // A cost that taps permanents (crew, "tap an untapped Rebel"):
-            // done as soon as it may be, else the creature least likely to
-            // attack (summoning sick first, then the smallest).
-            K::ChoosePermanent if matches!(g.agenda.last(), Some(Task::PayCosts { .. })) => {
+            // A cost that taps permanents (crew, "tap an untapped Rebel",
+            // convoke for a spell whose mana can't be spent, ENGINE.md
+            // 220.1): done as soon as it may be, else the creature least
+            // likely to attack (summoning sick first, then the smallest).
+            K::ChoosePermanent if matches!(g.agenda.last(), Some(Task::PayCosts { .. } | Task::ConvokePay { .. })) => {
                 let station = if self.eoe { self.station_tap(g, d, p) } else { None };
                 station.or_else(|| d.options.iter().find(|o| o.action == act::PASS).map(|o| o.action)).or_else(|| {
                     d.options

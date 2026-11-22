@@ -126,6 +126,23 @@
 //! activated, a spell cast without paying its mana cost, a spell made uncounterable and a name
 //! chosen (`sneak_show`: Show and Tell and Mistrise Village seen, a free cast, a spell made
 //! uncounterable). Games only (best-of-one).
+//! `FUZZ_POOL=hogaak_a` (ENGINE.md 220.1): lane A of the Legacy Hogaak Tempo deck: the deck's 60 with
+//! its cards of the other lanes swapped for supported graveyard and creature enablers
+//! (`HOGAAK_A_DECK`: Hogaak, Arisen Necropolis four, Orcish Bowmasters, Kaito, Brazen Borrower, the
+//! deck's interaction and mana; Mishra's Bauble, Street Wraith, Entomb, Dark Confidant, Deep-Cavern
+//! Bat, Barrowgoyf for Stitcher's Supplier, Mockingbird, Dark Matter Manipulator, Moonshadow and
+//! Dryad Arbor), against the Delver 60 in either seat, one game in three the mirror. Constructed
+//! play's table; every check of the default mode, and with 200 games or more Hogaak must have been
+//! cast from a hand and from a graveyard, paid by convoke, by delve and by both in one payment.
+//! Games only (best-of-one).
+//! `FUZZ_POOL=hogaak_b` (ENGINE.md 220.2): Legacy Hogaak Tempo's lane B, Mockingbird and Massacre
+//! four each (`HOGAAK_B_DECK`) with copy targets of mana value 0 to 7 (Orcish Bowmasters and its Orc
+//! Army tokens, Brazen Borrower, Kaito, Concealing Curtains and its back face, Walking Ballista,
+//! True-Name Nemesis, Phyrexian Metamorph, Murktide Regent), black and blue mana with Underground Sea
+//! and Plains-typed lands (Scrubland, Tundra, a Plains), against the Delver 60 in either seat, one
+//! game in three the mirror (where an opponent controls a Plains: Massacre's free cast). Constructed
+//! play's card table; every check of the default mode, and with 200 games or more Mockingbird cast,
+//! a copy made, a copy declined, Massacre cast for free and Massacre resolving. Games only.
 //! `FUZZ_POOL=names` (ENGINE.md 127): "choose a card name" with every kind of face. Each seat a
 //! random 60 of constructed play's table: Anointed Peacekeeper and Disruptor Flute four each, eight
 //! of the table's cards with more than one face (split cards, double-faced cards, adventurer and
@@ -141,14 +158,33 @@
 //! Show 60 (colourless spells, Emrakul's cast trigger), by seed. Constructed play's card table;
 //! every check of the default mode, and with 200 games or more each of the five must have been
 //! cast and a Consign to Memory aimed at a triggered ability. Games only (best-of-one).
+//! `FUZZ_POOL=hogaak_c` (ENGINE.md 220.3): lane C of the Legacy Hogaak Tempo deck (MTGGoldfish 8027954): its 60
+//! with the other lanes' cards (Hogaak, Mockingbird) out and lane C's four each (`HOGAAK_C_DECK`: Stitcher's
+//! Supplier, Dark Matter Manipulator, Moonshadow, Dryad Arbor) beside the deck's fetch lands, Wasteland, Orcish
+//! Bowmasters, Thoughtseize, Force of Will, Daze and Fatal Push, against the Delver 60 in either seat, one game in three
+//! the mirror; constructed play's table; every check of the default mode, and with 200 games or more each of the four
+//! must have been cast (Dryad Arbor played as a land), a Moonshadow -1/-1 counter removed by its trigger, a Dark
+//! Matter Manipulator at +2/+0 or more, and a Dryad Arbor attacking and tapped for mana. Games only (best-of-one).
+//! `FUZZ_POOL=hogaak` (ENGINE.md 220.4): the Legacy Hogaak Tempo deck (MTGGoldfish 8027954,
+//! `data/decks/hogaak_tempo_8027954.json`, `Decklist::legacy_hogaak`). Games: its real 60 against the real Delver,
+//! Doomsday and Sneak and Show 60s in either seat, one game in four the mirror (`seed % 8`), best-of-one, constructed
+//! play's table, every check of the default mode; with 200 games or more Hogaak must have been cast from a graveyard
+//! paid by convoke and delve together, a Mockingbird must have entered as a copy, a Moonshadow -1/-1 counter must have
+//! been removed, a Dark Matter Manipulator seen at +2/+0 or more, a Dryad Arbor played and a Stitcher's Supplier
+//! trigger resolved (its mill). Matches: constructed best-of-three between the real 75s, the Hogaak 75 against each
+//! of the three in either seat and its mirror twice (`HOGAAK_PAIRS`, `seed % 8`; one match in four 12-turn games),
+//! then post-sideboard matches of its mirror, every check of `FUZZ_POOL=delver`'s matches; with 500 matches or more a
+//! Massacre (a sideboard card) must have resolved.
 //! `FUZZ_POOL=cross` (ENGINE.md 148): the deck pairs on main no other pool plays. Games: the real
 //! Legacy Doomsday 60 against the real Sneak and Show 60 (seats by seed), constructed play's table,
 //! every check of the default mode, and with 200 games or more Doomsday and Show and Tell must have
 //! been cast. Matches: constructed best-of-three between the real 75s (`data/decks/`: each main and
 //! the sideboard cards this checkout supports, the rest named in the output) of every pair with
-//! Doomsday or Sneak and Show - Doomsday v Sneak and Show, Doomsday v Delver, Sneak and Show v
-//! Delver, each in both seats, and the two mirrors (`CROSS_PAIRS`, by `seed % 8`), one match in four
-//! 12-turn games - then as many post-sideboard matches, every check of `FUZZ_POOL=delver`'s matches.
+//! Doomsday, Sneak and Show or Hogaak - Doomsday v Sneak and Show, Doomsday v Delver, Sneak and Show v
+//! Delver, Hogaak v Delver, Hogaak v Doomsday, Hogaak v Sneak and Show, each in both seats, and the
+//! three mirrors (`CROSS_PAIRS`, by `seed % 15`; the Hogaak pairs since ENGINE.md 220.4), one match
+//! in four 12-turn games - then as many post-sideboard matches, every check of `FUZZ_POOL=delver`'s
+//! matches.
 //! `FUZZ_POOL=meta` (ENGINE.md 176): the metagame spec of the three real 75s (Delver, Doomsday, Sneak and Show; a
 //! `"metagame"` spec, uniform over the 9 ordered pairings), each game's pairing the engine's draw from its seed. Games:
 //! the best-of-one metagame's game of the seed (the pairing's mains) with every check of the default mode; matches:
@@ -547,12 +583,25 @@ pub enum PoolMode {
     SneakShow,
     /// `FUZZ_POOL=sns` (ENGINE.md 123): the lane's six cards four each.
     Sns,
+    /// `FUZZ_POOL=hogaak_a` (ENGINE.md 220.1): Hogaak, Arisen Necropolis four
+    /// with the Hogaak deck's supported cards and enablers.
+    HogaakA,
+    /// `FUZZ_POOL=hogaak_b` (ENGINE.md 220.2): Mockingbird and Massacre four
+    /// each against the Delver 60 and the mirror.
+    HogaakB,
     /// `FUZZ_POOL=names` (ENGINE.md 127): Anointed Peacekeeper and Disruptor
     /// Flute with the table's cards of more than one face.
     Names,
     /// `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver sideboard's five
     /// cards in the Delver 60.
     DelverSb,
+    /// `FUZZ_POOL=hogaak_c` (ENGINE.md 220.3): the Legacy Hogaak Tempo deck's
+    /// lane C cards four each against the Delver 60 and itself.
+    HogaakC,
+    /// `FUZZ_POOL=hogaak` (ENGINE.md 220.4): the Legacy Hogaak Tempo deck's real
+    /// 60 against the Delver, Doomsday and Sneak and Show 60s and its mirror;
+    /// best-of-three between its 75 and theirs.
+    Hogaak,
     /// `FUZZ_POOL=cross` (ENGINE.md 148): the deck pairs no other pool plays -
     /// Doomsday against Sneak and Show, and best-of-three between the real 75s.
     Cross,
@@ -589,14 +638,18 @@ pub fn pool_mode() -> PoolMode {
         Ok("doomsday") => PoolMode::Doomsday,
         Ok("sneak_show") => PoolMode::SneakShow,
         Ok("sns") => PoolMode::Sns,
+        Ok("hogaak_a") => PoolMode::HogaakA,
+        Ok("hogaak_b") => PoolMode::HogaakB,
         Ok("names") => PoolMode::Names,
         Ok("delver_sb") => PoolMode::DelverSb,
+        Ok("hogaak_c") => PoolMode::HogaakC,
+        Ok("hogaak") => PoolMode::Hogaak,
         Ok("cross") => PoolMode::Cross,
         Ok("delver_dealt") => PoolMode::DelverDealt,
         Ok("delver_dealt2") => PoolMode::DelverDealtPerSeat,
         Ok("meta") => PoolMode::Meta,
         Ok("meta_wheel") => PoolMode::MetaWheel,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -725,9 +778,24 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show`, `sns`, `names`, `delver_sb`, `cross` or `meta`).
+/// `doomsday`, `sneak_show`, `sns`, `hogaak_a`, `hogaak_b`, `hogaak_c`, `hogaak`, `names`, `delver_sb`,
+/// `cross` or `meta`).
 pub fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode() || cross_mode() || meta_mode() || wheel_mode()
+    delver_mode()
+        || dd_a_mode()
+        || dd_b_mode()
+        || ddc_mode()
+        || doomsday_mode()
+        || sns_mode()
+        || hogaak_a_mode()
+        || hogaak_b_mode()
+        || hogaak_c_mode()
+        || hogaak_mode()
+        || names_mode()
+        || delver_sb_mode()
+        || cross_mode()
+        || meta_mode()
+        || wheel_mode()
 }
 
 /// `FUZZ_POOL=meta_wheel` (ENGINE.md 180).
@@ -1085,23 +1153,25 @@ fn cross_mode() -> bool {
     pool_mode() == PoolMode::Cross
 }
 
-/// Constructed best-of-three matches: `FUZZ_POOL=delver`'s (ENGINE.md 120), `cross`'s (ENGINE.md 148) or `meta`'s
-/// (ENGINE.md 176).
+/// Constructed best-of-three matches: `FUZZ_POOL=delver`'s (ENGINE.md 120), `cross`'s (ENGINE.md 148), `meta`'s
+/// (ENGINE.md 176) or `hogaak`'s (ENGINE.md 220.4).
 pub fn constructed_bo3_mode() -> bool {
-    delver_mode() || cross_mode() || meta_mode()
+    delver_mode() || cross_mode() || meta_mode() || hogaak_mode()
 }
 
-/// The real 75s on main (ENGINE.md 148): the Izzet Delver, Legacy Doomsday and Sneak and Show lists.
+/// The real 75s on main (ENGINE.md 148): the Izzet Delver, Legacy Doomsday, Sneak and Show and (ENGINE.md 220.4)
+/// Legacy Hogaak Tempo lists.
 fn real_75(k: usize) -> crate::az::constructed::Decklist {
     use crate::az::constructed::Decklist;
     match k {
         0 => Decklist::izzet_delver(),
         1 => Decklist::legacy_doomsday(),
-        _ => Decklist::parse(include_str!("../../../data/decks/sneak_show_8014220.json")).unwrap(),
+        2 => Decklist::parse(include_str!("../../../data/decks/sneak_show_8014220.json")).unwrap(),
+        _ => Decklist::legacy_hogaak(),
     }
 }
 
-const REAL_75_NAMES: [&str; 3] = ["Delver", "Doomsday", "Sneak and Show"];
+const REAL_75_NAMES: [&str; 4] = ["Delver", "Doomsday", "Sneak and Show", "Hogaak"];
 
 /// A 75 as a constructed best-of-three spec takes it: the main's names and the sideboard cards
 /// this checkout supports (as `FUZZ_POOL=delver`'s matches; the rest left out, named by `cross_75_report`).
@@ -1111,19 +1181,28 @@ fn bo3_lists(d: &crate::az::constructed::Decklist) -> (Vec<String>, Vec<String>)
     (d.main_names(), side)
 }
 
-/// `FUZZ_POOL=cross`'s pairings of the real 75s for matches (`real_75`): every pair with Doomsday or
-/// Sneak and Show, both seats, and their mirrors - none is another pool's best-of-three.
-const CROSS_PAIRS: [(usize, usize); 8] = [(1, 2), (2, 1), (1, 0), (0, 1), (2, 0), (0, 2), (1, 1), (2, 2)];
+/// `FUZZ_POOL=cross`'s pairings of the real 75s for matches (`real_75`): every pair with Doomsday, Sneak and Show or
+/// (ENGINE.md 220.4) Hogaak, both seats, and their mirrors - none is `FUZZ_POOL=delver`'s best-of-three.
+const CROSS_PAIRS: [(usize, usize); 15] =
+    [(1, 2), (2, 1), (1, 0), (0, 1), (2, 0), (0, 2), (1, 1), (2, 2), (3, 0), (0, 3), (3, 1), (1, 3), (3, 2), (2, 3), (3, 3)];
 
-/// `FUZZ_POOL=cross`'s match `seed` (ENGINE.md 148): constructed best-of-three between `CROSS_PAIRS[seed % 8]`'s 75s,
-/// one match in four (by `seed / 8`) 12-turn games; `extra` merged into the spec (the post-sideboard matches').
+/// `FUZZ_POOL=hogaak`'s pairings of the real 75s for matches (ENGINE.md 220.4): the Hogaak 75 against each other 75
+/// in either seat, and its mirror twice (one match in four, as its games).
+const HOGAAK_PAIRS: [(usize, usize); 8] = [(3, 0), (0, 3), (3, 1), (1, 3), (3, 2), (2, 3), (3, 3), (3, 3)];
+
+/// `FUZZ_POOL=cross`'s match `seed` (ENGINE.md 148): constructed best-of-three between `CROSS_PAIRS[seed % 15]`'s
+/// 75s (`FUZZ_POOL=hogaak`: `HOGAAK_PAIRS[seed % 8]`'s), one match in four (by `seed / pairs`) 12-turn games; `extra`
+/// merged into the spec (the post-sideboard matches').
 fn cross_bo3_spec_with(seed: u64, extra: serde_json::Value) -> crate::az::MtgSpec {
-    let (p0, p1) = CROSS_PAIRS[(seed % 8) as usize];
+    let pairs: &[(usize, usize)] = if hogaak_mode() { &HOGAAK_PAIRS } else { &CROSS_PAIRS };
+    let (p0, p1) = pairs[(seed % pairs.len() as u64) as usize];
     // (A post-sideboard match is a mirror, ENGINE.md 147.4: `"start_game": 2` draws game 1 as a fair coin, exact for a
-    // mirror only; the pair's first 75 in both seats.)
-    let p1 = if extra.get("start_game").and_then(|x| x.as_u64()) == Some(2) { p0 } else { p1 };
+    // mirror only; the pair's first 75 in both seats - `FUZZ_POOL=hogaak`'s, the Hogaak 75's.)
+    let post = extra.get("start_game").and_then(|x| x.as_u64()) == Some(2);
+    let p0 = if post && hogaak_mode() { 3 } else { p0 };
+    let p1 = if post { p0 } else { p1 };
     let ((m0, s0), (m1, s1)) = (bo3_lists(&real_75(p0)), bo3_lists(&real_75(p1)));
-    let max_turns = if (seed / 8) % 4 == 3 { 12 } else { 60 };
+    let max_turns = if (seed / pairs.len() as u64) % 4 == 3 { 12 } else { 60 };
     let mut v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
         "decks": {"p0": m0, "p1": m1, "p0_sideboard": s0, "p1_sideboard": s1}});
     for (k, x) in extra.as_object().unwrap() {
@@ -1135,7 +1214,7 @@ fn cross_bo3_spec_with(seed: u64, extra: serde_json::Value) -> crate::az::MtgSpe
 /// The sideboard cards of the real 75s this checkout doesn't support (left out of `cross`'s 75s).
 fn cross_75_report() -> String {
     let db = CardDb::constructed();
-    (0..3)
+    (0..REAL_75_NAMES.len())
         .map(|k| {
             let d = real_75(k);
             let out: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_none()).map(|(k, n)| format!("{k} {n}")).collect();
@@ -1351,6 +1430,203 @@ fn count_delver_sb(g: &Game, seen: &mut Vec<u32>) {
     }
 }
 
+/// `FUZZ_POOL=hogaak_c` (ENGINE.md 220.3).
+fn hogaak_c_mode() -> bool {
+    pool_mode() == PoolMode::HogaakC
+}
+
+/// The deck of `FUZZ_POOL=hogaak_c` (ENGINE.md 220.3): the Legacy Hogaak Tempo 60 (MTGGoldfish 8027954) with the
+/// other lanes' Hogaak (4) and Mockingbird (3) out, Dryad Arbor 1 -> 4, a third Thoughtseize, a second Brazen
+/// Borrower and two Fatal Push (the sideboard's) in: lane C's four cards four each.
+const HOGAAK_C_DECK: &[(u32, &str)] = &[
+    (4, "Stitcher's Supplier"),
+    (4, "Dark Matter Manipulator"),
+    (4, "Moonshadow"),
+    (4, "Dryad Arbor"),
+    (3, "Thoughtseize"),
+    (2, "Kaito, Bane of Nightmares"),
+    (4, "Force of Will"),
+    (3, "Daze"),
+    (2, "Fatal Push"),
+    (3, "Orcish Bowmasters"),
+    (2, "Brazen Borrower // Petty Theft"),
+    (3, "Ponder"),
+    (4, "Brainstorm"),
+    (4, "Underground Sea"),
+    (1, "Swamp"),
+    (1, "Undercity Sewers"),
+    (4, "Misty Rainforest"),
+    (4, "Verdant Catacombs"),
+    (4, "Wasteland"),
+];
+
+fn hogaak_c_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = HOGAAK_C_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = crate::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    crate::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("HOGAAK_C_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=hogaak_c`'s counters: lane C's spells seen on the stack (Stitcher's Supplier, Dark Matter
+/// Manipulator, Moonshadow; each stack item once, by its id) and Dryad Arbor played as a land; Moonshadow's triggers
+/// put on the stack and its -1/-1 counters removed (a counter count that went down on the same object: its trigger,
+/// or a +1/+1 counter's annihilation, CR 704.5q); Dark Matter Manipulators (each object once) seen at +2/+0 or more
+/// (seven cards or more in its controller's graveyard); Dryad Arbors (each object once per turn) attacking, and
+/// chosen as a mana source while paying or floating mana.
+static HOGAAK_C_SEEN: [AtomicU64; 4] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static HOGAAK_C_MOON_TRIGGERS: AtomicU64 = AtomicU64::new(0);
+static HOGAAK_C_MOON_REMOVED: AtomicU64 = AtomicU64::new(0);
+static HOGAAK_C_DMM_BIG: AtomicU64 = AtomicU64::new(0);
+static HOGAAK_C_ARBOR_ATTACKS: AtomicU64 = AtomicU64::new(0);
+static HOGAAK_C_ARBOR_MANA: AtomicU64 = AtomicU64::new(0);
+const HOGAAK_C_CARDS: [&str; 4] = ["Stitcher's Supplier", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor"];
+
+/// One game's `FUZZ_POOL=hogaak_c` bookkeeping: the stack items counted, each Moonshadow's last -1/-1 count, the
+/// Manipulators counted, the Arbors' (object, turn) attacks counted.
+#[derive(Default)]
+struct HogaakCSeen {
+    items: Vec<u32>,
+    moon: Vec<(crate::ids::ObjRef, u64)>,
+    dmm: Vec<crate::ids::ObjRef>,
+    attacks: Vec<(crate::ids::ObjRef, u32)>,
+}
+
+/// Before action `a` is applied: Dryad Arbor played (`Choice::Play`) or chosen as a mana source.
+fn count_hogaak_c_choice(g: &Game, a: u16) {
+    let Some(d) = g.pending_decision() else { return };
+    let Some(o) = d.options.iter().find(|o| o.action == a) else { return };
+    match (d.kind, o.choice) {
+        (DecisionKind::Priority, Choice::Play(c)) if g.name(c) == "Dryad Arbor" => {
+            HOGAAK_C_SEEN[3].fetch_add(1, Ordering::Relaxed);
+        }
+        (DecisionKind::PayMana | DecisionKind::ActivateMana, Choice::Card(c) | Choice::Ability(c, _)) if g.name(c) == "Dryad Arbor" => {
+            HOGAAK_C_ARBOR_MANA.fetch_add(1, Ordering::Relaxed);
+        }
+        _ => {}
+    }
+}
+
+fn count_hogaak_c(g: &Game, s: &mut HogaakCSeen) {
+    for it in g.stack() {
+        if s.items.contains(&it.id) {
+            continue;
+        }
+        s.items.push(it.id);
+        match it.kind {
+            crate::game::StackKind::Spell { card } => {
+                if let Some(k) = HOGAAK_C_CARDS[..3].iter().position(|&n| n == g.name(card)) {
+                    HOGAAK_C_SEEN[k].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            crate::game::StackKind::Ability { ability, .. } if g.db().def(ability.def).name == "Moonshadow" => {
+                HOGAAK_C_MOON_TRIGGERS.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+    let turn = g.turn().number;
+    for &c in g.battlefield() {
+        let r = g.obj_ref(c);
+        match g.name(c) {
+            "Moonshadow" => {
+                let n = g.counters_on(c, crate::db::Counter::M1M1) as u64;
+                match s.moon.iter_mut().find(|x| x.0 == r) {
+                    Some(x) => {
+                        if n < x.1 {
+                            HOGAAK_C_MOON_REMOVED.fetch_add(x.1 - n, Ordering::Relaxed);
+                        }
+                        x.1 = n;
+                    }
+                    None => s.moon.push((r, n)),
+                }
+            }
+            "Dark Matter Manipulator" => {
+                let p = g.obj(c).controller;
+                if !s.dmm.contains(&r) && g.graveyard_cards(p).count() >= 7 {
+                    s.dmm.push(r);
+                    HOGAAK_C_DMM_BIG.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            "Dryad Arbor" if g.obj(c).attacking && !s.attacks.contains(&(r, turn)) => {
+                s.attacks.push((r, turn));
+                HOGAAK_C_ARBOR_ATTACKS.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `FUZZ_POOL=hogaak` (ENGINE.md 220.4).
+fn hogaak_mode() -> bool {
+    pool_mode() == PoolMode::Hogaak
+}
+
+/// The real Legacy Hogaak Tempo 60 (`data/decks/hogaak_tempo_8027954.json`'s main deck, ENGINE.md 220.4).
+fn hogaak_deck() -> Vec<u16> {
+    let d = crate::az::constructed::Decklist::legacy_hogaak();
+    let deck = crate::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap();
+    crate::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("the Hogaak 60: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=hogaak`'s decks of game `seed` (ENGINE.md 220.4): the Hogaak 60 against the Delver, Doomsday and Sneak
+/// and Show 60s in either seat, one game in four the mirror.
+fn hogaak_decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
+    let h = hogaak_deck();
+    let other = match (seed % 8) / 2 {
+        0 => delver_deck(),
+        1 => doomsday_deck(),
+        2 => sneak_show_deck(),
+        _ => h.clone(),
+    };
+    if seed % 2 == 0 {
+        [(h, Vec::new()), (other, Vec::new())]
+    } else {
+        [(other, Vec::new()), (h, Vec::new())]
+    }
+}
+
+/// `FUZZ_POOL=hogaak`'s own counters (ENGINE.md 220.4; the lanes' counters - `HOGAAK_A_SEEN`, `HOGAAK_B_COUNTS`,
+/// `HOGAAK_C_*` - count the rest in its games too): a Hogaak spell cast from a graveyard paid by convoke and delve
+/// together (counted with `HOGAAK_A_SEEN`, in every pool), a Stitcher's Supplier trigger put on the stack and one
+/// resolved (each stack item once; resolved: on top of the stack at a priority pass, gone after it).
+static HOGAAK_SEEN: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+const HOGAAK_KINDS: [&str; 3] = ["Hogaak cast from a graveyard by convoke and delve", "Stitcher's Supplier triggers", "Stitcher's Supplier triggers resolved"];
+/// `FUZZ_POOL=hogaak`'s matches (ENGINE.md 220.4): Massacre spells (the sideboard card) resolved (as
+/// `hogaak_b_massacre_on_top`) and cast (each stack item of each game once), in the main matches (0, 2) and in the
+/// post-sideboard ones (1, 3).
+static HOGAAK_MASSACRE_MATCHES: [AtomicU64; 4] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+
+/// The stack id of a Stitcher's Supplier trigger on top of the stack that action `a` (a priority pass) may resolve
+/// (`FUZZ_POOL=hogaak`).
+fn hogaak_stitcher_on_top(g: &Game, a: u16) -> Option<u32> {
+    if g.kind() != Some(DecisionKind::Priority) || a != crate::act::PASS {
+        return None;
+    }
+    let it = g.stack().last()?;
+    match it.kind {
+        crate::game::StackKind::Ability { ability, .. } if g.db().def(ability.def).name == "Stitcher's Supplier" => Some(it.id),
+        _ => None,
+    }
+}
+
+/// `FUZZ_POOL=hogaak`'s Stitcher's Supplier counts (`HOGAAK_SEEN` 1 and 2); `top` the trigger on top before the action.
+fn count_hogaak_stitcher(g: &Game, top: Option<u32>, seen: &mut Vec<u32>) {
+    if let Some(id) = top {
+        if !g.stack().iter().any(|s| s.id == id) {
+            HOGAAK_SEEN[2].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    for it in g.stack() {
+        if let crate::game::StackKind::Ability { ability, .. } = it.kind {
+            if g.db().def(ability.def).name == "Stitcher's Supplier" && !seen.contains(&it.id) {
+                seen.push(it.id);
+                HOGAAK_SEEN[1].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
 /// `FUZZ_POOL=sneak_show` or `sns` (ENGINE.md 123).
 fn sns_mode() -> bool {
     matches!(pool_mode(), PoolMode::SneakShow | PoolMode::Sns)
@@ -1439,6 +1715,214 @@ fn count_sns_names(g: &Game, named: &mut Vec<crate::ids::ObjRef>) {
         if !named.contains(&r) && g.marks_of(c).iter().any(|m| matches!(m, crate::game::Mark::ChosenName(_))) {
             named.push(r);
             SNS_NAMED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// `FUZZ_POOL=hogaak_a` (ENGINE.md 220.1).
+fn hogaak_a_mode() -> bool {
+    pool_mode() == PoolMode::HogaakA
+}
+
+/// The lane's deck of `FUZZ_POOL=hogaak_a` (ENGINE.md 220.1): MTGGoldfish's Legacy Hogaak Tempo
+/// (deck 8027957's archetype list, 8027954) with its cards of the other lanes (Stitcher's
+/// Supplier 4, Mockingbird 3, Dark Matter Manipulator 4, Moonshadow 4, Dryad Arbor 1: 16) swapped
+/// for supported graveyard fillers and cheap black creatures.
+const HOGAAK_A_DECK: &[(u32, &str)] = &[
+    (4, "Hogaak, Arisen Necropolis"),
+    (3, "Orcish Bowmasters"),
+    (2, "Kaito, Bane of Nightmares"),
+    (1, "Brazen Borrower // Petty Theft"),
+    (2, "Thoughtseize"),
+    (4, "Force of Will"),
+    (3, "Ponder"),
+    (4, "Brainstorm"),
+    (3, "Daze"),
+    (4, "Wasteland"),
+    (1, "Swamp"),
+    (4, "Underground Sea"),
+    (4, "Misty Rainforest"),
+    (4, "Verdant Catacombs"),
+    (1, "Undercity Sewers"),
+    (4, "Mishra's Bauble"),
+    (4, "Street Wraith"),
+    (2, "Entomb"),
+    (2, "Dark Confidant"),
+    (2, "Deep-Cavern Bat"),
+    (2, "Barrowgoyf"),
+];
+
+fn hogaak_a_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = HOGAAK_A_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = crate::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    crate::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("HOGAAK_A_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=hogaak_a`: Hogaak spells once cast (601.2i: at the priority after their cast, each
+/// stack item once): cast from a hand, from a graveyard; paid by convoke (its total cost less the
+/// cards delved is not zero: no mana pays it, so its convoke did; read at that priority, the cost
+/// the payment paid), by delve (cards delved), by both.
+static HOGAAK_A_SEEN: [AtomicU64; 5] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+const HOGAAK_A_KINDS: [&str; 5] = ["cast from a hand", "cast from a graveyard", "paid by convoke", "paid by delve", "paid by both"];
+
+/// `FUZZ_POOL=hogaak_a`'s counts (`HOGAAK_A_SEEN`), `seen` the stack ids counted.
+fn count_hogaak_a(g: &Game, seen: &mut Vec<u32>) {
+    if g.kind() != Some(DecisionKind::Priority) {
+        return;
+    }
+    for it in g.stack() {
+        let crate::game::StackKind::Spell { card } = it.kind else { continue };
+        if seen.contains(&it.id) || !g.def_of(card).casting.no_mana {
+            continue;
+        }
+        seen.push(it.id);
+        let conv = !g.total_mana(card, it).less_generic(it.delved as u64).is_zero();
+        let delve = it.delved > 0;
+        if it.origin == crate::ids::Zone::Graveyard && conv && delve {
+            HOGAAK_SEEN[0].fetch_add(1, Ordering::Relaxed);
+        }
+        for (k, hit) in [it.origin == crate::ids::Zone::Hand, it.origin == crate::ids::Zone::Graveyard, conv, delve, conv && delve].into_iter().enumerate() {
+            if hit {
+                HOGAAK_A_SEEN[k].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// `FUZZ_POOL=hogaak_b` (ENGINE.md 220.2).
+fn hogaak_b_mode() -> bool {
+    pool_mode() == PoolMode::HogaakB
+}
+
+/// The lane's deck of `FUZZ_POOL=hogaak_b` (ENGINE.md 220.2): Mockingbird and Massacre four each;
+/// copy targets of mana value 0 to 7 (Orcish Bowmasters and its Orc Army tokens, Brazen Borrower,
+/// Kaito, Concealing Curtains and its back face, Walking Ballista - 107.3m -, True-Name Nemesis,
+/// Phyrexian Metamorph - copies of copies -, Murktide Regent); the Hogaak deck's blue and black
+/// spells; Underground Sea, basic Swamps and Plains-typed lands (Scrubland, Tundra, a Plains), so in
+/// the mirror an opponent controls a Plains.
+const HOGAAK_B_DECK: &[(u32, &str)] = &[
+    (4, "Mockingbird"),
+    (4, "Massacre"),
+    (4, "Orcish Bowmasters"),
+    (2, "Brazen Borrower // Petty Theft"),
+    (2, "Kaito, Bane of Nightmares"),
+    (2, "Concealing Curtains // Revealing Eye"),
+    (2, "Walking Ballista"),
+    (1, "True-Name Nemesis"),
+    (1, "Phyrexian Metamorph"),
+    (1, "Murktide Regent"),
+    (4, "Force of Will"),
+    (4, "Brainstorm"),
+    (3, "Ponder"),
+    (3, "Daze"),
+    (2, "Thoughtseize"),
+    (4, "Underground Sea"),
+    (2, "Scrubland"),
+    (2, "Tundra"),
+    (2, "Swamp"),
+    (2, "Island"),
+    (1, "Plains"),
+    (3, "Verdant Catacombs"),
+    (3, "Polluted Delta"),
+    (2, "Wasteland"),
+];
+
+fn hogaak_b_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = HOGAAK_B_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = crate::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    crate::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("HOGAAK_B_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=hogaak_b`'s counts (ENGINE.md 220.2): Mockingbird cast, a copy made, a copy declined,
+/// Massacre cast for free (its alternative cost), Massacre resolving; Massacre cast, a copy of a
+/// back face, a Mockingbird entering as Walking Ballista with counters (107.3m).
+static HOGAAK_B_COUNTS: [AtomicU64; 8] = [
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+];
+const HOGAAK_B_NAMES: [&str; 8] = [
+    "Mockingbird cast",
+    "copies made",
+    "copies declined",
+    "Massacre cast for free",
+    "Massacre resolved",
+    "Massacre cast",
+    "copies of a back face",
+    "Mockingbird as Walking Ballista with counters",
+];
+
+/// The stack id of a Massacre spell on top of the stack that action `a` (priority's pass) may
+/// resolve (`FUZZ_POOL=hogaak_b`): it resolved if it is gone after the action (only a resolution
+/// takes the top item away on a pass; a counterspell resolves from the top itself).
+fn hogaak_b_massacre_on_top(g: &Game, a: u16) -> Option<u32> {
+    if g.kind() != Some(crate::DecisionKind::Priority) || a != crate::act::PASS {
+        return None;
+    }
+    let it = g.stack().last()?;
+    match it.kind {
+        crate::game::StackKind::Spell { card } if g.db().def(g.own_def(card)).name == "Massacre" => Some(it.id),
+        _ => None,
+    }
+}
+
+fn count_hogaak_b(g: &Game, massacre_top: Option<u32>, seen: &mut Vec<u32>, mbs: &mut Vec<crate::ids::ObjRef>) {
+    let add = |k: usize| HOGAAK_B_COUNTS[k].fetch_add(1, Ordering::Relaxed);
+    if let Some(id) = massacre_top {
+        if !g.stack().iter().any(|s| s.id == id) {
+            add(4);
+        }
+    }
+    for it in g.stack() {
+        let crate::game::StackKind::Spell { card } = it.kind else { continue };
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match g.db().def(g.own_def(card)).name.as_str() {
+            "Mockingbird" => {
+                add(0);
+            }
+            "Massacre" => {
+                add(5);
+                if it.alt == 1 {
+                    add(3);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mb = g.db().id("Mockingbird");
+    for &c in g.battlefield() {
+        if Some(g.own_def(c)) != mb {
+            continue;
+        }
+        let r = g.obj_ref(c);
+        if mbs.contains(&r) {
+            continue;
+        }
+        // (Its copy choice still pending: counted once it is made.)
+        if g.agenda.iter().any(|t| matches!(t, crate::flow::Task::EnterAsCopy { card, .. } if *card == c)) {
+            continue;
+        }
+        mbs.push(r);
+        if !g.is_copy(c) {
+            add(2);
+            continue;
+        }
+        add(1);
+        if g.db().def(g.copiable(c).def).front_mv.is_some() {
+            add(6);
+        }
+        if g.db().def(g.copiable(c).def).name == "Walking Ballista" && g.counters_on(c, crate::db::Counter::P1P1) > 0 {
+            add(7);
         }
     }
 }
@@ -2758,6 +3242,24 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
             _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
         };
     }
+    if hogaak_a_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = hogaak_a_deck();
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
+    }
+    if hogaak_b_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = hogaak_b_deck();
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
+    }
     if names_mode() {
         return [(names_deck(&mut rng), Vec::new()), (names_deck(&mut rng), Vec::new())];
     }
@@ -2775,6 +3277,18 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
         // (ENGINE.md 148) The Doomsday 60 against the Sneak and Show 60, seats by seed.
         let (dd, sns) = ((doomsday_deck(), Vec::new()), (sneak_show_deck(), Vec::new()));
         return if seed % 2 == 0 { [dd, sns] } else { [sns, dd] };
+    }
+    if hogaak_mode() {
+        return hogaak_decks(seed);
+    }
+    if hogaak_c_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = hogaak_c_deck();
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
     }
     if delver_sb_mode() {
         // Against Delver in either seat, the sideboarded mirror, or Sneak and Show.
@@ -2839,8 +3353,16 @@ pub fn play(seed: u64, checks: bool) -> Played {
     let mut doomsday_seen = DoomsdaySeen::default();
     // (`FUZZ_POOL=sneak_show` / `sns`: the Flutes that chose a name, ENGINE.md 123.)
     let mut sns_named: Vec<crate::ids::ObjRef> = Vec::new();
+    // (`FUZZ_POOL=hogaak_a`: the Hogaaks counted, ENGINE.md 220.1.)
+    let mut hogaak_seen: Vec<u32> = Vec::new();
+    // (`FUZZ_POOL=hogaak_b`: the Mockingbirds counted, ENGINE.md 220.2.)
+    let mut hogaak_b_seen: Vec<crate::ids::ObjRef> = Vec::new();
     // (`FUZZ_POOL=names`: the namers counted and the stack items seen, ENGINE.md 127.)
     let (mut names_named, mut names_seen): (Vec<crate::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
+    // (`FUZZ_POOL=hogaak_c`'s counts, ENGINE.md 220.3.)
+    let mut hogaak_c_seen = HogaakCSeen::default();
+    // (`FUZZ_POOL=hogaak`'s Stitcher's Supplier triggers counted, ENGINE.md 220.4.)
+    let mut hogaak_stitchers: Vec<u32> = Vec::new();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     // The rules checks (ENGINE.md 150), after every step.
     let mut rc = checks.then(|| RulesCheck::new(&g));
@@ -2895,6 +3417,11 @@ pub fn play(seed: u64, checks: bool) -> Played {
                 check_forced_chance(&g, seed, steps);
             }
         }
+        let massacre_top = if hogaak_b_mode() || hogaak_mode() { hogaak_b_massacre_on_top(&g, a) } else { None };
+        let stitcher_top = if hogaak_mode() { hogaak_stitcher_on_top(&g, a) } else { None };
+        if hogaak_c_mode() || hogaak_mode() {
+            count_hogaak_c_choice(&g, a);
+        }
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}
 {}", g.log_lines().iter().rev().take(60).rev().cloned().collect::<Vec<_>>().join("
@@ -2935,11 +3462,23 @@ pub fn play(seed: u64, checks: bool) -> Played {
             }
             count_sns_names(&g, &mut sns_named);
         }
+        if (hogaak_a_mode() || hogaak_mode()) && !g.stack().is_empty() {
+            count_hogaak_a(&g, &mut hogaak_seen);
+        }
+        if hogaak_b_mode() || hogaak_mode() {
+            count_hogaak_b(&g, massacre_top, &mut stack_seen, &mut hogaak_b_seen);
+        }
+        if hogaak_mode() {
+            count_hogaak_stitcher(&g, stitcher_top, &mut hogaak_stitchers);
+        }
         if names_mode() {
             count_names(&g, &mut names_named, &mut names_seen);
         }
         if delver_sb_mode() && !g.stack().is_empty() {
             count_delver_sb(&g, &mut stack_seen);
+        }
+        if hogaak_c_mode() || hogaak_mode() {
+            count_hogaak_c(&g, &mut hogaak_c_seen);
         }
         if cross_mode() && !g.stack().is_empty() {
             count_cross(&g, &mut stack_seen);
@@ -3557,6 +4096,47 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             SNS_CARDS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
         );
     }
+    if hogaak_a_mode() {
+        let seen: Vec<u64> = HOGAAK_A_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        println!("FUZZ_POOL=hogaak_a: Hogaak, Arisen Necropolis {}", HOGAAK_A_KINDS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", "));
+    }
+    if hogaak_b_mode() {
+        let n: Vec<u64> = HOGAAK_B_COUNTS.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        println!(
+            "FUZZ_POOL=hogaak_b: {}",
+            HOGAAK_B_NAMES.iter().zip(&n).map(|(k, c)| format!("{k} {c}")).collect::<Vec<_>>().join(", ")
+        );
+    }
+    if hogaak_c_mode() {
+        let seen: Vec<u64> = HOGAAK_C_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let l = |x: &AtomicU64| x.load(Ordering::Relaxed);
+        println!(
+            "FUZZ_POOL=hogaak_c: cast {} (Dryad Arbor played as a land); Moonshadow triggers {}, -1/-1 counters removed {}; Dark Matter Manipulators at +2/+0 or more {}; Dryad Arbor attacking {}, tapped for mana {}",
+            HOGAAK_C_CARDS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", "),
+            l(&HOGAAK_C_MOON_TRIGGERS),
+            l(&HOGAAK_C_MOON_REMOVED),
+            l(&HOGAAK_C_DMM_BIG),
+            l(&HOGAAK_C_ARBOR_ATTACKS),
+            l(&HOGAAK_C_ARBOR_MANA)
+        );
+    }
+    if hogaak_mode() {
+        let l = |x: &AtomicU64| x.load(Ordering::Relaxed);
+        println!(
+            "FUZZ_POOL=hogaak (ENGINE.md 220.4): Hogaak, Arisen Necropolis {}; {}; Mockingbird {}; Massacre {}; Stitcher's Supplier, Dark Matter Manipulator, Moonshadow cast {}, Dryad Arbor played {}; Moonshadow triggers {}, -1/-1 counters removed {}; Dark Matter Manipulators at +2/+0 or more {}; Dryad Arbor attacking {}, tapped for mana {}",
+            HOGAAK_A_KINDS.iter().zip(&HOGAAK_A_SEEN).map(|(n, c)| format!("{n} {}", l(c))).collect::<Vec<_>>().join(", "),
+            HOGAAK_KINDS.iter().zip(&HOGAAK_SEEN).map(|(n, c)| format!("{n} {}", l(c))).collect::<Vec<_>>().join(", "),
+            HOGAAK_B_NAMES[..3].iter().zip(&HOGAAK_B_COUNTS).map(|(n, c)| format!("{n} {}", l(c))).collect::<Vec<_>>().join(", "),
+            HOGAAK_B_NAMES[3..6].iter().zip(&HOGAAK_B_COUNTS[3..6]).map(|(n, c)| format!("{n} {}", l(c))).collect::<Vec<_>>().join(", "),
+            HOGAAK_C_SEEN[..3].iter().map(l).map(|c| c.to_string()).collect::<Vec<_>>().join(" / "),
+            l(&HOGAAK_C_SEEN[3]),
+            l(&HOGAAK_C_MOON_TRIGGERS),
+            l(&HOGAAK_C_MOON_REMOVED),
+            l(&HOGAAK_C_DMM_BIG),
+            l(&HOGAAK_C_ARBOR_ATTACKS),
+            l(&HOGAAK_C_ARBOR_MANA)
+        );
+    }
     if delver_sb_mode() {
         let seen: Vec<u64> = DELVER_SB_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
         let at = DELVER_SB_AT_ABILITY.load(Ordering::Relaxed);
@@ -3678,11 +4258,26 @@ fn games_totals(companions_used: u64) -> Totals {
         ("sns_uncounterable", l(&SNS_UNCOUNTERABLE)),
         ("sns_named", l(&SNS_NAMED)),
         ("delver_sb_at_ability", l(&DELVER_SB_AT_ABILITY)),
+        ("hogaak_c_moon_triggers", l(&HOGAAK_C_MOON_TRIGGERS)),
+        ("hogaak_c_moon_removed", l(&HOGAAK_C_MOON_REMOVED)),
+        ("hogaak_c_dmm_big", l(&HOGAAK_C_DMM_BIG)),
+        ("hogaak_c_arbor_attacks", l(&HOGAAK_C_ARBOR_ATTACKS)),
+        ("hogaak_c_arbor_mana", l(&HOGAAK_C_ARBOR_MANA)),
     ] {
         t.set(k, v);
     }
-    let arrays: [(&str, &[AtomicU64]); 6] =
-        [("dd_a_cast", &DD_A_CASTS), ("doomsday_cast", &DOOMSDAY_CASTS), ("doomsday_ability", &DOOMSDAY_ABILITY_COUNTS), ("sns_seen", &SNS_SEEN), ("delver_sb_seen", &DELVER_SB_SEEN), ("cross_seen", &CROSS_SEEN)];
+    let arrays: [(&str, &[AtomicU64]); 10] = [
+        ("dd_a_cast", &DD_A_CASTS),
+        ("doomsday_cast", &DOOMSDAY_CASTS),
+        ("doomsday_ability", &DOOMSDAY_ABILITY_COUNTS),
+        ("sns_seen", &SNS_SEEN),
+        ("delver_sb_seen", &DELVER_SB_SEEN),
+        ("cross_seen", &CROSS_SEEN),
+        ("hogaak_a_seen", &HOGAAK_A_SEEN),
+        ("hogaak_b", &HOGAAK_B_COUNTS),
+        ("hogaak_c_seen", &HOGAAK_C_SEEN),
+        ("hogaak_seen", &HOGAAK_SEEN),
+    ];
     for (name, a) in arrays {
         for (i, x) in a.iter().enumerate() {
             t.set(&format!("{name}_{i}"), l(x));
@@ -3819,6 +4414,39 @@ pub fn check_games(n: u64, t: &Totals) {
             assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
         }
     }
+    if hogaak_a_mode() && n >= 200 {
+        let seen = totals_vec(t, "hogaak_a_seen", HOGAAK_A_SEEN.len());
+        assert!(seen.iter().all(|&c| c > 0), "Hogaak's casts and payments: {:?}", HOGAAK_A_KINDS.iter().zip(&seen).collect::<Vec<_>>());
+    }
+    if hogaak_b_mode() && n >= 200 {
+        let c = totals_vec(t, "hogaak_b", HOGAAK_B_COUNTS.len());
+        assert!(c[..5].iter().all(|&x| x > 0), "the lane's cards weren't played: {:?}", HOGAAK_B_NAMES.iter().zip(&c).collect::<Vec<_>>());
+    }
+    if hogaak_c_mode() && n >= 200 {
+        let seen = totals_vec(t, "hogaak_c_seen", HOGAAK_C_SEEN.len());
+        let (trig, removed, big, attacks, mana) =
+            (g("hogaak_c_moon_triggers"), g("hogaak_c_moon_removed"), g("hogaak_c_dmm_big"), g("hogaak_c_arbor_attacks"), g("hogaak_c_arbor_mana"));
+        assert!(
+            seen.iter().all(|&c| c > 0) && trig > 0 && removed > 0 && big > 0 && attacks > 0 && mana > 0,
+            "lane C's cards weren't played: {seen:?} {trig} {removed} {big} {attacks} {mana}"
+        );
+    }
+    if hogaak_mode() && n >= 200 {
+        // (ENGINE.md 220.4: the seven cards; Massacre, a sideboard card, is the matches')
+        let own = totals_vec(t, "hogaak_seen", HOGAAK_SEEN.len());
+        let b = totals_vec(t, "hogaak_b", HOGAAK_B_COUNTS.len());
+        let c = totals_vec(t, "hogaak_c_seen", HOGAAK_C_SEEN.len());
+        let (removed, big) = (g("hogaak_c_moon_removed"), g("hogaak_c_dmm_big"));
+        let need = [
+            ("Hogaak cast from a graveyard by convoke and delve", own[0]),
+            ("a Mockingbird copy", b[1]),
+            ("Moonshadow -1/-1 counters removed", removed),
+            ("Dark Matter Manipulator at +2/+0", big),
+            ("Dryad Arbor played", c[3]),
+            ("Stitcher's Supplier triggers resolved", own[2]),
+        ];
+        assert!(need.iter().all(|x| x.1 > 0), "FUZZ_POOL=hogaak: the deck's cards weren't played: {need:?}");
+    }
     if delver_sb_mode() && n >= 200 {
         let seen = totals_vec(t, "delver_sb_seen", DELVER_SB_SEEN.len());
         let at = g("delver_sb_at_ability");
@@ -3837,6 +4465,11 @@ pub fn check_matches(n: u64, t: &Totals) {
         return;
     }
     let g = |k: &str| t.get(k);
+    if hogaak_mode() && n >= 500 {
+        // (ENGINE.md 220.4: Massacre is a sideboard card of the Hogaak 75: random sideboarding and random play cast
+        // it about once in 35 matches and resolve it about once in 70)
+        assert!(g("hogaak_massacre") > 0, "FUZZ_POOL=hogaak: no Massacre resolved in {n} matches");
+    }
     if dealt_mode() {
         assert!(g("dealt_matches") > 0 && g("dealt_decks") > 0, "no dealt match");
     }
@@ -3889,7 +4522,7 @@ pub fn match_spec(seed: u64) -> crate::az::MtgSpec {
     if delver_mode() {
         return delver_bo3_spec(seed);
     }
-    if cross_mode() {
+    if cross_mode() || hogaak_mode() {
         return cross_bo3_spec_with(seed, serde_json::json!({}));
     }
     if meta_mode() {
@@ -3940,8 +4573,9 @@ pub fn delver_post_spec(seed: u64) -> crate::az::MtgSpec {
     if seed % 3 == 2 && !dealt_mode() {
         extra["keep_deck"] = serde_json::json!([(seed / 3) % 2]);
     }
-    if cross_mode() {
-        // (`FUZZ_POOL=cross`, ENGINE.md 148: its pairings of the real 75s; post-sideboard, their mirrors, 147.4)
+    if cross_mode() || hogaak_mode() {
+        // (`FUZZ_POOL=cross`, ENGINE.md 148, and `hogaak`, 220.4: their pairings of the real 75s; post-sideboard, their
+        // mirrors, 147.4)
         return cross_bo3_spec_with(seed, extra);
     }
     delver_bo3_spec_with(seed, extra, true)
@@ -4638,6 +5272,8 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     // (ENGINE.md 168.3: a choice table seat's target of the sideboarding in progress, checked when the game begins)
     let mut table_target: [Option<std::sync::Arc<[u8]>>; 2] = [None, None];
     let mut table_decisions = 0u32;
+    // (`FUZZ_POOL=hogaak`'s Massacre spells counted: game, stack id; ENGINE.md 220.4)
+    let mut massacres_seen: Vec<(u8, u32)> = Vec::new();
     // The rules checks of each game (ENGINE.md 150), after every step.
     let mut mc = MatchCheck::new();
     if checks {
@@ -4770,7 +5406,24 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                 check_world_private_keys(&g, viewer, seed, actions.len());
             }
         }
+        // (`FUZZ_POOL=hogaak`, ENGINE.md 220.4: a Massacre on top of the stack resolved by this pass, the game going on)
+        let massacre_top = (hogaak_mode() && g.sideboarding().is_none()).then(|| hogaak_b_massacre_on_top(&g.g, a)).flatten().map(|id| (id, g.m.game_no));
         g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+        if let Some((id, game)) = massacre_top {
+            if g.m.game_no == game && g.sideboarding().is_none() && !g.g.stack().iter().any(|s| s.id == id) {
+                HOGAAK_MASSACRE_MATCHES[usize::from(sp.start_game == 2)].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        if hogaak_mode() && g.sideboarding().is_none() {
+            for it in g.g.stack() {
+                if let crate::game::StackKind::Spell { card } = it.kind {
+                    if g.g.name(card) == "Massacre" && !massacres_seen.contains(&(g.m.game_no, it.id)) {
+                        massacres_seen.push((g.m.game_no, it.id));
+                        HOGAAK_MASSACRE_MATCHES[2 + usize::from(sp.start_game == 2)].fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
         all_keys.append(&mut keys);
         actions.push(a);
         if g.sideboarding().is_none() && !g.match_over() {
@@ -4853,7 +5506,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
@@ -4945,9 +5598,14 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     // The information-set walks compared states (ENGINE.md 148).
     let (w, s) = (MATCH_IS_WALKS.load(Ordering::Relaxed), MATCH_IS_STEPS.load(Ordering::Relaxed));
     println!("match information sets (ENGINE.md 148): {w} walks, {s} states compared after a common action");
-    if cross_mode() {
-        let pairs: Vec<String> = CROSS_PAIRS.iter().map(|&(a, b)| format!("{} v {}", REAL_75_NAMES[a], REAL_75_NAMES[b])).collect();
-        println!("FUZZ_POOL=cross matches: {} by seed % 8; the 75s: {}", pairs.join(", "), cross_75_report());
+    if cross_mode() || hogaak_mode() {
+        let ps: &[(usize, usize)] = if hogaak_mode() { &HOGAAK_PAIRS } else { &CROSS_PAIRS };
+        let pairs: Vec<String> = ps.iter().map(|&(a, b)| format!("{} v {}", REAL_75_NAMES[a], REAL_75_NAMES[b])).collect();
+        println!("FUZZ_POOL={} matches: {} by seed % {}; the 75s: {}", if hogaak_mode() { "hogaak" } else { "cross" }, pairs.join(", "), ps.len(), cross_75_report());
+    }
+    if hogaak_mode() {
+        let l = |k: usize| HOGAAK_MASSACRE_MATCHES[k].load(Ordering::Relaxed);
+        println!("FUZZ_POOL=hogaak matches: Massacre cast {}, resolved {}", l(2), l(0));
     }
     if constructed_bo3_mode() {
         // Constructed best-of-three (ENGINE.md 120): no first picks; the later games' decks hidden.
@@ -4977,6 +5635,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         ("hidden_changed", stats.hidden_changed),
         ("choices_dealt", stats.choices_dealt),
         ("tilted", stats.tilted),
+        ("hogaak_massacre", HOGAAK_MASSACRE_MATCHES[0].load(Ordering::Relaxed)),
     ] {
         t.set(k, v);
     }
@@ -5063,6 +5722,10 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     rules_verdict("fuzz_post_sideboard_matches");
     // (ENGINE.md 141: every game 2 and 3 of these matches starts after a sideboarding, the worlds' too)
     println!("{} (cumulative)", private_keys_report());
+    if hogaak_mode() {
+        let l = |k: usize| HOGAAK_MASSACRE_MATCHES[k].load(Ordering::Relaxed);
+        println!("FUZZ_POOL=hogaak post-sideboard matches: Massacre cast {}, resolved {}", l(3), l(1));
+    }
     let mut t = Totals::default();
     for (k, v) in [
         ("dealt_matches", dealt_matches),
@@ -5311,8 +5974,8 @@ pub fn play_hidden(seed: u64) -> Played {
     // (`FUZZ_POOL=meta`: the metagame refuses hidden decklists, ENGINE.md 176)
     assert!(!meta_mode(), "FUZZ_HIDDEN_DECKS=1 with FUZZ_POOL=meta: the metagame's 75s are open decklists (the spec refuses hidden_decklists, ENGINE.md 176)");
     assert!(
-        !(sns_mode() || delver_sb_mode() || cross_mode()),
-        "FUZZ_HIDDEN_DECKS=1 with a pool that casts Show and Tell (sneak_show, sns, delver_sb, cross): the table's prior cannot condition a deck on its face-down pick (ENGINE.md 129.3)"
+        !(sns_mode() || delver_sb_mode() || cross_mode() || hogaak_mode()),
+        "FUZZ_HIDDEN_DECKS=1 with a pool that casts Show and Tell (sneak_show, sns, delver_sb, cross, hogaak): the table's prior cannot condition a deck on its face-down pick (ENGINE.md 129.3)"
     );
     let [(d0, s0), (d1, s1)] = decks(seed);
     let log = super::env::var("FUZZ_LOG").is_ok();

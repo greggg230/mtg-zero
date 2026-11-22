@@ -37,6 +37,8 @@ pub mod eoe_w2;
 pub mod doomsday_b;
 pub mod filter;
 pub mod graveyard_order;
+pub mod hogaak_a;
+pub mod hogaak_c;
 pub mod printing;
 pub mod statics;
 pub mod support;
@@ -216,6 +218,13 @@ impl Lowerer<'_> {
     /// table whose copy exceptions name more than 64 subtypes is refused
     /// loudly (docs/shortcuts.md 26.11.5).
     pub fn exc_subtype(&mut self, s: u16) -> Option<u8> {
+        // (A creature or a land type: `Game::has_subtype` gives it only to a
+        // copy with the type it corresponds to, CR 205.3d; ENGINE.md 220.2.)
+        let name = self.subtypes[s as usize].clone();
+        if !crate::eoe_w1::is_creature_type(&name) && !crate::eoe_w2::LAND_TYPES.contains(&name.as_str()) {
+            self.unsupported(format!("copy exception subtypes({name}: neither a creature type nor a land type)"));
+            return None;
+        }
         match self.exc_subtypes.iter().position(|&x| x == s) {
             Some(k) => Some(k as u8),
             None if self.exc_subtypes.len() < 64 => {
@@ -349,6 +358,7 @@ pub(crate) fn lower_card_in(
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;
+    hogaak_a::check_def(&mut l, &def);
     def.gives_basic_land_type = l.gives_basic;
     if l.uses_prepare && def.prepare.is_none() {
         l.unsupported("Effect:SourceBecomesPrepared(without a prepare spell)");

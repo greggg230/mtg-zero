@@ -282,7 +282,7 @@ PRESETS['delver-bo3-varied-smoke'] = dict(PRESETS['delver-bo3-smoke'], spec=SPEC
 # The training settings are the Delver line's best-of-one preset, `delver-mirror` (mtg-3's: the 128 x 4 token network,
 # 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration, GPU inference and training) -
 # the settings the Delver mirror's best-of-one runs started from, on the same three decks' table - with the metagame
-# publisher (`publish` = META3_PUBLISH since 2026-11-21, docs/ENGINE.md 223: every metagame run and every fork of one
+# publisher (`publish` = META3_PUBLISH since 2026-11-21, docs/ENGINE.md 221: every metagame run and every fork of one
 # appears on the Delver AI site unless it says otherwise) and WITHOUT the Delver mirror's standing yardsticks
 # (`yardsticks`: its anchors and canary library). A launch adds its own flags as the Delver runs did (network size,
 # evaluation cadence, remotes, the publisher's title).

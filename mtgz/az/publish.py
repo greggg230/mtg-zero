@@ -17,10 +17,10 @@ supervisor's companion hook that turns it into `tools/delverai_publish.py`'s com
   combo_every        a metagame run's combo games every N-th generation (the publisher's --combo-every; 0: none)
   for_run            the run directory name the setting was made for: a run of another name that carries it (a
                      launcher that copied another run's flags) publishes as a SIDE run titled after itself instead,
-                     said loudly (docs/ENGINE.md 223)
+                     said loudly (docs/ENGINE.md 221)
 
 The Delver presets (`delver-mirror`, and so `delver-mirror-bo3` and `delver-mirror-bo3-dealt`) set DELVER_PUBLISH and
-the metagame presets (`legacy-meta3`, `legacy-meta3-ddwheel`) META3_PUBLISH (since 2026-11-21, docs/ENGINE.md 223);
+the metagame presets (`legacy-meta3`, `legacy-meta3-ddwheel`) META3_PUBLISH (since 2026-11-21, docs/ENGINE.md 221);
 the smoke presets leave it off. A run whose setting is off says so loudly at every start (PUBLISH OFF in
 supervisor.log and on stderr), and so does tools/fork_run.py for a fork that will not publish: an experiment that
 nobody will see is never silent. On the command line `--publish '<json>'` replaces the dict and `--no-publish` turns
@@ -51,7 +51,7 @@ DEFAULT_FORKS = '~/delverai/forks.json'
 # the census of each recorded best-of-three generation)
 DELVER_PUBLISH = {'side': False, 'every': 8, 'games': 6, 'census': 200, 'device': 'cpu', 'threads': 4,
                   'forks': [DEFAULT_FORKS]}
-# the metagame presets' publisher (docs/ENGINE.md 223): the options legacy-meta3-r1's hand-started publisher ran with
+# the metagame presets' publisher (docs/ENGINE.md 221): the options legacy-meta3-r1's hand-started publisher ran with
 # since 2026-11-17 - 9 games (every pairing once) every 8th generation on the CPU, no combo games, no census (best of
 # one) - and no fork-record file (the metagame lineage has none: a fork's charts start from the metrics it copied)
 META3_PUBLISH = {'side': False, 'every': 8, 'games': 9, 'combo_every': 0, 'census': 0, 'device': 'cpu', 'threads': 4,
@@ -152,13 +152,13 @@ def loud(run, msg):
 def own_run(run, pub):
     """`pub` for the run directory `run`: a setting made for another run (`for_run`, e.g. a launcher that copied that
     run's flags) publishes as a SIDE run titled after this one, said loudly - never under another run's name, never
-    taking the site's default run (docs/ENGINE.md 223)."""
+    taking the site's default run (docs/ENGINE.md 221)."""
     name = os.path.basename(os.path.normpath(run))
     made_for = pub.get('for_run')
     if not made_for or made_for == name:
         return pub
     loud(run, f'PUBLISH SETTING OF ANOTHER RUN: it was made for {made_for}, this run is {name} - publishing as a side '
-              f'run titled "{name}" instead (give this run its own --publish to choose; docs/ENGINE.md 223)')
+              f'run titled "{name}" instead (give this run its own --publish to choose; docs/ENGINE.md 221)')
     out = dict(pub, side=True, title=name, for_run=name)
     out.pop('note', None)
     out.pop('state_dir', None)

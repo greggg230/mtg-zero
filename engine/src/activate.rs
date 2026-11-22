@@ -702,8 +702,13 @@ impl Game {
         // before the graveyard's cards are chosen, 601.2h; ruling bea302d9.)
         let short = self.exile_short(p, card, cost);
         if short > 0 {
-            let d: Vec<CardIdx> =
-                self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c)).collect();
+            // (Not for a spell whose mana can't be spent: its payment activates
+            // no mana source, ENGINE.md 220.1.)
+            let d: Vec<CardIdx> = if allow.no_mana {
+                Vec::new()
+            } else {
+                self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c)).collect()
+            };
             if short > d.len() + self.cost_feeds_graveyard(p, card, cost, &d) {
                 return false;
             }
@@ -1055,7 +1060,9 @@ impl Game {
         // (The cost's own discards are graveyard cards by then: ruling
         // bea302d9.)
         let short = self.exile_short(p, card, cost).saturating_sub(self.discards_feed(p, card, cost));
-        if short == 0 {
+        // (A spell whose mana can't be spent activates no mana source: ENGINE.md
+        // 220.1.)
+        if short == 0 || self.def_of(card).casting.no_mana {
             return Vec::new();
         }
         let classes = self.mana_classes(p, exclude);

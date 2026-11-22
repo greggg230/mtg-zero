@@ -116,7 +116,7 @@ def test_a_fork_publishes_as_a_side_run_and_records_its_lineage(tmp_path):
     reg = P.fork_registry([str(forks)])
     assert reg[P._norm(dest)] == {'parent': src.replace('\\', '/'), 'at': 300, 'label': 'lr 5e-05', 'won': False}
     # the same fork again: no second record; --set publish=...: the fork's own choice kept, named for the fork
-    # (for_run, docs/ENGINE.md 223)
+    # (for_run, docs/ENGINE.md 221)
     cfg2 = {'publish': {'title': 'The new main', 'side': False, 'forks': [str(forks)]}}
     PUB.on_fork(src, dest, 300, cfg2, {'publish': cfg2['publish']})
     assert cfg2['publish'] == {'title': 'The new main', 'side': False, 'forks': [str(forks)], 'for_run': 'pb2-fork'}
@@ -285,7 +285,7 @@ def test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished(tmp_pa
     assert st['ended'] == 'finished' and st['companion'] is None
 
 
-# ---------------------------------------------------------------- metagame runs publish by default (docs/ENGINE.md 223)
+# ---------------------------------------------------------------- metagame runs publish by default (docs/ENGINE.md 221)
 
 def test_the_metagame_presets_publish_with_the_r1_publishers_options():
     for name in ('legacy-meta3', 'legacy-meta3-ddwheel'):

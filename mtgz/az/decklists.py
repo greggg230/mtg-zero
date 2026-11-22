@@ -5,7 +5,7 @@ A decklist is a JSON file with its provenance (`source`, `event`, `date`, `playe
 it; the engine's `az::constructed` reads the same file and checks the two agree). A constructed spec
 (`"constructed": true`) plays fixed decklists with the card table of constructed play (the cube's
 cards and the legacy ones of `engine/src/az/legacy_cards.txt`: Murktide Regent, Prismari Charm, the
-Legacy Doomsday deck's ten, ENGINE.md 124); the engine checks CR 100.2a and 100.4a (at least 60 cards, at
+Legacy Doomsday deck's ten, ENGINE.md 124, ..., the Legacy Hogaak Tempo deck's seven, 220); the engine checks CR 100.2a and 100.4a (at least 60 cards, at
 most four of a card but basic lands, a sideboard of at most 15). Best-of-one plays the mains; best-of-three
 (`"format": "bo3"`, docs/ENGINE.md 120) sideboards between games: each pool is exactly the 75, every deck
 exactly 60 of it, game 1 the mains (open) and each later game's 60 hidden from the other player within the
@@ -32,6 +32,12 @@ LEGACY_DOOMSDAY = 'doomsday_8027957'
 
 # The Legacy Sneak and Show deck (ENGINE.md 123): MTGGoldfish deck 8014220 (data/decks/sneak_show_8014220.json).
 SNEAK_SHOW = 'sneak_show_8014220'
+
+# The Legacy Hogaak Tempo deck (ENGINE.md 220): MTGGoldfish's archetype "Legacy Hogaak Tempo" (paper), deck 8027954,
+# "Dimir Hogaak" by Jonathan Canfield, North American Eternal Weekend - Legacy Championship, 2026-10-31, 5th place
+# (12-3); https://www.mtggoldfish.com/deck/8027954. Every spec here takes it by name (`mirror_spec`, `mirror_bo3_spec`,
+# `pair_spec`, `metagame_spec(decks=META3 + (LEGACY_HOGAAK,))`); no preset plays it (a run's metagame is the user's call).
+LEGACY_HOGAAK = 'hogaak_tempo_8027954'
 
 # The three-deck Legacy metagame (docs/ENGINE.md 176): Izzet Delver, Doomsday, Sneak and Show.
 META3 = (IZZET_DELVER, LEGACY_DOOMSDAY, SNEAK_SHOW)

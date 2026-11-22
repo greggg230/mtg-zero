@@ -520,7 +520,7 @@ impl Describer<'_> {
             pile_moving: _, pile_shuffles: _, prepared, seen: _, initiative, dungeons, rules_srcs,
             choosing_for: _, marks, known_pools, log: _, log_mark: _, hand_looks: _, peeks,
             // (v6 engines: transient or derived - public_state.rs - or EoE-only, checked below)
-            page, releasing, oracle: _, oracle_dead: _, leaving_to: _, leaving_choice: _, leaving_card: _, resolving_adventure: _,
+            page, releasing, gy_arrivals, oracle: _, oracle_dead: _, leaving_to: _, leaving_choice: _, leaving_card: _, resolving_adventure: _,
             held, void_turn, next_turn_controller, turn_controller, lki_attached: _, lki_toughness: _, lki_power: _, loyalty: _,
             pool_restr, lands_entered: _, moon_game: _, entries, loop_taken: _, w3, w6: _,
             // (layout v7 engines, ENGINE.md 95.11: the hidden decklists' sightings and a search's finds - kept only
@@ -545,7 +545,7 @@ impl Describer<'_> {
         empty(monarch.is_some() as usize + initiative.is_some() as usize + day.is_some() as usize, "the monarch, the initiative, day and night")?;
         empty(miracle_cast.is_some() as usize, "a miracle in progress")?;
         empty(page.is_some() as usize, "a paged decision (more than 95 permanents)")?;
-        empty(releasing.len() + held.len() + entries.len(), "a simultaneous move or entry in progress")?;
+        empty(releasing.len() + gy_arrivals.len() + held.len() + entries.len(), "a simultaneous move or entry in progress")?;
         empty(next_turn_controller.iter().flatten().count() + turn_controller.is_some() as usize, "a player controlling another's turn")?;
         empty(pool_restr.len(), "mana with a spending restriction")?;
         empty((0..2u8).map(|p| g.lands_entered_this_turn(p) as usize).sum::<usize>(), "the lands entered this turn (Bioengineered Future)")?;

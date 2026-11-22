@@ -123,10 +123,10 @@ _EXILE_HAND_DRAW_THAT_MANY_PLAY_LINE = (
     "the end of your next turn, you may play cards exiled this way"
 )
 # "remove a[n] <kind> counter from this <permanent>" (Dark Depths, its
-# self-name rewritten by the land-line hook).
+# self-name rewritten by the land-line hook; Moonshadow's -1/-1 counter).
 _REMOVE_COUNTERS_FROM_SELF_RE = re.compile(
-    r"^remove (?P<n>an?|[a-z]+) (?P<kind>[a-z]+) counters? from this "
-    r"(?:land|artifact|creature|enchantment|permanent)$"
+    r"^remove (?P<n>an?|[a-z]+) (?P<kind>[a-z]+|[+-]1/[+-]1) counters? from "
+    r"this (?:land|artifact|creature|enchantment|permanent)$"
 )
 # "return a[n] <permanent> you control to its owner's hand" -- untargeted
 # (Simic Growth Chamber's enters trigger).

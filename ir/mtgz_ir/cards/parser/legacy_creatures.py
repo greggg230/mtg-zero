@@ -5,7 +5,9 @@ are cube cards but for Murktide Regent and Prismari Charm (Prismari Charm
 already parses). Murktide Regent's lines:
 
 * ``Delve`` on a creature -> ``CardPrinting.has_delve`` (CR 702.66; the
-  spell builder's ``Delve`` line, for a creature spell).
+  spell builder's ``Delve`` line, for a creature spell): since mtg-zero's
+  ENGINE.md 220.1 ``legacy_hogaak``'s casting-keyword list recognizer
+  ("Convoke, delve" too).
 * ``This creature enters with a +1/+1 counter on it for each instant and
   sorcery card exiled with it.`` ->
   ``CardPrinting.enters_with_counter_per_card_exiled_with_it`` = the card
@@ -52,12 +54,6 @@ def _card_type_filter(phrase: str):
     return out
 
 
-def _delve(line: str, name: str):
-    if line.strip().lower() == "delve":
-        return {"fields": {"has_delve": True}}
-    return None
-
-
 def _enters_with_counter_per_exiled(line: str, name: str):
     m = re.fullmatch(
         _SELF.format(name=re.escape(name)) + r" enters with a \+1/\+1 counter on it for each "
@@ -97,7 +93,7 @@ def _card_leaves_your_graveyard_counter(line: str, name: str):
     return {"triggers": (trig,)}
 
 
-_PARSERS = (_delve, _enters_with_counter_per_exiled, _card_leaves_your_graveyard_counter)
+_PARSERS = (_enters_with_counter_per_exiled, _card_leaves_your_graveyard_counter)
 
 
 def parse_legacy_creature_line(line: str, name: str):
