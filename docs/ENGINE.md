@@ -44126,6 +44126,10 @@ touches it).
   Under CPU load the tiny network's best-of-three match took ~40 s.
 * *Tests*: `tests/test_stew.py` 18, `tests/test_stew_judge.py` 6, `tests/test_stew_control.py` 4 (2 of them start
   processes: `live_run_hazard`).
+* *Gate*: the `python` gate on 4b2f7b15 (this branch's head): GATE PASSED WITH SKIPS (only the live-run fence: 8
+  `live_run_hazard` tests fenced off beside the live runs; 2,432 s). With lane 3 merged, `test_spec_extras_and_matchup_
+  settings_come_from_the_recipe` changed: the engine now parses dealt decks per seat in the best-of-three metagame at
+  init, so its check refuses the test's unknown per-deck key instead, and passes without it.
 
 ## 223. pb3's sideboarding for every stew specialist: dealt decks from each seat's own 75, the per-pairing matchup model and one choice table per deck, in the best-of-three metagame restricted to a pairing (branch `feat/pair-sideboarding`, 2026-11-21)
 
@@ -44297,10 +44301,14 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   `test_forced_find`, `test_metagame`, `test_dealt_decks`, `test_matchup`, `test_digest_specs`, `test_gate`: 133 passed.
   `test_metagame::test_the_engine_parses_and_refuses` expected dealt decks in a best-of-three metagame to be refused;
   they are accepted now (223.1), so the test checks that they parse and that best of one still refuses them.
-* **Digests**: every existing digest_formats digest equal to main's 220 values - constructed 91b6cf60576961a7, metagame
-  be3766d1f943c95c, EoE c3a9c786030f42eb, the driver 6a03572828250b86 -; the pair digest recorded
-  **f82ab8148a4870a9** (`DIGEST_WRITE=1 ... pair_digests`, then re-run equal, 70 matches). The cube's (44372545881ef768 /
-  encoding-free a965c3fc8d3bba8a) and the dealt digests (f0bfffd26a70a753, per seat c67b186ba7d00e51): the engine gate.
+* **Digests**: on the branch, every existing digest_formats digest equal to main's 220 values - constructed
+  91b6cf60576961a7, metagame be3766d1f943c95c, EoE c3a9c786030f42eb, the driver 6a03572828250b86 -; the pair digest
+  recorded f82ab8148a4870a9 (`DIGEST_WRITE=1 ... pair_digests`, then re-run equal, 70 matches). Merged with main's
+  Doomsday-mirror leak fix (its section: a search's finds by place, an encoding change that re-recorded the metagame
+  digest, be3766d1f943c95c -> 4039d04b7971975e), the pair digest moved with it: f82ab8148a4870a9 -> **b0e1c7c5dbcce38e**,
+  re-recorded; its encoding-free digest (`DIGEST_ENCODING=0`) is b1e9aa24fa89b2fb on both sides of that merge - play
+  unchanged, only the encoding. The cube's (44372545881ef768 / encoding-free a965c3fc8d3bba8a) and the dealt digests
+  (f0bfffd26a70a753, per seat c67b186ba7d00e51): the engine gate.
 * **Farm compatibility on the specialists' preset** (`tools/farm_compat.py --preset legacy-pair-bo3-varied`, the
   branch's release worker; the gate's own farm-compat step runs the Delver preset): PASSED - gate 2 (worker vs the
   Python remote worker) identical, 6 matches, 3,056 rows, 150 batches; gate 3 (records -> trainer rows) identical, 3,349
