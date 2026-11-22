@@ -421,7 +421,7 @@ class Watcher:
                 meta = RM.read_meta(self.run)
                 RM.register(meta, row['ref'], row.get('ref_sha'), e['path'])
                 RM.save_meta(self.run, meta)
-                rec = RM.publish(self.run, log=self.log)
+                rec = RM.publish(self.run, log=self.log, rows_log=False)
             self.log(f"{name} posted: {sum(len(x['rows']) for x in rec['series'])} rows in {len(rec['series'])} series")
         except Exception as ex:                # noqa: BLE001 - said; the next result posts again
             self.log(f"PUBLISH FAILED: {name}: {ex} - the row is in {Y.ROWS}; the next cells result against "

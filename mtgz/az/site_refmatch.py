@@ -385,13 +385,14 @@ def check_key(key_file=None, dry_run=False):
         raise RefmatchError(str(e))
 
 
-def publish(run, extra=(), url=None, key_file=None, dry_run=False, log=None):
+def publish(run, extra=(), url=None, key_file=None, dry_run=False, log=None, rows_log=True):
     """Rebuild `refmatch.<run>` from every row on disk (row_paths + `extra`) and post it whole -> the record.
-    RefmatchError: nothing to post, a record the site would refuse, no key, or the post failed."""
+    RefmatchError: nothing to post, a record the site would refuse, no key, or the post failed. `rows_log`: a line per
+    row (the command line's; the watcher logs the post's one line only)."""
     log = log or (lambda m: print(m, file=sys.stderr, flush=True))
     meta = read_meta(run)
     rec = record(run, meta, read_rows(row_paths(run, extra)), log)
-    for s in rec['series']:
+    for s in rec['series'] if rows_log else []:
         for r in s['rows']:
             log(f"refmatch {s['key']} gen {r['iter']:5d}: {100 * r['score']:.1f}% +- {100 * (r['se'] or 0):.1f}, "
                 f"{r['elo']:+.1f} +- {r['elo_se']} Elo, {r['games']} games")

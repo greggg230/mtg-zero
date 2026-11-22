@@ -217,6 +217,7 @@ def test_the_watcher_posts_after_a_mirror_result_and_says_off(tmp_path, posts):
     w.refmatch(row, nys)
     assert len(posts) == 1 and posts[0][1]['series'][0]['rows'][0]['iter'] == 16
     assert any('refmatch.legacy-meta3-mirror-snp posted: 1 rows' in m for m in logs)
+    assert not any(m.startswith('refmatch pb262 gen') for m in logs)      # (one line a post, not one a row)
     w.refmatch(_row(16, pair=(D, Z)), nys)                     # not a mirror: no post
     w.refmatch(_row(16, ref='gen0'), nys)                      # the run's own reference: no post
     assert len(posts) == 1
