@@ -576,7 +576,7 @@ impl Game {
             },
             Amount::TappedPower => self.tapped_power(f),
             // (As it last existed on the stack: the mana value recorded as it
-            // left, by the rule that reads it now; ENGINE.md 223.)
+            // left, by the rule that reads it now; ENGINE.md 226.)
             Amount::EventSpellMv => f.ev.obj.map_or(0, |r| self.spell_mana_value_lki(r) as W),
             Amount::ControllerLife => self.players[f.controller as usize].life.max(0) as W,
             Amount::MulticoloredPermanents => {

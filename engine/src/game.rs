@@ -690,8 +690,18 @@ pub struct Game {
     /// The clock of `sightings` and of the searches' finds (ENGINE.md 140.9).
     pub(crate) sight_at: u32,
     /// Cards found by their owner's library search that the other player can still tell apart (a card on top of the
-    /// library, a Doomsday pile's), with their search's time (ENGINE.md 140.9).
+    /// library, a Doomsday pile's), with their search's time (ENGINE.md 140.9): the real game's record for the
+    /// sightings' order and weight (`Game::sighted`); kept as 140.9 keeps it (a pile's finds stay marked when mixed
+    /// only with cards the other player knew), so it is not the public fact - `finds_told` is (ENGINE.md 223).
     pub(crate) found: Vec<(CardIdx, u32)>,
+    /// The public fact (ENGINE.md 223): the finds whose places everyone tells apart as their owner's search's finds -
+    /// a card its owner's library search put on top of the library, the finds of a Doomsday pile of finds only,
+    /// a find exiled face down -, until the card is seen, goes into a hand or is mixed by a shuffle or a private
+    /// rearrangement with any card that is not one (the other player then no longer tells which places hold finds).
+    /// Only the set of their places is public, not which search found which: the `found` segment and `view_of`
+    /// show them by place (`Game::finds_by_place`). Kept in every world too (unlike `found`): a search in a world
+    /// marks its finds as the real game's would.
+    pub(crate) finds_told: Vec<CardIdx>,
     /// The state was changed by hand (tests' perturbations, `Game::lose_sightings`): the sightings no longer
     /// describe it, and the deals weigh every seen card blind (ENGINE.md 140.9).
     pub(crate) sightings_lost: bool,
@@ -888,7 +898,7 @@ pub struct Game {
     /// Copiable values and mana value of permanents that left the
     /// battlefield this turn, as they last existed there (CR 608.2h): the
     /// mana value `mana_value_of` gave it then, copy effects included (a
-    /// copy of a back face 0, CR 202.3b; ENGINE.md 223), which its copiable
+    /// copy of a back face 0, CR 202.3b; ENGINE.md 226), which its copiable
     /// values alone don't tell (copy-ness isn't copiable, 707.2).
     pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals, u64)>,
     /// The permanents that permanents leaving the battlefield this turn were
@@ -917,7 +927,7 @@ pub struct Game {
     /// (slot, its `inc` on the battlefield, its power as it left; an amount,
     /// the game aborts past `num::AMOUNT_MAX`). Every departure of this turn
     /// (a slot that leaves, returns and leaves again keeps the first object's
-    /// power for an ability about it, ENGINE.md 223), and of each earlier turn
+    /// power for an ability about it, ENGINE.md 226), and of each earlier turn
     /// the latest of each slot plus any a public reference still names
     /// (`prune_lki_power` as a turn begins). Read
     /// through `Game::lki_power_of`; out of `Obj` (rare and wide: objects stay
@@ -943,7 +953,7 @@ pub struct Game {
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it"), and their
     /// mana value as they last existed there ("that spell's mana value":
-    /// `mana_value_with_x`, its X and a copy's 202.3b; ENGINE.md 223).
+    /// `mana_value_with_x`, its X and a copy's 202.3b; ENGINE.md 226).
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem, u64)>,
     /// The token being created is a copy with these values (consumed as it
     /// enters).
@@ -1344,6 +1354,7 @@ impl Game {
             sightings: Vec::new(),
             sight_at: 0,
             found: Vec::new(),
+            finds_told: Vec::new(),
             sightings_lost: false,
             ff: crate::forced_find::FfState::new(seed),
             tokens: 0,
@@ -1575,7 +1586,7 @@ impl Game {
     }
     /// Slot `idx` left the battlefield as incarnation `inc`, its power `p`:
     /// the slot's earlier departures stay (an ability about one of them reads
-    /// that object's power, not the latest's; ENGINE.md 223).
+    /// that object's power, not the latest's; ENGINE.md 226).
     pub(crate) fn set_lki_power(&mut self, idx: CardIdx, inc: u32, p: i64) {
         match self.lki_power.iter_mut().find(|x| x.0 == idx && x.1 == inc) {
             Some(x) => x.2 = p,
@@ -1586,7 +1597,7 @@ impl Game {
     /// each slot keeps its latest departure's power, and an earlier
     /// departure's stays only while a reference of the public state still
     /// names that object (`for_each_public_ref`: a delayed trigger about it
-    /// reads it in a later turn; ENGINE.md 223).
+    /// reads it in a later turn; ENGINE.md 226).
     pub(crate) fn prune_lki_power(&mut self) {
         let older = |all: &[(CardIdx, u32, i64)], c: CardIdx, inc: u32| all.iter().any(|&(c2, inc2, _)| c2 == c && inc2 > inc);
         if !self.lki_power.iter().any(|&(c, inc, _)| older(&self.lki_power, c, inc)) {
@@ -2598,7 +2609,7 @@ impl Game {
         // Its copiable values as it last existed on the battlefield (CR
         // 608.2h: "create a token that's a copy of it"), and its mana value
         // then, with the copy effects still on it ("damage equal to its mana
-        // value", ENGINE.md 223).
+        // value", ENGINE.md 226).
         if from == Zone::Battlefield {
             let v = self.copiable(idx);
             let mv = self.mana_value_of(idx);

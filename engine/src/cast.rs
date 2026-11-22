@@ -1097,7 +1097,7 @@ impl Game {
     /// number chosen while it is a spell, 0 anywhere else, 202.3e): the one
     /// rule of mana value, read now (`mana_value_of`) and as the object
     /// leaves the battlefield or the stack, for its last known information
-    /// (CR 608.2h: `Game::lki_copy`, `Game::spell_lki`; ENGINE.md 223).
+    /// (CR 608.2h: `Game::lki_copy`, `Game::spell_lki`; ENGINE.md 226).
     pub(crate) fn mana_value_with_x(&self, c: CardIdx, x: u32) -> u64 {
         // A copy "with no mana cost" (eternalize) has mana value 0.
         if self.exc(c).is_some_and(|e| e.no_cost) {

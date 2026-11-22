@@ -426,9 +426,19 @@ def test_the_farm_backend_plays_each_chooser_match_as_an_unpaired_job(tmp_path, 
         Y.measure_cells(run, 16, 'gen0', (D, S), cfg, ys)
     key = Y.base_key(Y.model_path(run, 0), (D, S), 8, ys, Y.cells_seat(run))[0]
     os.makedirs(Y.cache_dir(run, ys))
+    # docs/ENGINE.md 217: a baseline played here is not the farm cells' control (one backend per comparison) unless
+    # cells_reuse_base says so - then reused and named in the row
     with open(Y.base_file(Y.cache_dir(run, ys), key), 'w') as f:
         json.dump({'results': {'0': '01' * 4, '1': '01' * 4}}, f)
+    with pytest.raises(RuntimeError, match='no baseline .* for the farm backend'):
+        Y.measure_cells(run, 16, 'gen0', (D, S), cfg, ys)
+    reused = Y.measure_cells(run, 16, 'gen0', (D, S), cfg, dict(ys, cells_reuse_base=True))
+    assert reused['base'] == key and reused['base_backend'] == 'local'
+    subs.clear()
+    with open(Y.base_file(Y.cache_dir(run, ys), key), 'w') as f:
+        json.dump({'results': {'0': '01' * 4, '1': '01' * 4}, 'backend': 'farm'}, f)
     row = Y.measure_cells(run, 16, 'gen0', (D, S), cfg, ys)
+    assert row['base'] == key and 'base_backend' not in row
     assert [(s['chooser'], s['paired'], s['seats'], os.path.basename(s['a']), os.path.basename(s['b'])) for s in subs] \
         == [(c, False, [{'net': 1}, {'net': 2}], 'iter_0016.pt', 'iter_0000.pt') for c in (0, 1)]
     assert subs[0]['seed'] == subs[1]['seed'] == Y.pair_seed(ys, (D, S)) and subs[0]['games'] == 8
@@ -467,3 +477,20 @@ def test_the_cells_setting_is_checked_and_off_by_default():
         with pytest.raises(ValueError, match=why):
             Y.normalize(bad)
     assert Y.normalize({'bo1_games': 0, 'blunders': False, 'cells_gen_games': 4})['cells_refs'] == []
+
+
+def test_a_comparisons_control_is_played_on_its_own_backend(tmp_path):
+    """docs/ENGINE.md 217: resolve_base - a baseline's own key when absent or of the same backend family ('mac' is
+    'local'), the key beside it for another backend, the own key with a note under cells_reuse_base."""
+    cdir = str(tmp_path)
+    assert Y.resolve_base(cdir, 'k1', 'farm') == ('k1', None)
+    with open(Y.base_file(cdir, 'k1'), 'w') as f:
+        json.dump({'results': {}, 'backend': 'local'}, f)
+    assert Y.resolve_base(cdir, 'k1', 'local') == ('k1', None) and Y.resolve_base(cdir, 'k1', 'mac') == ('k1', None)
+    other, note = Y.resolve_base(cdir, 'k1', 'farm')
+    assert other != 'k1' and note is None and len(other) == 16
+    key, note = Y.resolve_base(cdir, 'k1', 'farm', reuse=True)
+    assert key == 'k1' and 'played on local' in note
+    with open(Y.base_file(cdir, 'k2'), 'w') as f:
+        json.dump({'results': {}}, f)                      # (no backend recorded: played here)
+    assert Y.resolve_base(cdir, 'k2', 'local') == ('k2', None) and Y.resolve_base(cdir, 'k2', 'farm')[0] != 'k2'

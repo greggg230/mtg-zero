@@ -25,7 +25,7 @@ pub enum W3 {
     /// matching `filter` ("it deals damage equal to its mana value to each
     /// creature"): the source as it is, or as it last existed on the
     /// battlefield (CR 608.2h, 113.7a: its mana value, copy effects included,
-    /// and its qualities as a source of damage; ENGINE.md 223).
+    /// and its qualities as a source of damage; ENGINE.md 226).
     DamageEachSourceMv { filter: Filter },
     /// The permanent the source is attached to ("enchanted creature"; as the
     /// source last existed if it left, CR 608.2h) deals damage equal to its
@@ -278,7 +278,7 @@ impl Game {
                 // as a source (`lki_damage`, kept with `SEEN_LKI_DAMAGE`, which
                 // this op sets) and its mana value with its copy effects (a copy
                 // of a back face 0, CR 202.3b; `Game::mana_value_lki`, ENGINE.md
-                // 223), never its card's in the zone it went to.
+                // 226), never its card's in the zone it went to.
                 let (src, mv) = if self.live(r) {
                     (crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) }, self.mana_value_of(r.idx))
                 } else {

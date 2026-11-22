@@ -1,4 +1,4 @@
-//! Last-known mana value of a departed copy (ENGINE.md 223): an effect that
+//! Last-known mana value of a departed copy (ENGINE.md 226): an effect that
 //! reads the mana value of an object that left its zone uses the object as it
 //! last existed there (CR 608.2h, 113.7a), copy effects included: a copy of
 //! the back face of a nonmodal double-faced permanent has mana value 0 (CR

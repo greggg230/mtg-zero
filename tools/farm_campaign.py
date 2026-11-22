@@ -4,17 +4,18 @@ mtgz.az.farm_campaign).
 
 Analysis campaigns:
     python tools/farm_campaign.py submit NAME --a CKPT [--b CKPT] --games N --build ID [--worker EXE] [--sims 64]
-           [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
+           [--chance-k 2] [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
            [--games-per-lease auto|N] [--deadline-h 3] [--spot 0.05] [--ort-dll DLL] [--min-agent V] [--wait]
            [zero.h2h's per-side options: --a-infoset-merge 1 --b-infoset-merge 0, --a-sims N, --b-select visits, ...]
            [--alternates release|ID[,ID...] | --no-alternates] [--variants 'gpu=fp16,dml=matmul@amd']
     python tools/farm_campaign.py submit NAME --a CKPT --samples [--set KEY=JSON ...] --games N --build ID ...
     python tools/farm_campaign.py status NAME
     python tools/farm_campaign.py collect NAME [--no-local] [--threads 4] [--wrap CMD ...] [--no-describe]
-           [--allow-failed] [--poll 60] [--once]
+           [--allow-failed] [--poll 60] [--once] [--no-publish | --publish EXPERIMENT --title T ...]
   submit: A against B (paired games 2k, 2k + 1 share their deal, seats swapped) or A against itself (no --b), as
   zero.h2h.match plays them (mtgz.az.farm_campaign.match_settings: A's run's evaluation settings, `--sims`, the spec,
-  the root belief tilts; the seats checked equal to the local match's): `--bo1` = the yardsticks' best-of-one (A's
+  the root belief tilts, `--chance-k` - zero.h2h's, default 2 as there; the seats checked equal to the local match's):
+  `--bo1` = the yardsticks' best-of-one (A's
   run's eval spec without its best-of-three keys, its tilts without 'deck': mtgz.az.yardsticks), else `--spec` (default
   A's run's evaluation spec) and `--tilts` (default the run's). zero.h2h's per-side options (zero-core
   zero.seat_settings.add_side_args without the local-only ones; zero-core docs/az.md 68, docs/ENGINE.md 214) give a
@@ -33,14 +34,20 @@ Analysis campaigns:
   collect: pull until done or the deadline, play what is missing here (the same worker; `--wrap`: a command prefix
   such as the slot throttle), check digests, replay the spot check, write games.jsonl and records.jsonl.gz; prints the
   result JSON (the games' digest, coverage, spot check, the head-to-head readout). `--once`: one pull (exit 3 while
-  games are out before the deadline).
+  games are out before the deadline). Then the head-to-head goes to delverai's Head-to-heads tab BY DEFAULT
+  (docs/ENGINE.md 225; mtgz.az.site_h2h's options: --publish EXPERIMENT, default the campaign's farm run name;
+  --title, default 'Farm campaign <name>'; --a-label / --b-label, default each checkpoint's run and generation),
+  checked before any waiting (no uploader or key: refused); `--no-publish`: a loud PUBLISH OFF line; a self-play or
+  unpaired campaign: PUBLISH SKIPPED (the tab shows paired head-to-heads only); a failed post: PUBLISH FAILED, exit 3
+  after the result was printed.
 
 Fuzz campaigns:
 
     python tools/farm_campaign.py create NAME --build ID --mode M [--env K=V ...] --seed-base N [--chunk N|auto]
-           [--priority P] [--share X|none] [--needs-threads N --needs-ram-mb N] [--paused]
+           [--priority P] [--share X|none] [--needs-threads N --needs-ram-mb N] [--paused] [--alternate ID ...]
     python tools/farm_campaign.py update NAME [--build ID] [--mode M] [--env K=V ...] [--seed-base N]
            [--chunk N|auto] [--priority P] [--share X|none] [--needs-threads N --needs-ram-mb N | --no-needs]
+           [--alternate ID ... | --no-alternates]
     python tools/farm_campaign.py pause NAME | resume NAME
     python tools/farm_campaign.py --from-existing NAME
   common: [--url URL] [--token-file F] [--key DATA_KEY] [--farm-release EXE] [--worker EXE] [--dist DIR ...]
@@ -55,14 +62,26 @@ create / update:
    $ZERO_BIG_DISK/cargo-target/mtg-zero/*/farm-build/dist and this checkout's), or `--worker EXE` (its `info` must name the
    build). `info` must list the kind `fuzz`; then `fuzz-check --mode M --env K=V ...` must accept the mode and env
    (PROTOCOL 5.1) and name the manifest's engine commit.
-3. The campaign's definition (zero.farm_def, PROTOCOL 7): kind campaign, builds [the build], the build's runtime pack
+3. The campaign's definition (zero.farm_def, PROTOCOL 7): kind campaign, builds [the build, its alternates], the build's runtime pack
    (`requires_runtime`, else null), no checkpoints, jobs.fuzz = {mode, env} - exactly what the PUT names. A new
    version (the coordinator's current + 1, or the archive's) signed with the data key and published by
    `farm-release define --publish`, unless the newest kept definition already says the same, is the coordinator's
    current one (when it names one) and lasts another 7 days (`--redefine`: always). It expires after
    `--expires-days` (90; 0 = never): re-run `update NAME` (or `--from-existing NAME`) before that.
+2b. **Alternates** (zero-farm PROTOCOL 11.4, rev 17: a campaign's worker build per platform; docs/ENGINE.md 219):
+   `--alternate ID` (repeatable) names a signed fuzz build of another platform - the macOS fuzz build
+   (`farm_build.py --profile fuzz --platform macos-arm64`) - that Macs play the campaign with. Each is found like the
+   build (its manifest checked, never run here: a Mach-O executable does not start on Windows) and must be a worker of
+   the build's game and profile, of another platform than the build's (one per platform), of the same engine commit
+   (or a commit with the same farm worker inputs, mtgz.az.farm_builds.rust_key); and the build's own `fuzz-check --mode
+   M --env ... --platform <its platform>` must accept the mode there (docs/ENGINE.md 197.3: modes whose outcome depends
+   on the platform's libm are refused off Windows - `delver_dealt2-matches`, `FUZZ_BELIEF`, ...). A refusal ends the
+   command before anything is signed. `update` keeps the campaign's alternates unless `--alternate` (the new list)
+   or `--no-alternates` is given.
 4. `PUT /v1/admin/campaign/NAME` with the fields (build_id, mode, env, seed_base, chunk, priority, state, needs,
-   share). `share` (zero-farm PROTOCOL 5.4, rev 14): with a number in (0, 1] the campaign competes with the runs' games
+   share, alternates, min_agent, gpu, providers: a PUT is the campaign's whole configuration, so every field GET
+   answers is put back - an `update`, `pause` or share change never drops an alternate or a minimum agent). `share`
+   (zero-farm PROTOCOL 5.4, rev 14): with a number in (0, 1] the campaign competes with the runs' games
    within that share of the farm's leases; `none` (the default): the backfill. Not signed: changing it needs no new
    definition (tools/fuzz_steward.py sets it while a build's daily fuzz is behind its pace).
 
@@ -94,8 +113,12 @@ from zero import local_config  # noqa: E402
 HOME = os.path.expanduser('~')
 EXPIRES_DAYS = 90
 RENEW_S = 7 * 86400                     # a definition that expires sooner than this is renewed by update / --from-existing
-DEFAULTS = {'env': {}, 'chunk': 'auto', 'priority': 0.2, 'state': 'active', 'needs': None, 'share': None}
-FIELDS = ('build_id', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'state', 'needs', 'share')
+DEFAULTS = {'env': {}, 'chunk': 'auto', 'priority': 0.2, 'state': 'active', 'needs': None, 'share': None,
+            'alternates': None, 'min_agent': None, 'gpu': None, 'providers': None}
+# every field a campaign PUT carries (the coordinator takes a PUT as the whole configuration: a field left out is reset)
+FIELDS = ('build_id', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'state', 'needs', 'share', 'alternates',
+          'min_agent', 'gpu', 'providers')
+DEFAULT_PLATFORM = 'windows-x64'
 
 
 def die(msg):
@@ -218,13 +241,80 @@ def check_worker(a, build_id, mode, env):
         die(f'fuzz-check reads the mode as {chk.get("mode")!r}, not {mode!r}')
     log(f'build {build_id} ({man.get("version")}, profile {man.get("profile")}): fuzz-check {mode} ok - loop '
         f'{chk.get("loop")}, min chunk {chk.get("min_chunk")}, env {chk.get("env")}')
+    man['_exe'] = exe
     return man, chk
+
+
+def platform_of(man):
+    return (man or {}).get('platform') or DEFAULT_PLATFORM
+
+
+def same_engine(c1, c2):
+    """Two engine commits build the same farm worker: equal, or the same farm worker inputs (mtgz.az.farm_builds.rust_key,
+    read from git: both commits must be in this repository)."""
+    if c1 == c2:
+        return True
+    try:
+        from mtgz.az import farm_builds
+        return farm_builds.rust_key(c1) == farm_builds.rust_key(c2)
+    except Exception as e:                                # noqa: BLE001 - (a commit this repository lacks: not the same)
+        log(f'engine commits {str(c1)[:12]} / {str(c2)[:12]}: their worker inputs could not be compared ({e})')
+        return False
+
+
+def check_alternates(a, man, mode, env, alt_ids):
+    """The campaign's alternates (module docs, 2b) checked against the build `man` (check_worker's) -> the PUT's list
+    [{"build_id", "when": {"platform"}}], or None for none. Dies on the first problem."""
+    if not alt_ids:
+        return None
+    dists = dist_dirs(a.dist)
+    builds = local_config.big_disk_path('zero-farm-builds')
+    main_platform = platform_of(man)
+    out, seen = [], {}
+    for bid in alt_ids:
+        if not FD.BUILD_RE.match(bid):
+            die(f'--alternate {bid!r}: a build_id (24 hex)')
+        bd, am = build_dir_of(bid, dists)
+        if bd is None and builds and os.path.exists(os.path.join(builds, bid, 'manifest.json')):
+            bd, am = build_dir_of(bid, [builds])
+        if bd is None:
+            die(f'alternate {bid}: no signed build directory under {dists}' + (f' or {builds}' if builds else ''))
+        plat = platform_of(am)
+        if am.get('kind') != 'worker':
+            die(f'alternate {bid} is a {am.get("kind")} build, not a worker')
+        if am.get('game') != man.get('game') or am.get('profile') != man.get('profile'):
+            die(f'alternate {bid} is game {am.get("game")} profile {am.get("profile")}; the build is game {man.get("game")} '
+                f'profile {man.get("profile")}')
+        if plat == main_platform:
+            die(f'alternate {bid} is a {plat} build, the build\'s own platform (an alternate is another platform\'s build)')
+        if plat in seen:
+            die(f'alternates {seen[plat]} and {bid} are both {plat} builds (one per platform)')
+        if not os.path.exists(os.path.join(bd, am.get('entry') or 'mtgz-worker')):
+            die(f'alternate {bid}: its executable {am.get("entry")} is missing from {bd}')
+        if not same_engine(am.get('engine_commit'), man.get('engine_commit')):
+            die(f'alternate {bid} is engine commit {str(am.get("engine_commit"))[:12]}, the build {str(man.get("engine_commit"))[:12]}: '
+                f'a campaign\'s alternate is its own engine\'s build')
+        # the mode on that platform: the build's own fuzz-check answers for it (docs/ENGINE.md 197.3, the libm refusals)
+        argv = [man['_exe'], 'fuzz-check', '--mode', mode, '--platform', plat]
+        for k, v in sorted(env.items()):
+            argv += ['--env', f'{k}={v}']
+        p = subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
+        if p.returncode != 0:
+            die(f'alternate {bid}: mode {mode} {env} is refused on {plat}: {(p.stderr or p.stdout).strip()[:1500]}')
+        seen[plat] = bid
+        out.append({'build_id': bid, 'when': {'platform': plat}})
+        log(f'alternate {bid} ({am.get("version")}, {plat}): fuzz-check {mode} --platform {plat} ok')
+    return out
+
+
+def alternate_ids(alts):
+    return [x['build_id'] for x in alts or []]
 
 
 # ---------------------------------------------------------------- the definition
 
-def definition_fields(man, build_id, mode, env):
-    return {'game': man.get('game') or 'mtg', 'builds': [build_id], 'runtime': man.get('requires_runtime'),
+def definition_fields(man, build_id, mode, env, alternates=None):
+    return {'game': man.get('game') or 'mtg', 'builds': [build_id] + alternate_ids(alternates), 'runtime': man.get('requires_runtime'),
             'checkpoints': {}, 'jobs': {'selfplay': None, 'eval': None, 'fuzz': {'mode': mode, 'env': dict(env)}}}
 
 
@@ -266,14 +356,24 @@ def campaign_body(c):
     return {k: c[k] for k in FIELDS}
 
 
+def put_alternates(v):
+    """A campaign's alternates as GET answers them (each with its `problems`) -> as a PUT takes them, or None."""
+    out = [{'build_id': x['build_id'], 'when': {'platform': (x.get('when') or {}).get('platform') or DEFAULT_PLATFORM}}
+           for x in v or []]
+    return out or None
+
+
 def current_fields(ans):
-    """A campaign's fields as GET /v1/admin/campaign answers them."""
+    """A campaign's fields as GET /v1/admin/campaign answers them (every field a PUT carries: FIELDS)."""
     chunk = ans.get('chunk')
     if isinstance(chunk, str) and chunk.isdigit():
         chunk = int(chunk)
+    gpu = ans.get('gpu')
     return {'build_id': ans['build_id'], 'mode': ans['mode'], 'env': ans.get('env') or {}, 'seed_base': ans['seed_base'],
             'chunk': chunk if chunk is not None else 'auto', 'priority': ans.get('priority', 0.2),
-            'state': ans.get('state', 'active'), 'needs': ans.get('needs'), 'share': ans.get('share')}
+            'state': ans.get('state', 'active'), 'needs': ans.get('needs'), 'share': ans.get('share'),
+            'alternates': put_alternates(ans.get('alternates')), 'min_agent': ans.get('min_agent'),
+            'gpu': None if gpu in (None, 'any') else gpu, 'providers': ans.get('providers') or None}
 
 
 def put(a, cl, name, c):
@@ -341,6 +441,65 @@ def find_worker(build_id, dists=None):
     return os.path.join(bd, man.get('entry') or 'mtgz-worker.exe'), man
 
 
+def publish_plan(o, st):
+    """Before collect (docs/ENGINE.md 225): the campaign's head-to-head is posted to delverai's Head-to-heads tab by
+    default (mtgz.az.site_h2h; experiment = --publish, default the campaign's farm run name, title = --title, default
+    'Farm campaign <name>') -> True when it will be; False said loudly: --no-publish (PUBLISH OFF), or a campaign with
+    no paired head-to-head to show (self-play / samples, or unpaired: PUBLISH SKIPPED). SystemExit (from
+    site_h2h.check) when the post could not work: no uploader, no key - before any waiting."""
+    from mtgz.az import farm_campaign as C
+    from mtgz.az import site_h2h as S
+    exp = o.publish or st['run'][:60].rstrip('-')
+    if o.no_publish:
+        log(f'PUBLISH OFF: campaign {st["name"]} (h2h.{exp}) will NOT appear on the Delver AI site\'s Head-to-heads tab '
+            f'(--no-publish; docs/ENGINE.md 225)')
+        return False
+    seats = st['seats']
+    if C.samples_job(st) or seats[0] == seats[1]:
+        log(f'PUBLISH SKIPPED: campaign {st["name"]} is self-play (no head-to-head to show on the Head-to-heads tab)')
+        return False
+    if not st['paired']:
+        log(f'PUBLISH SKIPPED: campaign {st["name"]} is unpaired (the Head-to-heads tab shows paired matches only)')
+        return False
+    o.publish = exp
+    a_label, b_label = side_labels(o, st)
+    S.check(o, default_title=f'Farm campaign {st["name"]}',
+            default_description=f'{a_label} against {b_label}: {st["games"]} paired games played on the farm (traced, '
+                                f'spot-checked), tools/farm_campaign.py.')
+    return True
+
+
+def side_labels(o, st):
+    """The sides' names on the site: --a-label / --b-label, else each checkpoint's run and generation; one checkpoint on
+    both sides with its own settings each (`--a-...` / `--b-...`): its move rule's tag after the name."""
+    from mtgz.az import site_h2h as S
+    a = o.a_label or S.checkpoint_label(st['a'])
+    b = o.b_label or S.checkpoint_label(st['b'] or st['a'])
+    if a == b:
+        from zero import farm_eval as FE
+        tags = FE.seat_tags(st['settings'], st['seats']) if st.get('settings') else [None, None]
+        if tags[0] == tags[1]:
+            raise SystemExit(f'both sides would be named {a!r}: give --a-label / --b-label (or --no-publish)')
+        a, b = f'{a} ({tags[0]})', f'{b} ({tags[1]})'
+    return a, b
+
+
+def publish_collected(o, st, res):
+    """The collected campaign's head-to-head (its readout, A = seats[0]) -> the experiment's match (key: --publish-key,
+    default the campaign's farm run name) -> exit code (3: PUBLISH FAILED, said with the retry command)."""
+    from mtgz.az import site_h2h as S
+    if not res.get('readout'):
+        log(f'PUBLISH FAILED: campaign {st["name"]} has no head-to-head readout to post (0 games?)')
+        return S.EXIT_PUBLISH_FAILED
+    o.a_label, o.b_label = side_labels(o, st)
+    h2h = dict(res['readout'], a=st['a'], b=st['b'] or st['a'])
+    if S.publish_result(h2h, o, name=o.publish_key or st['run'][:60].rstrip('-')) != 0:
+        log(f'PUBLISH FAILED: campaign {st["name"]}: its result stands (state.json); retry: python tools/farm_campaign.py '
+            f'collect {st["name"]} (a collected campaign returns its result at once, then posts)')
+        return S.EXIT_PUBLISH_FAILED
+    return 0
+
+
 def analysis_main(argv, client=None):
     from mtgz.az import farm_campaign as C
     ap = argparse.ArgumentParser(prog='farm_campaign.py ' + argv[0], description='analysis campaigns (ENGINE.md 165)')
@@ -353,6 +512,8 @@ def analysis_main(argv, client=None):
     ap.add_argument('--worker')
     ap.add_argument('--dist', action='append')
     ap.add_argument('--sims', type=int, default=64)
+    ap.add_argument('--chance-k', type=int, default=2, help="chance nodes' sampled outcomes (zero.h2h's --chance-k, "
+                    "default 2 as there; docs/ENGINE.md 217)")
     ap.add_argument('--bo1', action='store_true', help="the yardsticks' best-of-one spec and tilts of A's run")
     ap.add_argument('--spec')
     ap.add_argument('--tilts', help="root belief tilts JSON ({} = none; default the run's)")
@@ -388,6 +549,10 @@ def analysis_main(argv, client=None):
     ap.add_argument('--key', default=FD.data_key_path())
     ap.add_argument('--farm-release', default=FD.farm_release_path())
     ap.add_argument('--state-root')
+    from mtgz.az import site_h2h as S
+    S.add_args(ap)                             # (collect publishes by default: docs/ENGINE.md 225)
+    ap.add_argument('--no-publish', action='store_true', help="collect: do not post the head-to-head to delverai's "
+                    "Head-to-heads tab (said loudly: PUBLISH OFF)")
     from zero import seat_settings as SS
     SS.add_side_args(ap, local=False)          # (zero.h2h's per-side options: the seats' sets, zero-core docs/az.md 68)
     a = ap.parse_args(argv)
@@ -432,13 +597,15 @@ def analysis_main(argv, client=None):
                     spec = a.spec or h2h.run_eval_spec(a.a, C.GAME)
                     tilts = json.loads(a.tilts) if a.tilts is not None else None
                 if not a.samples:
-                    settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b, sides=a if sides else None)
+                    settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b, chance_k=a.chance_k,
+                                                   sides=a if sides else None)
                 seats = [{'net': 1}, {'net': 1}] if a.samples else                     C.campaign_seats(C.side_sets(settings, a if sides else None), bool(a.b))
                 gpl = a.games_per_lease if a.games_per_lease == 'auto' else int(a.games_per_lease)
                 C.submit(a.name, a.a, a.games, settings, seats, a.seed, a.build, exe, man.get('requires_runtime'),
                          b=a.b, paired=not (a.unpaired or a.samples), share=a.share, samples=a.samples, priority=a.priority, games_per_lease=gpl,
                          deadline_s=a.deadline_h * 3600, spot=a.spot, ort_dll=a.ort_dll, min_agent=a.min_agent,
-                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1, 'set': a.set, 'sides': sides}, client=cl, root=a.state_root, opts=opts,
+                         meta={'cmd': 'submit', 'sims': a.sims, 'chance_k': a.chance_k, 'bo1': a.bo1, 'set': a.set,
+                               'sides': sides}, client=cl, root=a.state_root, opts=opts,
                          alternates=None if a.no_alternates else a.alternates, variants=a.variants)
             print(d)
             if not a.wait:
@@ -446,6 +613,7 @@ def analysis_main(argv, client=None):
         if a.action == 'status':
             print(json.dumps(C.status(d, client=cl, opts=opts), indent=1))
             return 0
+        posting = publish_plan(a, C.load_state(d))
         res = C.collect(d, client=cl, poll=a.poll, local=not a.no_local, threads=a.threads, wrap=a.wrap,
                         describe_games=not a.no_describe, allow_failed=a.allow_failed, wait=not a.once, opts=opts,
                         deadline_s=0 if a.deadline_now else None)
@@ -453,6 +621,8 @@ def analysis_main(argv, client=None):
             print(json.dumps(C.status(d, client=cl, opts=opts)['coverage']))
             return 3
         print(json.dumps(res))
+        if posting:
+            return publish_collected(a, C.load_state(d), res)
         return 0
     except C.CampaignError as e:
         die(str(e))
@@ -478,6 +648,9 @@ def main(argv=None, client=None):
     ap.add_argument('--needs-ram-mb', type=int)
     ap.add_argument('--no-needs', action='store_true')
     ap.add_argument('--paused', action='store_true', help='create: the campaign starts paused')
+    ap.add_argument('--alternate', action='append', metavar='ID', help="another platform's signed fuzz build of the same "
+                    'engine (repeatable; e.g. the macOS fuzz build): that platform\'s machines play the campaign with it')
+    ap.add_argument('--no-alternates', action='store_true', help='update: the campaign without alternates')
     ap.add_argument('--url', default=os.environ.get('FARM_URL', FD.URL))
     ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
     ap.add_argument('--key', default=FD.data_key_path(), help='the data key (default ~/.config/zero-farm/data.key)')
@@ -496,6 +669,10 @@ def main(argv=None, client=None):
         ap.error(f'campaign name {name!r}: [a-z0-9][a-z0-9-]{{0,62}}')
     if a.build is not None and not FD.BUILD_RE.match(a.build):
         ap.error(f'--build {a.build!r}: a build_id (24 hex)')
+    if a.alternate and a.no_alternates:
+        ap.error('--alternate and --no-alternates')
+    if a.no_alternates and a.action != 'update':
+        ap.error('--no-alternates: update only')
     cl = client or FD.Client(a.url, token=read_token(a.token_file))
     ans = cl.get_or_none(f'/v1/admin/campaign/{name}')
     if a.from_existing or a.action in ('update', 'pause', 'resume'):
@@ -504,19 +681,21 @@ def main(argv=None, client=None):
         cur = current_fields(ans)
         if a.action in ('pause', 'resume'):
             given = [k for k in ('build', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'share', 'needs_threads',
-                                 'needs_ram_mb') if getattr(a, k) is not None]
+                                 'needs_ram_mb', 'alternate') if getattr(a, k) is not None]
             if given:
                 ap.error(f'{a.action}: only the state changes (use update for {given})')
             put(a, cl, name, dict(cur, state='paused' if a.action == 'pause' else 'active'))
             return 0
         if a.from_existing:
-            given = [k for k in ('build', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'share') if getattr(a, k) is not None]
+            given = [k for k in ('build', 'mode', 'env', 'seed_base', 'chunk', 'priority', 'share', 'alternate')
+                     if getattr(a, k) is not None]
             if given:
                 ap.error(f'--from-existing: the campaign as it is (use update for {given})')
             man, _ = check_worker(a, cur['build_id'], cur['mode'], cur['env'])
-            info = ensure_definition(a, cl, name, definition_fields(man, cur['build_id'], cur['mode'], cur['env']))
+            alts = check_alternates(a, man, cur['mode'], cur['env'], alternate_ids(cur['alternates']))
+            info = ensure_definition(a, cl, name, definition_fields(man, cur['build_id'], cur['mode'], cur['env'], alts))
             print(json.dumps({'campaign': name, 'definition': {k: info.get(k) for k in ('version', 'path', 'sha256')},
-                              'build_id': cur['build_id'], 'mode': cur['mode'], 'env': cur['env']}))
+                              'build_id': cur['build_id'], 'mode': cur['mode'], 'env': cur['env'], 'alternates': alts}))
             return 0
         c = dict(cur)
         if a.build:
@@ -534,6 +713,10 @@ def main(argv=None, client=None):
         if a.share is not None:
             c['share'] = share_of(a.share)
         c['needs'] = needs_of(a, cur['needs'])
+        if a.alternate:
+            c['alternates'] = [{'build_id': x} for x in a.alternate]
+        elif a.no_alternates:
+            c['alternates'] = None
     else:
         if ans is not None:
             die(f'campaign {name} exists on {a.url}: use update')
@@ -541,11 +724,13 @@ def main(argv=None, client=None):
             ap.error('create: --build, --mode and --seed-base')
         c = dict(DEFAULTS, build_id=a.build, mode=a.mode, env=parse_env(a.env), seed_base=a.seed_base,
                  chunk=chunk_of(a.chunk) or 'auto', priority=a.priority if a.priority is not None else DEFAULTS['priority'],
-                 state='paused' if a.paused else 'active', needs=needs_of(a), share=share_of(a.share))
+                 state='paused' if a.paused else 'active', needs=needs_of(a), share=share_of(a.share),
+                 alternates=[{'build_id': x} for x in a.alternate or []] or None)
     man, chk = check_worker(a, c['build_id'], c['mode'], c['env'])
     if isinstance(c['chunk'], int) and chk.get('min_chunk') and c['chunk'] < chk['min_chunk']:
         log(f'note: chunk {c["chunk"]} is below the mode\'s minimum chunk {chk["min_chunk"]} (fuzz-check)')
-    info = ensure_definition(a, cl, name, definition_fields(man, c['build_id'], c['mode'], c['env']))
+    c['alternates'] = check_alternates(a, man, c['mode'], c['env'], alternate_ids(c['alternates']))
+    info = ensure_definition(a, cl, name, definition_fields(man, c['build_id'], c['mode'], c['env'], c['alternates']))
     put(a, cl, name, c)
     print(json.dumps({'campaign': name, 'action': a.action, 'definition': {k: info.get(k) for k in ('version', 'path', 'sha256')},
                       **campaign_body(c)}))

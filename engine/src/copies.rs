@@ -213,7 +213,7 @@ impl Game {
     /// reads it now (`mana_value_of`: a copy of a back face 0, CR 202.3b; a
     /// copy with no mana cost 0, 202.3a); not its card's in the zone it went
     /// to, nor what its copiable values alone give (being a copy isn't a
-    /// copiable value, 707.2; ENGINE.md 223). `None`: it never left the
+    /// copiable value, 707.2; ENGINE.md 226). `None`: it never left the
     /// battlefield this turn.
     pub(crate) fn mana_value_lki(&self, r: ObjRef) -> Option<u64> {
         if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
@@ -354,7 +354,7 @@ impl Game {
     /// stacked triggered ability may need ("copy it", CR 608.2h): remember
     /// its item (`Game::spell_lki`), and its mana value as a spell (its X,
     /// 202.3e; a copy of a back face 0, 202.3b: `mana_value_with_x`, as the
-    /// item has just left `Game::stack`; ENGINE.md 223).
+    /// item has just left `Game::stack`; ENGINE.md 226).
     pub(crate) fn note_spell_lki(&mut self, card: CardIdx, item: &StackItem) {
         let r = self.obj_ref(card);
         let wanted = self.waiting.iter().any(|w| w.ev.obj == Some(r))
@@ -758,7 +758,7 @@ impl Game {
     }
 }
 
-/// Last-known mana value of a departed copy (ENGINE.md 223), in the states
+/// Last-known mana value of a departed copy (ENGINE.md 226), in the states
 /// no card of the tables makes together with an ability that reads it: built
 /// by hand (the card tests are `tests/rules_lki_mana_value.rs`). A token copy
 /// back face up (707.8a) and a copy with no mana cost (eternalize's

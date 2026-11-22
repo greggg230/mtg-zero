@@ -42,7 +42,7 @@ from zero.package import GamePackage, register
 from . import deck_reader, decklists
 from .evaldecks import eval_spec
 from .mac import LocalGpuRemote, RunCommitRemote
-from .publish import DELVER_PUBLISH
+from .publish import DELVER_PUBLISH, META3_PUBLISH
 from .yardsticks import DELVER_YARDSTICKS
 from ..sealed.games import REMOTE_EVAL_LOG
 from ..sealed.rolling import SETTINGS as ROLLING_SETTINGS
@@ -87,7 +87,10 @@ PRESETS = {
     'mtg-smoke': dict(game='mtg', spec=SPEC, players=[2], iters=3, games=16, conc=16, sims=8, sims_fast=2,
                       p_full=0.25, temp_moves=30, arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=128, min_window_samples=0,
                       min_steps=10, lr_warmup_steps=0, yardstick='heuristic', eval_games=8, eval_sims=4,
-                      eval_random_games=4, elo_games=4, ref_games=8, threads=2, max_steps=20_000),
+                      eval_random_games=4, elo_games=4, ref_games=8, threads=2, max_steps=20_000,
+                      # (a few games here, never the farm: no reason needed beside a published farm build either way,
+                      # zero-core docs/az.md 70; every smoke preset made from this one inherits it)
+                      selfplay_local_reason='a smoke run: a few games on this machine'),
     # the first small self-play run (M5a, docs/ENGINE.md 21.6; CPU inference while other
     # projects' runs use the GPU): a few iterations at modest sims, evaluated against the
     # heuristic (the Elo anchor) and random. Rolling self-play keeps 384 games in flight (CPU
@@ -281,12 +284,14 @@ PRESETS['delver-bo3-varied-smoke'] = dict(PRESETS['delver-bo3-smoke'], spec=SPEC
 # in each game record (`record_setup`'s "pairing").
 # The training settings are the Delver line's best-of-one preset, `delver-mirror` (mtg-3's: the 128 x 4 token network,
 # 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration, GPU inference and training) -
-# the settings the Delver mirror's best-of-one runs started from, on the same three decks' table - WITHOUT its two
-# Delver-only companions: the delverai publisher (`publish`: it publishes the Delver mirror's site) and the standing
-# yardsticks (`yardsticks`: the Delver mirror's anchors and canary library). A launch adds its own flags as the Delver
-# runs did (network size, evaluation cadence, remotes).
+# the settings the Delver mirror's best-of-one runs started from, on the same three decks' table - with the metagame
+# publisher (`publish` = META3_PUBLISH since 2026-11-21, docs/ENGINE.md 224: every metagame run and every fork of one
+# appears on the Delver AI site unless it says otherwise) and WITHOUT the Delver mirror's standing yardsticks
+# (`yardsticks`: its anchors and canary library). A launch adds its own flags as the Delver runs did (network size,
+# evaluation cadence, remotes, the publisher's title).
 SPEC_META3 = decklists.metagame_spec(decklists.META3, fmt='bo1', max_turns=60)
-PRESETS['legacy-meta3'] = dict(PRESETS['delver-mirror'], spec=SPEC_META3, eval_spec=SPEC_META3, publish={}, yardsticks={})
+PRESETS['legacy-meta3'] = dict(PRESETS['delver-mirror'], spec=SPEC_META3, eval_spec=SPEC_META3,
+                                publish=dict(META3_PUBLISH), yardsticks={})
 # the end-to-end check on CPU: the same spec with mtg-smoke's tiny network and sims (as delver-smoke)
 PRESETS['legacy-meta3-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_META3, eval_spec=SPEC_META3)
 # The Doomsday warm-up ("training wheel", docs/ENGINE.md 180, mtgz.az.forced_find): legacy-meta3 with the forced find in
@@ -496,7 +501,13 @@ PACKAGE = register(GamePackage(
     settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, **FORCED_FIND_SETTINGS, publish={}, yardsticks={}),
     setting_classes=SETTING_CLASSES,
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
+    # the published farm build of this checkout's commit (docs/ENGINE.md 218, zero-core docs/az.md 70): a run whose
+    # self-play stays here beside one says why (selfplay_local_reason) at its first start
+    farm_build='mtgz.az.farm_builds:published_for_run',
     engine_paths=ENGINE_PATHS,
+    # zero.h2h's farm backend (docs/ENGINE.md 217, zero-core docs/az.md 69): `python -m mtgz.az.h2h` plays on zero-farm
+    # when the farm can play exactly the match (--backend auto, the default), else here - decided before any game
+    h2h_backend='mtgz.az.h2h_farm:BACKEND',
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',

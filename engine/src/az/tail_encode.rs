@@ -317,7 +317,7 @@ pub mod mr {
 /// the card code where the viewer knows the card (`Cx::ref_def`: its owner, who found it; the other
 /// player knows it only once it is no find): the object (`rf::*`, `Cx::write_ref`: its zone, its
 /// owner, a face-down card's place) and, in a library, its depth from the top + 1 / 64 and in 16
-/// binary digits.
+/// binary digits. Slot k is the k-th told-apart find by place (ENGINE.md 223), not the k-th search.
 pub mod fs {
     use super::rf;
     pub const PRESENT: usize = 0;
@@ -1528,12 +1528,18 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     }
 }
 
-/// The `found` segment (`fs::*`, ENGINE.md 142.12): `Game::found` in the order of the searches.
-/// (A find is a card in a library or exiled face down - it leaves `Game::found` as it goes into a
-/// hand -, so its reference never names a hand card: no holder for `Game::for_each_public_ref`.)
+/// The `found` segment (`fs::*`, ENGINE.md 142.12): the finds everyone tells apart
+/// (`Game::finds_told`) by place, slot k the k-th (`Game::finds_by_place`, ENGINE.md 223: which
+/// search found which is not public after a shuffle or a private rearrangement among them, the set
+/// of their places is). (A find is a card in a library or exiled face down - it leaves them as it
+/// goes into a hand -, so its reference never names a hand card: no holder for
+/// `Game::for_each_public_ref`.)
 fn write_found(cx: &Cx, tail: &mut TailBuf) {
     let g = cx.g;
-    for (k, &(c, _)) in g.found.iter().enumerate() {
+    if g.finds_told.is_empty() {
+        return;
+    }
+    for (k, c) in g.finds_by_place().into_iter().enumerate() {
         let r = g.obj_ref(c);
         let x = tail.token(seg::FOUND, k as u32);
         if let Some(d) = cx.ref_def(r) {
@@ -1944,6 +1950,39 @@ impl Row {
             int(&mut v, t as u64, 4);
         }
         v
+    }
+
+    /// Where index `i` of `flat()` lies, for a check's message (ENGINE.md 223): a head float (its
+    /// segment's slot and the float in it, or a block outside the segments), a tail token's float
+    /// (segment name, absolute slot, the float in the token) or an override.
+    pub fn locate(&self, i: usize) -> String {
+        let nh = self.head.len();
+        if i < nh {
+            for s in 0..seg::N {
+                let (o, w, n) = (encode::LAY7.off[s], SEG_W[s], SEG_HEAD[s]);
+                if o != usize::MAX && n > 0 && i >= o && i < o + n * w {
+                    return format!("head segment {s} slot {} float {}", (i - o) / w, (i - o) % w);
+                }
+            }
+            return format!("head float {i} (outside the segments)");
+        }
+        let mut at = nh + 1;
+        for (sg, sl, x) in &self.tail {
+            let w = 3 + x.len();
+            if i < at + w {
+                let name = TAILS.iter().find(|t| t.seg == *sg).map_or("?", |t| t.name);
+                return match i - at {
+                    0 => format!("tail token {name} slot {sl}: its segment"),
+                    1 | 2 => format!("tail token {name} slot {sl}: its slot"),
+                    k => format!("tail token {name} slot {sl} float {}", k - 3),
+                };
+            }
+            at += w;
+        }
+        if i == at {
+            return "the tail's end".into();
+        }
+        format!("override entry {}", (i - at - 1) / 6)
     }
 
     /// The floats of the token at (segment, slot): a head slot (None when not present) or a tail
