@@ -44859,3 +44859,16 @@ accepts a checkpoint recorded as `mtg` with layout v7), honoured by the guard, `
 graph check - pushed and pinned, and (b) each old run started once as `mtg_v7` (its config's game rewritten, e.g. by
 `python -m mtgz.az.run` on seeing v7 checkpoints under `mtg`). This branch takes neither: the old name keeps the old
 layout, the new layout is the default under its own name, and nothing old changes.
+
+**The gates of the rework** (on 69cba460: layout v8 the default; env MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME, the system Python):
+`python tools/gate.py suite` - **GATE PASSED suite 69cba460002e in 483s**; `python tools/gate.py engine --expect-digest
+c2b04fed925eed67 --expect-digest0 d3c144b6cc2977e5 --tested-sha 69cba460002e` - **GATE PASSED WITH SKIPS engine
+69cba460002e in 1068s**; `python tools/gate.py encoding --expect-digest c2b04fed925eed67 --expect-digest0
+d3c144b6cc2977e5 --checkpoint <a copy of legacy-meta3-r1's iteration 1233, a layout v7 checkpoint of the game mtg>` -
+**GATE PASSED WITH SKIPS encoding 69cba460002e in 810s** (both skips: one live-run-hazard test of the desktop's pytest,
+fenced by a live run). The digests as recorded (full c2b04fed925eed67, encoding-free d3c144b6cc2977e5, constructed
+38ef93512e0a7259, metagame ed86a2f5ed21c436, EoE 5ffb850dd963bad0, driver cab97c01912f7e3f, dealt cc0d138ac5c80402),
+pytest on the Mac and the desktop passed, the encoding tier's v7 checkpoint loads and plays as `mtg` (8 games), the gates'
+farm compat (the Delver dealt preset, now `mtg_v8`) identical; `tools/farm_compat.py --set game="mtg"` (layout v7) and
+`--set game="mtg_v8"` both identical (6 games, 2,468 rows, 150 batches; records 2,598 rows; 0 and 698 v8 tokens in their
+shards). The next commit adds this paragraph only.
