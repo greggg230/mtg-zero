@@ -1028,7 +1028,7 @@ impl Game {
             let cost = self.total_mana(card, item);
             let allow = self.spend_allow_from(card, item.from);
             // (Its convoke's and improvise's sources too, as its payment's:
-            // ENGINE.md 227.3.)
+            // ENGINE.md 228.3.)
             let def = self.def_of(card);
             let classes = self.spell_pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke, allow);
             crate::decision::most_allowed(0, life, |v| {
@@ -1399,7 +1399,7 @@ impl Game {
                 // counted each, `delve_classes`; ENGINE.md 49.)
                 let later = late.len() - j - 1;
                 // (Its convoke and improvise too: `delve_rest_payable`,
-                // ENGINE.md 227.5.)
+                // ENGINE.md 228.5.)
                 if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.delve_rest_payable(p, card, &rest.less_generic(d), allow)) {
                     opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
                 }
@@ -2339,7 +2339,7 @@ impl Game {
         }
         // (Its convoke's creatures and improvise's artifacts too, and with
         // mana that can't be spent those only: `spell_classes`, ENGINE.md
-        // 220.1, 227.3.)
+        // 220.1, 228.3.)
         let own = self.spell_classes(p, card, classes);
         let classes = &own[..];
         let Some((a, _)) = self.alt_at(card, k) else { return false };
@@ -2432,7 +2432,7 @@ impl Game {
     /// (CR 601.2g-h), as its payment has them (`pay_classes`): `classes`
     /// (its mana abilities', `mana_classes`) with its convoke's untapped
     /// creatures (702.51a) and its improvise's untapped artifacts (702.126a)
-    /// - for every spell with either, whatever else pays (ENGINE.md 227.3:
+    /// - for every spell with either, whatever else pays (ENGINE.md 228.3:
     /// `normal_payable` and `alt_payable` left them out of a spell whose mana
     /// is spent); with "you can't spend mana to cast this spell" those alone
     /// (`no_mana_classes`, ENGINE.md 220.1). `classes` that hold them already
@@ -2456,7 +2456,7 @@ impl Game {
         let def = self.def_of(card);
         // (Its convoke's creatures and improvise's artifacts too, and with
         // mana that can't be spent those only: `spell_classes`, ENGINE.md
-        // 220.1, 227.3.)
+        // 220.1, 228.3.)
         let own = self.spell_classes(p, card, classes);
         let delved = self.delve_classes(p, card, &own);
         let classes = &delved[..];
