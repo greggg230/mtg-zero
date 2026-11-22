@@ -238,7 +238,7 @@ pub mod v6 {
 /// `mtg_eoe`: no tail, the v7 floats left out, pages shown as v6 showed them).
 pub struct Lay {
     pub v7: bool,
-    /// Layout v8 (ENGINE.md 236, the game `mtg_v8`): v7's head and tail plus `tail_v8`'s segments.
+    /// Layout v8 (ENGINE.md 236, the game `mtg`): v7's head and tail plus `tail_v8`'s segments.
     pub v8: bool,
     pub features: usize,
     /// Each object segment's offset and slot width (tail-only segments: 0).
@@ -3449,7 +3449,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
     layout_json_lay(db, false)
 }
 
-/// Layout v8 (ENGINE.md 236, the game `mtg_v8`): layout v7's JSON with `tail_v8`'s six tail-only
+/// Layout v8 (ENGINE.md 236, the game `mtg`): layout v7's JSON with `tail_v8`'s six tail-only
 /// gated segments appended (`pay_options` with a pointer column), version 8. Checked in as
 /// `mtgz/az/layout_v8.json`.
 pub fn layout_json_v8(db: &'static CardDb) -> String {

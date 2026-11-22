@@ -51,7 +51,7 @@ INSTANTS = {'Brainstorm', 'Lightning Bolt', 'Daze', 'Force of Will', 'Unholy Hea
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts
@@ -188,7 +188,7 @@ def rebuild(rep, upto):
     srng = random.Random(rng.randrange(1 << 30))
     srng.randrange(1 << 30)
     srng.randrange(1 << 30)
-    g = E.Game(rep['game'], rep['spec'], 2, srng.getrandbits(63))
+    g = E.Game(_lay().record_game(rep), rep['spec'], 2, srng.getrandbits(63))
     for k, f in enumerate(rep['frames'][:upto]):
         if f['k'] == 'nn' and (g.legal() != f['acts'] or g.to_move != f['p']):
             raise SystemExit(f'frame {k}: the rebuilt game does not match the replay ({g.legal()} vs {f["acts"]})')

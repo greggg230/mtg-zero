@@ -30,8 +30,8 @@ def delver_position(seed=3, steps=60):
     """A Delver mirror position after `steps` random actions whose decider's row has tail tokens."""
     E = G.engine()
     rng = np.random.default_rng(seed)
-    g = E.Game('mtg_v8', A.SPEC_DELVER, 2, seed)
-    rk = rowkit.kind('mtg_v8')
+    g = E.Game('mtg', A.SPEC_DELVER, 2, seed)
+    rk = rowkit.kind('mtg')
     k = 0
     while not g.over:
         legal = g.legal()
@@ -47,15 +47,15 @@ def ev():
     from zero.infer import NetEvaluator
     from zero.net import make_net
     torch.manual_seed(0)
-    return NetEvaluator(make_net(G.info('mtg_v8'), 'mtg_v8', 'tokens', 16, 1, heads=2, aux=A.PACKAGE.aux_of('mtg_v8')), 'cpu')
+    return NetEvaluator(make_net(G.info('mtg'), 'mtg', 'tokens', 16, 1, heads=2, aux=A.PACKAGE.aux_of('mtg')), 'cpu')
 
 
 def test_the_rows_of_a_game_with_and_without_tails():
-    rk = rowkit.kind('mtg_v8')
+    rk = rowkit.kind('mtg')
     assert rk is not None and rk.widths and rk.pointers
     g = delver_position()
     x, rr = rowkit.row(g, g.to_move, rk, opts=True)
-    assert x.shape == (G.info('mtg_v8')['num_features'],) and len(rr[0]['t_seg']) > 0
+    assert x.shape == (G.info('mtg')['num_features'],) and len(rr[0]['t_seg']) > 0
     assert len(rr[1][0]) == len(rr[1][1])                            # (the overrides: option index, token)
     # without variable-length rows: `encode`, no rr
     for game, spec in (('mtg_eoe', A.SPEC_EOE), ('toy', None)):
@@ -73,7 +73,7 @@ def test_the_rows_of_a_game_with_and_without_tails():
 
 def test_evaluate_takes_the_tails_and_overrides(ev):
     """A decider's row evaluated whole: its tail moves the answer (a row's head alone is another input)."""
-    rk = rowkit.kind('mtg_v8')
+    rk = rowkit.kind('mtg')
     g = delver_position()
     x, rr = rowkit.row(g, g.to_move, rk, opts=True)
     legal = list(g.legal())
@@ -115,7 +115,7 @@ def test_samples_with_tails_for_the_value_and_the_training(ev):
     forward with their tails and overrides resolved (`rowkit.train_kw`, as a run's window)."""
     from zero.infer import UniformEvaluator, drive
     seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10)
-    drv = G.Driver('mtg_v8', [[seat, seat]], spec=A.SPEC_DELVER, concurrency=1, threads=1, seed=9, record=True, max_steps=20000)
+    drv = G.Driver('mtg', [[seat, seat]], spec=A.SPEC_DELVER, concurrency=1, threads=1, seed=9, record=True, max_steps=20000)
     parts = []
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
     parts.append(drv.take_samples())

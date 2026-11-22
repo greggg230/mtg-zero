@@ -77,6 +77,9 @@ import subprocess
 import sys
 import time
 
+from zero import package
+from mtgz.az import layouts
+
 from zero import local_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -93,8 +96,9 @@ DEFAULT_SPOT = 0.05
 DEFAULT_DEADLINE_S = 3 * 3600
 EXPIRES_DAYS = 30
 SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,62}$')
-# (A campaign plays the game its checkpoints record - layout v7 `mtg` or v8 `mtg_v8`, docs/ENGINE.md 236 - never a
-# default: `ckpt_game`; a campaign made before layout v8 saved `mtg` in its state.)
+# (A campaign plays the game its checkpoints record - layout v8 `mtg` or v7 `mtg_v7`, docs/ENGINE.md 236 - never a
+# default: `ckpt_game`; its state saves the game with its layout record, `layouts.stamp`; a campaign made before layout
+# v8 saved `mtg` and none, which reads as `mtg_v7`: `layouts.record_game`.)
 
 
 def ckpt_game(a, b=None):
@@ -266,7 +270,8 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
         rule = h2h.with_belief(rule, tilts=dict(tilts))
         cfg['eval_belief_tilts'] = {k: float(v) for k, v in sorted(dict(tilts).items()) if v}
     cfg.update(eval_sims=int(sims), c_puct=float(c_puct), chance_k=int(chance_k), max_steps=int(max_steps),
-               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=ckpt_game(ckpt_a, ckpt_b), groups=EVAL_GROUPS)
+               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, groups=EVAL_GROUPS)
+    package.set_game(cfg, ckpt_game(ckpt_a, ckpt_b))   # (with its game_layout: a worker plays the layout it names)
     if sides is None:
         want = [match_seat(ckpt_a, sims, rule, chance_k, c_puct),
                 match_seat(ckpt_b or ckpt_a, sims, rule, chance_k, c_puct)]
@@ -323,7 +328,7 @@ def selfplay_settings(ckpt, overrides=None):
     if not cfg:
         raise CampaignError(f'{ckpt}: no run config next to it (runs/<run>/config.json)')
     cfg.update(overrides or {})
-    cfg['game'] = ckpt_game(ckpt)
+    package.set_game(cfg, ckpt_game(ckpt))          # (with its game_layout: a worker plays the layout it names)
     return cfg
 
 
@@ -850,7 +855,7 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
         if info.get('build_id') != build_id or 'eval' not in (info.get('kinds') or []):
             raise CampaignError(f'{worker} is build {info.get("build_id")} ({info.get("kinds")}), not the eval worker '
                                 f'build {build_id}')
-        st = {'run': run, 'name': name, 'game': ckpt_game(a, b), 'a': os.path.abspath(a), 'b': os.path.abspath(b) if b else None,
+        st = {'run': run, 'name': name, **layouts.stamp(ckpt_game(a, b)), 'a': os.path.abspath(a), 'b': os.path.abspath(b) if b else None,
               'seats': seats, 'paired': bool(paired), 'seed': int(seed), 'games': int(games), 'batch': 'c1',
               'games_per_lease': games_per_lease, 'share': None if share is None else float(share),
               'priority': float(priority), 'build_id': build_id, 'runtime': runtime, 'worker': os.path.abspath(worker),
@@ -877,9 +882,9 @@ def resume(d, client=None, opts=None, log=log_stderr):
 def _setup(d, st, client, opts, log):
     from zero import farm_def as FD
     if not st.get('gens'):
-        gens = {'1': export_gen(st['a'], 1, st.get('game', 'mtg'), st['spec'], st['run'], log, opts.get('export_cache'))}
+        gens = {'1': export_gen(st['a'], 1, layouts.record_game(st), st['spec'], st['run'], log, opts.get('export_cache'))}
         if st['b']:
-            gens['2'] = export_gen(st['b'], 2, st.get('game', 'mtg'), st['spec'], st['run'], log, opts.get('export_cache'))
+            gens['2'] = export_gen(st['b'], 2, layouts.record_game(st), st['spec'], st['run'], log, opts.get('export_cache'))
         st['gens'] = gens
         save_state(d, st)
     cl = client or FD.Client(opts.get('url', FD.URL))
@@ -1194,7 +1199,7 @@ def spot_check(d, st, frac=None, engine=None, log=log_stderr):
     for g in pick:
         r = rows[g]
         try:
-            FE.replay_trace(r, st.get('game', 'mtg'), st['spec'], engine, st['seed'], st['paired'], samples=samples_job(st),
+            FE.replay_trace(r, layouts.record_game(st), st['spec'], engine, st['seed'], st['paired'], samples=samples_job(st),
                             aux=bool(r.get('aux')))
         except FE.TraceMismatch as e:
             _refuse(d, st, f'spot check: machine {r.get("by", {}).get("machine")}: {e}')
@@ -1222,8 +1227,8 @@ def describe(row, spec, engine=None, states=False, game=None):
         import mtgz.az  # noqa: F401
         from mtgz import _engine as engine
     rec = row['rec']
-    # (the campaign's game, `st.get('game', 'mtg')`; a row of a campaign made before layout v8: layout v7's `mtg`)
-    g = engine.Game(game or row.get('game') or 'mtg', spec, int(rec['n']), int(rec['seed']))
+    # (the campaign's game, `layouts.record_game(st)`; a row of a campaign made before layout v8: layout v7's `mtg_v7`)
+    g = engine.Game(game or layouts.record_game(row), spec, int(rec['n']), int(rec['seed']))
     eps = [{'moves': []}]
     for i, s in enumerate(rec['steps']):
         if isinstance(s, dict):                      # a chained contest's episode boundary

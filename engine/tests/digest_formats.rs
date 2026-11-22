@@ -118,7 +118,7 @@ fn layout_v7() -> bool {
 /// A game of the `MtgAz` family, as the digests read it.
 trait Digested: SearchGame + Clone {
     fn az(&self) -> &MtgAz;
-    /// `viewer`'s encoding hashed: `mtg`'s whole layout v8 row (`mtg_v8`'s; v7's with `DIGEST_ENCODING=v7`),
+    /// `viewer`'s encoding hashed: `mtg`'s whole layout v8 row (v7's, `mtg_v7`'s, with `DIGEST_ENCODING=v7`),
     /// `mtg_eoe`'s layout v6 floats.
     fn hash_encoding(&self, viewer: usize, h: &mut H);
 }
@@ -503,7 +503,7 @@ const DRIVER_EVERY: u64 = 1_000;
 #[test]
 #[ignore]
 fn driver_digest() {
-    // (The default game's, `mtg_v8`, layout v8's rows, ENGINE.md 236; `DIGEST_ENCODING=v7`: the game `mtg`'s, layout v7.)
+    // (The default game's, `mtg`, layout v8's rows, ENGINE.md 236; `DIGEST_ENCODING=v7`: the game `mtg_v7`'s, layout v7.)
     if layout_v7() {
         driver_digest_of::<MtgAz>()
     } else {

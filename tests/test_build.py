@@ -30,7 +30,7 @@ def play_and_round_trip(p1_deck, games, seed0, share=0.15):
     rng = random.Random(seed0)
     built, not_built = 0, collections.Counter()
     for gi in range(games):
-        g = E.Game('mtg_v8', sj, 2, seed0 + gi)
+        g = E.Game('mtg', sj, 2, seed0 + gi)
         for _ in range(1500):
             if g.over:
                 break

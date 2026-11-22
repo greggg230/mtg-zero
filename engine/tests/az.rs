@@ -32,7 +32,7 @@ fn enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
     engine::az::tail_encode::Row::of_az_v8(g, viewer).flat()
 }
 
-/// `viewer`'s layout v7 row (the game `mtg`'s): the gate checks that it lacks exactly layout v8's facts.
+/// `viewer`'s layout v7 row (the game `mtg_v7`'s): the gate checks that it lacks exactly layout v8's facts.
 fn enc7(g: &MtgAz, viewer: usize) -> Vec<f32> {
     engine::az::tail_encode::Row::of_az(g, viewer).flat()
 }
@@ -441,12 +441,12 @@ fn layout_json_is_checked_in() {
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
 }
 
-/// Layout v8 (ENGINE.md 236, the game `mtg_v8`): `mtgz/az/layout_v8.json` = `encode::layout_json_v8`
+/// Layout v8 (ENGINE.md 236, the game `mtg`): `mtgz/az/layout_v8.json` = `encode::layout_json_v8`
 /// (MTGZ_WRITE_LAYOUT=1 rewrites it), and it widens layout v7 additively and exactly: the same
 /// features and head (the widen's map is the identity), v7's 25 segments unchanged (names, slots,
 /// widths, gates, columns), then the six tail-only gated segments of `tail_v8` (zero-core's widen
 /// gives them a gate of exactly 0: docs/az.md 43.8), `pay_options` with a pointer column; the tail
-/// segments are `TAILS_V8`, the game `mtg_v8`'s.
+/// segments are `TAILS_V8`, the game `mtg`'s.
 #[test]
 fn layout_v8_is_checked_in_and_widens_layout_v7_exactly() {
     let want = encode::layout_json_v8(CardDb::cube());
@@ -1609,7 +1609,7 @@ fn public_state_reaches_the_encoding() {
         applied6: usize,
         enc6_same: [usize; 2],
         example6: Option<String>,
-        // layout v7 (the game `mtg`, ENGINE.md 236): a public change its row leaves out
+        // layout v7 (the game `mtg_v7`, ENGINE.md 236): a public change its row leaves out
         enc7_same: [usize; 2],
         example7: Option<String>,
     }
@@ -1740,7 +1740,7 @@ fn public_state_reaches_the_encoding() {
         if !matches!(state, "ok" | "limit (design)" | "gap (next layout)" | "rare, not applied" | "rare limit" | "known gap") {
             findings.push(format!("{state}: {} ({})", p.name, p.field));
         }
-        // Layout v7 (the game `mtg`): a public change its row leaves out is one of layout v8's facts (ENGINE.md 236).
+        // Layout v7 (the game `mtg_v7`): a public change its row leaves out is one of layout v8's facts (ENGINE.md 236).
         if x.enc7_same.iter().any(|&n| n > 0) && limited != Some(LimitKind::Design) {
             match known_alone(V7, p.name) {
                 Some(k) => {

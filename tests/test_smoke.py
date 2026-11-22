@@ -22,4 +22,4 @@ def test_mtg_smoke_iteration(tmp_path):
     assert m[1]['eval_yard']['opp'] == 'heuristic' and m[1]['eval_yard']['games'] == 8
     assert m[1]['eval_random']['games'] == 4
     cfg = json.load(open(run / 'config.json'))
-    assert cfg['game'] == 'mtg_v8' and json.loads(cfg['spec'])['max_turns'] == 60     # (layout v8, ENGINE.md 236)
+    assert cfg['game'] == 'mtg' and json.loads(cfg['spec'])['max_turns'] == 60     # (layout v8, ENGINE.md 236)

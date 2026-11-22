@@ -78,8 +78,8 @@ fn legal(g: &MtgAz) -> Vec<u16> {
     v
 }
 
-/// The whole row of `viewer` (the head first): layout v8's, the default game `mtg_v8`'s (ENGINE.md 236); with
-/// `DIGEST_ENCODING=v7` layout v7's (the game `mtg`'s, the compatibility layout).
+/// The whole row of `viewer` (the head first): layout v8's, the default game `mtg`'s (ENGINE.md 236); with
+/// `DIGEST_ENCODING=v7` layout v7's (the game `mtg_v7`'s, the compatibility layout).
 fn row(g: &MtgAz, viewer: usize) -> Vec<f32> {
     let v7 = std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7");
     engine::az::tail_encode::Row::of_az_layout(g, viewer, !v7).flat()

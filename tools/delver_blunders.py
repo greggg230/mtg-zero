@@ -117,7 +117,7 @@ DMG_RE = re.compile(r'(\d+) damage to ')
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts
@@ -1044,7 +1044,7 @@ def mirror(ckpt, seat, games, sims, chance_k, seed, threads, groups, device, spe
     drive(drv, {'a': ev})
     rows = sorted(drv.take_results(), key=lambda r: r['gid'])
     w0 = sum(r['result'][0] for r in rows) / max(1, len(rows))
-    return {'a': ckpt, 'b': ckpt, 'game': _lay().current(), 'sims': int(sims), 'chance_k': int(chance_k), 'games': len(rows),
+    return {'a': ckpt, 'b': ckpt, **_lay().stamp(_lay().current()), 'sims': int(sims), 'chance_k': int(chance_k), 'games': len(rows),
             'seat0_score': round(w0, 4), 'unfinished': sum(1 for r in rows if not r['over']), 'one_evaluator': True,
             'rows': rows}
 

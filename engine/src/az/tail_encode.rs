@@ -60,7 +60,7 @@ pub mod seg {
     pub const FOUND: u16 = 24;
     /// The number of segments (layout v7).
     pub const N: usize = 25;
-    /// Layout v8 (ENGINE.md 236, the game `mtg_v8`): tail-only gated segments appended after v7's
+    /// Layout v8 (ENGINE.md 236, the game `mtg`): tail-only gated segments appended after v7's
     /// (`tail_v8`): a payment's state and picks in progress, the payment decisions' option
     /// meanings, a gone object's last known information (by its stale key), a gone spell's item
     /// and its relations, and the groups of places holding search finds mixed with other cards.
@@ -579,7 +579,7 @@ const fn ts8(seg: u16, name: &'static str) -> TailSeg {
     TailSeg { seg, name, width: SEG_W_V8[seg as usize], head: 0 }
 }
 
-/// The tail segments of layout v8 (the game `mtg_v8`, ENGINE.md 236): v7's, then its own.
+/// The tail segments of layout v8 (the game `mtg`, ENGINE.md 236): v7's, then its own.
 pub const TAILS_V8: [TailSeg; 27] = {
     let mut t = [ts8(seg::PAYMENT, "payment"); 27];
     let mut i = 0;
@@ -2388,7 +2388,7 @@ impl Row {
         Row::of_az_layout(a, viewer, false)
     }
 
-    /// `viewer`'s layout v8 row of match `a` (the game `mtg_v8`'s `encode_row` and
+    /// `viewer`'s layout v8 row of match `a` (the game `mtg`'s `encode_row` and
     /// `option_overrides`, ENGINE.md 236).
     pub fn of_az_v8(a: &super::MtgAz, viewer: usize) -> Row {
         Row::of_az_layout(a, viewer, true)

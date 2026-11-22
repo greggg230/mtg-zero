@@ -44,6 +44,10 @@ pub mod sealed;
 pub mod tail_encode;
 pub mod tail_v8;
 pub mod v8;
+
+/// The compatibility game: `mtg` in layout v7, the game every run, checkpoint and record made before layout v8 names
+/// `mtg` without a layout record (zero-core's game alias, ENGINE.md 236.9).
+pub const NAME_V7: &str = "mtg_v7";
 pub mod view;
 
 use crate::db::CardDb;
@@ -890,8 +894,8 @@ impl MtgSpec {
     /// never fed another's encodings through the wrong game's name.
     pub fn check_game(&self, game: &str) -> Result<(), String> {
         let mine = self.game();
-        // (`mtg_v8` is `mtg` in layout v8, ENGINE.md 236: the same specs.)
-        if mine == game || (mine == "mtg" && game == v8::NAME) {
+        // (`mtg` is layout v8 and `mtg_v7` layout v7, ENGINE.md 236.9: the same specs.)
+        if mine == game || (mine == v8::NAME && game == NAME_V7) {
             return Ok(());
         }
         Err(if mine == "mtg_eoe" {
@@ -1304,8 +1308,8 @@ impl Bot<MtgAz> for HeuristicBot {
 }
 
 impl MtgAz {
-    /// The row of `viewer` in layout v8 (`v8`: the game `mtg_v8`, ENGINE.md 236) or v7 (the game
-    /// `mtg`): the deck choice's and sideboarding's encodings have no tail (their lists fit the
+    /// The row of `viewer` in layout v8 (`v8`: the game `mtg`, ENGINE.md 236) or v7 (the game
+    /// `mtg_v7`): the deck choice's and sideboarding's encodings have no tail (their lists fit the
     /// head) and are the same in both.
     pub fn encode_row_layout(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf, v8: bool) {
         if self.m.choice.is_some() {
@@ -1336,7 +1340,7 @@ impl MtgAz {
 
 impl SearchGame for MtgAz {
     type Spec = MtgSpec;
-    const NAME: &'static str = "mtg";
+    const NAME: &'static str = NAME_V7;
     const NUM_ACTIONS: usize = crate::decision::NUM_ACTIONS;
     const NUM_FEATURES: usize = encode::NUM_FEATURES;
     const MIN_PLAYERS: usize = 2;

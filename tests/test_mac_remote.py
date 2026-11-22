@@ -134,7 +134,7 @@ def test_a_resolver_mirror_is_evaluated_after_the_same_check(tmp_path):
     from zero.net import save
     from zero.run import DEFAULTS, PRESETS, Run, model_path
     rc = resolver_config(dict(DEFAULTS, **PRESETS['team_draft-smoke']))
-    assert rc['game'] == 'mtg_v8' and rc['resolver'] == '' and rc['eval_remote'] == ''
+    assert rc['game'] == 'mtg' and rc['resolver'] == '' and rc['eval_remote'] == ''
     mirror = tmp_path / 'mtgz-remote' / 'td.resolver'
     (mirror / 'models').mkdir(parents=True)
     cfg = dict(rc, eval_games=2, eval_random_games=2, ref_games=2, elo_games=2)
@@ -355,7 +355,7 @@ def test_a_worker_plays_mtg(tmp_path, mode):
     rows = 0
     for e in shards:
         sh = read_shard(e['path'])
-        assert sh['meta']['game'] == 'mtg_v8' and sh['meta']['source'] == 'remote' and sh['meta']['iter'] == 1
+        assert sh['meta']['game'] == 'mtg' and sh['meta']['source'] == 'remote' and sh['meta']['iter'] == 1
         assert sh['x'].shape[1] == sh['meta']['features'] and int(sh['net'].max()) == 0
         rows += len(sh['player'])
     # self-play: the accepted games' samples (a game finished after the accept waits, held)

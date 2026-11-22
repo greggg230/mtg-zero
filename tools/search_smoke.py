@@ -67,7 +67,7 @@ SPECS = {
 # the Legacy Izzet Delver mirror (docs/ENGINE.md 54): the preset delver-mirror's spec
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts
@@ -185,11 +185,16 @@ UNIFORM_DROPS = ('selfplay_belief_tilt', 'selfplay_belief_tilts')
 def smoke_config(preset, run_config=None):
     """The run settings the smoke plays: a run's config.json (--run-config) over zero-core's DEFAULTS, else the
     preset's (`import mtgz.az` first: the package's presets)."""
+    from zero import package
     from zero.run import DEFAULTS, PRESETS
     if run_config:
         with open(run_config, encoding='utf-8') as f:
-            return dict(DEFAULTS, **json.load(f))
-    return dict(DEFAULTS, **PRESETS[preset])
+            saved = json.load(f)
+        # (the run's game as the run resolves it: `mtg` without a layout record is `mtg_v7`, ENGINE.md 236.9)
+        return package.set_game(dict(DEFAULTS, **saved), package.record_game(saved))
+    c = dict(DEFAULTS, **PRESETS[preset])
+    # (a preset's game is a first start's: the name's current layout, `mtg` = layout v8)
+    return package.set_game(c, package.resolve_game(c['game'], package.active().layout_of(c['game'])))
 
 
 def smoke_seat(c, sims):

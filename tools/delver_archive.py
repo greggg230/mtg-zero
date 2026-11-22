@@ -55,7 +55,7 @@ LIBRARY_REL = 'data/delver_canary_library.json'
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts
@@ -369,7 +369,7 @@ def main(argv=None):
     if not B.entries:
         raise SystemExit('no archive entry replays on this engine: nothing written')
     info = DB.engine_info(ROOT)
-    out = {'format': FORMAT, 'game': _lay().current(), 'base_spec': spec, 'deal': a.deal, 'turns': [t0, t1],
+    out = {'format': FORMAT, **_lay().stamp(_lay().current()), 'base_spec': spec, 'deal': a.deal, 'turns': [t0, t1],
            'built': {'date': time.strftime('%Y-%m-%d %H:%M'), 'engine': info, 'seconds': round(time.time() - t, 1)},
            'counts': counts, 'skipped_counts': skipped, 'canary': a.canary,
            'canary_held_out': [h['id'] for h in B.held_out], 'entries': B.entries}

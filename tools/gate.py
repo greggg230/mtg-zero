@@ -1875,7 +1875,7 @@ def compat_step(ctx, args, name):
                                                   f'did not run')
     base = check_baseline(ctx, args.baseline_root)
     return Step(name, [python_exe(), os.path.join(CORE, 'tools', 'check_checkpoint_compat.py'), '--old', base,
-                       '--new', ROOT, '--package', 'mtgz', '--net', 'random', '--game', 'mtg_v8', '--spec',
+                       '--new', ROOT, '--package', 'mtgz', '--net', 'random', '--game', 'mtg', '--spec',
                        args.checkpoint_spec or '{"max_turns": 60}'], id=sid, heavy=True,
                 checker=make_compat_checker(base, ROOT),
                 evidence='{"identical": true, "differences": []}, the old side = the baseline\'s and the new side = '

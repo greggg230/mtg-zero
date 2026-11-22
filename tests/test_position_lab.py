@@ -30,10 +30,10 @@ def spec(log=False):
 def fake_replay(seed=7, moves=60, pick=0):
     """A zero-replay/1-shaped record of a random Delver mirror game: the frames of its multi-option
     decisions (as the recorder stores them), the states at those frames (the log on)."""
-    rep = {'format': 'zero-replay/1', 'game': 'mtg_v8', 'seed': seed, 'game_index': 0,
+    rep = {'format': 'zero-replay/1', 'game': 'mtg', 'seed': seed, 'game_index': 0,
            'spec': json.dumps(spec(log=True)), 'title': 'Generation 1 #1', 'frames': [], 'states': []}
     from zero import mcts
-    g = E.Game('mtg_v8', rep['spec'], 2, L.replay_seed(rep))
+    g = E.Game('mtg', rep['spec'], 2, L.replay_seed(rep))
     while not g.over and len(g.legal()) == 1:
         mcts.transition(g, g.legal()[0])
     r = random.Random(seed + pick)
@@ -49,7 +49,7 @@ def fake_replay(seed=7, moves=60, pick=0):
 
 
 def lab_game(spot, **start):
-    return E.Game('mtg_v8', L.start_spec(spot, start), 2, 0)
+    return E.Game('mtg', L.start_spec(spot, start), 2, 0)
 
 
 def hand(g, p):
@@ -157,10 +157,10 @@ def test_belief_mode_deals_toward_the_prediction(spot):
 
 def test_no_start_block_is_the_game_of_before():
     sp = json.dumps(spec())
-    g = E.Game('mtg_v8', sp, 2, 3)
+    g = E.Game('mtg', sp, 2, 3)
     assert 'lab' not in json.loads(g.export_state())
     # an empty prefix with nothing dealt is the same game, move for move
-    h = E.Game('mtg_v8', L.start_spec({'spec': spec(), 'seed': 3, 'actions': []}, {'deal': 'none'}), 2, 99)
+    h = E.Game('mtg', L.start_spec({'spec': spec(), 'seed': 3, 'actions': []}, {'deal': 'none'}), 2, 99)
     from zero import mcts
     while not g.over and len(g.legal()) == 1:
         mcts.transition(g, g.legal()[0])
@@ -295,7 +295,7 @@ def test_the_canary_sees_a_bauble_look_before_the_land():
     the canary reads the look (and the seen card: the library's top) and the land choice from the moves."""
     s = L.opening_spot(json.loads(A.SPEC_DELVER), 1754)
     d = s['decider']
-    g = E.Game('mtg_v8', json.dumps(s['spec']), 2, s['seed'])
+    g = E.Game('mtg', json.dumps(s['spec']), 2, s['seed'])
     from zero import mcts
     moves = []
     plan = ['Play first', 'Keep', 'Keep', "Cast Mishra's Bauble", 'Pass priority', "Activate Mishra's Bauble", f'Target P{d + 1}',
@@ -334,14 +334,14 @@ def test_the_network_paths_take_whole_rows(spot):
     from zero.infer import NetEvaluator
     from zero.net import make_net
     torch.manual_seed(0)
-    ev = NetEvaluator(make_net(G.info('mtg_v8'), 'mtg_v8', 'tokens', 16, 1, heads=2, aux=A.PACKAGE.aux_of('mtg_v8')), 'cpu')
+    ev = NetEvaluator(make_net(G.info('mtg'), 'mtg', 'tokens', 16, 1, heads=2, aux=A.PACKAGE.aux_of('mtg')), 'cpu')
     g = L.spot_game(spot)
     rk = L.rows_kind()
     assert rk is not None and rk.widths, 'layout v7: variable-length rows'
     x, rr = L.net_row(g, spot['decider'])
     assert rr is not None and len(rr[0]['t_seg']) > 0, 'a Delver mid-game row with tail tokens (graveyard_order)'
     pred = L.belief_pred(ev, g, spot['decider'])
-    assert pred.shape == (G.info('mtg_v8')['aux_width'],) and np.isfinite(pred).all()
+    assert pred.shape == (G.info('mtg')['aux_width'],) and np.isfinite(pred).all()
     keys = {'leaf_value_view': 'root', 'belief_tilt': 1.0, 'belief_clip': 20.0, 'belief_mix': 0.25, 'select': 'visits'}
     params = {'keys': keys, 'c_puct': 1.0, 'sims': 8, 'chance_k': 0, 'seeds': [1, 2], 'floor': 0}
     out = L.evaluate_position(spot, ev, params, pred=list(pred))

@@ -1,11 +1,12 @@
-//! The zero-core game `mtg_v8` (ENGINE.md 236): the `mtg` game in layout v8. Layout v8 is layout
-//! v7 (the game `mtg`, ENGINE.md 125) plus six tail-only gated segments (`tail_v8`): a payment's
-//! picks and state in progress, the payment decisions' option meanings, a gone object's last known
-//! information, a gone spell's item and relations, and the groups of places holding search finds
-//! mixed with other cards. A v7 network widens onto it bit for bit (`tools/fork_run.py <checkpoint>
-//! <new run> --game mtg_v8`: the new segments' gates exactly 0), and a v7 run keeps the game `mtg`,
-//! whose rows are unchanged: zero-core's tail segments are a constant of the game type and its token
-//! layout is the game's (`mtgz/az/layout_v8.json`), so the layout is chosen by the game's name.
+//! The zero-core game `mtg` (ENGINE.md 236): MTG in layout v8, the default from now on. Layout v8 is
+//! layout v7 (the compatibility game `mtg_v7`, `MtgAz`, ENGINE.md 125) plus six tail-only gated
+//! segments (`tail_v8`): a payment's picks and state in progress, the payment decisions' option
+//! meanings, a gone object's last known information, a gone spell's item and relations, and the groups
+//! of places holding search finds mixed with other cards. A v7 network widens onto it bit for bit
+//! (`tools/fork_run.py <checkpoint> <new run> --game mtg`: the new segments' gates exactly 0), and a
+//! v7 run keeps layout v7, whose rows are unchanged: everything made before layout v8 names `mtg`
+//! without a layout record, which zero-core's game alias (`mtgz.az` `game_aliases`, zero-core docs/az.md
+//! 73) resolves to `mtg_v7`; what is made from now on names `mtg` with `game_layout` 8 (ENGINE.md 236.9).
 //!
 //! Everything else is `MtgAz`'s: the spec (the same specs), the rules, the match, the head of the
 //! row, the auxiliary targets, the bots.
@@ -15,14 +16,14 @@ use zero_search::tail::{TailBuf, TailSeg};
 
 use super::{encode, tail_encode, MtgAz, MtgSpec};
 
-/// The game's name.
-pub const NAME: &str = "mtg_v8";
+/// The game's name: `mtg` is layout v8 (ENGINE.md 236.9; `mtg_v7` the compatibility layout, zero-core's game alias).
+pub const NAME: &str = "mtg";
 
 /// An `mtg` game encoded in layout v8.
 #[derive(Clone)]
 pub struct MtgV8Az(pub MtgAz);
 
-/// One of `MtgAz`'s bots playing `mtg_v8` (the same game underneath).
+/// One of `MtgAz`'s bots playing `mtg` in layout v8 (the same game underneath).
 struct V8Bot(Box<dyn Bot<MtgAz>>);
 
 impl Bot<MtgV8Az> for V8Bot {
@@ -206,7 +207,7 @@ mod tests {
     /// game): the constants agree, and one random game plays alike in both, the same rows but v8's
     /// segments (ENGINE.md 236).
     #[test]
-    fn mtg_v8_is_mtg_in_layout_v8() {
+    fn mtg_is_mtg_v7_in_layout_v8() {
         assert_eq!(<MtgV8Az as SearchGame>::NUM_ACTIONS, <MtgAz as SearchGame>::NUM_ACTIONS);
         assert_eq!(<MtgV8Az as SearchGame>::AUX, <MtgAz as SearchGame>::AUX);
         assert_eq!(&<MtgV8Az as SearchGame>::TAILS[..21], <MtgAz as SearchGame>::TAILS);

@@ -306,7 +306,7 @@ def test_game_seed_pairs_and_rebuilds_a_driver_game():
     from mtgz.az.infer import drive
     from zero.games import engine
     h, r = G.seat_dict('heuristic'), G.seat_dict('random')
-    drv = G.Driver('mtg_v8', [[h, r], [r, h]] * 2, spec=P.SPEC_DELVER, concurrency=4, threads=2, seed=17, max_steps=20000,
+    drv = G.Driver('mtg', [[h, r], [r, h]] * 2, spec=P.SPEC_DELVER, concurrency=4, threads=2, seed=17, max_steps=20000,
                    move_log=1_000_000)
     drive(drv, {})
     E = engine()
@@ -360,7 +360,7 @@ def test_canary_search_of_a_rebuilt_spot():
     from zero.infer import NetEvaluator
     from zero.net import make_net
     h, r = G.seat_dict('heuristic'), G.seat_dict('random')
-    drv = G.Driver('mtg_v8', [[h, r]], spec=P.SPEC_DELVER, concurrency=1, threads=1, seed=5, max_steps=20000, move_log=1_000_000)
+    drv = G.Driver('mtg', [[h, r]], spec=P.SPEC_DELVER, concurrency=1, threads=1, seed=5, max_steps=20000, move_log=1_000_000)
     drive(drv, {})
     row = drv.take_results()[0]
     E = engine()
@@ -374,7 +374,7 @@ def test_canary_search_of_a_rebuilt_spot():
     g = B.spot_game(E, spot)
     assert json.loads(g.export_state())['decision'] == st['decision']
     torch.manual_seed(0)
-    ev = NetEvaluator(make_net(G.info('mtg_v8'), 'mtg_v8', 'tokens', 16, 1, heads=2), 'cpu')
+    ev = NetEvaluator(make_net(G.info('mtg'), 'mtg', 'tokens', 16, 1, heads=2), 'cpu')
     seat = {'select': 'cq', 'select_min_visits': 4, 'cq_c_visit': 50.0, 'cq_c_scale': 0.3, 'leaf_value_view': 'root'}
     chosen = B.search_many(ev, [g.clone() for _ in range(3)], [1, 2, 3], 8, seat)
     legal = {o['a'] for o in st['decision']['options']}

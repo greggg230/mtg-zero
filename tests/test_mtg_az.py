@@ -19,14 +19,14 @@ MATCH = '{"max_turns": 60, "format": "bo3"}'
 
 
 def nf():
-    return G.info('mtg')['num_features']
+    return G.info('mtg_v7')['num_features']
 
 
 def test_engine_module_registers_the_games():
     from mtgz import _engine as E
-    assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft', 'mtg_eoe', 'mtg_v8']
-    assert G.info('mtg_v8')['num_features'] == 56384 and G.info('mtg_v8')['num_actions'] == 1024   # layout v8: v7's head (ENGINE.md 236)
-    info = G.info('mtg')
+    assert G.engine() is E and E.game_names() == ['toy', 'mtg_v7', 'team_draft', 'mtg_eoe', 'mtg']
+    assert G.info('mtg')['num_features'] == 56384 and G.info('mtg')['num_actions'] == 1024   # layout v8: v7's head (ENGINE.md 236)
+    info = G.info('mtg_v7')
     assert info['num_actions'] == 1024 and info['num_features'] == 56384      # layout v7 (ENGINE.md 125)
     assert G.info('mtg_eoe')['num_features'] == 44212                        # mtg_eoe: layout v6 (ENGINE.md 100.5)
     assert info['min_players'] == info['max_players'] == 2
@@ -36,7 +36,7 @@ def test_engine_module_registers_the_games():
 def test_game_through_the_bindings():
     E = G.engine()
     rng = np.random.default_rng(1)
-    g = E.Game('mtg', SPEC, 2, 7)
+    g = E.Game('mtg_v7', SPEC, 2, 7)
     steps = 0
     while not g.over:
         legal = g.legal()
@@ -55,15 +55,15 @@ def test_game_through_the_bindings():
     r = g.result()
     assert abs(sum(r) - 1) < 1e-6 and g.rounds >= 1
     with pytest.raises(Exception):
-        E.Game('mtg', '{"bogus": 1}', 2, 1)
+        E.Game('mtg_v7', '{"bogus": 1}', 2, 1)
     with pytest.raises(Exception):
-        E.Game('mtg', SPEC, 3, 1)
+        E.Game('mtg_v7', SPEC, 3, 1)
 
 
 def test_bots_in_the_rust_driver():
     """heuristic vs random through the driver (the evaluation path): the heuristic wins."""
     h, r = G.seat_dict('heuristic'), G.seat_dict('random')
-    drv = G.Driver('mtg', [[h, r], [r, h]] * 6, spec=SPEC, concurrency=12,
+    drv = G.Driver('mtg_v7', [[h, r], [r, h]] * 6, spec=SPEC, concurrency=12,
                    threads=2, seed=3, max_steps=20000)
     drive(drv, {})
     res = drv.take_results()
@@ -74,14 +74,14 @@ def test_bots_in_the_rust_driver():
 
 def test_selfplay_records_samples():
     seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10)
-    drv = G.Driver('mtg', [[seat, seat]] * 2, spec=SPEC, concurrency=2, threads=1, seed=5, record=True,
+    drv = G.Driver('mtg_v7', [[seat, seat]] * 2, spec=SPEC, concurrency=2, threads=1, seed=5, record=True,
                    max_steps=20000)
     parts = []
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
     parts.append(drv.take_samples())
     s = protocol.concat_samples(parts)
     from zero.games import tail_widths
-    protocol.validate_samples(s, nf(), tail_widths(G.info('mtg')))
+    protocol.validate_samples(s, nf(), tail_widths(G.info('mtg_v7')))
     assert len(s['x']) > 50
     res = drv.take_results()
     assert len(res) == 2 and all(r['over'] for r in res)
@@ -94,7 +94,7 @@ def test_match_through_the_bindings():
     E = G.engine()
     rng = np.random.default_rng(3)
     for seed in (1, 2):
-        g = E.Game('mtg', MATCH, 2, seed)
+        g = E.Game('mtg_v7', MATCH, 2, seed)
         steps = 0
         while not g.over:
             legal = g.legal()
@@ -110,7 +110,7 @@ def test_match_through_the_bindings():
         r = g.result()
         assert abs(sum(r) - 1) < 1e-6 and r[0] in (0.0, 0.5, 1.0)
     h, r = G.seat_dict('heuristic'), G.seat_dict('random')
-    drv = G.Driver('mtg', [[h, r], [r, h]] * 3, spec=MATCH, concurrency=6, threads=2, seed=3, max_steps=60000)
+    drv = G.Driver('mtg_v7', [[h, r], [r, h]] * 3, spec=MATCH, concurrency=6, threads=2, seed=3, max_steps=60000)
     drive(drv, {})
     res = drv.take_results()
     assert len(res) == 6 and all(x['over'] for x in res)
@@ -125,11 +125,11 @@ def test_presets_and_defaults():
         json.loads(c4['spec']), decks='eval')                           # evaluation and Elo: matches
     assert {k for k in c3 if c3[k] != c4[k]} == {'spec', 'eval_spec', 'max_steps', 'preset'}
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {})
-    assert cfg['game'] == 'mtg_v8' and cfg['yardstick'] == 'heuristic'      # (layout v8: new runs, ENGINE.md 236)
+    assert cfg['game'] == 'mtg' and cfg['yardstick'] == 'heuristic'      # (layout v8: new runs, ENGINE.md 236)
     assert json.loads(cfg['spec'])['max_turns'] == 60
     assert cfg['eval_spec'] == ''                                      # the package's evaluation spec
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-1']), {})
-    assert cfg['game'] == 'mtg_v8' and cfg['iters'] >= 4 and cfg['infer_device'] == 'cpu'
+    assert cfg['game'] == 'mtg' and cfg['iters'] >= 4 and cfg['infer_device'] == 'cpu'
     a = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-2']), {})
     b = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-2-mlp']), {})
     assert (a['arch'], a['policy_target'], a['sims_minor']) == ('tokens', 'cq', 4) and b['arch'] == 'mlp'
@@ -144,7 +144,7 @@ def test_eval_spec():
     assert json.loads(evaldecks.eval_spec(lists)) == json.loads(lists)
     # the engine accepts it and plays the fixed set: every game is one of eval_decks pairs
     E = G.engine()
-    E.Game('mtg', evaldecks.eval_spec(SPEC), 2, 1)
+    E.Game('mtg_v7', evaldecks.eval_spec(SPEC), 2, 1)
 
 
 def test_evaluation_drivers_use_the_eval_decks():
@@ -154,7 +154,7 @@ def test_evaluation_drivers_use_the_eval_decks():
     import mtgz.az as A
     from zero import package
     assert not hasattr(run.Run.driver, '_mtgz_eval_decks')            # no patch any more
-    assert package.active().eval_spec_of('mtg', A.SPEC) == A.EVAL_SPEC == evaldecks.eval_spec(A.SPEC)
+    assert package.active().eval_spec_of('mtg_v7', A.SPEC) == A.EVAL_SPEC == evaldecks.eval_spec(A.SPEC)
     assert package.active().eval_spec_of('toy', '{}') == '{}'
     seen = []
     real = run.G.Driver
@@ -163,7 +163,7 @@ def test_evaluation_drivers_use_the_eval_decks():
         seen.append((kw.get('record'), spec))
 
     class Fake:
-        cfg = dict(run.DEFAULTS, game='mtg', spec=SPEC)
+        cfg = dict(run.DEFAULTS, game='mtg_v7', spec=SPEC)
     f = Fake()
     try:
         run.G.Driver = spy
@@ -185,7 +185,7 @@ def test_layout_and_token_network_read_the_encoding():
     import mtgz.az as A
     from zero.infer import NetEvaluator
     from zero.net import make_net, tokens_layout
-    info = G.info('mtg')
+    info = G.info('mtg_v7')
     lay = tokens_layout(A.LAYOUT, info['num_features'], info['num_actions'])
     assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 1024 and A.LAYOUT['version'] == 7
     segs = {s['name']: s for s in lay['segments']}
@@ -193,10 +193,10 @@ def test_layout_and_token_network_read_the_encoding():
     assert [g['name'] for g in lay['globals']] == ['globals', 'match', 'globals_v5', 'globals_v6', 'globals_v7']   # v7 (124.2)
     names = A.LAYOUT['cards']
     torch.manual_seed(0)
-    m = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)
+    m = make_net(info, 'mtg_v7', 'tokens', 32, 1, heads=2)
     E = G.engine()
     rng = np.random.default_rng(2)
-    g = E.Game('mtg', SPEC, 2, 11)
+    g = E.Game('mtg_v7', SPEC, 2, 11)
     seen = 0
     while not g.over and seen < 40:
         legal = list(g.legal())
@@ -227,7 +227,7 @@ def test_layout_and_token_network_read_the_encoding():
         g.step(int(legal[rng.integers(len(legal))]))
     assert seen > 0
     seat = G.nn_seat('m', 4)
-    drv = G.Driver('mtg', [[seat, G.seat_dict('random')]] * 6, spec=SPEC, concurrency=6, threads=1, seed=4,
+    drv = G.Driver('mtg_v7', [[seat, G.seat_dict('random')]] * 6, spec=SPEC, concurrency=6, threads=1, seed=4,
                    max_steps=20000)
     lb = drv.next_batch()
     pri, val, mar = NetEvaluator(m)(lb)
@@ -248,12 +248,12 @@ def test_an_older_token_network_widens_onto_layout_v7_exactly(tmp_path, old_vers
     import mtgz.az as A
     from mtgz.az import decklists
     from zero.net import TokenNet, token_feature_map, tokens_layout, widen
-    info = G.info('mtg')
+    info = G.info('mtg_v7')
     with open(os.path.join(os.path.dirname(A.__file__), f'layout_v{old_version}.json'), encoding='utf-8') as f:
         lo = json.load(f)
     assert lo['version'] == old_version and lo['features'] == old_features
     torch.manual_seed(3)
-    old = TokenNet(old_features, info['num_actions'], lo, d=32, layers=2, heads=2, ff=64, game='mtg').eval()
+    old = TokenNet(old_features, info['num_actions'], lo, d=32, layers=2, heads=2, ff=64, game='mtg_v7').eval()
     with torch.no_grad():
         for lin in (old.gen, old.ptr):
             lin.weight.normal_(0, 0.3)
@@ -268,7 +268,7 @@ def test_an_older_token_network_widens_onto_layout_v7_exactly(tmp_path, old_vers
     xs = []
     for spec in (SPEC, decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)):
         for seed in range(3):
-            g = E.Game('mtg', spec, 2, seed)
+            g = E.Game('mtg_v7', spec, 2, seed)
             k = 0
             while not g.over and k < 400:
                 if k % 7 == 0:
@@ -318,14 +318,14 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
     from zero import rows as R
     from zero.infer import NetEvaluator
     from zero.net import TokenNet, load, token_feature_map, tokens_layout, widen
-    info = G.info('mtg')
+    info = G.info('mtg_v7')
     ck = os.environ.get('MTGZ_WIDEN_CHECKPOINT')
     old = load(ck, allow_mismatch=True)[0] if ck else None
     if old is None or old.config['features'] != old_features:
         with open(os.path.join(os.path.dirname(A.__file__), f'layout_v{old_version}.json'), encoding='utf-8') as f:
             lo = json.load(f)
         torch.manual_seed(5)
-        old = TokenNet(old_features, info['num_actions'], lo, d=128, layers=2, heads=4, ff=256, game='mtg').eval()
+        old = TokenNet(old_features, info['num_actions'], lo, d=128, layers=2, heads=4, ff=256, game='mtg_v7').eval()
         with torch.no_grad():
             for lin in (old.gen, old.ptr):
                 lin.weight.normal_(0, 0.3)
@@ -344,7 +344,7 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
     worst = 0.0
     spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
     for seed in range(2):
-        g = E.Game('mtg', spec, 2, seed)
+        g = E.Game('mtg_v7', spec, 2, seed)
         k = 0
         while not g.over and k < 300:
             legal = np.asarray(g.legal(), np.int64)
@@ -372,7 +372,7 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
     assert seen['plain'] > 20 and seen['gated'] > 20, seen
     assert worst <= 1e-5, worst
     # the segments of the same width: bit for bit
-    xs = torch.from_numpy(np.asarray(E.Game('mtg', spec, 2, 3).encode_row(0)[0], np.float32))[None]
+    xs = torch.from_numpy(np.asarray(E.Game('mtg_v7', spec, 2, 3).encode_row(0)[0], np.float32))[None]
     with torch.no_grad():
         for (so, lo_), (sn, ln) in zip(zip(old.segs, old.seg_in), zip(new.segs, new.seg_in)):
             if so['count'] and so['width'] == sn['width']:
@@ -395,7 +395,7 @@ def _eval_one(ev, row, legal, to_move, v, tail_widths):
 
 def test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit(tmp_path):
     """ENGINE.md 236: a layout v7 token network (the game `mtg`; random weights, its policy heads too) widened
-    onto layout v8 (the game `mtg_v8`: `zero.net.widen`, tools/fork_run.py's route) computes exactly what it
+    onto layout v8 (the game `mtg`: `zero.net.widen`, tools/fork_run.py's route) computes exactly what it
     computed. On the same states, played in lockstep in both games (the cube's random decks and the Delver
     mirror), eager on the CPU:
     * on every v7 row (the v7 network's input) the widened network's priors, value and margin are the v7
@@ -406,33 +406,34 @@ def test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit(tmp_path):
       (zero-core docs/az.md 43.8: "to float rounding otherwise"), |diff| <= 1e-6.
     v8's six segments are appended gated, their gates exactly 0; v7's head and segments map one to one. The v7
     run's config keeps working: the v7 network is the game `mtg`'s (the encoding guard takes it there) and refused
-    by `mtg_v8` until widened."""
+    by `mtg` until widened."""
     import torch
     import mtgz.az as A
     from mtgz.az import decklists
     from zero import rows as R
     from zero.infer import NetEvaluator
     from zero.net import EncodingMismatch, TokenNet, check_encoding, encoding_mismatch, save, load, widen
-    info7, info8 = G.info('mtg'), G.info('mtg_v8')
+    info7, info8 = G.info('mtg_v7'), G.info('mtg')
     torch.manual_seed(7)
-    old = TokenNet(info7['num_features'], info7['num_actions'], A.LAYOUT, d=64, layers=2, heads=4, ff=128, game='mtg').eval()
+    old = TokenNet(info7['num_features'], info7['num_actions'], A.LAYOUT, d=64, layers=2, heads=4, ff=128, game='mtg_v7').eval()
     with torch.no_grad():
         for lin in (old.gen, old.ptr):
             lin.weight.normal_(0, 0.3)
             lin.bias.normal_(0, 0.3)
-    check_encoding(old.config, 'mtg')
+    check_encoding(old.config, 'mtg_v7')
     with pytest.raises(EncodingMismatch):
-        check_encoding(old.config, 'mtg_v8')
+        check_encoding(old.config, 'mtg')
     new = widen(old, info8['num_features'], info8['num_actions'], layout=A.LAYOUT_V8)
-    new.config['game'] = 'mtg_v8'
-    assert new.config['layout']['version'] == 8 and encoding_mismatch(new.config, 'mtg_v8') is None
+    from zero import package
+    package.set_game(new.config, 'mtg')               # (fork_run's: the name with game_layout 8, ENGINE.md 236.9)
+    assert new.config['layout']['version'] == 8 and encoding_mismatch(new.config, 'mtg') is None
     g8 = new.gates()
     assert {k: g8[k] for k in ('payment', 'pay_options', 'lki', 'lki_spells', 'lki_relations', 'find_groups')} == dict.fromkeys(
         ('payment', 'pay_options', 'lki', 'lki_spells', 'lki_relations', 'find_groups'), 0.0)
     assert all(g8[k] == v for k, v in old.gates().items())
     p = str(tmp_path / 'v8.pt')
     save(new, p)
-    load(p, game='mtg_v8')
+    load(p, game='mtg')
     eo, en = NetEvaluator(old, graphs=False), NetEvaluator(new, graphs=False)
     w7, w8 = R.layout_tails(old.config['layout']), R.layout_tails(new.config['layout'])
     E = G.engine()
@@ -442,7 +443,7 @@ def test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit(tmp_path):
     specs = [SPEC, decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)]
     for si, spec in enumerate(specs):
         for seed in range(3):
-            a, b = E.Game('mtg', spec, 2, seed), E.Game('mtg_v8', spec, 2, seed)
+            a, b = E.Game('mtg_v7', spec, 2, seed), E.Game('mtg', spec, 2, seed)
             k = 0
             while not a.over and k < 400:
                 legal = np.asarray(a.legal(), np.int64)
@@ -495,11 +496,11 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one(tmp_path
     from mtgz.az import replays
     from zero.net import (EncodingMismatch, TokenNet, check_checkpoint, check_encoding, encoding_mismatch, load,
                           make_net, save, widen)
-    info = G.info('mtg')
+    info = G.info('mtg_v7')
     with open(os.path.join(os.path.dirname(A.__file__), f'layout_v{old_version}.json'), encoding='utf-8') as f:
         v4 = json.load(f)
     torch.manual_seed(4)
-    old = TokenNet(old_features, info['num_actions'], v4, d=16, layers=1, heads=2, ff=32, game='mtg').eval()
+    old = TokenNet(old_features, info['num_actions'], v4, d=16, layers=1, heads=2, ff=32, game='mtg_v7').eval()
     p4 = str(tmp_path / 'old.pt')
     save(old, p4, {'iter': 3})
     with pytest.raises(EncodingMismatch) as e:
@@ -519,8 +520,8 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one(tmp_path
     save(new, p5)
     check_checkpoint(p5)
     replays.check_encoding(p5)
-    load(p5, game='mtg')
-    m = make_net(info, 'mtg', 'tokens', 16, 1, heads=2)
+    load(p5, game='mtg_v7')
+    m = make_net(info, 'mtg_v7', 'tokens', 16, 1, heads=2)
     assert m.config['layout']['version'] == 7 and encoding_mismatch(m.config) is None
     with pytest.raises(EncodingMismatch, match='token layout version 8 -> 7'):
         check_encoding(dict(m.config, layout=dict(m.config['layout'], version=8)))
@@ -529,8 +530,8 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one(tmp_path
     # the draft network: its own game and layout (draft_v2)
     d = make_net(G.info('team_draft'), 'team_draft', 'tokens', 16, 1, heads=2)
     assert d.config['layout']['version'] == 2 and encoding_mismatch(d.config) is None
-    with pytest.raises(EncodingMismatch, match="game 'team_draft' -> 'mtg'"):
-        check_encoding(d.config, 'mtg')
+    with pytest.raises(EncodingMismatch, match="game 'team_draft' -> 'mtg_v7'"):
+        check_encoding(d.config, 'mtg_v7')
 
 
 def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v7(tmp_path):
@@ -544,21 +545,21 @@ def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v7(tmp_path):
     from mtgz.az import decklists
     from zero.data import ShardWriter
     from zero.net import load, make_net, save
-    info = G.info('mtg')
+    info = G.info('mtg_v7')
     spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
     from zero.data import shard_format
-    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions'],
+    meta = {'game': 'mtg_v7', 'features': info['num_features'], 'actions': info['num_actions'],
             **shard_format({'shard_sparse': 1}, info)}       # (layout v7: sparse v2 shards, R8)
     for name, seed in (('iter_0001', 3), ('iter_0002', 4)):
         seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10)
-        drv = G.Driver('mtg', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,
+        drv = G.Driver('mtg_v7', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,
                        max_steps=20000)
         w = ShardWriter(str(tmp_path / 'data' / name), 'c00', rows=4096, meta=meta)
         drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: w.add(drv.take_samples()))
         w.add(drv.take_samples())
         assert w.close()['samples'] > 50
     torch.manual_seed(0)
-    t = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)
+    t = make_net(info, 'mtg_v7', 'tokens', 32, 1, heads=2)
     with torch.no_grad():
         for lin in (t.gen, t.ptr):                  # a teacher with a policy (they start at zero)
             lin.weight.normal_(0, 0.3)
@@ -571,7 +572,7 @@ def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v7(tmp_path):
                          str(tmp_path / 'data' / 'iter_0002'), '--hidden', '48', '--blocks', '2', '--heads', '2',
                          '--steps', '40', '--batch', '64', '--lr', '2e-3', '--warmup', '5', '--eval-every', '0',
                          '--torch-threads', '1', '--normal-priority']) == 0
-    s, extra = load(out, game='mtg')
+    s, extra = load(out, game='mtg_v7')
     assert (s.config['d'], s.config['layers'], s.config['layout']['version']) == (48, 2, 7)
     h = extra['distill']['heldout']
     assert [x['step'] for x in h] == [0, 40] and h[-1]['policy_kl'] < h[0]['policy_kl']
@@ -612,22 +613,22 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
     from mtgz.az import decklists
     from zero.data import ShardWriter
     from zero.net import check_belief_head, load, make_net, save
-    info = G.info('mtg')
+    info = G.info('mtg_v7')
     spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
     from zero.data import shard_format
-    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions'],
+    meta = {'game': 'mtg_v7', 'features': info['num_features'], 'actions': info['num_actions'],
             **shard_format({'shard_sparse': 1}, info)}       # (layout v7: sparse v2 shards, R8)
     for name, seed in (('iter_0001', 3), ('iter_0002', 4)):
         seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10, view_samples=0.5)
-        drv = G.Driver('mtg', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,
+        drv = G.Driver('mtg_v7', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,
                        max_steps=20000, aux=True)
         w = ShardWriter(str(tmp_path / 'data' / name), 'c00', rows=4096, meta=meta)
         drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: w.add(drv.take_samples()))
         w.add(drv.take_samples())
         assert w.close()['samples'] > 50
     torch.manual_seed(0)
-    belief = mtgz.az.PACKAGE.aux_of('mtg')   # (the hand's and the deck's targets, docs/ENGINE.md 102.4)
-    t = make_net(info, 'mtg', 'tokens', 32, 1, heads=2, aux=belief)
+    belief = mtgz.az.PACKAGE.aux_of('mtg_v7')   # (the hand's and the deck's targets, docs/ENGINE.md 102.4)
+    t = make_net(info, 'mtg_v7', 'tokens', 32, 1, heads=2, aux=belief)
     with torch.no_grad():
         for lin in (t.gen, t.ptr, t.aux_head[2]):
             lin.weight.normal_(0, 0.3)
@@ -640,8 +641,8 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
                          str(tmp_path / 'data' / 'iter_0002'), '--hidden', '48', '--blocks', '2', '--heads', '2',
                          '--steps', '40', '--batch', '64', '--lr', '2e-3', '--warmup', '5', '--eval-every', '0',
                          '--torch-threads', '1', '--normal-priority']) == 0
-    s, extra = load(out, game='mtg')
-    check_belief_head(s, 'mtg')                        # what selfplay_ / eval_belief_tilt ask of a checkpoint
+    s, extra = load(out, game='mtg_v7')
+    check_belief_head(s, 'mtg_v7')                        # what selfplay_ / eval_belief_tilt ask of a checkpoint
     assert s.config['aux'] == belief and s.config['layout']['version'] == 7
     h = extra['distill']['heldout']
     assert h[-1]['aux']['belief']['kl'] < h[0]['aux']['belief']['kl'] and h[-1]['policy_kl'] < h[0]['policy_kl']
@@ -651,53 +652,81 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
 
 
 def test_old_runs_stay_layout_v7_and_new_runs_are_layout_v8(tmp_path):
-    """ENGINE.md 236: layout v8 (the game `mtg_v8`) is every preset's and the package's default; the game name `mtg` stays
-    layout v7, the compatibility layout every run, checkpoint, farm run and record made before layout v8 records. A run
-    directory saved as `mtg` with a v7 checkpoint - an old run re-pinned onto this main, no fork - resolves its config as
-    `mtg` (its saved settings win over the preset's game), its game's layout is v7 and its checkpoint loads; loading that
-    checkpoint as `mtg_v8` is refused (the encoding guard). A new run of the same preset is `mtg_v8`, layout v8. A tool
-    loads a checkpoint as the game it records (`mtgz.az.layouts`) and refuses a second layout in one process."""
+    """ENGINE.md 236.9: the game `mtg` is layout v8 - every preset's and the package's default, recorded with
+    `game_layout` 8 - and `mtg_v7` layout v7, the compatibility game. Everything made before layout v8 names `mtg` WITHOUT
+    a layout record, and zero-core's game alias (`mtgz.az.GAME_ALIASES`, zero-core docs/az.md 73) reads it as `mtg_v7`: a
+    run directory whose config.json saves `"game": "mtg"` and whose checkpoint's config records `mtg` (an old run re-pinned
+    onto this main, no fork, no file rewritten) resolves as `mtg_v7` - its saved settings win over the preset, and the
+    preset's `mtg` never lends it a layout record - its game's layout is v7 and its checkpoint loads; loading that
+    checkpoint as `mtg` is refused (the encoding guard), and so is moving the run by `--game-layout 8`. A new run of the same
+    preset is `mtg` with `game_layout` 8, layout v8, and its networks record it. A tool loads a checkpoint as the game it
+    records (`mtgz.az.layouts`) and refuses a second layout in one process."""
     import os
     import torch
     import mtgz.az as A
     from mtgz.az import layouts as L
     from zero import package
-    from zero.net import EncodingMismatch, TokenNet, check_checkpoint, save
-    assert A.PACKAGE.game == 'mtg_v8' and L.GAME == 'mtg_v8' and L.GAME_V7 == 'mtg'
+    from zero.net import EncodingMismatch, TokenNet, check_checkpoint, make_net, save
+    assert A.PACKAGE.game == 'mtg' and L.GAME == 'mtg' and L.GAME_V7 == 'mtg_v7'
+    assert A.PACKAGE.game_aliases == {'mtg': {'layout': 8, 'before': 'mtg_v7'}}
     mtg_presets = [p for p in A.PRESETS.values() if p.get('game') in L.GAMES]
-    assert mtg_presets and all(p['game'] == 'mtg_v8' for p in mtg_presets)
-    assert package.active().tokens_of('mtg')['version'] == 7 and package.active().tokens_of('mtg_v8')['version'] == 8
-    assert len(G.info('mtg')['tails']) == 21 and len(G.info('mtg_v8')['tails']) == 27
-    info = G.info('mtg')
+    assert mtg_presets and all(p['game'] == 'mtg' and 'game_layout' not in p for p in mtg_presets)
+    assert package.active().tokens_of('mtg_v7')['version'] == 7 and package.active().tokens_of('mtg')['version'] == 8
+    assert len(G.info('mtg_v7')['tails']) == 21 and len(G.info('mtg')['tails']) == 27
+    info = G.info('mtg_v7')
     torch.manual_seed(1)
-    old = TokenNet(info['num_features'], info['num_actions'], A.LAYOUT, d=16, layers=1, heads=2, ff=32, game='mtg').eval()
+    old = TokenNet(info['num_features'], info['num_actions'], A.LAYOUT, d=16, layers=1, heads=2, ff=32, game='mtg_v7').eval()
+    old.config['game'] = 'mtg'                       # (a checkpoint of before layout v8: the name, no layout record)
     run_dir = tmp_path / 'old-run'
     (run_dir / 'models').mkdir(parents=True)
     ck = str(run_dir / 'models' / 'iter_0003.pt')
     save(old, ck, {'iter': 3})
+    assert torch.load(ck, weights_only=False)['config']['game'] == 'mtg'
+    assert 'game_layout' not in torch.load(ck, weights_only=False)['config']
     with open(run_dir / 'config.json', 'w', encoding='utf-8') as f:
         json.dump(dict(A.PRESETS['delver-mirror'], game='mtg', preset='delver-mirror'), f)
     with open(run_dir / 'config.json', encoding='utf-8') as f:
         saved = json.load(f)
+    assert 'game_layout' not in saved
     cfg = run.resolve_config(run.parse(['--run', str(run_dir)]), saved)
-    assert cfg['game'] == 'mtg' and package.active().tokens_of(cfg['game'])['version'] == 7
+    assert (cfg['game'], cfg['game_layout']) == ('mtg_v7', None)
+    assert package.active().tokens_of(cfg['game'])['version'] == 7
+    # (the config as zero.run writes it back reads as the same game on every later start)
+    again = run.resolve_config(run.parse(['--run', str(run_dir)]), json.loads(json.dumps(cfg)))
+    assert (again['game'], again['game_layout']) == ('mtg_v7', None)
+    assert run.resolve_config(run.parse(['--run', str(run_dir), '--game', 'mtg']), saved)['game'] == 'mtg_v7'
     check_checkpoint(ck, cfg['game'])
     with pytest.raises(EncodingMismatch):
-        check_checkpoint(ck, 'mtg_v8')
+        check_checkpoint(ck, 'mtg')
+    moved = run.resolve_config(run.parse(['--run', str(run_dir), '--game-layout', '8']), saved)
+    assert moved['game'] == 'mtg'
+    with pytest.raises(EncodingMismatch):
+        check_checkpoint(ck, moved['game'])          # (a layout move is a fork, never a resume)
     new = run.resolve_config(run.parse(['--run', str(tmp_path / 'new-run'), '--preset', 'delver-mirror']), {})
-    assert new['game'] == 'mtg_v8' and package.active().tokens_of(new['game'])['version'] == 8
-    assert L.checkpoint_game(ck) == 'mtg'
+    assert (new['game'], new['game_layout']) == ('mtg', 8) and package.active().tokens_of(new['game'])['version'] == 8
+    net8 = make_net(G.info('mtg'), 'mtg', 'tokens', 16, 1, heads=2)
+    assert (net8.config['game'], net8.config['game_layout']) == ('mtg', 8)
+    ck8 = str(tmp_path / 'v8.pt')
+    save(net8, ck8, {'iter': 0})
+    assert L.checkpoint_game(ck8) == 'mtg'
+    with pytest.raises(EncodingMismatch):
+        check_checkpoint(ck8, 'mtg_v7')
+    assert L.checkpoint_game(ck) == 'mtg_v7'
     m, _ = L.load(ck)
-    assert L.model_game(m) == 'mtg' and L.record_game({}) == 'mtg' and L.record_game({'game': 'mtg_v8'}) == 'mtg_v8'
+    assert L.model_game(m) == 'mtg_v7' and L.record_game({}) == 'mtg_v7' and L.record_game({'game': 'mtg'}) == 'mtg_v7'
+    assert L.record_game({'game': 'mtg', 'game_layout': 8}) == 'mtg' and L.record_game({'game': 'mtg_v7'}) == 'mtg_v7'
+    assert L.stamp('mtg') == {'game': 'mtg', 'game_layout': 8} and L.stamp('mtg_v7') == {'game': 'mtg_v7'}
+    with pytest.raises(package.GameAliasError):
+        L.record_game({'game': 'mtg', 'game_layout': 9})
     L._USED = None
     try:
-        L.use('mtg')
-        assert L.current() == 'mtg'
+        L.use('mtg_v7')
+        assert L.current() == 'mtg_v7'
         with pytest.raises(ValueError, match='cannot share'):
-            L.use('mtg_v8')
+            L.use('mtg')
     finally:
         L._USED = None
-    assert L.current() == 'mtg_v8'
+    assert L.current() == 'mtg'
     with pytest.raises(ValueError, match='different games'):
-        L.same_game('mtg', 'mtg_v8')
+        L.same_game('mtg_v7', 'mtg')
     assert os.path.exists(ck)

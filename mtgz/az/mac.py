@@ -129,7 +129,7 @@ def eval_log(mirror, it):
 
     from mtgz.sealed.games import remote_eval_log
     with open(os.path.join(mirror, 'config.json'), encoding='utf-8') as f:
-        game = json.load(f)['game']
+        game = package.record_game(json.load(f))   # (resolved: ENGINE.md 236.9)
     if not package.active().remote_eval_files_of(game, it):
         return None
     path = remote_eval_log(mirror, it)

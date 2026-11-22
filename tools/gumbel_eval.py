@@ -55,7 +55,7 @@ MODES = {'puct': None, 'gumbel': (16, 0.0, 0.3), 'gumbel-s1': (16, 0.0, 1.0), 'g
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts

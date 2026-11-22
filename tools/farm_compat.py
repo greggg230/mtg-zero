@@ -67,6 +67,12 @@ def settings(a):
         if k not in cfg:
             raise SystemExit(f'--set {k}: not a run setting')
         cfg[k] = json.loads(v)
+    # (a game --set now means the name's current layout - `mtg` = v8, `mtg_v7` = v7 - unless game_layout is --set too,
+    # e.g. `--set game_layout=null` with `game="mtg"`: the name as a run of before layout v8 recorded it; ENGINE.md 236.9)
+    from zero import package
+    keys = {s.split('=', 1)[0] for s in a.set}
+    lay = cfg.get('game_layout') if 'game_layout' in keys or 'game' not in keys else package.active().layout_of(cfg['game'])
+    package.set_game(cfg, package.resolve_game(cfg['game'], lay, '--set'))
     return cfg
 
 

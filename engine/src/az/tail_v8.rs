@@ -1,4 +1,4 @@
-//! Layout v8's own segments (ENGINE.md 236; the game `mtg_v8`): six tail-only gated segments
+//! Layout v8's own segments (ENGINE.md 236; the game `mtg`): six tail-only gated segments
 //! appended after layout v7's, so a v7 network widens onto v8 bit for bit (zero-core docs/az.md
 //! 43.8: a new gated segment's tokens weigh exactly 0 at the widen) and a v8 row is the v7 row plus
 //! these tokens (and the overrides into `pay_options`).

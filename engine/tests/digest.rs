@@ -33,7 +33,7 @@
 //! hashes the layout v6 part (`encode::v6_projection`: where each of layout
 //! v6's 44,212 floats is in the v7 head): layout v6's recorded full digest
 //! (b63f643e97a30a61, main c3abdb8a and 64c86cc2) while every v6 float of layout v7 is
-//! v6's (ENGINE.md 125). `DIGEST_ENCODING=v7` hashes layout v7's whole row (the game `mtg`'s:
+//! v6's (ENGINE.md 125). `DIGEST_ENCODING=v7` hashes layout v7's whole row (the game `mtg_v7`'s:
 //! head, tail tokens, overrides): layout v7's recorded full digest (9473f7debc4bceb3, main e445ba27)
 //! while v8 only adds segments (ENGINE.md 236). The recorded file is layout v8's full digest (ENGINE.md 236).
 //!

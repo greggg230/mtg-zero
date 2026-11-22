@@ -2739,7 +2739,7 @@ pub const BASE: &str = "(the position as it is)";
 /// layout v6 (the `mtg_eoe` game, checked on the gate's EoE positions).
 pub const V7: u8 = 1;
 pub const V6: u8 = 2;
-/// Layout v8 (the game `mtg_v8`, ENGINE.md 236): the gate's rows since then.
+/// Layout v8 (the game `mtg`, ENGINE.md 236): the gate's rows since then.
 pub const V8: u8 = 4;
 
 /// A public-state gap the encoding has, found by the gate and waiting on a decision (ENGINE.md
@@ -2977,7 +2977,7 @@ pub fn known_gaps() -> Vec<KnownGap> {
         },
         KnownGap {
             name: "layout v7 (the game mtg) lacks layout v8's facts (v8_fixed): a payment's picks and state in progress, a gone object's last known information, the find groups",
-            decision: "the user's decision of 2026-11-21 (ENGINE.md 236): one additive layout v8, the game mtg_v8; a v7 run stays on v7 until it is forked onto v8",
+            decision: "the user's decision of 2026-11-21 (ENGINE.md 236): one additive layout v8, the game mtg (v7: mtg_v7, ENGINE.md 236.9); a v7 run stays on v7 until it is forked onto v8",
             layouts: V7,
             alone: v8_fixed(),
             alike: vec![],
@@ -3402,7 +3402,7 @@ fn v8_perturbations() -> Vec<Perturbation> {
 /// stream of their own, so the pairs of the perturbations before them stay main's).
 ///
 /// Layout v8's facts (ENGINE.md 236): the perturbations of `v8_perturbations` whose change layout v7
-/// (the game `mtg`) and layout v6 (`mtg_eoe`) leave out - all but the innermost payment's cost, which
+/// (the game `mtg_v7`) and layout v6 (`mtg_eoe`) leave out - all but the innermost payment's cost, which
 /// their context block's cost floats show (layout v8's `payment` tokens show every part exactly).
 pub fn v8_perturbation_names() -> Vec<&'static str> {
     v8_perturbations().iter().map(|p| p.name).collect()

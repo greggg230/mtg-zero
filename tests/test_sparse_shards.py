@@ -14,7 +14,7 @@ from mtgz.az.infer import UniformEvaluator, drive
 def _delver_samples():
     import mtgz.az as A
     seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10)
-    drv = G.Driver('mtg', [[seat, seat]] * 2, spec=A.SPEC_DELVER, concurrency=2, threads=1, seed=5, record=True,
+    drv = G.Driver('mtg_v7', [[seat, seat]] * 2, spec=A.SPEC_DELVER, concurrency=2, threads=1, seed=5, record=True,
                    max_steps=20000)
     parts = []
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
@@ -33,7 +33,7 @@ def _chunks(s, n=32):
 
 
 def test_delver_rows_in_sparse_shards(tmp_path):
-    info = G.info('mtg')
+    info = G.info('mtg_v7')
     F, A = info['num_features'], info['num_actions']
     whole = _delver_samples()
     # Layout v7's rows (ENGINE.md 125): their tails and overrides go only to a sparse v2 shard, read back as they
@@ -41,7 +41,7 @@ def test_delver_rows_in_sparse_shards(tmp_path):
     rows = protocol.ROW_SAMPLE_KEYS
     assert all(k in whole for k in rows) and len(whole['t_seg']) > 0
     v2 = D.ShardWriter(str(tmp_path / 'v2'), 'r00', rows=1 << 16,
-                       meta={'game': 'mtg', 'features': F, 'actions': A, 'iter': 1, **D.shard_format({'shard_sparse': 1}, info)})
+                       meta={'game': 'mtg_v7', 'features': F, 'actions': A, 'iter': 1, **D.shard_format({'shard_sparse': 1}, info)})
     v2.add(whole)
     assert v2.close()['samples'] == len(whole['player'])
     (p2,) = D.shard_paths(str(tmp_path / 'v2'))
@@ -57,7 +57,7 @@ def test_delver_rows_in_sparse_shards(tmp_path):
     for fmt in ({}, D.shard_format({'shard_sparse': 1})):
         kind = 'sparse' if fmt else 'dense'
         w = D.ShardWriter(str(tmp_path / kind), 'r00', rows=max(64, len(s['player']) // 3),
-                          meta={'game': 'mtg', 'features': F, 'actions': A, 'iter': 1, **fmt})
+                          meta={'game': 'mtg_v7', 'features': F, 'actions': A, 'iter': 1, **fmt})
         for p in parts:
             w.add(p)
         out = w.close()
@@ -86,11 +86,11 @@ def test_delver_rows_in_sparse_shards(tmp_path):
 
 def test_presets_leave_shard_sparse_off():
     """Off by default and in every preset of a game without variable-length rows; on in every `mtg` preset (layout v7,
-    ENGINE.md 125.12: a game with tail tokens and overrides writes sparse shards only, zero-core R8; and `mtg_v8`'s,
+    ENGINE.md 125.12: a game with tail tokens and overrides writes sparse shards only, zero-core R8; and `mtg`'s,
     layout v8, ENGINE.md 236)."""
     from mtgz.az.run import DEFAULTS, PRESETS
-    tails = ('mtg', 'mtg_v8')
+    tails = ('mtg_v7', 'mtg')
     assert DEFAULTS['shard_sparse'] == 0
     assert all(not p.get('shard_sparse') for p in PRESETS.values() if p.get('game') not in tails)
     assert all(p.get('shard_sparse') == 1 for p in PRESETS.values() if p.get('game') in tails)
-    assert any(p.get('game') == 'mtg_v8' for p in PRESETS.values())
+    assert any(p.get('game') == 'mtg' for p in PRESETS.values())

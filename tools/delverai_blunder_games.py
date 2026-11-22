@@ -46,7 +46,7 @@ SEED = 20261103
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts
@@ -196,7 +196,7 @@ def record(ckpt, spots, engine_path=B.ROOT, log=B.say, seed=SEED):
                    'passed': right >= D.PASS, 'played': labels.get(a, str(a)), 'played_right': right_of(sp, labels.get(a, str(a))),
                    'sims': info['sims'], 'select': 'visits'}
         out[sp['id']] = {
-            'format': 'zero-replay/1', 'game': _lay().current(), 'spec': spec, 'seed': sp['seed'], 'game_index': k, 'created': created,
+            'format': 'zero-replay/1', **_lay().stamp(_lay().current()), 'spec': spec, 'seed': sp['seed'], 'game_index': k, 'created': created,
             'title': f'{blunder["label"]} · {run} iter {it}', 'group': f'blunder test cases · {run} iter {it}',
             'selfplay': False, 'hint': None, 'source': {'checkpoint': os.path.basename(ckpt), 'run': run, 'iter': it},
             'seats': [dict(info), dict(info)], 'states': states, 'frames': frames, 'final': final, 'result': res,

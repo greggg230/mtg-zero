@@ -86,7 +86,7 @@ TABLES += ('bauble',)                         # the Bauble activations (tools/ga
 
 
 def _lay():
-    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
     (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
     from mtgz.az import layouts
     return layouts
@@ -700,7 +700,7 @@ def replay_record(rep, unit):
     from mtgz import _engine as E
     from zero import gamerec as GR
     seed = replay_seed(rep['seed'], rep['game_index'])
-    g = E.Game(rep['game'], rep['spec'], len(rep['seats']), seed)
+    g = E.Game(_lay().record_game(rep), rep['spec'], len(rep['seats']), seed)
     pr = (json.loads(g.export_state()).get('match') or {}).get('pairing')
     setup = json.dumps({'pairing': pr}, separators=(',', ':')) if pr else ''
     acts = [int(f['a']) for f in rep['frames']]
