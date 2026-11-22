@@ -3,8 +3,9 @@ checked against the engine - every decision of random best-of-one and best-of-th
 rows - the opponent's deck read from the opponent-pool bag is the pairing's, the acting player's true deck is always
 among its candidates, and the candidates are one deck wherever the docstring says they must be (every best-of-one
 row; every row of a two-deck or mirror run; all but the sideboarding rows of a three-deck best-of-three); the hook on
-shard files (dense and sparse), its keys and its loud refusals; and zero-core's `tools/distill.py --sources` through
-this repo's wrapper on best-of-three self-play shards of a stew-specialist-like pairing run."""
+shard files (dense and sparse), its keys and its loud refusals; a dealt post-board 60 read by its 75 (a dealt-deck
+mirror); and zero-core's `tools/distill.py --sources` through this repo's wrapper on best-of-three self-play shards of
+a stew-specialist-like pairing run."""
 import json
 import os
 import sys
@@ -39,7 +40,8 @@ def play(spec, seeds, every=1, keep=0):
     ptr, idx, val, truth, rows = [0], [], [], [], []
     for seed in seeds:
         g = E.Game('mtg', spec, 2, seed)
-        pair = json.loads(g.export_state())['match']['pairing']['decks']
+        m = json.loads(g.export_state())['match']
+        pair = m['pairing']['decks'] if 'pairing' in m else [0, 0]      # (a fixed mirror spec: deck 0 both seats)
         k = 0
         while g is not None:
             while not g.over:
@@ -95,6 +97,28 @@ def test_the_bags_tell_the_opponent_and_hold_the_actors_deck(played, case):
         assert one.all()
     if case.startswith('bo3'):
         assert sb.any()                                       # (sideboarding rows were among them)
+
+
+def test_a_dealt_60_is_read_by_its_75(played):
+    """The acting deck is identified by its 75, never by the 60 it plays: a best-of-three Delver mirror whose seats are
+    dealt random post-board 60s from their own 75 (`dealt_decks` per seat, ENGINE.md 154 / 168.1; the metagame spec
+    refuses dealt decks until per-seat dealing reaches pairings, so a fixed mirror spec, read as a one-deck metagame) -
+    the opponent-pool bag is the whole 75 on every row, every row's own cards are within the 75 (one candidate), and
+    many rows' own cards are NOT within the registered main 60 (sideboard cards dealt in)."""
+    for sg in (1, 2):
+        sp = DL.mirror_bo3_spec(D, game_episodes=True, start_game=sg,
+                                dealt_decks={'p': 1.0, 'swaps': [0, 15], 'per_seat': True})
+        spec = json.loads(sp)
+        d = spec['decks']
+        mg = RS.Metagame({'format': 'bo3', 'constructed': True,
+                          'metagame': {'decks': [{'name': D, 'main': d['p0'], 'sideboard': d['p0_sideboard']}]}})
+        main60 = RS.Metagame({'format': 'bo3', 'constructed': True,
+                              'metagame': {'decks': [{'name': D, 'main': d['p0']}]}}).full[0, :belief.CUBE_CAP]
+        bags, truth, _ = play(sp, range(3), every=2)
+        o, cand = RS.identify(bags, mg)                       # (raises on a row whose bag is not the 75)
+        assert (o == 0).all() and cand[:, 0].all() and bags.N > 100
+        own = np.concatenate([bags.counts(lo, min(bags.N, lo + 512))[0] for lo in range(0, bags.N, 512)])
+        assert (own > main60).any(1).sum() > bags.N // 10, sg
 
 
 def test_the_selector_decides_what_the_opponent_alone_tells(played):

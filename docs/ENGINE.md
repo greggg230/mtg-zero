@@ -42051,13 +42051,26 @@ the waiting player's value-only rows hold nothing of its own pool at all. The st
 specialists are pairing runs; its retention rows come from the best-of-one source run's archive); a run that does
 needs a per-row tag (below).
 
-**Tests** (`tests/test_rowselect.py`, 8): against the engine, every 2nd to 5th decision of random games, both
+**By its 75, never by its 60.** The deck is identified by its pool: the opponent-pool bag is the whole 75 whatever 60
+the opponent plays, and U is checked against each deck's 75. So a post-board 60 with sideboard cards in, a dealt
+random 60 (ENGINE.md 154, 168.1: the stew's specialists will be dealt per seat, section 222's lane 3) and a sideboarding
+row whose decision is a table's teacher decision (168.3: one-hot targets) are read alike. The metagame spec refuses
+dealt decks until that lane lands, so it is checked on a fixed mirror: the engine test below plays a best-of-three
+Delver mirror dealt per seat (`dealt_decks` p 1.0, swaps 0-15, `start_game` 1 and 2), and on real data the Delver
+best-of-three line's `delver-bo3-pb3` (dealt per seat at p 0.85 / swaps 0-15, sideboarding by the matchup model's
+tables as teacher decisions; its spec read as a one-deck metagame): iteration 155, **220,211 rows, the opponent-pool
+bag the 75 and the own cards within the 75 on every one**, 205,008 of them (93%) with own cards NOT within the
+registered main 60, 3,762 sideboarding rows.
+
+**Tests** (`tests/test_rowselect.py`, 9): against the engine, every 2nd to 5th decision of random games, both
 players' head rows (`encode_row`): best-of-one metagame of the three decks (18 games of all 9 cells, 2,030 rows),
 best-of-three metagame (6 matches, 4,322 rows, 176 at sideboarding), a Delver|Doomsday pairing run (3 matches, 1,270
 rows) and the Delver mirror (2 matches, 1,086 rows) - the opponent's deck is the pairing's on every row, the true
 deck is among the candidates on every row, and the candidates are one deck on every row but the three-deck
-best-of-three's sideboarding rows (exactly those, where all 3 decks remain); `evaluate` decides what the opponent
-alone tells (a pairing ruled out on a sideboarding row) and nothing more; the hook on dense and sparse shard files
+best-of-three's sideboarding rows (exactly those, where all 3 decks remain); a dealt 60 read by its 75 (the dealt
+Delver mirror above, both start games: the bag the 75 on every row, every row's own cards within the 75, over a
+tenth of the rows' own cards outside the main 60); `evaluate` decides what the opponent alone tells (a pairing ruled
+out on a sideboarding row) and nothing more; the hook on dense and sparse shard files
 (`actor`, `pairing`, `actor` + `not_pairing` equal the truth; `tally`), every refusal (an unknown key, a deck the
 run does not have, a malformed pair, no config, a non-metagame spec, a shard of another metagame), an undecidable
 row failing the selection with its count; `tools/distill.py --sources` through this repo's wrapper on
@@ -42149,7 +42162,11 @@ needs it.
 passed (a first run, beside the live meta3 run and other sessions' builds, failed the timing-sensitive
 `driver::tests::queued_setups_fill_every_free_slot_when_the_queue_is_long` and passed on the rerun; the branch changes
 no Rust file); `tests/test_distill_sources.py` 11 passed, the two byte-identity goldens among them; `test_distill`,
-`test_net_data`, `test_package_hooks`, `test_tail_train`, `test_shard_thread` 76 passed; privacy check 0 findings.
-This repo: `tests/test_rowselect.py` 8 passed, with `test_mtg_az`'s distillation test, `test_delverai_meta` and
-`test_privacy` 24 passed. The full zero-core suite, `smoke_all.sh --with-this-core --build-only` and this commit's
-`python` gate: 222.1's gate note (the next commit).
+`test_net_data`, `test_package_hooks`, `test_tail_train`, `test_shard_thread` 76 passed; privacy check 0 findings;
+`bash tools/smoke_all.sh --with-this-core --build-only`: **games: 3 of 3 checked** (glassroad-zero, caverna-zero,
+kingdombuilder-zero built against ae3bc6c), its core cargo test and build ok, its full core pytest 790 passed, 31
+skipped, 2 failed - both CUDA tests outside the diff on the GPU the live run holds:
+`test_dup_reduce::test_max_is_deterministic_on_cuda_and_matches_the_cpu` (fails alike on c850a5d in its own
+worktree) and `test_token_graphs::test_absent_slots_are_never_read[max]` (a 3e-8 difference; passed on the rerun, on
+c850a5d too). This repo: `tests/test_rowselect.py` 9 passed, with `test_mtg_az`'s distillation test,
+`test_delverai_meta` and `test_privacy`. The `python` gate: 222.1's gate note (the next commit).
