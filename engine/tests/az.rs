@@ -4089,3 +4089,91 @@ fn constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s() {
     println!("{worlds} constructed worlds, {other} with another 60 than the real one");
     assert!(worlds >= 150 && other * 2 > worlds, "{worlds} {other}");
 }
+
+/// ENGINE.md 232's cost measurement (not a gate: `--ignored --nocapture`): in random games of the cube, the Delver
+/// mirror and the three-deck Legacy metagame's Doomsday mirror (`COST_GAMES` a pool, default 200), at every decision
+/// both viewers' rows in layout v7 (`Row::of`) and v8 (`Row::of_v8`): the rows holding v8 tokens, v8's tokens by
+/// segment, tokens and floats a row (head features + every tail token's width) and the encode time a row of each.
+#[test]
+#[ignore]
+fn layout_v8_cost() {
+    use engine::az::tail_encode::{seg, seg_w, Row, TAILS_V8};
+    let games: u64 = std::env::var("COST_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
+    let mirror = |d: engine::az::constructed::Decklist| {
+        let names = d.main_names();
+        MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string()).unwrap()
+    };
+    let pools: Vec<(&str, MtgSpec)> = vec![
+        ("cube", spec()),
+        ("delver", mirror(engine::az::constructed::Decklist::izzet_delver())),
+        ("doomsday", mirror(engine::az::constructed::Decklist::legacy_doomsday())),
+        ("hogaak", mirror(engine::az::constructed::Decklist::legacy_hogaak())),
+    ];
+    for (pool, sp) in pools {
+        let mut rng = Rng::new(232);
+        let (mut rows, mut rows8, mut tok7, mut tok8, mut fl7, mut fl8) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+        let (mut t7, mut t8) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+        let mut by_seg = [0u64; seg::N_V8];
+        let mut rows_seg = [0u64; seg::N_V8];
+        let mut head = vec![0.0f32; NUM_FEATURES];
+        let mut tb7 = zero_search::tail::TailBuf::new(&engine::az::tail_encode::TAILS);
+        let mut tb8 = zero_search::tail::TailBuf::new(&TAILS_V8);
+        for s in 0..games {
+            let mut g = MtgAz::new_game(&sp, 2, 232_000 + s).unwrap();
+            let mut keys = Vec::new();
+            while g.to_move().is_some() {
+                for v in 0..2usize {
+                    // (Each layout timed first on every other row: neither gets the other's warm caches.)
+                    for k in 0..2 {
+                        let v8 = (k == 1) ^ (rows % 2 == 1);
+                        head.fill(0.0);
+                        let tb = if v8 { &mut tb8 } else { &mut tb7 };
+                        tb.clear();
+                        let a = std::time::Instant::now();
+                        g.encode_row_layout(v, &mut head, tb, v8);
+                        tb.seal();
+                        *(if v8 { &mut t8 } else { &mut t7 }) += a.elapsed();
+                    }
+                    let r7 = Row::of_az(&g, v);
+                    let r8 = Row::of_az_v8(&g, v);
+                    rows += 1;
+                    let n8 = r8.tail.iter().filter(|t| t.0 as usize >= seg::N).count() as u64;
+                    rows8 += (n8 > 0) as u64;
+                    let present = |r: &Row| (0..seg::N as u16).map(|sg| r.tokens(sg).iter().filter(|t| (t.0 as usize) < engine::az::tail_encode::seg_head(sg)).count()).sum::<usize>() as u64;
+                    tok7 += 1 + present(&r7) + r7.tail.len() as u64;
+                    tok8 += 1 + present(&r8) + r8.tail.len() as u64;
+                    fl7 += (r7.head.len() + r7.tail.iter().map(|t| seg_w(t.0)).sum::<usize>()) as u64;
+                    fl8 += (r8.head.len() + r8.tail.iter().map(|t| seg_w(t.0)).sum::<usize>()) as u64;
+                    let mut here = [false; seg::N_V8];
+                    for t in r8.tail.iter().filter(|t| t.0 as usize >= seg::N) {
+                        by_seg[t.0 as usize] += 1;
+                        here[t.0 as usize] = true;
+                    }
+                    for (k, h) in here.iter().enumerate() {
+                        rows_seg[k] += *h as u64;
+                    }
+                }
+                let l = legal(&g);
+                let a = l[rng.below(l.len() as u32) as usize];
+                g.step(a, &mut keys).unwrap();
+            }
+        }
+        let segs: Vec<String> = TAILS_V8[21..]
+            .iter()
+            .map(|t| format!("{} {} tokens in {:.2}% of rows (width {})", t.name, by_seg[t.seg as usize], 100.0 * rows_seg[t.seg as usize] as f64 / rows as f64, t.width))
+            .collect();
+        println!(
+            "COST {pool}: {games} games, {rows} rows; rows with v8 tokens {:.2}%; tokens a row v7 {:.2} -> v8 {:.2}; floats a row v7 {:.0} -> v8 {:.0} (+{:.2}%); encode a row v7 {:.2} us -> v8 {:.2} us (+{:.1}%); {}",
+            100.0 * rows8 as f64 / rows as f64,
+            tok7 as f64 / rows as f64,
+            tok8 as f64 / rows as f64,
+            fl7 as f64 / rows as f64,
+            fl8 as f64 / rows as f64,
+            100.0 * (fl8 as f64 / fl7 as f64 - 1.0),
+            t7.as_secs_f64() * 1e6 / rows as f64,
+            t8.as_secs_f64() * 1e6 / rows as f64,
+            100.0 * (t8.as_secs_f64() / t7.as_secs_f64() - 1.0),
+            segs.join("; ")
+        );
+    }
+}

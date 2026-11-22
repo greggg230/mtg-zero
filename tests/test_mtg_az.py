@@ -396,12 +396,17 @@ def _eval_one(ev, row, legal, to_move, v, tail_widths):
 def test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit(tmp_path):
     """ENGINE.md 232: a layout v7 token network (the game `mtg`; random weights, its policy heads too) widened
     onto layout v8 (the game `mtg_v8`: `zero.net.widen`, tools/fork_run.py's route) computes exactly what it
-    computed: on the same states, played in lockstep in both games (the cube's random decks and the Delver
-    mirror), the widened network on each v8 row (v7's plus v8's tokens: payments, last known information, and
-    the overrides into `pay_options`) gives the v7 network's priors, value and margin on the v7 row bit for bit
-    (eager, CPU). v8's six segments are appended gated, their gates exactly 0; v7's head and segments map one to
-    one. The v7 run's config keeps working: the v7 network is the game `mtg`'s (the encoding guard takes it
-    there) and refused by `mtg_v8` until widened."""
+    computed. On the same states, played in lockstep in both games (the cube's random decks and the Delver
+    mirror), eager on the CPU:
+    * on every v7 row (the v7 network's input) the widened network's priors, value and margin are the v7
+      network's bit for bit;
+    * on the v8 rows: bit for bit on every row that holds no v8 token or override (the row is the v7 row); a row
+      holding v8 tokens (payments, last known information; overrides into `pay_options`) weighs them exactly 0
+      (gates 0) but its attention runs over more keys, so its answers are the v7 network's to float32 rounding
+      (zero-core docs/az.md 43.8: "to float rounding otherwise"), |diff| <= 1e-6.
+    v8's six segments are appended gated, their gates exactly 0; v7's head and segments map one to one. The v7
+    run's config keeps working: the v7 network is the game `mtg`'s (the encoding guard takes it there) and refused
+    by `mtg_v8` until widened."""
     import torch
     import mtgz.az as A
     from mtgz.az import decklists
@@ -458,16 +463,22 @@ def test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit(tmp_path):
                         seen['v8 overrides'] += new_ov > 0
                         ra = _eval_one(eo, (x7, t7, o7, k7), legal, a.to_move, v, w7)
                         rb = _eval_one(en, (x8, t8, o8, k8), legal, b.to_move, v, w8)
-                        for name, u, w in zip(('priors', 'value', 'margin'), ra[:3], rb[:3]):
+                        rc = _eval_one(en, (x7, t7, o7, k7), legal, a.to_move, v, w8)
+                        for name, u, w, z in zip(('priors', 'value', 'margin'), ra[:3], rb[:3], rc[:3]):
+                            assert np.array_equal(np.asarray(u), np.asarray(z)), (si, seed, k, v, name, 'the v7 row')
                             if not np.array_equal(np.asarray(u), np.asarray(w)):
-                                differ.append((si, seed, k, v, name, new_tok, new_ov, float(np.max(np.abs(np.asarray(u, np.float64) - np.asarray(w, np.float64)), initial=0.0))))
+                                d = float(np.max(np.abs(np.asarray(u, np.float64) - np.asarray(w, np.float64)), initial=0.0))
+                                differ.append((si, seed, k, v, name, new_tok, new_ov, d))
                 x = int(legal[rng.integers(len(legal))])
                 a.step(x)
                 b.step(x)
                 k += 1
-    print(f'widen v7 -> v8: rows {seen}, {len(differ)} answers not bit for bit: {differ[:5]}')
+    worst = max((x[-1] for x in differ), default=0.0)
+    print(f'widen v7 -> v8: rows {seen}; v8 rows not bit for bit: {len(differ)} answers, all of rows with v8 tokens, '
+          f'worst |diff| {worst:.3g}')
     assert seen['same row'] > 50 and seen['v8 tokens'] > 20 and seen['v8 overrides'] > 0, seen
-    assert not differ, differ[:10]
+    assert all(x[5] > 0 or x[6] > 0 for x in differ), [x for x in differ if not (x[5] or x[6])][:10]
+    assert worst <= 1e-6, worst
 
 
 @pytest.mark.parametrize('old_version, old_features', [(4, 33652), (5, 37620), (6, 44212)])
