@@ -494,3 +494,20 @@ fn same_seed_and_actions_replay_matches_identically() {
         }
     }
 }
+
+/// ENGINE.md 224: the Doomsday mirror's post-sideboard best-of-three match 163 (one episode a game) passes every check
+/// of `play_match_spec`, the information-set walk (`check_match_information_set`) included. Reported by the Hogaak
+/// integration's first FUZZ_POOL=hogaak probe (pre-existing on main 1e7416c5 and 45dbf2e1).
+#[test]
+fn engine_224_doomsday_mirror_post_board_match_163_information_set() {
+    let d = engine::az::constructed::Decklist::legacy_doomsday();
+    let side: Vec<String> = d.sideboard.iter().flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
+    let v = serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",
+        "decks": {"p0": d.main_names(), "p1": d.main_names(), "p0_sideboard": side.clone(), "p1_sideboard": side},
+        "start_game": 2, "game_episodes": true});
+    let sp = engine::az::MtgSpec::parse(&v.to_string()).unwrap();
+    let seeds: Vec<u64> = std::env::var("ENGINE_224_SEEDS").map(|s| s.split(',').map(|x| x.parse().unwrap()).collect()).unwrap_or(vec![163]);
+    for seed in seeds {
+        play_match_spec(seed, &sp, true, &mut HiddenStats::default());
+    }
+}

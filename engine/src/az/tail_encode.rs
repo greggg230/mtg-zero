@@ -1946,6 +1946,39 @@ impl Row {
         v
     }
 
+    /// Where index `i` of `flat()` lies, for a check's message (ENGINE.md 224): a head float (its
+    /// segment's slot and the float in it, or a block outside the segments), a tail token's float
+    /// (segment name, absolute slot, the float in the token) or an override.
+    pub fn locate(&self, i: usize) -> String {
+        let nh = self.head.len();
+        if i < nh {
+            for s in 0..seg::N {
+                let (o, w, n) = (encode::LAY7.off[s], SEG_W[s], SEG_HEAD[s]);
+                if o != usize::MAX && n > 0 && i >= o && i < o + n * w {
+                    return format!("head segment {s} slot {} float {}", (i - o) / w, (i - o) % w);
+                }
+            }
+            return format!("head float {i} (outside the segments)");
+        }
+        let mut at = nh + 1;
+        for (sg, sl, x) in &self.tail {
+            let w = 3 + x.len();
+            if i < at + w {
+                let name = TAILS.iter().find(|t| t.seg == *sg).map_or("?", |t| t.name);
+                return match i - at {
+                    0 => format!("tail token {name} slot {sl}: its segment"),
+                    1 | 2 => format!("tail token {name} slot {sl}: its slot"),
+                    k => format!("tail token {name} slot {sl} float {}", k - 3),
+                };
+            }
+            at += w;
+        }
+        if i == at {
+            return "the tail's end".into();
+        }
+        format!("override entry {}", (i - at - 1) / 6)
+    }
+
     /// The floats of the token at (segment, slot): a head slot (None when not present) or a tail
     /// token.
     pub fn token(&self, sg: u16, slot: u32) -> Option<&[f32]> {
