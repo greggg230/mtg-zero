@@ -46465,3 +46465,24 @@ changed) and the Mac's test binaries (208 s), then the group in about 520 s: the
 After the merge of main (57c5e0e5: the six shards and this section on top of 241's pin; this paragraph is the next
 commit, docs only): `tests/test_gate.py` 103 passed, **GATE PASSED WITH SKIPS python 57c5e0e59c3f in 255s** (the
 desktop's one fenced test).
+
+## 243. zero-core pin 00eb2d7 -> 8370543: the fast graph at fixed capacities as a farm pool variant, CUDA graphs on NVIDIA farm PCs (opt-in: `pool_variants` 'gpu=fixed-fp16@nvidia'; zero-core `perf/gpu-parity-r3` + `feat/fixed-variant`, docs/az.md 78-79; 2026-11-22)
+
+**Why.** On a 4-core CUDA farm PC the worker's GPU calls are host-bound: ONNX Runtime launches the fast graph's ~1,200
+kernels one by one with 27 device syncs a call, so a crew reached ~0.86x of the trainer's evaluator (which replays CUDA
+graphs). zero-core's graph 'fast-fixed' is the fast graph's arithmetic with every size an input's (capacities S, MR, T),
+so the worker captures it once per bucket of fixed shapes and replays it.
+
+**What changes here.** Only the pin. With it a run may set `pool_variants` 'gpu=fixed-fp16@nvidia' (with AMD PCs:
+'gpu=fixed-fp16@nvidia,dml=matmul@amd'): each generation is exported again as graph 'fast-fixed' in float16 and
+registered as the run's NVIDIA (CUDA) alternate's model; the worker turns its CUDA-graph buckets on by itself for a fixed
+graph on CUDA (`ZERO_WORKER_CUDA_GRAPHS=0` turns them off). **Off by default**: no run sets it, every graph and run plays
+as before (the fixed graph is a new export; the default and fast graphs are byte for byte).
+
+**Measured** (a 4-core CUDA farm PC, gen 769 of legacy-meta3-r1 in fp16, 5-minute crews, trainer 32.9k leaves/s): 3 x
+1,150 games in flight 32.3k / 32.3k leaves/s (0.98x; 32.7k with bucket reuse, 0.99x) vs the fast fp16 graph's 29.8k;
+2 x 1,152 (the agent's layout there) 30.3k / 30.3k, then 30.7k (vs 27.4k; the graph released before the Pad export 24.4k).
+Worker self-test on CUDA passes (fp16, max abs 1.7e-2, deterministic); the worker's answers on the CPU vs the Python
+reference 1.2e-7, vs torch 6.8e-6 (zero-core `tools/onnx_worker_gate.py`).
+
+**Gates.** optin-core on this commit (below).
