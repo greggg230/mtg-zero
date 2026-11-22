@@ -664,6 +664,13 @@ impl Game {
     /// hand (Painter's Servant and characteristic-defining abilities only):
     /// `p`'s, whose cards the cost may take (no other hidden card is read).
     fn chars_may_change(&self, p: PlayerId, w: &Writes, hand: bool) -> Change {
+        self.chars_may_change_in(p, w, hand, false)
+    }
+
+    /// [`chars_may_change`](Self::chars_may_change); with `public`, a Blood Moon's and W3's grants read from the
+    /// permanents on the battlefield (the game's `moon_game`, `w3.seen`: any card of the game's decks, hidden ones
+    /// too - read by the 601.2g step's collapse, ENGINE.md 222.3, no hidden card may decide it).
+    fn chars_may_change_in(&self, p: PlayerId, w: &Writes, hand: bool, public: bool) -> Change {
         let mut out = Change::default();
         if w.is_empty() {
             return out;
@@ -748,13 +755,16 @@ impl Game {
             if w.leave.iter().any(|&c| self.abilities(c).grants_equipped.is_some()) {
                 out.0 |= kind::ABILITIES;
             }
-            if self.moon_game {
+            let on_bf = |f: &dyn Fn(&crate::db::CardDef) -> bool| self.battlefield.iter().any(|&c| f(self.def_of(c)));
+            let moon = if public { on_bf(&|d| d.nonbasic_lands_are_mountains) } else { self.moon_game };
+            let w3 = if public { self.battlefield.iter().fold(0, |a, &c| a | self.def_of(c).w3.seen) } else { self.w3.seen };
+            if moon {
                 out.0 |= kind::TYPES | kind::ABILITIES;
             }
-            if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 {
+            if w3 & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 {
                 out.0 |= kind::TYPES;
             }
-            if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
+            if w3 & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
                 out.0 |= kind::ABILITIES;
             }
             if self.battlefield.iter().any(|&c| self.def_of(c).reconfigure && self.objs[c.i()].attached.is_some_and(|h| leaving(h.idx))) {
@@ -856,7 +866,9 @@ impl Game {
                 }
             }
         }
-        if any_leaves || self.seen & crate::game::SEEN_SAC_MANA != 0 {
+        // (Rain of Filth's granted sacrifice: its effect in play, public - not the game's `SEEN_SAC_MANA`, which hidden
+        // cards set.)
+        if any_leaves || self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
             w.leave.extend(self.permanents_of(p));
             w.zones = true;
         }
@@ -874,7 +886,7 @@ impl Game {
         if let Some(e) = emerge {
             w.leave.push(e);
         }
-        let ch = self.chars_may_change(p, &w, false);
+        let ch = self.chars_may_change_in(p, &w, false, true);
         RestReach { unsettled: !w.counters.is_empty() || ch.0 & kind::PT != 0, chars: ch.0 & (kind::TYPES | kind::ABILITIES) != 0, leave: w.leave }
     }
 
