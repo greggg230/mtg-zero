@@ -45688,3 +45688,9 @@ line into `pytest_durations.json` once the shard passed (`merge_durations`: the 
 junit reader plus the same merge). A shard's result is still pytest's final summary line alone. The Mac's seconds and
 the desktop's are different clocks; a gate's shards all run on one of them, so one gate's seconds balance the next
 gate's shards on either.
+
+Checked (164e0604, beside two live runs; this paragraph is the next commit, docs only): `tests/test_gate.py` 103 passed
+(new: the line's round trip, a failed shard recording nothing, the merge keeping other files' seconds); **GATE PASSED
+WITH SKIPS python 164e0604f82c in 319s** (the desktop's one fenced test; the Mac was also running another repo's tests)
+- each of its four Mac shards printed its line, `pytest_durations.json` was rewritten at the gate's end, and the next
+plan's shards are 16 / 19 / 19 / 27 files where this gate's were 20 / 24 / 18 / 20.
