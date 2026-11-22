@@ -53,6 +53,13 @@ DELVER_LAB = os.path.expanduser('~/delver-lab/data')         # the (private) Del
 LIBRARY_REL = 'data/delver_canary_library.json'
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def canon(obj):
     return json.dumps(obj, sort_keys=True, separators=(',', ':'))
 
@@ -158,7 +165,7 @@ class Builder:
             self.seen[k]['also'].append(source)
             return True
         try:
-            g0 = self.E.Game('mtg', self.start_spec(seed, actions, 'none'), 2, 0)
+            g0 = self.E.Game(_lay().current(), self.start_spec(seed, actions, 'none'), 2, 0)
         except Exception as e:                                   # noqa: BLE001
             self.skip(kind, source, f'its start block does not start: {e}', **extra)
             return False
@@ -167,7 +174,7 @@ class Builder:
             return False
         sig = DB.spot_sig(json.loads(g0.export_state()))
         try:
-            g1 = self.E.Game('mtg', self.start_spec(seed, actions, self.deal), 2, 12345)
+            g1 = self.E.Game(_lay().current(), self.start_spec(seed, actions, self.deal), 2, 12345)
         except Exception as e:                                   # noqa: BLE001
             self.skip(kind, source, f'deal {self.deal!r} does not start: {e}', **extra)
             return False
@@ -196,7 +203,7 @@ class Builder:
                 continue
             try:
                 sj = json.loads(self.spec)
-                g = self.E.Game('mtg', json.dumps(sj), 2, int(sp['seed']))
+                g = self.E.Game(_lay().current(), json.dumps(sj), 2, int(sp['seed']))
                 roots = []
                 for a in sp['actions']:
                     if g.over:
@@ -232,7 +239,7 @@ class Builder:
         """The Play record replayed from its seed (each root action after the start's auto-steps) ->
         (final game, {k: game after root action k (1-based) for k in keep}, [turn after each action]);
         raises at an action the engine does not offer."""
-        g = self.E.Game('mtg', self.spec, 2, int(rec['seed']))
+        g = self.E.Game(_lay().current(), self.spec, 2, int(rec['seed']))
         auto_step(g)
         kept, turns = {}, []
         for i, a in enumerate(rec.get('actions') or []):
@@ -362,7 +369,7 @@ def main(argv=None):
     if not B.entries:
         raise SystemExit('no archive entry replays on this engine: nothing written')
     info = DB.engine_info(ROOT)
-    out = {'format': FORMAT, 'game': 'mtg', 'base_spec': spec, 'deal': a.deal, 'turns': [t0, t1],
+    out = {'format': FORMAT, **_lay().stamp(_lay().current()), 'base_spec': spec, 'deal': a.deal, 'turns': [t0, t1],
            'built': {'date': time.strftime('%Y-%m-%d %H:%M'), 'engine': info, 'seconds': round(time.time() - t, 1)},
            'counts': counts, 'skipped_counts': skipped, 'canary': a.canary,
            'canary_held_out': [h['id'] for h in B.held_out], 'entries': B.entries}

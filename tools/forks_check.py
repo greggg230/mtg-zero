@@ -34,6 +34,13 @@ from zero.infer import NetEvaluator, UniformEvaluator, drive  # noqa: E402
 from zero.workqueue import split_games  # noqa: E402
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def seat_of(cfg, sims):
     s = G.nn_seat('m', sims, selfplay=True, sims_fast=max(1, sims // 4), p_full=float(cfg.get('p_full', 0.25)),
                   sims_minor=cfg.get('sims_minor'), temp_moves=int(cfg.get('temp_moves', 60)), chance_k=0,
@@ -48,7 +55,7 @@ def play(spec, seat, games, conc, seed, ev, branch=None, starts=None, threads=8)
         kw['branch'] = branch
     if starts:
         kw['starts'] = starts
-    d = G.Driver('mtg', [[seat, seat]] * games, spec=spec, concurrency=conc, seed=seed, record=True, threads=threads,
+    d = G.Driver(_lay().current(), [[seat, seat]] * games, spec=spec, concurrency=conc, seed=seed, record=True, threads=threads,
                  groups=2, max_steps=20_000, **kw)
     out = []
 
@@ -81,12 +88,12 @@ def main(argv=None):
     cfg = dict(mtgz.az.PRESETS['delver-mirror'])
     if a.checkpoint:
         from zero.net import load
-        model, _ = load(a.checkpoint, 'cpu', game='mtg')
+        model, _ = _lay().load_used(a.checkpoint, 'cpu')
         ev = NetEvaluator(model, 'cpu', workers=2)
     else:
         ev = UniformEvaluator()
     seat = seat_of(cfg, a.sims)
-    A = FK.load_archive(a.archive, 'mtg', spec)
+    A = FK.load_archive(a.archive, _lay().current(), spec)
     t0 = time.time()
     on, st = play(spec, seat, a.games, a.conc, a.seed, ev, branch={'p': a.branch, 'moves': a.moves, 'temp': a.temp, 'differ': bool(a.differ)},
                      starts={'p': a.archive_p, 'specs': A['specs']}, threads=a.threads)

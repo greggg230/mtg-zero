@@ -240,6 +240,10 @@ pub enum DecisionKind {
     /// `NUMBER` + j = play candidate deck j of the decider's pool (0 the builder's best guess);
     /// hidden from the other player.
     ChooseDeck,
+    /// CR 601.2g: activate a mana ability while casting a spell, its total cost determined and not yet paid (the
+    /// asking task `CastMana`; `MY_PERM` = a permanent with such abilities, then `ChooseMode` for which; `HAND_ABILITY`
+    /// = a card's in hand; `PASS` = pay the cost; ENGINE.md 231).
+    CastMana,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
@@ -1137,6 +1141,16 @@ impl Game {
         ranges: &[PagedRange],
         extra: Vec<Opt>,
     ) {
+        // A decision of a mana ability activated in a cast's 601.2g step (its total cost locked) offers, as `ask`'s,
+        // only the options that leave the cast's payment completable (`completing`, ENGINE.md 231): a paged one too
+        // (Cascading Cataracts' 126 productions). (A payment's own paged decisions filter their items themselves.)
+        if !self.cast_lock.is_empty() && !matches!(task, Task::PayMana(_)) && ranges.iter().all(|r| r.linked.is_none()) && self.completing_floor(&task).is_some() {
+            let kept: Vec<Vec<(u32, Choice)>> = ranges.iter().map(|r| self.completing_items(&task, r.items.to_vec())).collect();
+            let extra = self.completing(&task, extra);
+            let rs: Vec<PagedRange> = ranges.iter().zip(kept.iter()).map(|(r, k)| PagedRange::new(r.base, r.n, k)).collect();
+            self.ask_ranges(task, page, player, kind, &rs, extra, false);
+            return;
+        }
         self.ask_ranges(task, page, player, kind, ranges, extra, false);
     }
 

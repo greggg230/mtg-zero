@@ -255,6 +255,8 @@ FARM_COMPAT_OK = (json.dumps(FARM_SUMMARY) + '\nfarm compat: PASSED - delver-mir
 
 # ---------------------------------------------------------------------------- the fake gate
 
+MAC_MODULE = "mtgz._engine OK: /Users/someone/mtg-zero-wt/detached-ccc/mtgz/_engine.so | games: ['toy', 'mtg']\n"
+
 class Fake:
     """gate.execute stubbed: a canned real-format output per kind of step (override with `set`), a queue
     of scripted (output, rc) answers for the core pytest, and every call recorded."""
@@ -318,6 +320,8 @@ class Fake:
             return self.over[k]
         if k == 'mac' and 'tools/slotd.sh' in argv[-1]:           # an offloaded step (ENGINE.md 166): its Mac output
             inner = argv[-1]
+            if 'tools/build_py.sh' in inner and G.MAC_BUILT not in inner:   # (the module built there once: ENGINE.md 238)
+                return MAC(SHA, MAC_MODULE), 0
             if '--no-run' in inner:                                   # (the test binaries built there: ENGINE.md 167)
                 return MAC(SHA, '    Finished `release` profile [optimized + debuginfo] target(s) in 1.20s\n'), 0
             if 'fuzz_shards.py' in inner:
@@ -402,7 +406,8 @@ def gate(tmp_path, monkeypatch):
                                      core_pin=PIN, core_head=PIN, target_dir=str(tmp_path / 'target'),
                                      logs_dir=str(tmp_path / 'gates' / 'logs'), base_env={'CUDA_VISIBLE_DEVICES': '-1'},
                                      no_mac=args.no_mac, dirty=[], baseline=None, slot_wait=args.slot_wait,
-                                     throttle=False, placement=None)
+                                     throttle=False, placement=None,
+                                     core_pytest_shards=args.core_pytest_shards)
     monkeypatch.setattr(G, 'Ctx', fake_ctx)
     fake = Fake(str(core))
     # placement (ENGINE.md 166): no live run and no Mac unless a test says so (never this machine's real state)
@@ -1386,7 +1391,11 @@ def test_beside_a_live_run_the_heavy_steps_go_to_the_mac_and_the_rest_waits_for_
     by = {k: [c for kk, c in calls if kk == k] for k in ('build', 'worker-build', 'pytest', 'mac')}
     assert all(c.startswith('bash tools/slotd.sh ') for c in by['build'] + by['worker-build'] + by['pytest'])
     mac = by['mac']
-    assert len(mac) == 2 and all('nice -n 10' in c and 'tools/slotd.sh' in c and '-u PYTEST_ADDOPTS' in c for c in mac)
+    # (the module built on the Mac once, before the pytest and the smoke that import it there at once: ENGINE.md 238)
+    assert len(mac) == 3 and all('nice -n 10' in c and 'tools/slotd.sh' in c and '-u PYTEST_ADDOPTS' in c for c in mac)
+    assert mac[0].endswith("bash -c 'bash tools/build_py.sh'") and all(G.MAC_BUILT in c for c in mac[1:])
+    ids = [s['id'] for s in report['steps']]
+    assert ids.index('worker-build') < ids.index('mac-build') < min(ids.index('pytest'), ids.index('run-loop-smoke'))
     pytest_mac = next(c for c in mac if 'pytest' in c)
     assert 'bash tools/build_py.sh && python -m pytest tests' in pytest_mac
     for a in G.PYTEST_DESKTOP_ONLY:                   # the Mac leaves out exactly what the desktop part runs
@@ -1396,7 +1405,8 @@ def test_beside_a_live_run_the_heavy_steps_go_to_the_mac_and_the_rest_waits_for_
     assert steps['pytest']['placement'] == 'mac' and steps['pytest']['mac']
     assert steps['run-loop-smoke']['placement'] == 'mac' and steps['run-loop-smoke']['reason'] == '16 games, 0 unfinished'
     assert steps['pytest-desktop']['placement'] == G.THROTTLED and steps['build']['placement'] == G.THROTTLED
-    assert report['placement']['live_runs'] == LIVE and 'placement: 2 step(s) on the Mac' in out
+    assert steps['mac-build']['placement'] == 'mac' and '/mtgz/_engine.so' in steps['mac-build']['reason']
+    assert report['placement']['live_runs'] == LIVE and 'placement: 3 step(s) on the Mac' in out
 
 
 def test_no_mac_keeps_everything_on_the_desktop_but_throttled(gate, capsys):
@@ -1466,3 +1476,103 @@ def test_mac_never_reached_and_fenced_counts():
     assert 'no "[mac]' in G.mac_never_reached('ssh: no route\n')
     assert G.fenced_tests('SKIPPED [3] a.py:1: live-run fence: x\nSKIPPED [1] b.py:2: other\n'
                           'SKIPPED [1] c.py:3: live-run fence: y\n') == 4
+
+
+# ---------------------------------------------------------------------------- ENGINE.md 238: the Mac at once, core shards
+
+def test_the_mac_module_checker():
+    ok = G.check_mac_module(MAC_MODULE, 0)
+    assert ok[0] and ok[2]['module'].endswith('/mtgz/_engine.so')
+    assert G.check_mac_module("mtgz._engine OK: C:\\x\\mtgz\\_engine.pyd | games: ['mtg']\n", 0)[0]   # (the desktop fallback)
+    assert not G.check_mac_module(MAC_MODULE, 1)[0]
+    assert not G.check_mac_module('   Compiling engine\nerror: could not compile\n', 0)[0]
+    assert not G.check_mac_module('mtgz._engine OK: /x/mtgz/_engine.so | games: []\n', 0)[0]
+    assert not G.check_mac_module('zero._engine OK: /x/python/zero/_engine.so | games: [1]\n', 0)[0]
+
+
+def test_mac_steps_that_never_import_the_module_get_no_build_step(gate, capsys):
+    """The module is built on the Mac ahead of a group of steps that import it; a tier whose Mac steps never import it
+    (the suite: cargo and the fuzz) gets no such step."""
+    gate.fake.live, gate.fake.mac = LIVE, (True, 'the Mac: load 6, 40 GB available')
+    rc, out, _, report = gate('suite', capsys=capsys)
+    assert rc == 0, out
+    assert 'mac-build' not in [s['id'] for s in report['steps']]
+
+
+def test_a_mac_shard_has_its_own_basetemp_removed_after(monkeypatch):
+    monkeypatch.setattr(G, 'read_durations', lambda *a: {})
+    steps = G.pytest_step(ctx=types.SimpleNamespace(pytest_shards=3, sha_short=SHA[:12]))
+    macs = [s.mac_cmd(None)[0][2] for s in steps if s.mac_cmd]
+    bases = [m.split('--basetemp=')[1].split(';')[0] for m in macs]
+    assert len(set(bases)) == 3 and all(b.startswith(f'gates/tmp/pytest-{SHA[:12]}-') for b in bases)
+    assert all(m.endswith(f'; rc=$?; rm -rf {b}; exit $rc; }}') for m, b in zip(macs, bases))
+    assert all('{ mkdir -p gates/tmp && python -m pytest ' in m for m in macs)      # (pytest makes no parents)
+
+
+def test_the_jobs_default_is_the_machines_setting(tmp_path, monkeypatch):
+    monkeypatch.delenv('CARGO_BUILD_JOBS', raising=False)
+    monkeypatch.setenv('MTGZ_SLOTS_HOME', str(tmp_path))
+    assert G.env_jobs() == 4                                    # no slots.conf
+    (tmp_path / 'slots.conf').write_text('# settings\nslots=4\n jobs = 10\n', encoding='utf-8')
+    assert G.env_jobs() == 10
+    monkeypatch.setenv('CARGO_BUILD_JOBS', '6')                 # the caller's own wins
+    assert G.env_jobs() == 6
+
+
+def test_the_core_pytest_runs_in_shards_every_test_once(tmp_path, monkeypatch):
+    """ENGINE.md 238: zero-core's pytest as --core-pytest-shards steps over disjoint parts (the desktop's: heavy, never
+    a Mac command), each its own process, --basetemp and junit file, with the flaky policy; its durations in their own
+    file."""
+    core = tmp_path / 'core'
+    (core / 'tests').mkdir(parents=True)
+    names = sorted([f'tests/test_{c}.py' for c in 'abcdefg'] + [REMOTEPLAY.split('::')[0]])
+    for k, n in enumerate(names):
+        (core / n).write_text('#' * (2000 * (k + 1)), encoding='utf-8')
+    (core / 'tests' / 'conftest.py').write_text('', encoding='utf-8')
+    monkeypatch.setattr(G, 'CORE', str(core))
+    monkeypatch.setattr(G, 'GATES_DIR', str(tmp_path / 'gates'))
+    monkeypatch.setattr(G, 'WIN', False)
+    seen = []
+    monkeypatch.setattr(G, 'read_durations', lambda name=None: seen.append(name) or {})
+    ctx = types.SimpleNamespace(sha_short=SHA[:12], core_pytest_shards=3)
+    build, *shards = G.core_steps(ctx)
+    assert build.id == 'core-build' and [s.id for s in shards] == [f'core-pytest-{k}-of-3' for k in (1, 2, 3)]
+    assert seen == [G.CORE_PYTEST_DURATIONS] and G.CORE_PYTEST_DURATIONS != G.PYTEST_DURATIONS
+    assert all(s.cwd == str(core) and s.heavy and s.mac_cmd is None and s.flaky.file == G.FLAKY_FILE for s in shards)
+    assert sorted(a for s in shards for a in s.argv if a.startswith('tests/')) == names
+    bases = [next(a for a in s.argv if a.startswith('--basetemp=')) for s in shards]
+    xmls = [next(a for a in s.argv if a.startswith('--junitxml=')) for s in shards]
+    assert len(set(bases)) == 3 and len(set(xmls)) == 3
+    retry = shards[1].flaky.argv(REMOTEPLAY, 1)
+    assert REMOTEPLAY in retry and bases[1] + '-retry1' in retry and not any(a.startswith('--junitxml') for a in retry)
+    # a measured file longer than a shard's share is split by its tests, each test in one shard
+    w = {names[0]: 900.0, **{f'{names[0]}::t{i}': 100.0 for i in range(9)}}
+    monkeypatch.setattr(G, 'read_durations', lambda name=None: w)
+    _, *split = G.core_steps(ctx)
+    named = [a for s in split for a in s.argv if a.startswith(names[0] + '::')]
+    desel = [a[len('--deselect='):] for s in split for a in s.argv if a.startswith('--deselect=')]
+    assert named and sorted(named) == sorted(desel)
+    # one shard, or a core without two test files: the one step, as before
+    one = G.core_steps(types.SimpleNamespace(sha_short=SHA[:12], core_pytest_shards=1))
+    assert [s.id for s in one] == ['core-build', 'core-pytest'] and one[1].argv[3:5] == ['tests', '-q']
+    for n in names[1:]:
+        os.remove(core / n)
+    assert [s.id for s in G.core_steps(ctx)] == ['core-build', 'core-pytest']
+
+
+def test_the_core_tier_runs_every_core_shard_and_a_failed_one_fails_the_gate(gate, capsys):
+    core = gate.fake.core
+    os.makedirs(os.path.join(core, 'tests'))
+    for c in 'abcd':
+        with open(os.path.join(core, 'tests', f'test_{c}.py'), 'w', encoding='utf-8') as f:
+            f.write('#' * 4000)
+    args = ('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other, '--core-pytest-shards', '2')
+    rc, out, _, report = gate(*args, capsys=capsys)
+    assert rc == 0, out
+    assert [k for k, _ in gate.fake.calls].count('core-pytest') == 2
+    ids = [s['id'] for s in report['steps']]
+    assert 'core-pytest-1-of-2' in ids and 'core-pytest-2-of-2' in ids and 'core-pytest' not in ids
+    gate.fake.calls.clear()
+    gate.fake.core_pytest = [('.\n9 passed in 1.00s\n', 0), (PYTEST_FAILED('tests/test_a.py::test_x', passed=3), 1)]
+    rc, out, _, report = gate(*args, capsys=capsys)
+    assert rc == 1 and final(out).startswith('GATE FAILED optin-core') and 'core-pytest-' in final(out)

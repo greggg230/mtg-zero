@@ -1,11 +1,13 @@
 //! One test binary for the comprehensive-rules tests (every `rules_*.rs`) (docs/ENGINE.md 167.9): each file a module of it, so the engine is linked once
-//! for all 35 instead of once per file. Run one file's tests with its module name as the filter:
+//! for all 36 instead of once per file. Run one file's tests with its module name as the filter:
 //! `cargo test --release -p engine --test rules_suite rules_activated::` (was `--test rules_activated`).
 //! A file keeps its own `mod common;` / kit modules: `#[path]` loads it like a crate root, so its modules
 //! resolve beside it as before.
 
 #[path = "rules_activated.rs"]
 mod rules_activated;
+#[path = "rules_cast_mana.rs"]
+mod rules_cast_mana;
 #[path = "rules_castpay.rs"]
 mod rules_castpay;
 #[path = "rules_chance.rs"]
@@ -56,6 +58,8 @@ mod rules_m8b;
 mod rules_m8b_hidden;
 #[path = "rules_numbers.rs"]
 mod rules_numbers;
+#[path = "rules_pay_fixes.rs"]
+mod rules_pay_fixes;
 #[path = "rules_payment.rs"]
 mod rules_payment;
 #[path = "rules_payment_b.rs"]

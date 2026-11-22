@@ -77,6 +77,13 @@ class AgreementError(RuntimeError):
 
 # ----------------------------------------------------------------------------- the canonical path (36.2, 168.3)
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def apply(copies, counts, last, asking, a):
     """One sideboarding answer `a` (engine `Sideboarding::choose`) -> (counts, last, asking, done)."""
     counts = list(counts)
@@ -253,7 +260,7 @@ def setup(threads=4):
 def load_net(path):
     from zero.infer import NetEvaluator
     from zero.net import load
-    model, _ = load(path, 'cpu', game='mtg')
+    model, _ = _lay().load_used(path, 'cpu')
     model.eval()
     return NetEvaluator(model, 'cpu')
 
@@ -263,7 +270,7 @@ class Net:
 
     def __init__(self, ev):
         import rowkit
-        self.ev, self.R, self.rk, self.n = ev, rowkit, rowkit.kind('mtg'), 0
+        self.ev, self.R, self.rk, self.n = ev, rowkit, rowkit.kind(_lay().current()), 0
 
     def priors(self, games):
         out = []
@@ -321,7 +328,7 @@ def check_counts(g, names, copies, start):
 
 def replay(E, spec, pos):
     """The probe position's game: its match rebuilt from the seed, its stored actions replayed (each one legal)."""
-    g = E.Game('mtg', spec, 2, int(pos['seed']))
+    g = E.Game(_lay().current(), spec, 2, int(pos['seed']))
     for i, a in enumerate(pos['moves']):
         if a == NEXT_EPISODE:
             if g.to_move is not None:
@@ -460,7 +467,7 @@ def make_probe(run, per_context=75, seed=20261115, policy_iter=0, log=print, E=N
             continue
         line = m['games'][2]
         decks = {p: (main, line['decks'][p]) for p in (0, 1)}
-        g = E.Game('mtg', spec, 2, s)
+        g = E.Game(_lay().current(), spec, 2, s)
         moves, found = [], []
         sideboard_phase(g, moves, decks, lambda p, c: not m['dealt'][p] and want(tuple(c)), m['dealt'], copies, found,
                         {'seed': str(s), 'game': 2})
@@ -491,7 +498,7 @@ def make_probe(run, per_context=75, seed=20261115, policy_iter=0, log=print, E=N
         for s in part:
             m = by[s]
             line = m['games'][2]
-            g = E.Game('mtg', spec, 2, s)
+            g = E.Game(_lay().current(), spec, 2, s)
             mv = []
             sideboard_phase(g, mv, {p: (main, line['decks'][p]) for p in (0, 1)}, lambda p, c: False, m['dealt'],
                             copies, [], {})

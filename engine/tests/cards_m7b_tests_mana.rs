@@ -116,6 +116,7 @@ fn talismans_tap_for_colorless_or_one_of_two_colors_for_one_damage() {
         let t = bf(&g, 0, name);
         let z = g.card(0, "Test Zero", Zone::Hand);
         g.choose(Choice::Cast(z));
+        g.pass_cast_mana();
         assert!(g.has_option(act(t, 0)) && g.has_option(act(t, 1)), "{name}: either ability pays {{1}}");
         g.choose(act(t, 0));
         g.drive_until(at_priority);

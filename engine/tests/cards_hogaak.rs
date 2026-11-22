@@ -248,6 +248,10 @@ fn pay_hogaak(g: &mut Game, p: PlayerId, delve: &[CardIdx], convoke: &[CardIdx])
     convoke.sort_by_key(|&c| g.permanents_of(p).position(|x| x == c).unwrap());
     let (mut d, mut k) = (0, 0);
     for _ in 0..100 {
+        if g.kind() == Some(DecisionKind::CastMana) {
+            g.choose(Choice::Pass);
+            continue;
+        }
         if at_priority(g) {
             assert_eq!((d, k), (delve.len(), convoke.len()), "every pick made: {}", log(g));
             return;

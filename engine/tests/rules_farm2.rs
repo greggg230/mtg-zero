@@ -644,6 +644,7 @@ fn teamwork_keeps_a_lumberjacks_mana_when_another_creature_is_tapped() {
     // is tapped, still there to sacrifice.
     let reacher = g.card(0, "Test Reacher", Zone::Hand);
     g.choose(Choice::Cast(reacher));
+    g.pass_cast_mana();
     for src in [forest, island] {
         assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
         g.choose(act(src, 0));

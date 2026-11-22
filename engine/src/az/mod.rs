@@ -35,12 +35,19 @@ pub mod hidden_decks;
 pub mod identity;
 pub mod lab;
 pub mod matches;
+pub mod merge_key;
 pub mod metagame;
 pub mod pools;
 pub mod sample;
 pub mod sbtable;
 pub mod sealed;
 pub mod tail_encode;
+pub mod tail_v8;
+pub mod v8;
+
+/// The compatibility game: `mtg` in layout v7, the game every run, checkpoint and record made before layout v8 names
+/// `mtg` without a layout record (zero-core's game alias, ENGINE.md 236.9).
+pub const NAME_V7: &str = "mtg_v7";
 pub mod view;
 
 use crate::db::CardDb;
@@ -959,7 +966,8 @@ impl MtgSpec {
     /// never fed another's encodings through the wrong game's name.
     pub fn check_game(&self, game: &str) -> Result<(), String> {
         let mine = self.game();
-        if mine == game {
+        // (`mtg` is layout v8 and `mtg_v7` layout v7, ENGINE.md 236.9: the same specs.)
+        if mine == game || (mine == v8::NAME && game == NAME_V7) {
             return Ok(());
         }
         Err(if mine == "mtg_eoe" {
@@ -1394,9 +1402,40 @@ impl Bot<MtgAz> for HeuristicBot {
     }
 }
 
+impl MtgAz {
+    /// The row of `viewer` in layout v8 (`v8`: the game `mtg`, ENGINE.md 236) or v7 (the game
+    /// `mtg_v7`): the deck choice's and sideboarding's encodings have no tail (their lists fit the
+    /// head) and are the same in both.
+    pub fn encode_row_layout(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf, v8: bool) {
+        if self.m.choice.is_some() {
+            encode::encode_deck_choice(self, viewer as u8, head);
+        } else if self.m.sb.is_some() {
+            encode::encode_sideboarding(self, viewer as u8, head);
+        } else {
+            if v8 {
+                self.g.encode_features_row_v8(viewer as u8, head, tail);
+            } else {
+                self.g.encode_features_row(viewer as u8, head, tail);
+            }
+            encode::encode_match(self, viewer as u8, head);
+        }
+        // What the other player knows of the frame's pool: its earlier games' reveals (ENGINE.md 125.7).
+        tail_encode::write_my_revealed(&self.m, self.frame_seat(viewer as u8), tail);
+    }
+
+    /// The pointer overrides of `viewer`'s row in layout v8 (`v8`) or v7: none during the deck
+    /// choice and sideboarding (their options keep the static table).
+    pub fn option_overrides_layout(&self, viewer: usize, legal: &[u16], out: &mut Vec<(u32, i64)>, v8: bool) {
+        if self.m.choice.is_some() || self.m.sb.is_some() {
+            return;
+        }
+        tail_encode::option_overrides_layout(&self.g, viewer as u8, legal, out, v8);
+    }
+}
+
 impl SearchGame for MtgAz {
     type Spec = MtgSpec;
-    const NAME: &'static str = "mtg";
+    const NAME: &'static str = NAME_V7;
     const NUM_ACTIONS: usize = crate::decision::NUM_ACTIONS;
     const NUM_FEATURES: usize = encode::NUM_FEATURES;
     const MIN_PLAYERS: usize = 2;
@@ -1615,25 +1654,13 @@ impl SearchGame for MtgAz {
     /// Layout v7's row: the head and the tail tokens (`tail_encode`). The deck choice's and
     /// sideboarding's encodings have no tail (their lists fit the head).
     fn encode_row(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf) {
-        if self.m.choice.is_some() {
-            encode::encode_deck_choice(self, viewer as u8, head);
-        } else if self.m.sb.is_some() {
-            encode::encode_sideboarding(self, viewer as u8, head);
-        } else {
-            self.g.encode_features_row(viewer as u8, head, tail);
-            encode::encode_match(self, viewer as u8, head);
-        }
-        // What the other player knows of the frame's pool: its earlier games' reveals (ENGINE.md 125.7).
-        tail_encode::write_my_revealed(&self.m, self.frame_seat(viewer as u8), tail);
+        self.encode_row_layout(viewer, head, tail, false);
     }
 
     /// The pointer overrides (`tail_encode::option_overrides`): none during the deck choice and
     /// sideboarding (their options keep the static table).
     fn option_overrides(&self, viewer: usize, legal: &[u16], out: &mut Vec<(u32, i64)>) {
-        if self.m.choice.is_some() || self.m.sb.is_some() {
-            return;
-        }
-        tail_encode::option_overrides(&self.g, viewer as u8, legal, out);
+        self.option_overrides_layout(viewer, legal, out, false);
     }
 
     /// The turns of the match's games.
@@ -1836,6 +1863,17 @@ impl SearchGame for MtgAz {
         } else {
             KeyObs::Opaque
         }
+    }
+
+    /// Near-tie branches' merge key (`merge_key.rs`, ENGINE.md 233; zero-core docs/search.md 2.11): equal only for
+    /// equivalent states, None where the state cannot be keyed safely. Read only by the near-tie branch rule.
+    fn merge_key(&self) -> Option<u128> {
+        merge_key::merge_key(self)
+    }
+
+    /// Whether `alt` is worth a near-tie branch next to `played` (`merge_key::branch_alt_ok`, ENGINE.md 233).
+    fn branch_alt_ok(&self, played: u16, alt: u16) -> bool {
+        merge_key::branch_alt_ok(self, played, alt)
     }
 }
 

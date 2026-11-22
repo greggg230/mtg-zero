@@ -142,12 +142,12 @@ def replay_refusals(wdir, settings, seed):
     rows}."""
     import glob
     import gzip
-    from zero import games as G
+    from zero import games as G, package
     from zero.run import DEFAULTS
     E = G.engine()
     rc = dict(DEFAULTS)
     rc.update(settings)
-    game, spec = rc['game'], G.spec_json(rc['spec'])
+    game, spec = package.record_game(rc), G.spec_json(rc['spec'])   # (resolved: ENGINE.md 236.9)
     info = G.info(game)
     out = {'files': 0, 'games': 0, 'rows': 0, 'refused': []}
     for p in sorted(glob.glob(os.path.join(wdir, '*.rec.jsonl.gz'))):
@@ -156,7 +156,7 @@ def replay_refusals(wdir, settings, seed):
             lines = f.read().splitlines()
         h = json.loads(lines[0])
         want = {'game': game, 'features': info['num_features'], 'actions': info['num_actions'], 'seed': seed}
-        got = {k: h.get(k) for k in want}
+        got = dict({k: h.get(k) for k in want}, game=package.record_game(h))   # (resolved, ENGINE.md 236.9)
         if got != want or json.loads(h.get('spec') or '{}') != json.loads(spec):
             out['refused'].append({'file': os.path.basename(p), 'why': f'header {got} (want {want}) or another spec'})
             continue
@@ -418,8 +418,9 @@ def main(argv=None):
     sys.path.insert(0, os.path.join(ROOT, 'third_party', 'zero-core', 'python'))
     import mtgz.az  # noqa: F401
     from zero.onnx_export import export_checkpoint, load_checkpoint
+    from zero import package
     with open(a.config, encoding='utf-8') as f:
-        game = json.load(f)['game']
+        game = package.record_game(json.load(f))   # (the run's config: `mtg` without a layout record is mtg_v7)
     net = a.net
     if net is None:
         _, info = load_checkpoint(a.checkpoint, game)

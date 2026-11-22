@@ -1130,7 +1130,9 @@ fn cr_601_2g_a_lotus_petal_is_no_source_of_hogaak_but_floated_first_it_is_delve_
         .hand(0, &[HOGAAK])
         .at(Step::Main1, 0)
         .start();
-    assert!(!castable(&g, 0, Zone::Hand), "four cards and two creatures: {}", opts(&g));
+    // (Castable: the Petal sacrificed during the cast is delve's fifth card, CR
+    // 601.2g; ENGINE.md 231, `rules_cast_mana.rs`.)
+    assert!(castable(&g, 0, Zone::Hand), "four cards, the Petal and two creatures: {}", opts(&g));
     g.choose(Choice::Yes);
     let petal = bf(&g, 0, "Lotus Petal");
     g.choose(Choice::Card(petal));
@@ -1459,24 +1461,36 @@ fn cr_601_2h_castability_and_the_payment_agree_on_random_boards() {
 }
 
 #[test]
-fn cr_601_2g_escapes_graveyard_cards_are_never_fed_by_a_mana_source_hogaak_doesnt_activate() {
+fn cr_601_2g_a_lotus_petal_sacrificed_while_hogaak_is_cast_feeds_escapes_exile() {
     // Underworld Breach's escape exiles three other graveyard cards; with two
-    // there and a Lotus Petal on the battlefield, a spell whose mana is paid
-    // could sacrifice the Petal for mana first (601.2g) to make the third
-    // (ENGINE.md 34.4). Hogaak's payment activates no mana source: only its
-    // own permission is a route (no route to choose). The Petal floated first
-    // (its mana stays), escape is a route too.
+    // there and a Lotus Petal on the battlefield, the Petal sacrificed for
+    // mana while Hogaak is cast (CR 601.2g: mana abilities before the cost is
+    // paid, its mana floating: Hogaak's can't be spent) is the third (ENGINE.md
+    // 231, which replaced lane A's reading that Hogaak's payment activates no
+    // mana source). Both permissions are routes; cast by escape, the 601.2g
+    // step must sacrifice the Petal (`PASS` alone can't pay). The Petal floated
+    // first (its mana stays) is the same.
     let mut g = scen()
         .battlefield(0, &["Underworld Breach", "Lotus Petal", GREEN, GREEN, RED, RED, RED, GREY, GREY])
         .graveyard(0, &[HOGAAK, "Ponder", "Brainstorm"])
         .at(Step::Main1, 0)
         .start();
-    let mut own = g.clone();
-    begin_hogaak(&mut own, 0, Zone::Graveyard);
-    assert_ne!(own.kind(), Some(DecisionKind::ChooseRoute), "{}", opts(&own));
-    assert_eq!(own.stack().last().unwrap().from, engine::game::CastFrom::Permission { free: false, any_mana: false });
-    g.choose(Choice::Yes);
     let petal = bf(&g, 0, "Lotus Petal");
+    let mut esc = g.clone();
+    begin_hogaak(&mut esc, 0, Zone::Graveyard);
+    assert_eq!(esc.kind(), Some(DecisionKind::ChooseRoute), "{}", opts(&esc));
+    let mut routes: Vec<Choice> = esc.offered();
+    routes.sort_by_key(|c| format!("{c:?}"));
+    assert_eq!(routes, vec![Choice::Number(10), Choice::Number(2)], "{}", opts(&esc));
+    esc.choose(Choice::Number(2));
+    assert_eq!(esc.stack().last().unwrap().from, engine::game::CastFrom::Escape, "{}", log(&esc));
+    assert_eq!(esc.kind(), Some(DecisionKind::CastMana), "{}", opts(&esc));
+    assert_eq!(esc.offered(), vec![Choice::Card(petal)], "only the Petal leaves escape's exile payable: {}", opts(&esc));
+    until_priority(&mut esc, &|_| None);
+    let h = esc.card(0, HOGAAK, Zone::Stack);
+    assert_eq!(esc.obj(h).zone, Zone::Stack, "{}", log(&esc));
+    assert_eq!(esc.obj(petal).zone, Zone::Exile, "the Petal exiled by escape: {}", log(&esc));
+    g.choose(Choice::Yes);
     g.choose(Choice::Card(petal));
     until_priority(&mut g, &|g| (g.kind() == Some(DecisionKind::ActivateMana)).then_some(Choice::Pass));
     begin_hogaak(&mut g, 0, Zone::Graveyard);

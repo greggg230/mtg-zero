@@ -30,7 +30,12 @@
 //! earlier object of a card (a fetchland's ability whose source is now in the graveyard) is
 //! `{"ref": "g0.3", "stale": true}`; a token that ceased to exist is `{"gone": "Clue", "owner": 0}`.
 //! Either may carry what it shows (`Game::ref_lki`, ENGINE.md 95.11): `known_by` (who knew the object as
-//! it left; default both) and `was` (its identity then, where the viewer knew it; default the card's now).
+//! it left; default both) and `was` (its identity then, where the viewer knew it; default the card's now);
+//! and its last known information (ENGINE.md 236, layout v8's `lki` tokens): `"lki": {"copy": <name>, "dfc":
+//! <bool>, "mv": n, "power": n, "toughness": [n, <controller>], "qualities": {"controller", "deathtouch",
+//! "lifelink", "infect", "spell", "colors", "types"}, "attached": <reference>, "counters": [[<kind>, n]]}`, each
+//! key present where the game keeps that record (a copy's exceptions, keyword and named counters and a gone
+//! spell's item are not described: such a position is refused).
 //!
 //! The decks are the spec's lists (best-of-one, open decklists): every card of each list is placed
 //! exactly once - the named cards where the description says, the rest in the unknown slots (the
@@ -336,6 +341,21 @@ fn lookup_any(db: &CardDb, name: &str) -> Result<DefId, String> {
 /// The description of `g`'s position from `viewer`'s view (module docs; ENGINE.md 95): everything the
 /// viewer sees and knows, nothing it does not. An error names what the schema does not support.
 pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
+    describe_as(g, viewer, false)
+}
+
+/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 233): the same description, finer where the key
+/// needs it and wider where the key covers the rest itself. A stale reference or a gone token also carries its age
+/// (`"age"`: the card's zone changes since that object, so two earlier objects of one card never read alike); the
+/// sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (the key adds them);
+/// and the description gains the turn's last known information of gone objects (`"lki"`, CR 608.2h) and the turn's
+/// loop actions (`"loops"`, `loops.rs`), both of which the rules read and the build has no key for. Not a buildable
+/// description.
+pub(crate) fn describe_for_key(g: &Game, viewer: PlayerId) -> Result<Value, String> {
+    describe_as(g, viewer, true)
+}
+
+fn describe_as(g: &Game, viewer: PlayerId, key: bool) -> Result<Value, String> {
     if viewer > 1 {
         return Err(format!("describe: viewer {viewer}"));
     }
@@ -345,7 +365,53 @@ pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
         h.sort_by_key(|&c| (g.ident(c), !g.objs[c.i()].known, c.i()));
         hands[p as usize] = h;
     }
-    Describer { g, me: viewer, hands }.run()
+    // (The merge key without a positional graveyard reader among the game's cards: each graveyard as its creature
+    // cards in their order, then its other cards by identity - the user's rule, 2026-11-21: "order only matters for
+    // creatures" (ENGINE.md 233); references by that place.)
+    let unordered = key && !positional_reader_in(g);
+    let gys: [Vec<CardIdx>; 2] = std::array::from_fn(|p| {
+        let mut v = g.players[p].graveyard.clone();
+        if unordered {
+            let creature = |c: &CardIdx| g.db.def(g.objs[c.i()].def).types & crate::db::types::CREATURE != 0;
+            let (mut cr, mut rest): (Vec<CardIdx>, Vec<CardIdx>) = v.into_iter().partition(creature);
+            rest.sort_by_key(|&c| g.ident(c));
+            cr.append(&mut rest);
+            v = cr;
+        }
+        v
+    });
+    Describer { g, me: viewer, hands, key, gys }.run()
+}
+
+/// Does a card of the game (its objects, the sideboards) read a graveyard's order (a positional reader, R17:
+/// `lower::graveyard_order`)? Only the card table's readers can; none in the table, none in the game.
+fn positional_reader_in(g: &Game) -> bool {
+    if crate::lower::graveyard_order::readers(g.db).is_empty() {
+        return false;
+    }
+    let r = reader_defs(g.db);
+    g.objs.iter().map(|o| o.def).chain(g.players.iter().flat_map(|p| p.sideboard.iter().copied())).any(|d| r[d as usize])
+}
+
+/// Per definition of `db`: it, its back face or its adventure is a positional graveyard reader (R17); computed
+/// once per card table.
+fn reader_defs(db: &'static CardDb) -> &'static [bool] {
+    static READERS: std::sync::Mutex<Vec<(usize, &'static [bool])>> = std::sync::Mutex::new(Vec::new());
+    let key = db as *const CardDb as usize;
+    let mut v = READERS.lock().unwrap();
+    if let Some(&(_, r)) = v.iter().find(|(k, _)| *k == key) {
+        return r;
+    }
+    let one = |d: DefId| crate::lower::graveyard_order::check_defs(std::iter::once((d, db.def(d)))).map_or(true, |r| !r.is_empty());
+    let flags: Vec<bool> = (0..db.len() as DefId)
+        .map(|d| {
+            let cd = db.def(d);
+            one(d) || cd.back.is_some_and(one) || cd.adventure.is_some_and(one)
+        })
+        .collect();
+    let r: &'static [bool] = Box::leak(flags.into_boxed_slice());
+    v.push((key, r));
+    r
 }
 
 struct Describer<'a> {
@@ -353,6 +419,11 @@ struct Describer<'a> {
     me: PlayerId,
     /// The hand cards described (all of the viewer's, the opponent's the viewer knows), in order.
     hands: [Vec<CardIdx>; 2],
+    /// For the merge key (`describe_for_key`).
+    key: bool,
+    /// Each graveyard in the order described (bottom first; the merge key's: by identity when no rule reads the
+    /// order).
+    gys: [Vec<CardIdx>; 2],
 }
 
 fn unsupported<T>(what: impl std::fmt::Display) -> Result<T, String> {
@@ -365,7 +436,7 @@ impl Describer<'_> {
         let o = &g.objs[c.i()];
         match o.zone {
             Zone::Battlefield => g.battlefield.iter().position(|&x| x == c).map(|i| format!("b{i}")),
-            Zone::Graveyard => g.players[o.owner as usize].graveyard.iter().position(|&x| x == c).map(|i| format!("g{}.{i}", o.owner)),
+            Zone::Graveyard => self.gys[o.owner as usize].iter().position(|&x| x == c).map(|i| format!("g{}.{i}", o.owner)),
             Zone::Exile => g.exile.iter().position(|&x| x == c).map(|i| format!("x{i}")),
             Zone::Stack => g.stack.iter().position(|s| s.kind == StackKind::Spell { card: c }).map(|i| format!("s{i}")),
             Zone::Command => g.command.iter().position(|&x| x == c).map(|i| format!("e{i}")),
@@ -396,6 +467,10 @@ impl Describer<'_> {
                 None => return unsupported(format!("a reference to an earlier object of a card now in a {} the viewer does not see", zone_name(o.zone))),
             }
         };
+        // (The merge key: which earlier object of the card, by its zone changes since.)
+        if self.key {
+            v["age"] = json!(o.inc.wrapping_sub(r.inc));
+        }
         // What the stale reference shows (`Game::ref_lki`, ENGINE.md 156; the encoding writes it): who knew the object
         // as it left (default both) and, where the viewer did, its identity then (default the card's identity now).
         match g.ref_lki.iter().rev().find(|x| x.0 == r) {
@@ -408,6 +483,58 @@ impl Describer<'_> {
                     v["was"] = json!(g.db.def(d).name);
                 }
             }
+        }
+        // Its last known information (ENGINE.md 236: layout v8's `lki` tokens show it).
+        let l = super::tail_v8::lki_of(g, r);
+        if !l.is_empty() {
+            let mut x = serde_json::Map::new();
+            if let Some((_, vals, mv)) = l.copy {
+                if !vals.exc.is_empty() {
+                    return unsupported("a gone object's last known copiable values with a copy effect's exceptions");
+                }
+                x.insert("copy".into(), json!(g.db.def(vals.def).name));
+                x.insert("dfc".into(), json!(vals.dfc));
+                x.insert("mv".into(), json!(mv));
+            }
+            if let Some(p) = l.power {
+                x.insert("power".into(), json!(p));
+            }
+            if let Some((t, ctl)) = l.toughness {
+                x.insert("toughness".into(), json!([t, ctl]));
+            }
+            if let Some(d) = l.damage {
+                if d.obj.is_some_and(|o| o != r) {
+                    return unsupported("a gone object's last known qualities as a damage source naming another object");
+                }
+                x.insert(
+                    "qualities".into(),
+                    json!({"controller": d.controller, "deathtouch": d.deathtouch, "lifelink": d.lifelink, "infect": d.infect,
+                           "spell": d.spell, "colors": d.colors, "types": d.types, "itself": d.obj.is_some()}),
+                );
+            }
+            if let Some(a) = l.attached {
+                x.insert("attached".into(), self.obj(a)?);
+            }
+            if !l.counters.is_empty() {
+                let mut cs = Vec::new();
+                for &(k, n) in &l.counters {
+                    use crate::db::Counter as K;
+                    let name = match k {
+                        K::P1P1 => "+1/+1",
+                        K::M1M1 => "-1/-1",
+                        K::Stun => "stun",
+                        K::Loyalty => "loyalty",
+                        K::Lore => "lore",
+                        K::Kw(_) | K::Named(_) => return unsupported("a gone object's last known keyword or named counters"),
+                    };
+                    cs.push(json!([name, n]));
+                }
+                x.insert("counters".into(), json!(cs));
+            }
+            if l.spell.is_some() {
+                return unsupported("a gone spell's last known item (Game::spell_lki)");
+            }
+            v["lki"] = Value::Object(x);
         }
         Ok(v)
     }
@@ -514,9 +641,9 @@ impl Describer<'_> {
             observer: _, keys, forced: _, forced_at: _, decisions: _, no_auto: _, effects, any_loss: _, counters: _, n_static: _,
             n_self_types: _, leaving: _, links, delayed, resolved, permissions, combat_damage_now: _, quiet_leave: _, monarch,
             lki_counters: _, entering_escaped: _, entering_x: _, entering_sunburst: _, entering_exiled: _, entering_mods: _,
-            entering_counters: _, entering_tapped: _, discard_entered: _, repl_decided: _, route_choice: _, entering_dash: _,
+            entering_counters: _, entering_tapped: _, discard_entered: _, repl_decided: _, route_choice: _, cast_lock, pool_wild: _, entering_dash: _,
             entering_warp: _, miracle_cast, entering_face: _, day, done_once, discarded, temp_triggers, gy_exile, copies,
-            copy_objs, lki_copy: _, lki_damage: _, spell_lki: _, entering_copy: _, entering_times: _, enter_note: _, defer_enters: _,
+            copy_objs, lki_copy: _, lki_damage: _, lki_qualities: _, spell_lki: _, entering_copy: _, entering_times: _, enter_note: _, defer_enters: _,
             pile_moving: _, pile_shuffles: _, prepared, seen: _, initiative, dungeons, rules_srcs,
             choosing_for: _, marks, known_pools, log: _, log_mark: _, hand_looks: _, peeks,
             // (v6 engines: transient or derived - public_state.rs - or EoE-only, checked below)
@@ -526,7 +653,7 @@ impl Describer<'_> {
             // (layout v7 engines, ENGINE.md 95.11: the hidden decklists' sightings and a search's finds - kept only
             // where whole-deck clouds are -, the last known identities of gone objects - described with each stale
             // reference, `obj` -, a loop action's activation in progress)
-            sightings, sight_at: _, found, finds_told, sightings_lost: _, ref_lki: _, loop_open,
+            sightings, sight_at: _, found, finds_told, find_groups, sightings_lost: _, ref_lki: _, loop_open,
             // (ENGINE.md 180: the forced find's records, a self-play setting's; a described position's game has none)
             ff: _,
         } = g;
@@ -546,15 +673,19 @@ impl Describer<'_> {
         empty(miracle_cast.is_some() as usize, "a miracle in progress")?;
         empty(page.is_some() as usize, "a paged decision (more than 95 permanents)")?;
         empty(releasing.len() + gy_arrivals.len() + held.len() + entries.len(), "a simultaneous move or entry in progress")?;
+        empty(cast_lock.len(), "a spell's total cost locked by a mana ability during its cast (ENGINE.md 231)")?;
         empty(next_turn_controller.iter().flatten().count() + turn_controller.is_some() as usize, "a player controlling another's turn")?;
         empty(pool_restr.len(), "mana with a spending restriction")?;
         empty((0..2u8).map(|p| g.lands_entered_this_turn(p) as usize).sum::<usize>(), "the lands entered this turn (Bioengineered Future)")?;
         empty(w3.phased.len() + w3.indirect.len(), "phased-out permanents")?;
         empty(g.loyalty.iter().filter(|l| l.extra > 0).count(), "extra loyalty activations")?;
         empty(dungeons.iter().filter(|d| d.obj.is_some() || d.completed > 0).count(), "dungeons")?;
-        empty(known_pools.iter().filter(|k| k.is_some()).count(), "hidden decks (best-of-three)")?;
-        empty(sightings.len(), "the hidden decklists' sightings (ENGINE.md 140.9)")?;
-        empty(found.len() + finds_told.len(), "a library search's finds the other player tells apart (hidden decklists, ENGINE.md 140.9, 223)")?;
+        // (The merge key adds the known pools and the sightings itself.)
+        if !self.key {
+            empty(known_pools.iter().filter(|k| k.is_some()).count(), "hidden decks (best-of-three)")?;
+            empty(sightings.len(), "the hidden decklists' sightings (ENGINE.md 140.9)")?;
+        }
+        empty(found.len() + finds_told.len() + find_groups.len(), "a library search's finds the other player tells apart (hidden decklists, ENGINE.md 140.9, 223, 235)")?;
         empty(loop_open.is_some() as usize, "a loop action's activation in progress")?;
 
         let mut out = Map::new();
@@ -728,7 +859,73 @@ impl Describer<'_> {
         if !cl.is_empty() {
             out.insert("clouds".into(), Value::Array(cl));
         }
+        if self.key {
+            self.key_extras(&mut out)?;
+        }
         Ok(Value::Object(out))
+    }
+
+    /// What the merge key's description adds (`describe_for_key`): the turn's last known information of gone objects
+    /// (each list's entries by their gone object, which names each entry once - sorted, as the rules look them up by
+    /// object) and the turn's loop actions (their records hold no ids: the loop hash of a view, a battlefield place,
+    /// action ids - sorted, as the loop rule reads them as a set). EoE's last known information and W6's state are
+    /// refused (not in the merge key's pools).
+    fn key_extras(&self, out: &mut Map<String, Value>) -> Result<(), String> {
+        let g = self.g;
+        if !g.w3.lki_host.is_empty() || !g.w3.lki_loss.is_empty() {
+            return unsupported("EoE's last known information (W3)");
+        }
+        if !g.w6.control.is_empty() || g.w6.tokens_turn.iter().any(|&t| t != 0) {
+            return unsupported("EoE's control effects and token turns (W6)");
+        }
+        let mut lki: Vec<String> = Vec::new();
+        for &(r, k, n) in &g.lki_counters {
+            lki.push(json!(["counters", self.obj(r)?, counter_name(g, k), n]).to_string());
+        }
+        for (r, v, mv) in &g.lki_copy {
+            lki.push(json!(["copy", self.obj(*r)?, format!("{v:?}"), mv]).to_string());
+        }
+        for &(r, h) in &g.lki_attached {
+            lki.push(json!(["attached", self.obj(r)?, self.obj(h)?]).to_string());
+        }
+        for (r, d) in &g.lki_damage {
+            let crate::game::DamageSource { controller, deathtouch, lifelink, infect, spell, colors, types, obj } = d;
+            let o = match obj {
+                Some(x) => self.obj(*x)?,
+                None => Value::Null,
+            };
+            lki.push(json!(["damage", self.obj(*r)?, controller, deathtouch, lifelink, infect, spell, format!("{colors:?}"), types, o]).to_string());
+        }
+        for &(r, t, c) in &g.lki_toughness {
+            lki.push(json!(["toughness", self.obj(r)?, t, c]).to_string());
+        }
+        for &(idx, inc, p) in &g.lki_power {
+            // (Kept across turns, one per slot. A card now in a library has no place a reference could name, so
+            // nothing can read its entry: a reference to that object elsewhere would itself be refused.)
+            if g.objs[idx.i()].zone == Zone::Library {
+                continue;
+            }
+            lki.push(json!(["power", self.obj(crate::ids::ObjRef { idx, inc })?, p]).to_string());
+        }
+        for (r, d, item, mv) in &g.spell_lki {
+            lki.push(json!(["spell", self.obj(*r)?, g.db.def(*d).name, self.stack_item(item)?, mv]).to_string());
+        }
+        lki.sort_unstable();
+        out.insert("lki".into(), json!(lki));
+        let mut loops: Vec<String> = Vec::new();
+        // (A record whose activation sacrificed its source holds that permanent on the battlefield in its hash, so the
+        // loop rule never reads it again this turn: left out - the fuzz checks it, `Game::check_dropped_loop_records`.)
+        for r in g.loop_taken.iter().filter(|r| !r.sac_self) {
+            let act = match r.act {
+                crate::loops::LoopAct::Activate { place, slot } => json!([place, slot]),
+                crate::loops::LoopAct::MayCopy => json!("copy"),
+            };
+            let path: Vec<Value> = r.path.iter().map(|s| json!([s.options, s.chosen])).collect();
+            loops.push(json!([r.p, r.hash.to_string(), act, path]).to_string());
+        }
+        loops.sort_unstable();
+        out.insert("loops".into(), json!(loops));
+        Ok(())
     }
 
     fn player(&self, p: PlayerId, pl: &crate::game::Player) -> Result<Value, String> {
@@ -746,7 +943,8 @@ impl Describer<'_> {
         if *cant_gain_life || *flash_sorceries || *poison > 0 || *experience > 0 || *gy_play_turn > 0 || *gy_exile_turn > 0 || *city_blessing || *prot_until > 0 {
             return unsupported("a rare player state (can't gain life, sorceries with flash, poison, experience, graveyard play or exile, the city's blessing, protection)");
         }
-        if !sideboard.is_empty() || companion.is_some() || companion_def.is_some() || *companion_used {
+        // (The merge key adds the sideboards itself.)
+        if (!sideboard.is_empty() && !self.key) || companion.is_some() || companion_def.is_some() || *companion_used {
             return unsupported("sideboards and companions");
         }
         if *uncounterable_next > 0 {
@@ -796,7 +994,8 @@ impl Describer<'_> {
             m.insert("library_known".into(), Value::Array(lk));
         }
         let mut gy = Vec::new();
-        for &c in graveyard {
+        debug_assert_eq!(graveyard.len(), self.gys[p as usize].len());
+        for &c in &self.gys[p as usize] {
             if g.is_token(c) {
                 return unsupported("a token in a graveyard (state-based actions pending)");
             }
@@ -851,7 +1050,7 @@ impl Describer<'_> {
         let o = &g.objs[c.i()];
         let crate::game::Obj {
             def, owner, controller, zone: _, inc: _, timestamp: _, tapped, damage, deathtouched, control_since, attacking, blocked, blocking,
-            struck_first, known: _, attached, evoked, flashback, escaped, chosen_player, monstrous, attacks, entered, flips,
+            struck_first, known: _, lost: _, attached, evoked, flashback, escaped, chosen_player, monstrous, attacks, entered, flips,
         } = o;
         // (loyalty activations: out of Obj on v6 engines, Game::loyalty_of; extra ones are refused in run)
         let crate::game::Loyalty { turn: pw_turn, used: pw_used, .. } = g.loyalty_of(c);
@@ -1238,7 +1437,7 @@ impl Builder<'_> {
                 Ok(ObjRef { idx: c, inc: self.g.objs[c.i()].inc })
             }
             Value::Object(o) if o.contains_key("gone") => {
-                keys(o, &["gone", "owner", "known_by", "was"], "a gone token")?;
+                keys(o, &["gone", "owner", "known_by", "was", "lki"], "a gone token")?;
                 let name = o["gone"].as_str().ok_or("build: gone must be a token name")?;
                 let owner = need_player(o, "owner", "a gone token")?;
                 let c = self.token(owner, name, Zone::Nowhere)?;
@@ -1247,11 +1446,11 @@ impl Builder<'_> {
                 Ok(r)
             }
             Value::Object(o) => {
-                keys(o, &["ref", "stale", "known_by", "was"], "a reference")?;
+                keys(o, &["ref", "stale", "known_by", "was", "lki"], "a reference")?;
                 let s = o.get("ref").and_then(|x| x.as_str()).ok_or_else(|| format!("build: a reference without ref: {v}"))?;
                 let c = *self.refs.get(s).ok_or_else(|| format!("build: no object {s:?}"))?;
                 if !boolean(o, "stale")? {
-                    if o.contains_key("known_by") || o.contains_key("was") {
+                    if o.contains_key("known_by") || o.contains_key("was") || o.contains_key("lki") {
                         return Err(format!("build: known_by and was are a stale reference's: {v}"));
                     }
                     return Ok(ObjRef { idx: c, inc: self.g.objs[c.i()].inc });
@@ -1299,9 +1498,71 @@ impl Builder<'_> {
                 if let Some(e) = entry {
                     self.g.ref_lki.push(e);
                 }
+                if let Some(x) = o.get("lki") {
+                    self.last_known(r, x)?;
+                }
                 Ok(())
             }
         }
+    }
+
+    /// A stale reference's last known information (module docs; ENGINE.md 236), into the game's records.
+    fn last_known(&mut self, r: ObjRef, v: &Value) -> Result<(), String> {
+        let o = v.as_object().ok_or("build: lki must be an object")?;
+        keys(o, &["copy", "dfc", "mv", "power", "toughness", "qualities", "attached", "counters"], "a gone object's last known information")?;
+        let int = |x: &Value, what: &str| x.as_i64().ok_or_else(|| format!("build: lki {what} must be an integer"));
+        if let Some(c) = o.get("copy") {
+            let def = lookup_any(self.db, c.as_str().ok_or("build: lki copy must be a card name")?)?;
+            let dfc = o.get("dfc").map_or(Ok(false), |x| x.as_bool().ok_or("build: lki dfc must be a boolean"))?;
+            let mv = o.get("mv").ok_or("build: lki copy without its mv")?.as_u64().ok_or("build: lki mv must be a number")?;
+            self.g.lki_copy.push((r, crate::copies::CopyVals { def, exc: Default::default(), dfc }, mv));
+        }
+        if let Some(p) = o.get("power") {
+            self.g.lki_power.push((r.idx, r.inc, int(p, "power")?));
+        }
+        if let Some(t) = o.get("toughness") {
+            let a = t.as_array().filter(|a| a.len() == 2).ok_or("build: lki toughness must be [toughness, controller]")?;
+            let ctl = a[1].as_u64().filter(|&p| p < 2).ok_or("build: lki toughness's controller must be a player")? as PlayerId;
+            self.g.lki_toughness.push((r, int(&a[0], "toughness")?, ctl));
+        }
+        if let Some(q) = o.get("qualities") {
+            let q = q.as_object().ok_or("build: lki qualities must be an object")?;
+            keys(q, &["controller", "deathtouch", "lifelink", "infect", "spell", "colors", "types", "itself"], "lki qualities")?;
+            let b = |k: &str| q.get(k).and_then(|x| x.as_bool()).ok_or_else(|| format!("build: lki qualities {k} must be a boolean"));
+            let n = |k: &str| q.get(k).and_then(|x| x.as_u64()).ok_or_else(|| format!("build: lki qualities {k} must be a number"));
+            let d = crate::game::DamageSource {
+                controller: n("controller")?.min(1) as PlayerId,
+                deathtouch: b("deathtouch")?,
+                lifelink: b("lifelink")?,
+                infect: b("infect")?,
+                spell: b("spell")?,
+                colors: n("colors")? as crate::mana::ManaMask,
+                types: n("types")? as u16,
+                obj: b("itself")?.then_some(r),
+            };
+            self.g.lki_qualities.push((r, d));
+        }
+        if let Some(a) = o.get("attached") {
+            let h = self.obj(a)?;
+            self.g.lki_attached.push((r, h));
+        }
+        if let Some(cs) = o.get("counters") {
+            use crate::db::Counter as K;
+            for c in cs.as_array().ok_or("build: lki counters must be a list")? {
+                let a = c.as_array().filter(|a| a.len() == 2).ok_or("build: an lki counter must be [kind, number]")?;
+                let k = match a[0].as_str() {
+                    Some("+1/+1") => K::P1P1,
+                    Some("-1/-1") => K::M1M1,
+                    Some("stun") => K::Stun,
+                    Some("loyalty") => K::Loyalty,
+                    Some("lore") => K::Lore,
+                    _ => return Err(format!("build: an lki counter's kind: {}", a[0])),
+                };
+                let n = a[1].as_u64().ok_or("build: an lki counter's number")?;
+                self.g.lki_counters.push((r, k, n as crate::num::Count));
+            }
+        }
+        Ok(())
     }
 
     fn opt_obj(&mut self, o: &Map<String, Value>, k: &str) -> Result<Option<ObjRef>, String> {

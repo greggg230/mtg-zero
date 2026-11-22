@@ -66,6 +66,7 @@ fn cr_601_2g_cascading_cataracts_pays_within_a_payment() {
     let spell = g.card(0, "Test Double", Zone::Hand);
     assert!(g.has_option(Choice::Cast(spell)));
     g.choose(Choice::Cast(spell));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana));
     assert!(g.has_option(act(cat, 1)), "{:?}", g.options_desc());
     g.choose(act(cat, 1));
@@ -366,6 +367,7 @@ fn cr_302_6_gene_pollinator_in_a_payment_and_summoning_sickness() {
     let island = bf(&g, 0, "Island");
     let new = g.card(0, "Gene Pollinator", Zone::Hand);
     g.choose(Choice::Cast(new));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
     // (The Island by its own id: tapped for the Pollinator's ability.)
     assert!(g.has_option(Choice::Card(island)), "{:?}", g.options_desc());

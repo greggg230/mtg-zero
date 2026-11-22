@@ -38,6 +38,12 @@ decision the old engine never asked is answered only as the old engine behaved:
   passed for the player, who had no other option);
 * PayMana offering "Pay the rest from the pool": that (the old engine ended the payment when the pool
   covered the rest; 100.4.3, 13.13);
+* any other PayMana no old step matches (ENGINE.md 229.2: a payment's sources the game tells apart are
+  options of their own, so a payment the old engine finished by itself - one class left - may ask): each
+  option is tried, and the one whose later states equal the old engine's is kept (the permanent the old
+  engine tapped: permanents are never paired anew, so at most one does);
+* CastMana offering "Pay the cost" (ENGINE.md 231: a cast's 601.2g step, which the old engine never asked - it
+  went straight to the payment): that;
 * OrderTriggers, ChooseReplacement, OrderTimestamps (questions 100.3 added): each option is tried, and
   the one whose later states equal the old engine's is kept. When several do (the order shows in no
   recorded state: nobody acted while those triggers waited), the first is taken and the spot lists the
@@ -78,16 +84,24 @@ import delver_blunders as DB  # noqa: E402  (load_engine, engine_info, spot_sig,
 
 TRACE_FORMAT = 'delver-canary-trace/1'
 PASS, FLOAT, POOL = 'Pass priority', 'Activate mana abilities', 'Pay the rest from the pool'
+STEP_PASS = 'Pay the cost'   # a cast's 601.2g step (ENGINE.md 231)
 ORDERS = ('OrderTriggers', 'ChooseReplacement', 'OrderTimestamps')
 PILE = ('PutOnTop', 'PutOnBottom')        # a looked-at pile put back card by card (docs/ENGINE.md 152.1, 157)
 OLD_INDEX_KEYS = ('k_main1',)             # spot fields that index the old path (the Bauble miner's main-1 decision)
 NODES = 200000                            # the walk's budget a spot (a loud failure, never a cut path)
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def new_game(E, sp):
     sj = json.loads(sp['spec'])
     sj['log'] = True
-    return E.Game('mtg', json.dumps(sj), 2, int(sp['seed']))
+    return E.Game(_lay().current(), json.dumps(sj), 2, int(sp['seed']))
 
 
 def options(st):
@@ -338,6 +352,10 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
             cands.append(('ins', dict(opts)[PASS]))
         elif kind == 'PayMana' and POOL in labels:
             cands.append(('ins', dict(opts)[POOL]))
+        elif kind == 'CastMana' and STEP_PASS in labels:
+            cands.append(('ins', dict(opts)[STEP_PASS]))
+        elif kind == 'PayMana' and not any(how == 'match' for how, _ in cands):
+            cands += [('ins', x) for _, x in opts]
         elif kind in ORDERS:
             cands += [('order', x) for _, x in opts]
         words = dict((x, t) for t, x in opts)

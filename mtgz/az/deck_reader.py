@@ -86,7 +86,9 @@ def readers(hidden=256, enter='trunk', belief=False, path=PATH, path_v7=PATH_V7)
 
     def reader(inputs):
         return {'target': d['target'], 'inputs': inputs, 'hidden': hidden, 'enter': enter, 'belief': belief}
-    return {'mtg': [reader([list(r) for r in d7['inputs']])], 'mtg_eoe': [reader(eoe_inputs(path))]}
+    # (`mtg`, layout v8, ENGINE.md 236: layout v7's head, so `mtg_v7`'s reader)
+    return {'mtg': [reader([list(r) for r in d7['inputs']])], 'mtg_v7': [reader([list(r) for r in d7['inputs']])],
+            'mtg_eoe': [reader(eoe_inputs(path))]}
 
 
 READERS = readers()

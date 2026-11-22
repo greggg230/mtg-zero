@@ -963,6 +963,7 @@ fn arena_of_glory_exerts_for_mana_that_gives_haste_cr701_39() {
     let dwarf = g.card(0, "Test Dwarf", Zone::Hand);
     g.choose(Choice::Cast(dwarf));
     g.drive_until(|g| !at_priority(g));
+    g.pass_cast_mana();
     assert!(g.has_option(act(arena, 1)), "{:?}", g.options_desc());
     g.choose(act(arena, 1));
     pay(&mut g);

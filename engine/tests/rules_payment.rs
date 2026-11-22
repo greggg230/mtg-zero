@@ -279,6 +279,7 @@ fn cr_605_3a_arena_of_glory_while_paying_for_a_creature() {
     let d = g.card(0, "Test Dwarf", Zone::Hand);
     assert!(g.has_option(Choice::Cast(d)));
     g.choose(Choice::Cast(d));
+    g.pass_cast_mana();
     let arena = bf(&g, 0, "Arena of Glory");
     assert!(g.has_option(act(arena, 1)), "{:?}", g.options_desc());
     let mut h = g.clone();

@@ -552,7 +552,10 @@ pub(crate) struct PayMana {
     pub extra_haste: u8,
     /// Single-mana sources picked.
     pub chosen: Vec<Src>,
-    pub min_class: u8,
+    /// The class of the last pick: the picks go up the classes (ENGINE.md
+    /// 18). A u32: a payment's classes are split into runs of twins
+    /// (`split_unlike`, ENGINE.md 229.2), up to one a permanent.
+    pub min_class: u32,
     /// `vm` is known.
     pub pooled: bool,
     /// How much of the virtual pool's mana the payment spends: as much as
@@ -1008,15 +1011,18 @@ impl Game {
 
     /// The sources of payment `pm` (`pay_classes`), without those of the
     /// permanents a cost tapped already (`Keep::committed`: teamwork's
-    /// creatures, docs/shortcuts.md 13.17).
+    /// creatures, docs/shortcuts.md 13.17); each class split into runs of
+    /// twins, the sources the rest of the game can't tell apart (`split_unlike`,
+    /// ENGINE.md 229.2): a class is one option, its first free member picked.
     pub(crate) fn payment_classes(&self, pm: &PayMana) -> Vec<Class> {
         let classes = self.spell_pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke, pm.keep.allow);
         let classes = if pm.keep.committed.is_empty() { classes } else { self.classes_without(&classes, &pm.keep.committed) };
         // (And the source's own conflicting sources, `SelfUse`.)
-        match self.classes_for_self_use(&classes, pm.keep.self_use) {
+        let classes = match self.classes_for_self_use(&classes, pm.keep.self_use) {
             std::borrow::Cow::Borrowed(_) => classes,
             std::borrow::Cow::Owned(v) => v,
-        }
+        };
+        self.split_unlike(classes)
     }
 
     /// The additional mana tapping permanent `x` for mana adds (CR 106.12,
@@ -1478,32 +1484,26 @@ impl Game {
     /// The sources of a payment: mana abilities, and with improvise the
     /// untapped artifacts, with convoke the untapped creatures.
     pub(crate) fn pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: u16, convoke: bool) -> Vec<Class> {
-        let mut classes = self.mana_classes(p, exclude);
+        let classes = self.mana_classes(p, exclude);
+        self.with_alternatives(p, exclude, classes, improvise, convoke)
+    }
+
+    /// `classes` (mana abilities', `mana_classes`) with a spell's
+    /// alternatives to mana: with convoke the untapped creatures (CR
+    /// 702.51a), with improvise the untapped permanents of `improvise`'s
+    /// types (702.126a). A permanent another's mana ability taps (Urza's,
+    /// `TAP_FOR`) is a source both ways, two options of its one `MY_PERM` id
+    /// (which one: asked next, `PayMana::which`): they are not one tap -
+    /// convoke pays a pip of the creature's colours where Urza's ability
+    /// makes {U}, and convoke and improvise spend no mana where its {U} is
+    /// mana spent and a colour spent (ENGINE.md 229.2; ENGINE.md 31.4 left
+    /// improvise out of such an artifact, convoke out of such a creature).
+    pub(crate) fn with_alternatives(&self, p: PlayerId, exclude: Option<CardIdx>, mut classes: Vec<Class>, improvise: u16, convoke: bool) -> Vec<Class> {
         if convoke {
-            let tapped_for: Vec<CardIdx> =
-                classes.iter().filter(|cl| cl.members[0].slot == TAP_FOR).flat_map(|cl| cl.members.iter().map(|s| s.card)).collect();
-            for mut cl in self.convoke_classes(p, exclude) {
-                cl.members.retain(|s| !tapped_for.contains(&s.card));
-                if !cl.members.is_empty() {
-                    classes.push(cl);
-                }
-            }
+            classes.extend(self.convoke_classes(p, exclude));
         }
         if improvise != 0 {
-            // (A permanent another's mana ability taps for mana isn't also
-            // offered for improvise: the same tap, whose mana pays for {1}
-            // as well, ENGINE.md 31.)
-            let tapped_for: Vec<CardIdx> =
-                classes.iter().filter(|cl| cl.members[0].slot == TAP_FOR).flat_map(|cl| cl.members.iter().map(|s| s.card)).collect();
-            for mut cl in self.improvise_classes(p, exclude, improvise) {
-                if !tapped_for.is_empty() {
-                    cl.members.retain(|s| !tapped_for.contains(&s.card));
-                    if cl.members.is_empty() {
-                        continue;
-                    }
-                }
-                classes.push(cl);
-            }
+            classes.extend(self.improvise_classes(p, exclude, improvise));
         }
         classes
     }
@@ -1532,10 +1532,14 @@ impl Game {
     /// or with `Allow::no_mana` only the alternatives to mana (convoke's and
     /// improvise's taps, `IMPROVISE`; ENGINE.md 220.1).
     pub(crate) fn spendable_classes<'a>(classes: &'a [Class], allow: crate::doomsday_b::Allow) -> std::borrow::Cow<'a, [Class]> {
-        if !allow.no_mana || classes.iter().all(|cl| cl.members.first().is_some_and(|s| s.slot == IMPROVISE)) {
+        // (And the cards mana abilities activated during its cast put into the
+        // graveyard for its delve, no mana with them: `Game::no_mana_feeders`,
+        // ENGINE.md 231.4.)
+        let kept = |cl: &Class| cl.members.first().is_some_and(|s| s.slot == IMPROVISE) || cl.delve;
+        if !allow.no_mana || classes.iter().all(kept) {
             return std::borrow::Cow::Borrowed(classes);
         }
-        std::borrow::Cow::Owned(classes.iter().filter(|cl| cl.members.first().is_some_and(|s| s.slot == IMPROVISE)).cloned().collect())
+        std::borrow::Cow::Owned(classes.iter().filter(|cl| kept(cl)).cloned().collect())
     }
 
     /// A card in hand with a mana ability (a Spirit Guide).
@@ -1837,6 +1841,14 @@ impl Game {
     /// `any`, the cost's purposes and those of the needs mana abilities may
     /// add, ENGINE.md 100.4.5).
     fn add_pool(&self, p: PlayerId, any: crate::doomsday_b::Allow, c: &mut Cands) {
+        // (The payment search's mana whose type isn't chosen yet, one of a mask each: `Game::pool_wild`, ENGINE.md
+        // 231.4.)
+        let (wild, mask) = self.pool_wild[p as usize];
+        if wild > 0 && !any.no_mana {
+            for _ in 0..wild {
+                c.fixed.push(Unit::free(mask));
+            }
+        }
         let pool = &self.players[p as usize].pool;
         // (A payment of no mana spends none of the pool's: ENGINE.md 220.1.)
         if pool.total() == 0 || any.no_mana {
@@ -2031,7 +2043,7 @@ impl Game {
         if need == 0 {
             return true;
         }
-        let mut have = self.players[p as usize].pool.total() as u64;
+        let mut have = self.players[p as usize].pool.total() as u64 + self.pool_wild[p as usize].0 as u64;
         for cl in classes {
             if have >= need as u64 {
                 return true;
@@ -2787,7 +2799,7 @@ impl Game {
             pm.card_slots.clear();
             let src = Src { card, slot, g };
             let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
-            pm.min_class = ci as u8;
+            pm.min_class = u32::try_from(ci).expect("a payment's classes: fewer than 2^32");
             // (A shared source's actor: asked next, `actor_for`.)
             if !classes[ci].actors.is_empty() && matches!(classes[ci].yld, Yield::One(_)) {
                 pm.actor_for = Some(src);
@@ -4823,6 +4835,7 @@ mod tests {
         let others: Vec<CardIdx> = g.permanents_of(0).filter(|&c| matches!(g.def_of(c).name.as_str(), "Island" | "Mountain")).collect();
         // (Priority's "cast or play from the graveyard", then the card: ENGINE.md 100.5.)
         g.choose(Choice::Cast(fl));
+        g.pass_cast_mana();
         assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
         let granted = Choice::Ability(pol, AbilitySlot::Activated(1));
         assert!(g.has_option(granted), "the Pollinator's granted {{U}}: {:?}", g.options_desc());

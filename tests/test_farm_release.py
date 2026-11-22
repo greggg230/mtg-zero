@@ -552,3 +552,34 @@ def test_the_farm_build_hook_and_the_runs_start(tmp_path, fbx, monkeypatch):
     R.check_farm_use(str(tmp_path), dict(cfg, selfplay_local_reason='a timing A/B'), True, lines.append)
     assert ': a timing A/B - beside a published farm build of this commit (commit ' in lines[-1]
     assert R.PRESETS['mtg-smoke']['selfplay_local_reason'] and R.PRESETS['delver-smoke']['selfplay_local_reason']
+
+
+def test_the_mac_gates_name_the_commit_for_the_local_fuzz_build(tmp_path, monkeypatch):
+    """The local fuzz build (a bare cargo build, no manifest.json) gets this commit through ZERO_FARM_ENGINE_COMMIT, so
+    its failures' repros say "(at <sha>)" like the Mac's published build - farm_gates part (d) compares them; without it
+    the desktop said "(at unknown)" and the macOS part of 50205980's release failed on four identical faults."""
+    import farm_release as FR
+    import farm_gates as G
+    sha = 'ab' * 20
+    r = object.__new__(FR.Release)
+    r.s = {'python': 'py', 'reference': {'config': 'c.json', 'export': str(tmp_path)}}
+    r.log_dir, r.wt = str(tmp_path), str(tmp_path)
+    seen = {}
+
+    def run(self, step, cmd, cwd=None, env=None, **kw):
+        seen.update(step=step, cmd=cmd, env=env)
+        os.makedirs(os.path.join(self.log_dir, 'mac-gates'), exist_ok=True)
+        with open(os.path.join(self.log_dir, 'mac-gates', 'summary.json'), 'w', encoding='utf-8') as f:
+            json.dump({'passed': True, 'parts': {}}, f)
+    monkeypatch.setattr(FR.Release, 'run', run)
+    monkeypatch.setattr(FR.Release, 'local_fuzz_worker', lambda self: 'fz.exe')
+    monkeypatch.setattr(FR.Release, 'mac_runtime_name', lambda self: ('rt', 'pack'))
+    monkeypatch.setattr(FR, 'git', lambda *a, **k: sha if a[:2] == ('rev-parse', 'HEAD') else '')
+    r.mac_gates({'mac_path': 'm/w'}, {'mac_path': 'm/fz'})
+    assert seen['env']['ZERO_FARM_ENGINE_COMMIT'] == sha and seen['env']['CUDA_VISIBLE_DEVICES'] == ''
+    assert seen['cmd'][seen['cmd'].index('--fuzz-worker') + 1] == 'fz.exe'
+    # what part (d) then compares: both sides' repros normalised to the same text
+    fin = lambda at: {'mode': 'games', 'failures': [{'seed': 505, 'site': 'crash exit -6', 'panic': None,  # noqa: E731
+                                                     'repro': f'(at {at}) FUZZ_FIRST=505 cargo test'}]}
+    assert G.fault_failures(fin(sha[:12]))['505']['repro'] == G.fault_failures(fin(sha))['505']['repro']
+    assert G.fault_failures(fin('unknown'))['505']['repro'] != G.fault_failures(fin(sha))['505']['repro']

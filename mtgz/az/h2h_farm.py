@@ -180,7 +180,7 @@ def job(a, sides):
     network on both seats). NotHere when the farm's seats are not the local match's."""
     from zero import games as G, h2h, seat_settings as SS
     from . import farm_campaign as C
-    spec = h2h.match_spec(a.a, a.b, C.GAME, a.spec)
+    spec = h2h.match_spec(a.a, a.b, C.ckpt_game(a.a, a.b), a.spec)
     own = [h2h.side_settings(ck, a.sims, a.c_puct, a.chance_k) for ck in (a.a, a.b)]
     try:
         sets = SS.sets_of(a, own[0], own[1])
@@ -189,7 +189,7 @@ def job(a, sides):
     full = [SS.seat_cfg(own[k], sets[k] or None) for k in range(2)]
     cfg = dict(h2h.run_settings(a.a))
     cfg.update(eval_sims=int(a.sims), c_puct=float(a.c_puct), chance_k=int(a.chance_k), max_steps=MAX_STEPS,
-               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=C.GAME)
+               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=C.ckpt_game(a.a, a.b))
     seat_sets = []
     for k, f in enumerate(full):
         lack = sorted(x for x in SS.SEAT_KEYS if x in cfg and x not in f)

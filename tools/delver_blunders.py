@@ -115,6 +115,13 @@ TARGET_RE = re.compile(r'target (.+?)#(\d+)')
 DMG_RE = re.compile(r'(\d+) damage to ')
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def say(*a):
     """The tool's log: print, flushed (a watcher's console is a file)."""
     print(*a, flush=True)
@@ -1028,16 +1035,16 @@ def mirror(ckpt, seat, games, sims, chance_k, seed, threads, groups, device, spe
     from zero import games as G
     from zero.infer import NetEvaluator, drive
     from zero.net import load
-    model, _ = load(ckpt, device, game='mtg')
+    model, _ = _lay().load_used(ckpt, device)
     sa = G.nn_seat('a', int(sims), 1.0, chance_k=int(chance_k))
     sa.update(seat)
-    drv = G.Driver('mtg', [[sa, sa] for _ in range(games)], spec=spec, concurrency=conc, seed=seed, threads=threads,
+    drv = G.Driver(_lay().current(), [[sa, sa] for _ in range(games)], spec=spec, concurrency=conc, seed=seed, threads=threads,
                    groups=groups, max_steps=5000, move_log=1_000_000, sparse=bool(sparse))
     ev = NetEvaluator(model, device, graphs=bool(graphs) or None)
     drive(drv, {'a': ev})
     rows = sorted(drv.take_results(), key=lambda r: r['gid'])
     w0 = sum(r['result'][0] for r in rows) / max(1, len(rows))
-    return {'a': ckpt, 'b': ckpt, 'game': 'mtg', 'sims': int(sims), 'chance_k': int(chance_k), 'games': len(rows),
+    return {'a': ckpt, 'b': ckpt, **_lay().stamp(_lay().current()), 'sims': int(sims), 'chance_k': int(chance_k), 'games': len(rows),
             'seat0_score': round(w0, 4), 'unfinished': sum(1 for r in rows if not r['over']), 'one_evaluator': True,
             'rows': rows}
 
@@ -1112,7 +1119,7 @@ def rebuild(E, spec, driver_seed, row, paired=False):
     every engine step; frames {s, p, k 'nn' | 'forced', a}). Raises when the log does not replay."""
     sp = json.loads(spec)
     sp['log'] = True
-    g = E.Game('mtg', json.dumps(sp), 2, game_seed(driver_seed, int(row['gid']), paired))
+    g = E.Game(_lay().current(), json.dumps(sp), 2, game_seed(driver_seed, int(row['gid']), paired))
     states, frames = [], []
 
     def step(a, kind):
@@ -1293,7 +1300,7 @@ def build_spots(games_paths, per_kind=12, play=(), engine_path=ROOT, log=say):
         import mtgz.az.replays as R
         run, _ = core.run_of(rec['model']['path'])
         spec = R.spec_with_log(core.run_config(run)['spec'])
-        g = E.Game('mtg', spec, 2, int(rec['seed']))
+        g = E.Game(_lay().current(), spec, 2, int(rec['seed']))
         for a in rec['actions'][:idx]:
             g.step(int(a))
         st = json.loads(g.export_state())
@@ -1309,7 +1316,7 @@ def build_spots(games_paths, per_kind=12, play=(), engine_path=ROOT, log=say):
 def spot_game(E, sp):
     sj = json.loads(sp['spec'])
     sj['log'] = True
-    g = E.Game('mtg', json.dumps(sj), 2, int(sp['seed']))
+    g = E.Game(_lay().current(), json.dumps(sj), 2, int(sp['seed']))
     for a in sp['actions']:
         g.step(int(a))
     return g
@@ -1322,7 +1329,7 @@ def search_many(ev, games, seeds, sims, seat, chance_k=0):
     import numpy as np
     import rowkit
     from zero.protocol import ROW_BELIEF
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     trees = [g.search_tree(True, int(sd)) for g, sd in zip(games, seeds)]
     if seat.get('belief_tilt'):
         B = len(games)
@@ -1401,7 +1408,7 @@ def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_
         import torch
         torch.set_num_threads(min(8, os.cpu_count() or 8))
     for ck, (sel, cs) in [(c, r) for c in ckpts for r in (rules or [(select, c_scale)])]:
-        model, _ = load(ck, device, game='mtg')
+        model, _ = _lay().load_used(ck, device)
         ev = NetEvaluator(model, device, graphs=True if device.startswith('cuda') else None)
         seat, rule = eval_seat(ck, sel, cs)
         chance_k = int(h2h.run_config(ck).get('chance_k', 0))
@@ -1541,11 +1548,11 @@ def spot_value(ckpt, g, p):
     if ckpt not in _VALUE_NETS:
         from zero.infer import NetEvaluator
         from zero.net import load
-        model, _ = load(ckpt, 'cpu', game='mtg')
+        model, _ = _lay().load_used(ckpt, 'cpu')
         _VALUE_NETS[ckpt] = NetEvaluator(model, 'cpu')
     import rowkit
     legal = [int(v) for v in g.legal()]
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     x, rr = rowkit.row(g, p, rk, opts=p == g.to_move)
     out = rowkit.evaluate(_VALUE_NETS[ckpt], [x], [legal if p == g.to_move else []], rk, [rr])
     return float(out[1][0][0])

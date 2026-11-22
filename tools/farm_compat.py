@@ -67,6 +67,12 @@ def settings(a):
         if k not in cfg:
             raise SystemExit(f'--set {k}: not a run setting')
         cfg[k] = json.loads(v)
+    # (a game --set now means the name's current layout - `mtg` = v8, `mtg_v7` = v7 - unless game_layout is --set too,
+    # e.g. `--set game_layout=null` with `game="mtg"`: the name as a run of before layout v8 recorded it; ENGINE.md 236.9)
+    from zero import package
+    keys = {s.split('=', 1)[0] for s in a.set}
+    lay = cfg.get('game_layout') if 'game_layout' in keys or 'game' not in keys else package.active().layout_of(cfg['game'])
+    package.set_game(cfg, package.resolve_game(cfg['game'], lay, '--set'))
     return cfg
 
 
@@ -161,8 +167,9 @@ def main(argv=None):
     if os.path.exists(rep):
         with open(rep, encoding='utf-8') as f:
             r3 = json.load(f)
+    # (with branched games, zero-core records/2, each branch is a game record of its own: a setup each)
     ok3 = rc3 == 0 and bool(r3 and r3.get('identical')) and (r3 or {}).get('rows', 0) > 0 and \
-        (r3 or {}).get('setups') == a.games
+        (r3 or {}).get('setups') == a.games + int((r3 or {}).get('branches') or 0)
     summary['gate3'] = {'passed': ok3, 'seconds': s3, 'result': r3, **({} if ok3 else {'tail': tail3})}
     feats = worker_features(a.worker)
     okf = feats['passed']

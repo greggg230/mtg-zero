@@ -130,6 +130,17 @@ pub struct Cloud {
 /// every cloud); b = 0: a chance the deck does not change. `x`: R_def before it less the sightings that had grown R (a payment's pinned cards; ENGINE.md 140.9).
 /// Kept only where whole-deck clouds are (`hidden_decklists`, `deck_clouds`: R never loses a card there), and only
 /// in a game no `determinize` dealt (`Game::observer`: a world's are dropped, `sightings_lost`).
+/// A group of places that hold search finds mixed with other cards (ENGINE.md 236; 223's decision 4,
+/// `Game::find_groups`): its owner, its members (the cards at its places, by card index, sorted) and how
+/// many of them are their owner's search's finds. Public: everyone saw the finds made and the private
+/// rearrangement that mixed them; not which places hold them.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct FindGroup {
+    pub owner: PlayerId,
+    pub members: Vec<CardIdx>,
+    pub finds: u32,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Sighting {
     pub viewer: PlayerId,
@@ -526,6 +537,33 @@ impl Game {
         self.ref_lki.iter().rev().find(|x| x.0 == r).filter(|x| x.2 >> viewer & 1 != 0).map(|x| x.1)
     }
 
+    /// `players` (a bit per player) lose track of which of `cards` is which
+    /// (ENGINE.md 235: a shuffle, a private rearrangement, cards put in an
+    /// order nobody knows): their library cards' `Obj::lost`. One card alone
+    /// is where it was put, so nobody loses track of it.
+    pub(crate) fn lose_track(&mut self, cards: &[CardIdx], players: u8) {
+        if cards.len() < 2 {
+            return;
+        }
+        for &c in cards {
+            let o = &mut self.objs[c.i()];
+            if o.zone == Zone::Library {
+                o.lost |= players;
+            }
+        }
+    }
+
+    /// Does `r` name an existing object as `viewer` sees it (ENGINE.md 235)?
+    /// Live (CR 400.7), and not a library card `viewer` lost track of
+    /// (`Obj::lost`): a draw, a mill or a search may have taken that card or
+    /// one it was mixed with, and the viewer can't tell which - in one of its
+    /// worlds the reference is live while in another, with the same keys, its
+    /// object left. So the viewer's view, row and loop hash show such a
+    /// reference as they show a gone object's.
+    pub(crate) fn ref_seen_live(&self, viewer: PlayerId, r: ObjRef) -> bool {
+        self.live(r) && !(self.objs[r.idx.i()].zone == Zone::Library && self.objs[r.idx.i()].lost >> viewer & 1 != 0)
+    }
+
     /// At a turn's start: the departures no reference of the public state
     /// names any more are forgotten (`Game::ref_lki`).
     pub(crate) fn prune_ref_lki(&mut self) {
@@ -659,8 +697,50 @@ impl Game {
         self.sighted(q, owner, c, d, !merged, terms);
         if q != owner {
             self.untrack_found(c);
+            // (ENGINE.md 236: the other player knows a member now, so the group's count is no longer "k of
+            // these places" for it.)
+            self.end_find_group(c);
         }
         self.tidy_clouds();
+    }
+
+    /// The find group card `c` is a member of, if any, ends (ENGINE.md 236): the member left the group's
+    /// zone or the other player learned it, so "k of these places hold finds" no longer holds as one count.
+    pub(crate) fn end_find_group(&mut self, c: CardIdx) {
+        if !self.find_groups.is_empty() {
+            self.find_groups.retain(|grp| !grp.members.contains(&c));
+        }
+    }
+
+    /// A private rearrangement of `owner`'s `domain` (`scramble`; `told` its told-apart hand cards) and the
+    /// find groups (ENGINE.md 236): when the domain mixes told finds or a group's members with any other card,
+    /// the domain's cards and every group they touch become one group, its finds the domain's told finds and
+    /// those groups' finds - the public fact `finds_told` stops telling (223's strict rule). A domain inside one
+    /// group (Ponder over a pile's places) changes nothing.
+    fn group_scramble(&mut self, owner: PlayerId, domain: &[CardIdx], told: &[CardIdx]) {
+        let mixed = domain.iter().any(|&c| !told.contains(&c) && !self.finds_told.contains(&c));
+        if !mixed {
+            return;
+        }
+        let told_in = domain.iter().filter(|&&c| self.finds_told.contains(&c)).count() as u32;
+        let touching: Vec<usize> = (0..self.find_groups.len()).filter(|&i| self.find_groups[i].owner == owner && self.find_groups[i].members.iter().any(|c| domain.contains(c))).collect();
+        if told_in == 0 && touching.is_empty() {
+            return;
+        }
+        let members_of = |c: &CardIdx| !told.contains(c);
+        if told_in == 0 && touching.len() == 1 && domain.iter().filter(|c| members_of(c)).all(|c| self.find_groups[touching[0]].members.contains(c)) {
+            return;
+        }
+        let mut members: Vec<CardIdx> = domain.iter().copied().filter(|c| members_of(c)).collect();
+        let mut finds = told_in;
+        for &i in touching.iter().rev() {
+            let grp = self.find_groups.remove(i);
+            finds += grp.finds;
+            members.extend(grp.members);
+        }
+        members.sort_unstable();
+        members.dedup();
+        self.find_groups.push(FindGroup { owner, members, finds });
     }
 
     // ---- sightings (ENGINE.md 140.9) --------------------------------------
@@ -990,9 +1070,14 @@ impl Game {
             // (ENGINE.md 223: the public fact. After the rearrangement the viewer knows none of the domain's cards
             // apart - those it knew are a cloud's now -, so finds mixed with any card that is not one are no longer
             // told apart, and among finds only it knows that the domain's places hold them, not which holds which.)
+            // (ENGINE.md 236: the group fact, counted before the strict rule drops the domain's told finds.)
+            self.group_scramble(owner, &domain, &told);
             if !self.finds_told.is_empty() && domain.iter().any(|&c| !told.contains(&c) && !self.finds_told.contains(&c)) {
                 self.finds_told.retain(|c| !domain.contains(c));
             }
+            // (ENGINE.md 235: which of the domain's cards is which is the owner's alone now.)
+            let mixed: Vec<CardIdx> = domain.iter().copied().filter(|c| !told.contains(c)).collect();
+            self.lose_track(&mixed, 1 << q);
             for c in domain {
                 if told.contains(&c) {
                     continue;
@@ -1054,6 +1139,8 @@ impl Game {
         for &c in cards {
             self.objs[c.i()].known &= !(1 << owner);
         }
+        // (ENGINE.md 235: nobody can tell these cards apart by where they are.)
+        self.lose_track(cards, 0b11);
         self.tidy_clouds();
     }
 

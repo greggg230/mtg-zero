@@ -26,10 +26,24 @@ fn spec() -> MtgSpec {
     MtgSpec { max_turns: 60, ..MtgSpec::default() }
 }
 
-/// `viewer`'s whole row (layout v7, ENGINE.md 125): the head ([`NUM_FEATURES`] floats first),
-/// then the tail tokens and the pointer overrides (`tail_encode::Row::flat`).
+/// `viewer`'s whole row (layout v8, ENGINE.md 236: v7's, ENGINE.md 125, and v8's segments): the head
+/// ([`NUM_FEATURES`] floats first), then the tail tokens and the pointer overrides (`tail_encode::Row::flat`).
 fn enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    engine::az::tail_encode::Row::of_az_v8(g, viewer).flat()
+}
+
+/// `viewer`'s layout v7 row (the game `mtg_v7`'s): the gate checks that it lacks exactly layout v8's facts.
+fn enc7(g: &MtgAz, viewer: usize) -> Vec<f32> {
     engine::az::tail_encode::Row::of_az(g, viewer).flat()
+}
+
+/// The gate's positions of layout v8's facts (ENGINE.md 236; `public_state_v8`): payments in progress in each of
+/// their decisions, gone objects whose last known information an ability reads, a find group.
+fn v8_positions() -> Vec<(&'static str, MtgAz)> {
+    let mut v = engine::public_state_v8::payment_positions();
+    v.extend(engine::public_state_v8::lki_positions());
+    v.extend(engine::public_state_v8::find_group_positions());
+    v
 }
 
 fn legal(g: &MtgAz) -> Vec<u16> {
@@ -195,11 +209,12 @@ fn encode_sparse_is_the_rows_non_zeros_with_the_same_key() {
     use zero_search::lookahead::{obs_hash, obs_hash_sparse};
     let names = engine::az::constructed::Decklist::izzet_delver().main_names();
     let mirror = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
-    let mut gs = states(scale(12), 5, 5);
+    // (14 games of each: at least 300 rows without a tail - 12 gave 280 once ENGINE.md 229 moved the games.)
+    let mut gs = states(scale(14), 5, 5);
     let sp = MtgSpec::parse(&mirror).unwrap();
     let mut rng = Rng::new(6);
     let mut h = Heuristic::new(6);
-    for s in 0..scale(12) {
+    for s in 0..scale(14) {
         let mut g = MtgAz::new_game(&sp, 2, 6000 + s).unwrap();
         let mut keys = Vec::new();
         while g.to_move().is_some() {
@@ -424,6 +439,49 @@ fn layout_json_is_checked_in() {
     assert_eq!(v["features"], NUM_FEATURES);
     assert_eq!(v["version"], 7);
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
+}
+
+/// Layout v8 (ENGINE.md 236, the game `mtg`): `mtgz/az/layout_v8.json` = `encode::layout_json_v8`
+/// (MTGZ_WRITE_LAYOUT=1 rewrites it), and it widens layout v7 additively and exactly: the same
+/// features and head (the widen's map is the identity), v7's 25 segments unchanged (names, slots,
+/// widths, gates, columns), then the six tail-only gated segments of `tail_v8` (zero-core's widen
+/// gives them a gate of exactly 0: docs/az.md 43.8), `pay_options` with a pointer column; the tail
+/// segments are `TAILS_V8`, the game `mtg`'s.
+#[test]
+fn layout_v8_is_checked_in_and_widens_layout_v7_exactly() {
+    let want = encode::layout_json_v8(CardDb::cube());
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v8.json");
+    if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
+        std::fs::write(&path, &want).unwrap();
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    assert!(have == want, "{} differs from encode::layout_json_v8 (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az layout)", path.display());
+    let (l7, l8) = (read_layout("layout_v7.json"), read_layout("layout_v8.json"));
+    assert_eq!(l8.features, l7.features);
+    let id: Vec<usize> = (0..NUM_FEATURES).collect();
+    assert_eq!(widen_map(&l7, &l8), id, "the widen's map is the identity");
+    let j7: serde_json::Value = serde_json::from_str(&encode::layout_json(CardDb::cube())).unwrap();
+    let j8: serde_json::Value = serde_json::from_str(&want).unwrap();
+    assert_eq!(j8["version"], 8);
+    assert_eq!(j8["revision"].as_u64(), Some(encode::LAYOUT_V8_REVISION as u64));
+    for k in ["features", "vocab", "bags", "globals", "cards", "option_pointers", "max_row_tokens", "draft"] {
+        assert_eq!(j7[k], j8[k], "{k}");
+    }
+    let (s7, s8) = (j7["segments"].as_array().unwrap(), j8["segments"].as_array().unwrap());
+    assert_eq!(s8[..25], s7[..], "v7's segments, unchanged");
+    let names: Vec<&str> = s8[25..].iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["payment", "pay_options", "lki", "lki_spells", "lki_relations", "find_groups"]);
+    for s in &s8[25..] {
+        assert_eq!((s["count"].as_u64(), s["tail"].as_bool(), s["gate"].as_bool(), s["offset"].is_null()), (Some(0), Some(true), Some(true), true), "{}", s["name"]);
+    }
+    assert_eq!(s8[26]["columns"], 1);
+    assert!(s8[25..].iter().filter(|s| s["name"] != "pay_options").all(|s| s.get("columns").is_none()));
+    let tails: Vec<(&str, usize)> = s8.iter().filter(|s| s["tail"] == true).map(|s| (s["name"].as_str().unwrap(), s["width"].as_u64().unwrap() as usize)).collect();
+    let want: Vec<(&str, usize)> = engine::az::tail_encode::TAILS_V8.iter().map(|t| (t.name, t.width)).collect();
+    assert_eq!(tails, want, "the tail segments are TAILS_V8");
+    for t in engine::az::tail_encode::TAILS_V8.iter() {
+        assert_eq!(s8[t.seg as usize]["name"].as_str().unwrap(), t.name);
+    }
 }
 
 /// Layout v7 widens layout v6 exactly (ENGINE.md 124.2, 125): the map a widen derives from the
@@ -1363,6 +1421,82 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The 601.2g step's positions (ENGINE.md 231): Hogaak castable only through a Chromatic Star activated while it is
+/// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
+/// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
+fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    const HOGAAK: &str = "Hogaak, Arisen Necropolis";
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [(HOGAAK, 4), ("Chromatic Star", 4), ("Lotus Petal", 4), ("Elvish Spirit Guide", 4), ("Island", 22), ("Swamp", 22)] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 8])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Chromatic Star", "Elvish Spirit Guide", "Elvish Spirit Guide", "Swamp"])
+        .graveyard(0, &["Island", "Swamp", "Island"])
+        .hand(0, &[HOGAAK])
+        .battlefield(0, &["Lotus Petal"])
+        .battlefield(1, &["Island", "Elvish Spirit Guide"])
+        .at(Step::Main1, 0)
+        .start();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 222).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let mut out = vec![("cast_mana", wrap(&g))];
+    let h = g.card(0, HOGAAK, Zone::Hand);
+    assert!(g.has_option(Choice::Cast(h)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(h));
+    let mut steps = 0;
+    for _ in 0..40 {
+        let Some(d) = g.pending_decision() else { break };
+        if d.kind == DecisionKind::Priority {
+            break;
+        }
+        steps += (d.kind == DecisionKind::CastMana) as usize;
+        out.push(("cast_mana", wrap(&g)));
+        // The Star first (then the Petal, then PASS); the fewest graveyard cards; the first creature.
+        let star = d.options.iter().find(|o| matches!(o.choice, Choice::Card(c) if g.name(c) == "Chromatic Star")).map(|o| o.choice);
+        let c = match d.kind {
+            DecisionKind::CastMana => star.unwrap_or(d.options.iter().find(|o| o.choice != Choice::Pass).unwrap_or(&d.options[0]).choice),
+            DecisionKind::ChooseGraveyardCard if d.options.iter().any(|o| o.choice == Choice::Pass) => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert!(steps >= 2 && out.len() >= 8, "the step's positions: {steps} steps, {} positions
+{}", out.len(), g.log_lines().join("
+"));
+    out
+}
+
+/// An Edge of Eternities position with a card its owner exiled face up (ENGINE.md 231): the witness of layout v6's
+/// known gap "an exiled card is turned face down" (v6 shows the owner its own face-down card as an exiled one; no
+/// permanent, so the gate's permanent perturbations add nothing here). The
+/// gate's sampled EoE positions held one by chance; the 601.2g step changed their games (231.7), so it is built here.
+fn eoe_exile_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::Step;
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60}"#).unwrap();
+    let g = Scenario::new(CardDb::eoe())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Plains"; 8])
+        .library(1, &["Plains"; 8])
+        .exile(0, &["Rig for War"])
+        .at(Step::Main1, 0)
+        .start();
+    let mut a = MtgAz::new_game(&sp, 2, 229).unwrap();
+    a.g = g;
+    vec![("eoe", a)]
+}
+
 fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     let mut x = g.g.view_of(v);
     x.push(u64::MAX - 77);
@@ -1445,12 +1579,15 @@ fn v6_hash(x: &[f32]) -> (u64, u64) {
 /// `public_states_encode_apart`.
 #[test]
 fn public_state_reaches_the_encoding() {
-    use engine::public_state::{fields, known_gaps, limits, perturbations, Class, LimitKind, V6, V7};
+    use engine::public_state::{fields, known_gaps, limits, perturbations, Class, LimitKind, V6, V7, V8};
     let t0 = std::time::Instant::now();
     let mut pos = gate_positions(scale(60) as usize, 59);
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(cast_mana_positions());
+    pos.extend(eoe_exile_positions());
+    pos.extend(v8_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1472,6 +1609,9 @@ fn public_state_reaches_the_encoding() {
         applied6: usize,
         enc6_same: [usize; 2],
         example6: Option<String>,
+        // layout v7 (the game `mtg_v7`, ENGINE.md 236): a public change its row leaves out
+        enc7_same: [usize; 2],
+        example7: Option<String>,
     }
     let mut t: Vec<Tally> = ps.iter().map(|_| Tally::default()).collect();
     // With hidden decklists (ENGINE.md 102) the fields `HIDDEN_BY_DECKLISTS` names are hidden
@@ -1481,6 +1621,7 @@ fn public_state_reaches_the_encoding() {
     let mut past_v6_caps = 0;
     for (spec, a) in &pos {
         let base_enc = [enc(a, 0), enc(a, 1)];
+        let base_enc7 = [enc7(a, 0), enc7(a, 1)];
         let base_view = [public_view(a, 0), public_view(a, 1)];
         let v6 = v6_checked(spec, a);
         past_v6_caps += (v6 == Some(false)) as usize;
@@ -1507,6 +1648,12 @@ fn public_state_reaches_the_encoding() {
                 if enc(&b, v) == base_enc[v] {
                     t[k].enc_same[v] += 1;
                     t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s encoding unchanged)"));
+                }
+            }
+            for v in 0..2 {
+                if public_view(&b, v as u8) != base_view[v] && enc7(&b, v) == base_enc7[v] {
+                    t[k].enc7_same[v] += 1;
+                    t[k].example7.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s layout v7 row unchanged)"));
                 }
             }
             if let Some(b6) = &base6 {
@@ -1557,7 +1704,7 @@ fn public_state_reaches_the_encoding() {
         let limited = lim.iter().find(|l| l.name == p.name).map(|l| l.kind);
         let view_bad = x.view_same.iter().any(|&n| n > 0);
         let enc_bad = x.enc_same.iter().any(|&n| n > 0);
-        let known7 = known_alone(V7, p.name);
+        let known7 = known_alone(V8, p.name);
         let state = match (x.applied, view_bad, enc_bad, limited) {
             (0, _, _, None) if p.rare => "rare, not applied",
             (0, _, _, Some(_)) if p.rare => "rare limit",
@@ -1576,7 +1723,7 @@ fn public_state_reaches_the_encoding() {
             "gap (next layout)" | "rare limit" => next += 1,
             "known gap" => {
                 gaps_known += 1;
-                seen_alone.push((V7, p.name));
+                seen_alone.push((V8, p.name));
             }
             _ => {}
         }
@@ -1592,6 +1739,19 @@ fn public_state_reaches_the_encoding() {
         );
         if !matches!(state, "ok" | "limit (design)" | "gap (next layout)" | "rare, not applied" | "rare limit" | "known gap") {
             findings.push(format!("{state}: {} ({})", p.name, p.field));
+        }
+        // Layout v7 (the game `mtg_v7`): a public change its row leaves out is one of layout v8's facts (ENGINE.md 236).
+        if x.enc7_same.iter().any(|&n| n > 0) && limited != Some(LimitKind::Design) {
+            match known_alone(V7, p.name) {
+                Some(k) => {
+                    seen_alone.push((V7, p.name));
+                    println!("     v7 known gap | {:<58} | v7 row same {:?} | {k} | {}", p.name, x.enc7_same, x.example7.as_deref().unwrap_or(""));
+                }
+                None => {
+                    println!("  V7 ENCODING GAP | {:<58} | v7 row same {:?} | {}", p.name, x.enc7_same, x.example7.as_deref().unwrap_or(""));
+                    findings.push(format!("V7 ENCODING GAP: {} ({})", p.name, p.field));
+                }
+            }
         }
         // Layout v6 on the EoE positions: a public change (the view moved) its encoding leaves out.
         if x.enc6_same.iter().any(|&n| n > 0) && limited != Some(LimitKind::Design) {
@@ -1619,12 +1779,12 @@ fn public_state_reaches_the_encoding() {
     if std::env::var("GATE_SEED").is_err() && scale(1) == 1 {
         let mut stale = Vec::new();
         for k in &known {
-            let layout = if k.layouts & V7 != 0 { V7 } else { V6 };
+            let layout = if k.layouts & V8 != 0 { V8 } else if k.layouts & V7 != 0 { V7 } else { V6 };
             for &a in &k.alone {
                 let i = ps.iter().position(|p| p.name == a).unwrap_or_else(|| panic!("known gap {}: no perturbation {a:?}", k.name));
-                let applied = if layout == V7 { t[i].applied } else { t[i].applied6 };
+                let applied = if layout == V6 { t[i].applied6 } else { t[i].applied };
                 if applied > 0 && !seen_alone.contains(&(layout, a)) {
-                    stale.push(format!("{}: {a:?} (layout v{})", k.name, if layout == V7 { 7 } else { 6 }));
+                    stale.push(format!("{}: {a:?} (layout v{})", k.name, match layout { V8 => 8, V7 => 7, _ => 6 }));
                 }
             }
         }
@@ -1658,7 +1818,7 @@ fn public_state_reaches_the_encoding() {
 /// limits' perturbations are left out (they encode like the position by design).
 #[test]
 fn public_states_encode_apart() {
-    use engine::public_state::{covered, known_gaps, limits, perturbations, BASE, COMBO_EXCLUDED, HIDDEN_BY_DECKLISTS, V6, V7};
+    use engine::public_state::{covered, known_gaps, limits, perturbations, BASE, COMBO_EXCLUDED, HIDDEN_BY_DECKLISTS, V6, V8};
     use engine::az::tail_encode::Row;
     use std::collections::BTreeMap;
     let t0 = std::time::Instant::now();
@@ -1666,12 +1826,19 @@ fn public_states_encode_apart() {
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(cast_mana_positions());
+    pos.extend(eoe_exile_positions());
+    pos.extend(v8_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
     let seed: u64 = std::env::var("GATE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(4242);
     let live: Vec<usize> = (0..ps.len()).filter(|&k| !lim.contains(&ps[k].name)).collect();
     let combinable: Vec<usize> = live.iter().copied().filter(|&k| !COMBO_EXCLUDED.contains(&ps[k].name)).collect();
+    // (Layout v8's perturbations, ENGINE.md 236, draw their partners from a stream of their own, among every
+    // combinable one; the others draw from the others as before, so their pairs are main's.)
+    let v8p = engine::public_state::v8_perturbation_names();
+    let combinable_old: Vec<usize> = combinable.iter().copied().filter(|&k| !v8p.contains(&ps[k].name)).collect();
     // ENGINE.md 151.4: CR 508.8's record (`Turn::had_attackers`, game float `g5::COMBAT_GOES_ON`)
     // is compared with every state: the states it reaches, on layout v7 and on v6 (never vacuous).
     let goes_on = ps.iter().position(|p| p.name == "the declare blockers step follows an attacker that left combat").expect("151.4's perturbation");
@@ -1682,13 +1849,14 @@ fn public_states_encode_apart() {
     let mut credit = vec![0usize; known.len()];
     let mut example: Vec<Option<String>> = vec![None; known.len()];
     let (mut states_n, mut combos_n, mut panics, mut pairs_n, mut past_caps) = (0usize, 0usize, 0usize, 0usize, 0usize);
-    let lv = |l: u8| if l == V7 { "v7" } else { "v6" };
+    let lv = |l: u8| if l == V8 { "v8" } else { "v6" };
     for (pi, (spec, a)) in pos.iter().enumerate() {
         let v6 = v6_checked(spec, a);
         past_caps += (v6 == Some(false)) as usize;
         let v6 = v6 == Some(true);
         let stream = seed ^ (pi as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
         let mut partner_rng = Rng::new(stream ^ 0x5bd1_e995);
+        let mut partner8_rng = Rng::new(stream ^ 0x0232_0232);
         // the states: (perturbations, description, views, v7 row hashes, v6 hashes)
         struct St {
             atoms: Vec<usize>,
@@ -1701,7 +1869,7 @@ fn public_states_encode_apart() {
             atoms,
             what,
             view: [public_view(b, 0), public_view(b, 1)],
-            row: [row_hash(&Row::of_az(b, 0)), row_hash(&Row::of_az(b, 1))],
+            row: [row_hash(&Row::of_az_v8(b, 0)), row_hash(&Row::of_az_v8(b, 1))],
             row6: v6.then(|| [v6_hash(&v6_enc(b, 0)), v6_hash(&v6_enc(b, 1))]),
         };
         let mut sts = vec![state(a, Vec::new(), BASE.to_string())];
@@ -1726,7 +1894,11 @@ fn public_states_encode_apart() {
             if !combinable.contains(&k) {
                 continue;
             }
-            let j = combinable[partner_rng.below(combinable.len() as u32) as usize];
+            let j = if v8p.contains(&ps[k].name) {
+                combinable[partner8_rng.below(combinable.len() as u32) as usize]
+            } else {
+                combinable_old[partner_rng.below(combinable_old.len() as u32) as usize]
+            };
             if j == k || (hidden && HIDDEN_BY_DECKLISTS.contains(&ps[j].name)) || pairs_done.contains(&(k.min(j), k.max(j))) {
                 continue;
             }
@@ -1753,13 +1925,13 @@ fn public_states_encode_apart() {
         }
         states_n += sts.len();
         let name = |k: usize| ps[k].name;
-        for (layout, v) in [(V7, 0usize), (V7, 1), (V6, 0), (V6, 1)] {
+        for (layout, v) in [(V8, 0usize), (V8, 1), (V6, 0), (V6, 1)] {
             if layout == V6 && !v6 {
                 continue;
             }
             let mut by_row: BTreeMap<(u64, u64), Vec<usize>> = BTreeMap::new();
             for (i, s) in sts.iter().enumerate() {
-                let h = if layout == V7 { s.row[v] } else { s.row6.unwrap()[v] };
+                let h = if layout == V8 { s.row[v] } else { s.row6.unwrap()[v] };
                 by_row.entry(h).or_default().push(i);
             }
             for group in by_row.values().filter(|g| g.len() > 1) {
@@ -1809,7 +1981,9 @@ fn public_states_encode_apart() {
     assert!(goes_on_n > 0 && goes_on_v6 > 0, "151.4's record reached no state (v7 {goes_on_n}, v6 {goes_on_v6})");
     assert!(unknown.is_empty(), "{} collisions no known gap covers (ENGINE.md 142)", unknown.len());
     if std::env::var("GATE_SEED").is_err() && scale(1) == 1 {
-        let stale: Vec<&str> = known.iter().zip(&credit).filter(|(_, &n)| n == 0).map(|(k, _)| k.name).collect();
+        // (Entries of layouts this pass doesn't compare - layout v7's lack of v8's facts, the single pass's - are not
+        // stale here.)
+        let stale: Vec<&str> = known.iter().zip(&credit).filter(|(k, &n)| n == 0 && k.layouts & (V8 | V6) != 0).map(|(k, _)| k.name).collect();
         assert!(stale.is_empty(), "known gaps that cover no collision (the encoding was fixed: remove them): {stale:?}");
     }
 }
@@ -3914,4 +4088,92 @@ fn constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s() {
     }
     println!("{worlds} constructed worlds, {other} with another 60 than the real one");
     assert!(worlds >= 150 && other * 2 > worlds, "{worlds} {other}");
+}
+
+/// ENGINE.md 236's cost measurement (not a gate: `--ignored --nocapture`): in random games of the cube, the Delver
+/// mirror and the three-deck Legacy metagame's Doomsday mirror (`COST_GAMES` a pool, default 200), at every decision
+/// both viewers' rows in layout v7 (`Row::of`) and v8 (`Row::of_v8`): the rows holding v8 tokens, v8's tokens by
+/// segment, tokens and floats a row (head features + every tail token's width) and the encode time a row of each.
+#[test]
+#[ignore]
+fn layout_v8_cost() {
+    use engine::az::tail_encode::{seg, seg_w, Row, TAILS_V8};
+    let games: u64 = std::env::var("COST_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
+    let mirror = |d: engine::az::constructed::Decklist| {
+        let names = d.main_names();
+        MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string()).unwrap()
+    };
+    let pools: Vec<(&str, MtgSpec)> = vec![
+        ("cube", spec()),
+        ("delver", mirror(engine::az::constructed::Decklist::izzet_delver())),
+        ("doomsday", mirror(engine::az::constructed::Decklist::legacy_doomsday())),
+        ("hogaak", mirror(engine::az::constructed::Decklist::legacy_hogaak())),
+    ];
+    for (pool, sp) in pools {
+        let mut rng = Rng::new(232);
+        let (mut rows, mut rows8, mut tok7, mut tok8, mut fl7, mut fl8) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+        let (mut t7, mut t8) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+        let mut by_seg = [0u64; seg::N_V8];
+        let mut rows_seg = [0u64; seg::N_V8];
+        let mut head = vec![0.0f32; NUM_FEATURES];
+        let mut tb7 = zero_search::tail::TailBuf::new(&engine::az::tail_encode::TAILS);
+        let mut tb8 = zero_search::tail::TailBuf::new(&TAILS_V8);
+        for s in 0..games {
+            let mut g = MtgAz::new_game(&sp, 2, 232_000 + s).unwrap();
+            let mut keys = Vec::new();
+            while g.to_move().is_some() {
+                for v in 0..2usize {
+                    // (Each layout timed first on every other row: neither gets the other's warm caches.)
+                    for k in 0..2 {
+                        let v8 = (k == 1) ^ (rows % 2 == 1);
+                        head.fill(0.0);
+                        let tb = if v8 { &mut tb8 } else { &mut tb7 };
+                        tb.clear();
+                        let a = std::time::Instant::now();
+                        g.encode_row_layout(v, &mut head, tb, v8);
+                        tb.seal();
+                        *(if v8 { &mut t8 } else { &mut t7 }) += a.elapsed();
+                    }
+                    let r7 = Row::of_az(&g, v);
+                    let r8 = Row::of_az_v8(&g, v);
+                    rows += 1;
+                    let n8 = r8.tail.iter().filter(|t| t.0 as usize >= seg::N).count() as u64;
+                    rows8 += (n8 > 0) as u64;
+                    let present = |r: &Row| (0..seg::N as u16).map(|sg| r.tokens(sg).iter().filter(|t| (t.0 as usize) < engine::az::tail_encode::seg_head(sg)).count()).sum::<usize>() as u64;
+                    tok7 += 1 + present(&r7) + r7.tail.len() as u64;
+                    tok8 += 1 + present(&r8) + r8.tail.len() as u64;
+                    fl7 += (r7.head.len() + r7.tail.iter().map(|t| seg_w(t.0)).sum::<usize>()) as u64;
+                    fl8 += (r8.head.len() + r8.tail.iter().map(|t| seg_w(t.0)).sum::<usize>()) as u64;
+                    let mut here = [false; seg::N_V8];
+                    for t in r8.tail.iter().filter(|t| t.0 as usize >= seg::N) {
+                        by_seg[t.0 as usize] += 1;
+                        here[t.0 as usize] = true;
+                    }
+                    for (k, h) in here.iter().enumerate() {
+                        rows_seg[k] += *h as u64;
+                    }
+                }
+                let l = legal(&g);
+                let a = l[rng.below(l.len() as u32) as usize];
+                g.step(a, &mut keys).unwrap();
+            }
+        }
+        let segs: Vec<String> = TAILS_V8[21..]
+            .iter()
+            .map(|t| format!("{} {} tokens in {:.2}% of rows (width {})", t.name, by_seg[t.seg as usize], 100.0 * rows_seg[t.seg as usize] as f64 / rows as f64, t.width))
+            .collect();
+        println!(
+            "COST {pool}: {games} games, {rows} rows; rows with v8 tokens {:.2}%; tokens a row v7 {:.2} -> v8 {:.2}; floats a row v7 {:.0} -> v8 {:.0} (+{:.2}%); encode a row v7 {:.2} us -> v8 {:.2} us (+{:.1}%); {}",
+            100.0 * rows8 as f64 / rows as f64,
+            tok7 as f64 / rows as f64,
+            tok8 as f64 / rows as f64,
+            fl7 as f64 / rows as f64,
+            fl8 as f64 / rows as f64,
+            100.0 * (fl8 as f64 / fl7 as f64 - 1.0),
+            t7.as_secs_f64() * 1e6 / rows as f64,
+            t8.as_secs_f64() * 1e6 / rows as f64,
+            100.0 * (t8.as_secs_f64() / t7.as_secs_f64() - 1.0),
+            segs.join("; ")
+        );
+    }
 }

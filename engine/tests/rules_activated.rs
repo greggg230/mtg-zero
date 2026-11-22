@@ -310,6 +310,7 @@ fn a_cards_mana_abilities_are_alternatives() {
     let t = g.card(0, "Talisman of Dominance", Zone::Battlefield);
     let f = g.card(0, "Test Flyer", Zone::Hand);
     g.choose(Choice::Cast(f)); // {1}{U}
+    g.pass_cast_mana();
     // The {C} ability cannot help ({U} must come from the Talisman).
     assert!(!g.has_option(act(t, 0)) && g.has_option(act(t, 1)));
     g.choose(act(t, 1));
@@ -473,6 +474,7 @@ fn a_permanent_a_later_sacrifice_needs_is_not_spent_on_mana() {
         .start();
     let o = g.card(0, "Test Artifact Offering", Zone::Hand);
     g.choose(Choice::Cast(o));
+    g.pass_cast_mana();
     let petal = g.card(0, "Lotus Petal", Zone::Battlefield);
     assert!(g.has_option(act(petal, 0)));
 }
@@ -491,6 +493,7 @@ fn cr_605_3a_a_spirit_guide_is_activated_while_paying_and_revealed() {
     assert!(!g.has_option(Choice::Ability(guide, AbilitySlot::Hand(0))));
     assert!(g.has_option(Choice::Cast(dbl)), "the guide's mana counts toward castability");
     g.choose(Choice::Cast(dbl));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana));
     // The red pip needs the guide; the Forests pay the generic part.
     // Sources are picked in canonical class order: Forests, then the guide.
@@ -524,6 +527,7 @@ fn cr_605_3a_a_spirit_guide_pays_an_unless_cost_during_resolution() {
         .start();
     let bear = g.card(0, "Test Bear", Zone::Hand);
     g.choose(Choice::Cast(bear));
+    g.pass_cast_mana();
     while g.kind() == Some(DecisionKind::PayMana) {
         // The Forest class: both Forests.
         let forest = g
@@ -570,6 +574,7 @@ fn a_hand_mana_source_leaves_the_cards_a_discard_cost_needs() {
     let mut g = manual().hand(0, &["Test Rummage", "Simian Spirit Guide", "Island"]).at(Step::Main1, 0).start();
     let r = g.card(0, "Test Rummage", Zone::Hand);
     g.choose(Choice::Cast(r));
+    g.pass_cast_mana();
     let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
     g.choose(Choice::Ability(guide, AbilitySlot::Hand(0)));
     assert_eq!(g.kind(), Some(DecisionKind::DiscardCost));

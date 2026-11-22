@@ -542,6 +542,7 @@ fn malevolent_rumble_reveals_four_takes_a_permanent_and_makes_a_spawn() {
     g.drive_until(|g| g.turn().number == 5 && g.turn().step == Step::Main1);
     let bear = g.card(0, "Test Bear", Zone::Hand);
     g.choose(Choice::Cast(bear));
+    g.pass_cast_mana();
     // Sources in canonical class order: a Forest, then the Spawn may pay
     // the generic part.
     let forest = g.pending_decision().unwrap().options[0].choice;

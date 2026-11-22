@@ -3,7 +3,10 @@ docs/search.md) + what is MTG's, registered here as the process's game package: 
 (engine/src/az, docs/ENGINE.md 21-22, 36: one game of Magic between two random 40-card decks of the
 supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match with sideboarding
 between games, decks built from random card pools), its object layout for zero-core's token
-network (arch 'tokens': `layout_v7.json`, written by the engine's `encode::layout_json`), the game
+network (arch 'tokens': layout v8, `layout_v8.json`, written by the engine's `encode::layout_json_v8`: v7's rows plus
+a payment's state, a gone object's last known information and the find groups, docs/ENGINE.md 236), the game `mtg_v7`
+(the same game in layout v7, `layout_v7.json`: the compatibility game of every run, checkpoint and record made before
+layout v8, which name `mtg` without a layout record - zero-core's game alias, docs/ENGINE.md 236.9), the game
 `team_draft` (docs/ENGINE.md 41, 43, 45, DESIGN.md 2.3: a team cube draft and deckbuilding up to
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
@@ -70,6 +73,22 @@ EVAL_SPEC = eval_spec(SPEC)
 # (`layout_eoe.json`, below).
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v7.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
+# Layout v8 (ENGINE.md 236) is the game `mtg` from now on (every preset, the package's default game, every tool that
+# starts fresh): the same specs, rules and head as layout v7, whose rows add six tail-only gated segments - a payment's
+# state and picks in progress with its decisions' option meanings, a gone object's last known information (and a gone
+# spell's item), the groups of places holding search finds mixed with other cards. Layout v7 is the game `mtg_v7`: the
+# compatibility layout of every run, checkpoint, farm run and record made before layout v8. Those name `mtg` without a
+# layout record, which zero-core's game alias (`game_aliases` below, zero-core docs/az.md 73) resolves to `mtg_v7`: such a
+# run resumes as layout v7, byte for byte, with no file rewritten (`mtgz.az.layouts`); what is made from now on names
+# `mtg` with `game_layout` 8. A v7 run moves by `python tools/fork_run.py <checkpoint> <new run> --game mtg` (the new
+# segments' gates exactly 0).
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v8.json'), encoding='utf-8') as _f:
+    LAYOUT_V8 = json.load(_f)
+# (the games of `mtg`'s rules and identity space: v8's rows, the default, and v7's, the compatibility layout)
+MTG_GAMES = ('mtg', 'mtg_v7')
+# zero-core's game alias (docs/az.md 73, ENGINE.md 236.9): the game `mtg` is layout revision 8; a run config, network
+# config, graph, shard, records header, farm job or record naming `mtg` without a layout record is `mtg_v7`
+GAME_ALIASES = {'mtg': {'layout': 8, 'before': 'mtg_v7'}}
 # The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41, 47: layout draft_v2, the pack and pool
 # slots and 13 bags; `id_actions`: a slot scores its card's identity, the pick or adding it to the deck
 # next, zero-core's TokenNet since M6 part 3, ENGINE.md 45)
@@ -459,8 +478,10 @@ PRESETS['eoe-2e-smoke'] = dict(PRESETS['eoe-smoke'], spec=json.dumps(dict(json.l
 # Layout v7 (ENGINE.md 125.12): the `mtg` game's rows have tail tokens and pointer overrides, whose shards are sparse
 # only (format v2, zero-core R8: a dense shard would drop them), so every `mtg` preset writes sparse shards. (Its MLP
 # presets, mtg-1 and mtg-2-mlp, layout v6's, are refused on v7 at the start: an MLP takes no tail tokens, R4.)
+# Layout v8 (ENGINE.md 236) is every MTG preset's: `game='mtg'` - a new run records `game_layout` 8 at its first start (a
+# run made before saved `mtg` without one: it stays `mtg_v7`, zero.run's resolve_run_game; presets never set game_layout).
 for _p in PRESETS.values():
-    if _p.get('game') == 'mtg':
+    if _p.get('game') in MTG_GAMES:
         _p['shard_sparse'] = 1
 
 # a rented GPU box's self-play settings (tools/vast.py, docs/ENGINE.md 97): one worker process, CUDA inference with
@@ -524,9 +545,11 @@ PACKAGE = register(GamePackage(
     # the same targets in the EoE identity space
     aux={'mtg': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'},
                  {'name': 'deck', 'width': 1024, 'loss': 'multinomial'}],
+         'mtg_v7': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'},
+                    {'name': 'deck', 'width': 1024, 'loss': 'multinomial'}],
          'mtg_eoe': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'},
                      {'name': 'deck', 'width': 1024, 'loss': 'multinomial'}]},
-    replay_aux={'mtg': 'mtgz.az.belief:render', 'mtg_eoe': 'mtgz.az.belief:render_eoe'},
+    replay_aux={'mtg': 'mtgz.az.belief:render', 'mtg_v7': 'mtgz.az.belief:render', 'mtg_eoe': 'mtgz.az.belief:render_eoe'},
     # the deck readers (zero-core docs/az.md 36, docs/ENGINE.md 102.4, 105.5): a small branch of the network
     # over the declared bags and globals predicts the `deck` target and feeds the trunk (run settings
     # reader_deck 1 with aux_deck_w > 0; off by default); `mtg_eoe`'s reads the EoE space's identities
@@ -569,15 +592,19 @@ PACKAGE = register(GamePackage(
     # zero.h2h's farm backend (docs/ENGINE.md 217, zero-core docs/az.md 69): `python -m mtgz.az.h2h` plays on zero-farm
     # when the farm can play exactly the match (--backend auto, the default), else here - decided before any game
     h2h_backend='mtgz.az.h2h_farm:BACKEND',
-    selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
-    # a multi-source distillation's row selector (zero-core docs/az.md 71, docs/ENGINE.md 222.1): a metagame run's
+    # `mtg` = layout v8; `mtg` without a layout record (everything made before it) = `mtg_v7` (ENGINE.md 236.9)
+    game_aliases=GAME_ALIASES,
+    selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec',
+                    'mtg_v7': 'mtgz.az.decklists:selfplay_spec'},
+    # a multi-source distillation's row selector (zero-core docs/az.md 76, docs/ENGINE.md 222.1): a metagame run's
     # rows by the acting player's deck and the pairing ({"actor"}, {"pairing"}, {"not_pairing"}), read exactly from
     # each row's bags (mtgz.az.rowselect)
-    row_selectors={'mtg': 'mtgz.az.rowselect:row_select'},
+    row_selectors={'mtg': 'mtgz.az.rowselect:row_select', 'mtg_v7': 'mtgz.az.rowselect:row_select'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
-    specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
-    env_prefix='MTGZ', presets=PRESETS, tokens={'mtg': LAYOUT, 'team_draft': LAYOUT_DRAFT, 'mtg_eoe': LAYOUT_EOE},
-    eval_specs={'mtg': eval_spec, 'mtg_eoe': eval_spec},
+    specs={'mtg': SPEC, 'mtg_v7': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
+    env_prefix='MTGZ', presets=PRESETS,
+    tokens={'mtg': LAYOUT_V8, 'mtg_v7': LAYOUT, 'team_draft': LAYOUT_DRAFT, 'mtg_eoe': LAYOUT_EOE},
+    eval_specs={'mtg': eval_spec, 'mtg_v7': eval_spec, 'mtg_eoe': eval_spec},
     # remote evaluation (run setting eval_remote='mac', zero.remote; docs/ENGINE.md 44): the MacBook
     # (M4 Max, 16 cores, no CUDA) evaluates with exactly the run's code: its checkout
     # ~/mtg-zero-wt/run-<sha12> of the commit of the run's checkout (`bash tools/mac.sh

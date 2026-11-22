@@ -111,6 +111,14 @@ pub struct Obj {
     pub struck_first: bool,
     /// Bit p: player p knows the card's identity (hidden zones; ENGINE.md 10).
     pub known: u8,
+    /// Bit p: player p lost track of this library card among others since it
+    /// entered the library - a shuffle (CR 701.20a), a private rearrangement
+    /// p didn't make, cards put in an order nobody knows - so p can't tell it
+    /// from the cards it was mixed with, and a reference naming it tells p no
+    /// more than a reference to a gone object would (`Game::ref_seen_live`,
+    /// ENGINE.md 235). Read only in a library; a zone change clears it (a new
+    /// object, CR 400.7).
+    pub lost: u8,
     /// The permanent this one (an Equipment) is attached to (CR 301.5);
     /// stale once the host leaves, until SBA 704.5n unattaches it.
     pub attached: Option<ObjRef>,
@@ -702,6 +710,12 @@ pub struct Game {
     /// show them by place (`Game::finds_by_place`). Kept in every world too (unlike `found`): a search in a world
     /// marks its finds as the real game's would.
     pub(crate) finds_told: Vec<CardIdx>,
+    /// The public groups of places that hold search finds mixed with other cards (ENGINE.md 236, 223's
+    /// decision 4): a scramble that mixes told finds (or a group) with any other card makes one - "k of
+    /// these places hold their owner's search's finds" - where `finds_told` drops them. A group lasts
+    /// while its members keep their zone and the other player doesn't learn one (`move_card`, `learn`
+    /// end it); public moves shift its places. Layout v8's `find_groups` tokens.
+    pub(crate) find_groups: Vec<crate::hidden::FindGroup>,
     /// The state was changed by hand (tests' perturbations, `Game::lose_sightings`): the sightings no longer
     /// describe it, and the deals weigh every seen card blind (ENGINE.md 140.9).
     pub(crate) sightings_lost: bool,
@@ -849,6 +863,16 @@ pub struct Game {
     pub(crate) repl_decided: bool,
     /// The route chosen for the cast about to begin (`Task::ChooseRoute`).
     pub(crate) route_choice: Option<crate::cast::Route>,
+    /// The total cost of a spell being cast, locked as it was determined (CR 601.2f) once a mana ability is activated
+    /// during its cast (601.2g: `Task::CastMana`), by stack id: what the ability changes (an artifact sacrificed, a
+    /// creature gone) no longer changes the cost (`Game::total_mana`; ENGINE.md 231). Cleared as the spell becomes cast.
+    pub(crate) cast_lock: Vec<(u32, crate::mana::ManaCost)>,
+    /// The payment search's mana of "X mana in any combination of <types>" (Wizard's Rockets) activated in a cast's
+    /// 601.2g step, per player: (how many, the types each may be) - each one mana of a type of the mask, its type not
+    /// chosen yet (`Game::oracle` copies only; ENGINE.md 231.4: the search asks whether some combination completes the
+    /// payment, so the payment's castability counts each as a unit of those types, `add_pool`, and a later choice that
+    /// needs the pool's types chooses them first). Always (0, 0) outside the search.
+    pub(crate) pool_wild: [(u8, crate::mana::ManaMask); 2],
     /// The entering permanent's spell's delayed ability k (dash, warp) and
     /// the definition holding it: its own (`None`) or the one whose granted
     /// alternative cost it was cast for (ENGINE.md 99.15).
@@ -909,6 +933,11 @@ pub struct Game {
     /// they last existed there (CR 608.2h, 113.7a; kept when
     /// `SEEN_LKI_DAMAGE`).
     pub(crate) lki_damage: Vec<(ObjRef, DamageSource)>,
+    /// The same qualities of every permanent that left the battlefield this turn, recorded whatever the cards
+    /// of the game (ENGINE.md 236): `lki_damage` is kept only when a card of the game reads it
+    /// (`SEEN_LKI_DAMAGE`, a bit of every card in the game, hidden ones too), so its presence would tell the
+    /// network of a hidden card; layout v8's `lki` tokens read this one. No rule reads it.
+    pub(crate) lki_qualities: Vec<(ObjRef, DamageSource)>,
     /// Permanents that left the battlefield this turn, their toughness and
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
@@ -1355,6 +1384,7 @@ impl Game {
             sight_at: 0,
             found: Vec::new(),
             finds_told: Vec::new(),
+            find_groups: Vec::new(),
             sightings_lost: false,
             ff: crate::forced_find::FfState::new(seed),
             tokens: 0,
@@ -1397,6 +1427,8 @@ impl Game {
             discard_entered: false,
             repl_decided: false,
             route_choice: None,
+            cast_lock: Vec::new(),
+            pool_wild: [(0, 0); 2],
             entering_dash: None,
             entering_warp: false,
             miracle_cast: None,
@@ -1414,6 +1446,7 @@ impl Game {
             lki_copy: Vec::new(),
             lki_attached: Vec::new(),
             lki_damage: Vec::new(),
+            lki_qualities: Vec::new(),
             lki_toughness: Vec::new(),
             ref_lki: Vec::new(),
             lki_power: Vec::new(),
@@ -1500,6 +1533,7 @@ impl Game {
             blocking: None,
             struck_first: false,
             known: 0,
+            lost: 0,
             attached: None,
             evoked: false,
             flashback: false,
@@ -2506,6 +2540,10 @@ impl Game {
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
         let from = self.objs[idx.i()].zone;
+        // (A find group's member leaving its zone ends the group: ENGINE.md 236.)
+        if from != to && !self.find_groups.is_empty() {
+            self.end_find_group(idx);
+        }
         // Entering face down (manifest, CR 701.40a): its identity stays as
         // hidden as in the library it comes from.
         let fd_enter = to == Zone::Battlefield && std::mem::take(&mut self.moving_face_down);
@@ -2617,10 +2655,11 @@ impl Game {
             if let Some(h) = self.objs[idx.i()].attached {
                 self.lki_attached.push((old, h));
             }
+            let d = self.damage_source_of(idx);
             if self.seen & SEEN_LKI_DAMAGE != 0 {
-                let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
             }
+            self.lki_qualities.push((old, d));
             // (Its controller as it last existed too: "that creature's
             // controller", ENGINE.md 99.12.)
             if self.db.watch_toughness || self.db.watch_lki_controller {
@@ -2680,6 +2719,10 @@ impl Game {
         {
             let public = !lki_hidden || from == Zone::Battlefield || (!to.is_hidden() && to != Zone::Nowhere && !fd_enter) || choose.is_some();
             let known = if public { 0b11 } else if from == Zone::Hand && !told { fd_known & (1 << owner) } else { fd_known };
+            // (A library card a player lost track of, ENGINE.md 235: that player sees a card leave - a draw, a mill,
+            // a search's find - but not that it is this object, which in another of its worlds is still in the
+            // library while a card it was mixed with left.)
+            let known = if from == Zone::Library { known & !self.objs[idx.i()].lost } else { known };
             if known != 0 {
                 self.ref_lki.push((old, lki_def, known));
             }
@@ -2705,6 +2748,7 @@ impl Game {
             o.blocking = None;
             o.struck_first = false;
             o.known = if to.is_hidden() || fd_enter { known_before } else { 0b11 };
+            o.lost = 0;
             o.attached = None;
             o.evoked = to == Zone::Battlefield && std::mem::take(&mut self.entering_evoked);
             o.flashback = false;
@@ -3427,6 +3471,8 @@ impl Game {
         for &c in &lib {
             self.objs[c.i()].known = 0;
         }
+        // (Nobody, its owner included, can tell its cards apart by where they are now: ENGINE.md 235.)
+        self.lose_track(&lib, 0b11);
         self.players[p as usize].library = lib;
     }
 

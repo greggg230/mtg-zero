@@ -38,8 +38,9 @@
 //!
 //! Per game or match the first two hash, decision by decision: the decider, the pending decision's
 //! kind and player (a sideboarding's decider and kind, a deck choice), the legal actions, the action
-//! taken and the chance keys; every 10th decision the decider's encoding (`mtg`: the whole layout v7
-//! row - head, tail tokens, pointer overrides; `mtg_eoe`: its layout v6 floats); every 20th the
+//! taken and the chance keys; every 10th decision the decider's encoding (`mtg`: the whole layout v8
+//! row - head, tail tokens, pointer overrides, ENGINE.md 236; `DIGEST_ENCODING=v7`: layout v7's, the
+//! combined digests printed only; `mtg_eoe`: its layout v6 floats); every 20th the
 //! decider's auxiliary targets and a world `determinize` deals it (its decision, both players' hand
 //! and library identities in order, both decks, the other player's encoding there, five random
 //! actions played in it); every 40th a world dealt by a random belief (`determinize_with`: the hand's
@@ -114,10 +115,17 @@ fn encodings_on() -> bool {
     !std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0")
 }
 
+/// `DIGEST_ENCODING=v7` (ENGINE.md 236): `mtg`'s layout v7 rows hashed instead of layout v8's, the combined
+/// digests printed only (layout v7's recorded files of main e445ba27 while v8 only adds segments).
+fn layout_v7() -> bool {
+    std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7")
+}
+
 /// A game of the `MtgAz` family, as the digests read it.
 trait Digested: SearchGame + Clone {
     fn az(&self) -> &MtgAz;
-    /// `viewer`'s encoding hashed: `mtg`'s whole layout v7 row, `mtg_eoe`'s layout v6 floats.
+    /// `viewer`'s encoding hashed: `mtg`'s whole layout v8 row (v7's, `mtg_v7`'s, with `DIGEST_ENCODING=v7`),
+    /// `mtg_eoe`'s layout v6 floats.
     fn hash_encoding(&self, viewer: usize, h: &mut H);
 }
 
@@ -126,7 +134,7 @@ impl Digested for MtgAz {
         self
     }
     fn hash_encoding(&self, viewer: usize, h: &mut H) {
-        let row = engine::az::tail_encode::Row::of_az(self, viewer);
+        let row = engine::az::tail_encode::Row::of_az_layout(self, viewer, !layout_v7());
         let mut x = H::new();
         x.f32s(&row.head);
         x.u64(row.tail.len() as u64);
@@ -327,7 +335,7 @@ fn finish(name: &str, file: &str, what: &str, lines: &[String], t: std::time::In
     if let Ok(dir) = std::env::var("DIGEST_LINES") {
         std::fs::write(std::path::Path::new(&dir).join(file), lines.join("\n") + "\n").unwrap();
     }
-    if !encodings_on() && name != "driver" {
+    if layout_v7() || (!encodings_on() && name != "driver") {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(file);
@@ -599,6 +607,15 @@ const DRIVER_EVERY: u64 = 1_000;
 #[test]
 #[ignore]
 fn driver_digest() {
+    // (The default game's, `mtg`, layout v8's rows, ENGINE.md 236; `DIGEST_ENCODING=v7`: the game `mtg_v7`'s, layout v7.)
+    if layout_v7() {
+        driver_digest_of::<MtgAz>()
+    } else {
+        driver_digest_of::<engine::az::v8::MtgV8Az>()
+    }
+}
+
+fn driver_digest_of<G: SearchGame>() {
     let t = std::time::Instant::now();
     let threads = std::env::var("DIGEST_DRIVER_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
     let cfg = DriverCfg {
@@ -623,9 +640,9 @@ fn driver_digest() {
         starts: None,
         max_row_tokens: None,
     };
-    let mut d = Driver::<MtgAz>::new(cfg).unwrap();
+    let mut d = Driver::<G>::new(cfg).unwrap();
     d.resume(1_000_000, 0).unwrap();
-    let w = MtgAz::aux_width();
+    let w = G::aux_width();
     let mut h = H::new();
     let (mut batches, mut rows, mut samples, mut results) = (0u64, 0u64, 0u64, 0u64);
     let mut lines = Vec::new();

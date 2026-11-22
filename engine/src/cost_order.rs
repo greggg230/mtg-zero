@@ -333,6 +333,21 @@ fn filter_reads(f: &Filter) -> Reads {
     }
 }
 
+/// Does filter `f` read whether a permanent is tapped (`filter_reads`; ENGINE.md 231.3)?
+pub(crate) fn filter_reads_tapped(f: &Filter) -> bool {
+    filter_reads(f).tapped
+}
+
+/// What the rest of a spell's cast may change of the permanents' mana abilities, from its 601.2g step on
+/// (`Game::cast_rest_reach`; ENGINE.md 231.3): `leave`, the permanents it may remove; `chars`, whether a continuous
+/// effect may change some permanent's types or abilities; `unsettled`, whether a permanent may lose counters or a
+/// toughness change (a state-based action could then remove a permanent).
+pub(crate) struct RestReach {
+    pub leave: Vec<CardIdx>,
+    pub chars: bool,
+    pub unsettled: bool,
+}
+
 /// What paying parts of a cost may change (`Game::order_free`), or the mana
 /// payment before them (`Game::mana_writes`).
 #[derive(Clone, Default, Debug)]
@@ -649,6 +664,13 @@ impl Game {
     /// hand (Painter's Servant and characteristic-defining abilities only):
     /// `p`'s, whose cards the cost may take (no other hidden card is read).
     fn chars_may_change(&self, p: PlayerId, w: &Writes, hand: bool) -> Change {
+        self.chars_may_change_in(p, w, hand, false)
+    }
+
+    /// [`chars_may_change`](Self::chars_may_change); with `public`, a Blood Moon's and W3's grants read from the
+    /// permanents on the battlefield (the game's `moon_game`, `w3.seen`: any card of the game's decks, hidden ones
+    /// too - read by the 601.2g step's collapse, ENGINE.md 231.3, no hidden card may decide it).
+    fn chars_may_change_in(&self, p: PlayerId, w: &Writes, hand: bool, public: bool) -> Change {
         let mut out = Change::default();
         if w.is_empty() {
             return out;
@@ -733,13 +755,16 @@ impl Game {
             if w.leave.iter().any(|&c| self.abilities(c).grants_equipped.is_some()) {
                 out.0 |= kind::ABILITIES;
             }
-            if self.moon_game {
+            let on_bf = |f: &dyn Fn(&crate::db::CardDef) -> bool| self.battlefield.iter().any(|&c| f(self.def_of(c)));
+            let moon = if public { on_bf(&|d| d.nonbasic_lands_are_mountains) } else { self.moon_game };
+            let w3 = if public { self.battlefield.iter().fold(0, |a, &c| a | self.def_of(c).w3.seen) } else { self.w3.seen };
+            if moon {
                 out.0 |= kind::TYPES | kind::ABILITIES;
             }
-            if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 {
+            if w3 & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 {
                 out.0 |= kind::TYPES;
             }
-            if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
+            if w3 & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
                 out.0 |= kind::ABILITIES;
             }
             if self.battlefield.iter().any(|&c| self.def_of(c).reconfigure && self.objs[c.i()].attached.is_some_and(|h| leaving(h.idx))) {
@@ -792,6 +817,94 @@ impl Game {
             | Cond::LandsPlayedAtLeast(_)
             | Cond::AttackedWithSubtype(_) => false,
         }
+    }
+
+    /// Does condition `k` read whether a permanent is tapped (`cond_reads`; ENGINE.md 231.3)?
+    pub(crate) fn cond_reads_tapped(&self, k: &Cond) -> bool {
+        self.cond_reads(k, CardIdx::new(0), &Writes { tapped: vec![CardIdx::new(0)], ..Writes::default() })
+    }
+
+    /// What the rest of spell `card`'s cast (`item`) may change from its 601.2g step on (ENGINE.md 231.3): the step's
+    /// other mana abilities and the payment's mana (`mana_writes` over every source `p` has, convoke's and improvise's
+    /// taps, delve's exiles, the life paid after the mana), every mana ability `p` may activate (a sacrifice of
+    /// another permanent: any of `p`'s may leave; of its own; a counter removed), the cost's other parts
+    /// (`part_view`), emerge's permanent; and what that may change (`chars_may_change`).
+    pub(crate) fn cast_rest_reach(&self, p: PlayerId, card: CardIdx, item: &crate::game::StackItem) -> RestReach {
+        let def = self.def_of(card);
+        let mut pm = crate::pay::PayMana::new(p, self.total_mana(card, item));
+        pm.improvise = def.improvise;
+        pm.convoke = def.casting.convoke;
+        pm.life_after = self.life_later(card, item);
+        let mut w = self.mana_writes(&pm, def.delve);
+        let mut any_leaves = false;
+        // (The permanents' activated abilities, theirs and granted; the hand's mana abilities - of its mana sources,
+        // which a payment in progress pins in every world the other player deals, ENGINE.md 10: nothing else of the
+        // caster's hidden hand is read, so the collapse never depends on it.)
+        let hand: Vec<CardIdx> = self.players[p as usize].hand.iter().copied().filter(|&c| self.hand_mana_source(c)).collect();
+        for c in self.permanents_of(p).chain(hand) {
+            let d = self.abilities(c);
+            let on_bf = self.objs[c.i()].zone == Zone::Battlefield;
+            let granted = if on_bf { self.granted_activated(c) } else { Vec::new() };
+            let own: &[crate::db::ActivatedDef] = if on_bf { &d.activated } else { &d.hand_abilities };
+            let ads = own.iter().chain(granted.iter().map(|g| self.db.def(g.def).activated_def(crate::db::AbilitySlot::Activated(g.slot))));
+            for ad in ads.filter(|ad| ad.mana().is_some()) {
+                let k = &ad.cost;
+                // A sacrifice or return of another permanent: the permanents it may take now, when its filter reads
+                // nothing the rest may change but types, abilities and power or toughness - which, if they may change,
+                // keep the collapse off anyway (`chars`, `unsettled`), so the set holds whenever it is read; else any.
+                for s in k.sacrifice.iter().chain(k.bounce.iter()) {
+                    let r = filter_reads(&s.filter);
+                    if !r.tapped && !r.counters && !r.counts && r.kinds & !(kind::TYPES | kind::ABILITIES | kind::PT) == 0 {
+                        w.leave.extend(self.sacrifice_candidates(p, c, s));
+                        w.zones = true;
+                    } else {
+                        any_leaves = true;
+                    }
+                }
+                if k.sac_self || ad.mana().is_some_and(|m| m.sac_if_no.is_some()) {
+                    w.leave.push(c);
+                }
+                if k.remove_counters.is_some() || k.remove_counter_from.is_some() {
+                    w.counters.push(c);
+                }
+                if k.life > 0 || ad.mana().is_some_and(|m| m.damage_to_you > 0 || m.opp_life > 0) {
+                    w.life = true;
+                }
+                if k.discard > 0 || k.discard_hand || k.discard_self || k.exile_self || k.discard_also.is_some() || k.exile_from_hand.is_some() || k.exile_graveyard > 0 {
+                    w.zones = true;
+                }
+            }
+        }
+        if any_leaves {
+            w.leave.extend(self.permanents_of(p));
+            w.zones = true;
+        }
+        // (Rain of Filth's granted "sacrifice this land: add one mana": its effect in play, public - not the game's
+        // `SEEN_SAC_MANA`, which hidden cards set; the permanents it gives the ability now, `sac_mana_of`.)
+        if self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
+            w.leave.extend(self.permanents_of(p).filter(|&x| self.sac_mana_of(x) != 0));
+            w.zones = true;
+        }
+        let emerge = if item.alt > 0 {
+            self.item_alt(card, item).and_then(|(a, _)| a.emerge.as_ref().and(item.noted.first().copied())).filter(|r| self.live(*r)).map(|r| r.idx)
+        } else {
+            None
+        };
+        if let Some(rest) = self.spell_rest(card, item) {
+            let o = Order::new(p, card, &rest, 0, 0, 0).with_moves(emerge, None);
+            for k in bits(o.left()) {
+                w.add(&self.part_view(&o, k).1);
+            }
+        }
+        if let Some(e) = emerge {
+            w.leave.push(e);
+        }
+        let ch = self.chars_may_change_in(p, &w, false, true);
+        // (Counters removed matter only where a state-based action reads them - a creature's toughness, a
+        // planeswalker's loyalty, a battle's defense (CR 704.5f-g, 704.5i, 704.5v) - or a continuous effect does,
+        // which `chars_may_change` counts (`Change`'s power and toughness).)
+        let fragile = |x: CardIdx| self.is_creature(x) || self.is_type(x, crate::db::types::PLANESWALKER) || self.is_type(x, crate::db::types::BATTLE);
+        RestReach { unsettled: w.counters.iter().any(|&x| fragile(x)) || ch.0 & kind::PT != 0, chars: ch.0 & (kind::TYPES | kind::ABILITIES) != 0, leave: w.leave }
     }
 
     /// The first part of `parts` in the order `part::DOMINANT`.
@@ -1251,15 +1364,18 @@ impl Game {
     /// The payment search's floor for `task`, if it is a payment whose
     /// options must leave it completable: a cost whose parts the player
     /// orders, or the mana payment before one.
-    fn completing_floor(&self, task: &Task) -> Option<(usize, PlayerId)> {
+    pub(crate) fn completing_floor(&self, task: &Task) -> Option<(usize, PlayerId)> {
         if self.oracle {
             return None;
         }
-        match task {
+        let own = match task {
             Task::PayCosts { order: Some(o), .. } => Some((o.floor as usize, o.p)),
             Task::PayMana(pm) => pm.oracle.map(|f| (f as usize, pm.payer)),
             _ => None,
-        }
+        };
+        // (A cast's mana abilities before its cost is paid, CR 601.2g: the
+        // step's options and its abilities' decisions, ENGINE.md 231.)
+        own.or_else(|| self.cast_mana_floor(task))
     }
 
     /// `options` of `task` that leave its payment completable (all of them
