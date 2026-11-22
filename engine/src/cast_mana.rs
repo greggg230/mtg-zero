@@ -195,7 +195,7 @@ impl Game {
                     // set of them once, not each order) when their activations commute for the search's question
                     // (`feeders_commute`, ENGINE.md 231.4, 236); else every order, and no order carried on from this
                     // node (its activations mark nothing).
-                    let ordered = search_collapse() && self.feeders_commute(id, p, spell, &sources);
+                    let ordered = search_collapse() && self.feeders_commute(id, p, spell);
                     let (after, sac) = if ordered { (after, sac) } else { (0, None) };
                     let mut opts: Vec<Opt> = sources
                         .iter()
@@ -281,8 +281,8 @@ impl Game {
         }
     }
 
-    /// Do the activations of the feeding abilities a node of the payment search offers (`sources`, of spell `id`'s
-    /// 601.2g step) commute for the search's question (ENGINE.md 231.4, 236)? Then the search activates them in
+    /// Do the activations of the feeding abilities a node of the payment search of spell `id`'s 601.2g step may make,
+    /// now or later, commute for the search's question (ENGINE.md 231.4, 236)? Then the search activates them in
     /// increasing order of their card and, for one card's, of the permanent each sacrifices: each set once, not each
     /// order. They commute when no activation can change what another may do but by taking objects (a permanent
     /// tapped or sacrificed, a card discarded: each object one activation's), so in any order each has the same choices
@@ -290,7 +290,8 @@ impl Game {
     /// (can the payment be completed: delve's and the exile's cards are sets, the triggers wait) never reads. Over
     /// everything the rest of the cast may change (`cast_rest_reach`, a superset of every activation's writes, so the
     /// answer holds at every later node too):
-    /// * no ability has a condition ("only if": another activation could make it true or false);
+    /// * no ability has a condition ("only if": another activation could make it true or false) or a life cost (a
+    ///   payable life cost can become unpayable after another's life or damage, CR 119.4);
     /// * no permanent's types or abilities may change (`RestReach::chars`: a feeder's own abilities, what its
     ///   sacrifice's filter reads, what a sacrificed land could produce) and no lock on activating may leave;
     /// * each sacrifice, return or tap cost's filter reads nothing else that may change (`filter_settled`);
@@ -299,16 +300,37 @@ impl Game {
     ///   ability with {T} adds no bonus a leaving permanent gives ("whenever you tap ... for mana").
     /// A mana cost one activation pays with another's mana is paid in the other order by activating that ability
     /// within its own payment (CR 605.3a), as 231.4 argues.
-    fn feeders_commute(&self, id: u32, p: PlayerId, spell: CardIdx, sources: &[(CardIdx, Vec<AbilitySlot>)]) -> bool {
-        let ads: Vec<(CardIdx, &ActivatedDef)> = sources
-            .iter()
-            .flat_map(|(c, slots)| slots.iter().filter(|&&s| matches!(s, AbilitySlot::Activated(_) | AbilitySlot::Hand(_))).map(move |&s| (*c, s)))
-            .map(|(c, s)| (c, self.src_ability(c, s)))
-            .collect();
-        if ads.iter().any(|(_, ad)| ad.only_if.is_some()) {
+    fn feeders_commute(&self, id: u32, p: PlayerId, spell: CardIdx) -> bool {
+        let Some(pos) = self.item_index(id) else { return false };
+        // (Every feeding ability the search may activate from here on, whether it may be activated now or not - one whose
+        // cost another's mana pays later, Chromatic Star's {1}: a superset of every later node's.)
+        let exile = self.spell_rest(spell, &self.stack[pos]).is_some_and(|r| r.exile_graveyard > 0);
+        let (delve, no_mana) = (self.def_of(spell).delve, self.def_of(spell).casting.no_mana);
+        let gap = |ad: &ActivatedDef, slot: AbilitySlot| ad.mana().is_some() && !ad.instant_only && Self::gap_feeder(delve, no_mana, exile, ad, slot);
+        let mut ads: Vec<(CardIdx, &ActivatedDef)> = Vec::new();
+        for c in self.permanents_of(p) {
+            for (i, ad) in self.abilities(c).activated.iter().enumerate() {
+                if gap(ad, AbilitySlot::Activated(i as u8)) {
+                    ads.push((c, ad));
+                }
+            }
+            for g in self.granted_activated(c) {
+                let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
+                if gap(ad, AbilitySlot::Activated(g.slot)) {
+                    ads.push((c, ad));
+                }
+            }
+        }
+        for &c in &self.players[p as usize].hand {
+            for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
+                if gap(ad, AbilitySlot::Hand(i as u8)) {
+                    ads.push((c, ad));
+                }
+            }
+        }
+        if ads.iter().any(|(_, ad)| ad.only_if.is_some() || ad.cost.life > 0) {
             return false;
         }
-        let Some(pos) = self.item_index(id) else { return false };
         let reach = self.cast_rest_reach(p, spell, &self.stack[pos]);
         if reach.chars || reach.leave.iter().any(|&x| self.abilities(x).locks_activated != 0) {
             return false;
@@ -1124,7 +1146,7 @@ mod tests {
             let id = g.stack().last().expect("the Bolt").id;
             let sources = g.cast_mana_sources(id, 0, bolt, true);
             assert!(!sources.is_empty(), "Squandered Resources feeds escape's exile");
-            g.feeders_commute(id, 0, bolt, &sources)
+            g.feeders_commute(id, 0, bolt)
         };
         assert!(at_step(&[]), "basic lands");
         assert!(at_step(&["Gaea's Cradle", "Llanowar Elves"]), "the Cradle's creatures: none may leave");
