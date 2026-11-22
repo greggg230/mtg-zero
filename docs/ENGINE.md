@@ -43550,6 +43550,289 @@ skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core
 (test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
 (docs).
 
+## 223. A search's finds by place, not by search: the Doomsday-mirror hidden-information leak (branch `fix/dd-mirror-infoset`, 2026-11-21)
+
+**Why.** The Hogaak integration's first FUZZ_POOL=hogaak probe (220.4) hit a Doomsday-mirror post-sideboard match (seed
+163, games 2-3 with hidden decks) that failed `check_match_information_set`: same keys, different encodings of P1 at
+flat index 57219. That failure was already on main (1e7416c5, 45dbf2e1). The new `Row::locate` names the index: the
+`found` token slot 0, float `CODE + fs::DEPTH`, depth 1 against depth 0. Trace: P1's library held only two cards,
+Murktide Regent and Pact of Negation, both finds of P1's earlier Doomsday pile (140.9, 142.12). P1 cracked a fetch land:
+search, then `shuffle_library`. The shuffle kept both marked (the library was finds only), and the two worlds' RNGs put
+them in different orders. `write_found` wrote each find's depth **by its slot in the order of the searches**, so slot
+0's depth was "which find is on top": the shuffle's result, hidden from everyone (its owner too), was in P1's row. The
+key correctly omits the shuffle. So this was not merged search nodes: **the network's input showed hidden
+information**, in the real game too.
+
+**Same root, more cases** (found by reading the code; the regression tests below cover them):
+
+1. *A private reorder among finds.* After a Doomsday pile's `Op::PileTo` order, or Ponder over finds, the other player no
+   longer knows which find is where, but slot k still pointed at one object's depth. Worse, a pile's finds are marked
+   in **definition order** (`dd_pile_found` sorts the pile by definition before `found_by_search`), so slot k was "the
+   pile's k-th smallest definition" and **the opponent's row mapped definition rank to depth**. That is identity-correlated
+   hidden information (e.g. where Thassa's Oracle sits), from the moment the pile is ordered. In the opponent's worlds the
+   pile's definitions are dealt anew, so the walk could also diverge there.
+2. *Finds mixed with cards the other player knew.* 140.9's rule unmarked a scramble's finds only when its domain held a
+   card the viewer did NOT know that was not a find. Cases: a Doomsday pile with graveyard picks (public cards, never
+   finds); a pile card the viewer saw (Mishra's Bauble: `learn` unmarks it); a revealed card on top (Personal Tutor). After
+   the private order those cards are a cloud's, so which places hold finds is not public, yet the tokens showed each
+   find's exact depth.
+
+**The fix** (no layout change: the same `found` token, the same widths):
+
+* `Game::finds_told: Vec<CardIdx>` (game.rs), **the public fact**: the finds whose places everyone tells apart as their
+  owner's search's finds. A find is added in `found_by_search` under the same `keeps_sightings` gate as before. It is
+  added in a world too: a search inside the tree marks its finds as the real game's would. `found` itself stays
+  real-game only. A find is removed by `untrack_found` (seen, put into a hand, `forget_order`), and in `scramble` by the
+  **strict rule**: if the domain holds any card that is not a told find (the owner's told-apart hand cards excepted),
+  the domain's told finds leave `finds_told`. With that rule the **set of the told finds' places is always public**,
+  though which-is-which is not. A told find is created at a public place: on top after a tutor, the top n for a pile of
+  finds only, a face-down exile place. Its place then changes only by public moves (draws and mills from the top leave
+  and unmark it; cards put on top or bottom shift the places publicly; a search's removal comes after a whole-library
+  scramble) or by scrambles and shuffles, which now keep told finds only when the domain is told finds only (the
+  domain's places hold finds before and after). `determinize` keeps objects' places and the marks.
+* `Game::finds_by_place()` (hidden.rs): the told finds sorted by (owner, zone, depth from the top / exile place).
+  `write_found` (tail_encode.rs) and `Game::view_of` (testkit.rs) list them in that order: **slot k = the k-th find by
+  place**. Identity only where the viewer knows the card (`Cx::ref_def`, unchanged: after a shuffle the owner doesn't).
+* `Game::found` keeps 140.9's likelihood semantics exactly (same entries, same order, the deal's posterior unchanged).
+  It is reclassified **Hidden** in `public_state.rs`: it is the real game's sighting record, not the public fact.
+  `finds_told` is Public. The gate's two perturbations ("the top library card is its owner's search's find", "a
+  search's find is no longer told apart") now perturb `Game.finds_told`. Their names are unchanged, so the `V7_FIXED`
+  / `COMBO_EXCLUDED` entries still match.
+* `build.rs`: a described position must have neither `found` nor `finds_told`.
+* `check_match_information_set` reports where two rows differ (`Row::locate`: a head segment's slot and float, a tail
+  token's segment, slot and float, or an override) and handles rows of different lengths.
+
+**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8).** Once finds are mixed with other cards, the rows
+no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
+already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
+encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
+layout v8 question (P's payment segment, E's stale-reference LKI block): a group-level finds fact in v8, or counting a
+pile's graveyard picks as told members without a layout change (partial). **The user chose the group fact in the single
+additive v8** (one token per group of places: owner, zone, the places, how many hold search finds and other cards). Also noted, not
+changed: 140.9's likelihood reads the real mark when a find and a mixed-in known card share an identity (pre-existing);
+open-decklist games record no finds at all (A1's rule), so no cube or game-1 row has the fact.
+
+**Tests.**
+* `engine_223_doomsday_mirror_post_board_match_163_information_set` (tests/fuzz.rs): the repro. It also runs as a scan:
+  `ENGINE_223_DECKS=<p0>,<p1>` (files of data/decks), `ENGINE_223_START=1|2`, `ENGINE_223_SEEDS=a..b` or a list.
+* `engine_223_a_doomsday_piles_private_order_is_not_in_the_found_tokens` (tests/v7_tails.rs): a pile of five library
+  finds in two orders. Five tokens at depths 1-5 in both rows, the card at each depth in its owner's row only. The
+  opponent's tokens are equal across the two orders and in 16 of its worlds. Then a fetch land finds nothing and
+  shuffles: still five tokens at depths 1-5, no identity in either row (the owner no longer knows the order), equal in
+  each player's worlds. With the sort toggled back to search order the test fails (the owner's slot 0 at depth 2).
+* `engine_223_a_pile_mixing_finds_with_a_graveyard_pick_has_no_found_token` (tests/v7_tails.rs): the strict rule.
+* Unchanged and passing: `a_tutors_card_on_top_is_a_found_token`, the az public-state gate (the perturbations now on
+  `finds_told`), the hidden suite.
+
+**Digests.** Cube full 44372545881ef768, DIGEST_ENCODING=0 a965c3fc8d3bba8a, v5 9f4cb802bae20e3b, constructed
+91b6cf60576961a7 (dealt and dealt per seat as recorded), EoE c3a9c786030f42eb, driver 6a03572828250b86: **all equal**
+(open decklists record no finds; EoE's layout v6 has no `found` token). **Metagame be3766d1f943c95c -> 4039d04b7971975e**:
+12 of its 288 lines (games and matches of the meta3 spec: Delver, Doomsday, Sneak and Show with hidden decks). Every move
+explained by toggling (an uncommitted switch, on the desktop):
+* the old `found` segment (the 140.9 set in search order) with all the rest of the new code: **= be3766d1f943c95c**, so
+  the 12 lines move through the `found` segment's content alone (no play, no other float);
+* only the order changed (the old set, by place): 11 of the 12 lines move (the leak: case 1 and the shuffle);
+* only the set changed (the strict rule, search order): 10 of the 12 move (case 2). The instrument logged 14 drops,
+  every one a scramble whose domain mixed told finds with cards the viewer knew (a Doomsday pile with Thoughtseize,
+  Force of Will, Dark Ritual... picked from the graveyard, or cards seen before);
+* the 12 lines are exactly the union (mm 18 11 and mp 7 11 by the order only; mp 10 11 by the strict rule only); no
+  other line moves under any toggle.
+Re-recorded with DIGEST_WRITE=1 (`digests_metagame.txt`).
+
+**How often** (the metagame digest's games as a stand-in for meta3's rows: random and heuristic play, not the run's self-play; an uncommitted counter in `write_found`, on the Mac): of about 14,500 rows encoded (real positions and `hash_world`'s worlds), 147 hold a find (the old or the new set), and **144 of them showed hidden information under the old code**: 12 by the order (the old set in search order, not by place: case 1 and the shuffle) and 132 by a mixed group (case 2: the old code kept those finds with exact depths). About 1% of the rows, all in hidden-deck games where a Doomsday player has piled. The live run's own rate depends on how often its Doomsday player piles in games 2-3; it was not measured from its game records.
+
+**Checks** (on the Mac, at a17fd01b = this fix's code): the full engine suite (`cargo test --release -p engine -p
+card_ir --no-fail-fast`) passed; fuzz: FUZZ_POOL=cross 20,000 games + 1,000 matches + 1,000 post-sideboard, doomsday
+2,000, delver 2,000 (+100 matches, +100 post-sideboard), sneak_show 2,000, hogaak 2,000 (+100, +100), the default 2,000
+(+100 matches), all passed. FUZZ_HIDDEN_DECKS=1 with `cross` is refused by main's own guard (129.3), and with `doomsday`
+it plays no Doomsday deck (the pool's played-card checks fail by design), so neither applies. **The widened
+post-sideboard scan** (the repro test as a scan, every check of `play_match_spec` incl. the information-set walk):
+2,000 matches each of the Doomsday, Delver, Sneak and Show and Hogaak mirrors from game 2, and of Doomsday-Delver
+(both seats), Doomsday-Sneak and Show and Hogaak-Doomsday from game 1: **16,000 matches, all passed**.
+
+**The live run.** legacy-meta3 self-plays best-of-three matches whose games 2-3 have hidden decks, where `found` is kept
+and Doomsday piles are the deck's core. So it trained on this leak: the opponent's row after a pile ordered by
+definition rank, and both rows after a shuffle of a library of finds only. The fix moves encodings only in those
+states. A checkpoint keeps its layout (no layout change), so a run can re-pin onto the fix with no fork.
+
+**The suite gate** (on 1115a8bf, this section's commit, in its worktree; steps on the Mac beside the live legacy-meta3 runs):
+`python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,doomsday,cross,hogaak,delver` - **GATE PASSED
+suite 1115a8bff898 in 978s**: privacy 0 findings; the full engine suite 2,870 passed (24 binaries); the sharded 2,000-game
+fuzz of each pool passed (the default with 100 matches; default with hidden decklists; delver_dealt, cross, hogaak and
+delver each with 100 matches + 100 post-sideboard; doomsday games only).
+
+**The engine gate** (on 6048fb79 = this branch merged with main 76973535, zero-core pin 84bb5e1; in the branch's worktree,
+steps on the Mac and the desktop's throttled beside the live legacy-meta3 runs): `python tools/gate.py engine --tested-sha
+1115a8bff898 --expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine
+6048fb7978fd in 1355s** (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live runs): privacy 0
+findings; the build and the release worker; the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (=
+expected); the formats constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame
+4039d04b7971975e and dealt f0bfffd26a70a753 (each = the checkout's recorded file); `az` 57, `limits` 13, `hidden` 28
+passed; pytest on the Mac 214 + 114 + 143 + 196 passed and the desktop part 49 (5 skipped); the desktop smoke config;
+**farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609
+rows); the suite evidence of 1115a8bff898; the Mac's full-suite recheck not needed (main's 21 files outside engine/ and
+card_ir/). The next commit adds this paragraph only (docs).
+
+## 224. Metagame runs publish by default; a run or a fork that will not publish says so; a copied setting stays a side run (branch `feat/meta3-publish`, 2026-11-21)
+
+Branch `feat/meta3-publish` from e9ff0e24 (legacy-meta3-r1's pinned commit, so the run can move onto it with Python
+changes only). Why: the user (2026-11-21), after a day of meta3 experiments none of which appeared on the Delver AI
+site: "We did work before to make it so that stuff like this should be published without having to remember to do
+that". 163 (the run-owned publisher; forks of a publishing run publish as side runs) and 193 (tools/ab.py) exist, but:
+
+* the `legacy-meta3` preset set `publish={}` (written 2026-11-17 when the publisher showed Delver-mirror runs only; the
+  metagame view landed days later) and legacy-meta3-r1's launcher passes `--publish {}`; r1 got a hand-started
+  publisher instead, so as far as 163 knows r1 does not publish;
+* so every fork of r1 inherits "off" (163's fork hook publishes only forks of a publishing run), and the experiment
+  launchers copied r1's flags, `--publish {}` included (the games2x data experiment, the mirror-only / lr / shrink-and-
+  perturb forks, the low-simulation arms): none appeared without a hand-started publisher;
+* r1's hand publisher runs with `--combo-every 0`, which the `publish` setting did not accept, so r1 could not move to
+  its own publisher as it was;
+* nothing said that a run or a fork would not publish.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 224.1 What changed (mtgz/az/publish.py, mtgz/az/__init__.py)
+
+* **`combo_every`** is a `publish` option (int >= 0; the publisher's `--combo-every`).
+* **`META3_PUBLISH`** = r1's hand publisher's options: `{side: false, every: 8, games: 9, combo_every: 0, census: 0,
+  device: cpu, threads: 4, forks: []}` (9 games = every pairing once; no fork-record file: the metagame lineage keeps
+  none, a fork's charts start from the metrics it copied). `legacy-meta3` and so `legacy-meta3-ddwheel` set it; the
+  smoke presets stay off. A run that saved `publish` keeps what it saved (r1's `{}` until its launcher passes one).
+* **PUBLISH OFF is loud.** `companion()` (the supervisor's hook, every start) with the setting off writes `PUBLISH OFF:
+  <run> will not appear on the Delver AI site ...` to the run's supervisor.log and stderr and returns None (the run goes
+  on, as 163: publishing never stops training). `on_fork` prints `fork_run: PUBLISH OFF - <fork> will NOT appear ...`
+  for a fork of a run that does not publish.
+* **`for_run`**: the run directory name a setting was made for. A run of another name carrying it - a launcher that
+  copied another run's flags, `--publish` included - publishes as a SIDE run titled after itself (its own state dir,
+  no note), said loudly (`PUBLISH SETTING OF ANOTHER RUN`), instead of posting under the other run's title or taking
+  the site's default run. `on_fork` writes the fork's own name into it (and drops a copied `state_dir`); a launcher
+  that passes a main run's `--publish` should name the run in it.
+* An explicit `forks: []` is deliberate (the metagame presets, ab.py's arms): no "names no forks file" note.
+
+### 224.2 Tests
+
+tests/test_run_publisher.py: the metagame presets carry META3_PUBLISH (smokes off; resolved through `--preset
+legacy-meta3-ddwheel`); `combo_every` reaches the command, bad values refused; PUBLISH OFF on stderr and in
+supervisor.log; a copied setting (for_run another run's) becomes a side run titled after the run without the note or
+state dir, the own run unchanged; a fork of an unpublished run says it will not publish; a fork of a metagame run is a
+side run made for itself, `combo_every` kept, no forks-file note.
+
+### 224.3 Turning it on for legacy-meta3-r1
+
+At the run's next start from a checkout with this change (a re-pin onto this branch's commit: Python only, the worker
+build unchanged): its launcher passes `--publish '{..., "title": "<r1's site title>", "for_run": "legacy-meta3-r1",
+"state_dir": "<the hand publisher's state dir>"}'` over META3_PUBLISH (same site record, same history), and the
+hand-started publisher is stopped first. From then on every fork of r1 publishes as a side run with no step to
+remember.
+
+## 225. Judging publishes by default: reference matches from the cells yardstick, farm campaigns' head-to-heads, ab.py's outside reference (branch `feat/judging-publish`, 2026-11-21)
+
+Branch `feat/judging-publish` from 00cfd372 (`feat/meta3-publish` merged with main: 224's loud PUBLISH OFF is the
+pattern followed here). Why: the user (2026-11-21, after 224): "Experiments should appear on Delver AI without anyone
+remembering to wire it up." 224 made the runs and their forks publish; the measurements of an experiment still did
+not:
+
+* the reference-match chart of a run's page (delverai's record `refmatch.<run>`: the run's checkpoints against a
+  fixed network from outside the run - the metagame runs' Delver mirror against pb1@262) was fed only by a
+  hand-written sidecar per experiment that measured with `run_yardsticks.py one --kind cells --ref LABEL --pair X,X`
+  and ran delverai's tools/upload_refmatch.py from the site's checkout when a file `UPLOAD` existed (none did for the
+  shrink-and-perturb fork: nothing appeared);
+* `tools/farm_campaign.py collect` printed a head-to-head nobody posted;
+* `tools/ab.py` judged arms only against each other and the start: a single-arm experiment (one fork trained on,
+  judged against a fixed network) did not fit it at all.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 225.1 The reference-match record in this repo (mtgz/az/site_refmatch.py)
+
+The record is built here, not by shelling out to the site's checkout, field for field the one upload_refmatch.py
+builds (`{run: "refmatch.<run>", kind: "refmatch", for_run, updated, series: [{key, label, title, note, ref: {run,
+gen}, deck, deck_label, format, games, sims, rows: [{iter, games, score, se, elo, elo_se, unfinished, note?}]}],
+marks?, iters: []}`; se from the deals' pentanomial, elo / elo_se the cell's): the shrink-and-perturb sidecar's
+upload.json and rows.jsonl give a byte-identical JSON record through both. It is posted with mtgz.az.publish's key and
+POST (`upload_key` / `post` moved there from mtgz.az.replays, which re-exports them: one copy, light enough for the
+yardsticks' watcher). Each post replaces the record whole, so it is rebuilt every time from every row on disk:
+`<run>/yardsticks.jsonl` (the watcher's), `<run>/yardsticks/refmatch_rows.jsonl` (rows measured by hand: the watcher
+stays the only writer of its file) and any `--rows` files. A row counts when it is a 'cells' result of a mirror pair
+X,X against a registered reference with that reference's network (ref_sha); the newest row of a generation wins.
+
+* **An outside reference** is a cells reference that is not the gen-over-gen kind, not frozen from the run
+  (`cells-freeze` entries carry an iteration) and no file under the run directory (generation 0 is not one).
+* **Registration**: <run>/yardsticks/refmatch.json keeps per reference label its network (sha256[:12], at the first
+  measurement; a row of another network under the label is left out and said; a new network needs a new label), the
+  reference's run and generation (default: from its checkpoint's path `<run>/models/iter_N.pt`) and the human fields
+  the flags gave - `--series-label` (default `<run>@<gen>`), `--title`, `--note`, `--deck-label` (default
+  data/decks/<deck>.json's name), `--ref-run`, `--ref-gen`, `--mark ITER=LABEL`, `--row-note ITER=TEXT` - kept for
+  every later post, derived defaults otherwise.
+* **Checked as the site checks** (refmatchProblem: names, lengths, counts, at most 8 series and 2,000 rows, no local
+  path in any string) before the post, and **a record with no row is refused** (RefmatchError, exit 3): a publish
+  that posts nothing is a failure, never a quiet no-op.
+
+### 225.2 Who posts it (tools/run_yardsticks.py; the yardsticks setting `refmatch_publish`)
+
+* **`one RUN --kind cells --ref LABEL --pair X,X --iter N` by hand, against an outside reference: posts by default.**
+  Before any game it checks that the post can work (an upload key; a mirror pair - the record shows mirrors only, a
+  non-mirror pair needs `--no-publish`; the label's network), registers the reference with the flags' fields; after
+  the games it prints the result line as always (stdout; a sidecar parsing it is unchanged), keeps the row in
+  refmatch_rows.jsonl and posts (its lines on stderr). `--no-publish`: a loud `PUBLISH OFF: refmatch.<run> is not
+  posted (--no-publish) ...` with the command that posts later, the row kept. A failed post: `PUBLISH FAILED` with
+  the retry command, exit 3 after the result line. `--publish-dry-run` prints the record.
+* **`watch`**: after each mirror cells result against an outside reference it appended, the watcher posts (the new
+  yardsticks setting `refmatch_publish`, default true; false: `PUBLISH OFF` at each such result and at the watcher's
+  start). A failed post is said (`PUBLISH FAILED`) and the lane goes on; the next result posts again. The watcher's
+  measurement children carry `MTGZ_YARDSTICK_CHILD=1` and never post themselves (their command line is unchanged).
+  At its start the watcher names the outside references it will post for, or says why it cannot (no key).
+* **`refmatch RUN [--ref LABEL --ref-ckpt PATH] [--rows FILE ...] [--dry-run] [fields]`**: the record rebuilt and
+  posted now - after `--no-publish`, to change a field, or to adopt a sidecar's rows (an unregistered label takes its
+  network from `--ref-ckpt` or from the rows' own ref_sha when they agree).
+
+So a sidecar like the shrink-and-perturb fork's (`one` from the run's own worktree) posts on its own once its
+worktree carries this commit, without its `UPLOAD` file or the site's checkout; a run whose yardsticks setting names
+an outside reference in its ladder posts from its watcher.
+
+### 225.3 farm_campaign.py collect posts its head-to-head
+
+After `collect` (or `submit --wait`) printed its result, the campaign's readout (zero.h2h's summary, A = seats[0])
+goes to the Head-to-heads tab through mtgz.az.site_h2h (the site's uploader, as 193) **by default**: experiment
+`--publish`, default the campaign's farm run name (`cmp-<name>`); `--title`, default `Farm campaign <name>`, and a
+derived description (site_h2h.check gained `default_title` / `default_description`: used only for an experiment that
+is not on the site yet, so a later match never trips the uploader's "another title" refusal); the sides by
+`--a-label` / `--b-label`, default each checkpoint's run and generation (one checkpoint with a set per side: each
+side's move-rule tag after the name; the same tag on both sides is refused - give labels); the match key
+`--publish-key`, default the farm run name. The check runs **before any waiting** (no uploader or key: refused, as
+`ab.py go`). `--no-publish`: `PUBLISH OFF` on stderr. A self-play or samples campaign, or an unpaired one, has
+nothing the tab can show: `PUBLISH SKIPPED` with the reason. No readout after a collect, or a failed post:
+`PUBLISH FAILED`, exit 3 after the result (a collected campaign returns its result at once, so `collect NAME` again
+retries the post).
+
+### 225.4 ab.py: an outside reference and single-arm experiments
+
+The spec's optional `"reference": {"path": CKPT, "label": "pb1@262"}` (label default: the checkpoint's run and
+generation), or `--ref CKPT [--ref-label L]` on judge / go / check / publish (kept in ab_state.json, so a later
+`publish` rebuilds the same manifest): every arm's last checkpoint is also judged against it with the cells
+(`<arm>_vs_ref.json`, cells-match `--ref-label ref`), published as each arm's overall match against the reference
+(key rank 7) and one match per cell (rank 3) - the tab lists treatments vs control (9), arms vs the reference (7),
+arms vs the start (5), then the cells. With a reference **one arm is enough**: it is the control, there are no
+treatments. The judge was already publishing by default (193); its opt-outs are now loud: `--no-publish` or
+`"publish": {"h2h": false}` print `PUBLISH OFF: h2h.<id> ... post them later: python tools/ab.py publish SPEC` at the
+judge and at the start of `go`. report.json names the reference's label.
+
+### 225.5 Tests
+
+tests/test_site_refmatch.py: outside vs own references (generation 0, a file of the run, frozen, gen over gen); the
+record from every mirror row of the registered network (the newest row of a generation; non-mirror, foreign-network,
+unregistered and failed rows left out; upload_refmatch.py's field order; derived and given fields; marks and row
+notes); no row, a local path and a re-used label refused; the POST faked (url, key, the whole record; dry run posts
+nothing); `one` by hand posting by default, the fields kept for the next post, `--no-publish` loud with the row kept,
+the watcher's child not posting; refusals before any game (a non-mirror pair, no key), a failed post exit 3 with the
+row kept, an own reference silent; the watcher posting after a mirror result, not after a non-mirror or own one,
+PUBLISH OFF / FAILED said and never raised; `refmatch` adopting a sidecar's rows. tests/test_judging_publish.py:
+ab.py's single-arm experiment with a reference (matches, manifest keys and labels, no path sent), the command line's
+reference kept for a later publish, the judge's PUBLISH OFF; farm_campaign.py collect's default post through a fake
+uploader (experiment, title, labels, key, the saved result), PUBLISH OFF / SKIPPED / FAILED, the per-side labels, no
+key refused before waiting. The site is never contacted.
+
 ## 226. zero-core pin 84bb5e1 -> 899e0eb: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good; an NVIDIA card's CUDA ordinal by its LUID, a second DXGI listing of a card left out (zero-core `fix/resume-fatal` f8a6211, `fix/cuda-luid-ordinal` 899e0eb; 2026-11-21)
 
 **Why.** On 2026-11-21 a farm GPU lease went dead for 86 minutes after an owner-activity pause: at the `resume` the
