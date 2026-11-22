@@ -705,3 +705,23 @@ fn cr_605_3a_no_mana_ability_while_paying_a_cost_of_no_mana() {
     assert_eq!(g.obj(wb).zone, Zone::Stack, "{}", log(&g));
     assert_eq!(g.obj(petal).zone, Zone::Battlefield, "{}", log(&g));
 }
+
+#[test]
+fn cr_601_2g_a_land_a_mana_ability_may_sacrifice_is_offered_an_artifact_it_cant_is_collapsed() {
+    // Squandered Resources ("sacrifice a land: add one mana of any type that land could produce") may sacrifice the
+    // Mountain during the cast, so the Mountain's "{T}: add {R}" activated in the step (then sacrificed) is no outcome
+    // the priority after the cast has: offered. Mind Stone isn't a land: Squandered can't take it, its "{T}: add {C}"
+    // stays collapsed (ENGINE.md 228.3, the tightening). Chromatic Star makes the step ask.
+    let mut g = cube()
+        .battlefield(0, &["Squandered Resources", "Mind Stone", "Mountain", "Chromatic Star"])
+        .hand(0, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    let (stone, mountain) = (bf(&g, 0, "Mind Stone"), bf(&g, 0, "Mountain"));
+    g.choose(Choice::Cast(bolt));
+    g.choose(Choice::Target(Target::Player(1)));
+    assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{}", opts(&g));
+    let offered = sources_offered(&g);
+    assert!(offered.contains(&mountain) && !offered.contains(&stone), "{}", opts(&g));
+}
