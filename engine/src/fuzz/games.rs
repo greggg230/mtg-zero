@@ -4994,16 +4994,19 @@ fn check_match_information_set(g: &crate::az::MtgAz, viewer: usize, seed: u64, r
             assert!(!(a.to_move() == Some(viewer) && b.to_move() == Some(viewer)), "match {seed} step {step}: the viewer's options differ");
             return;
         }
-        xa = crate::az::tail_encode::Row::of_az(&a, viewer).flat();
-        xb = crate::az::tail_encode::Row::of_az(&b, viewer).flat();
-        if let Some(i) = (0..xa.len()).find(|&i| xa[i] != xb[i]) {
+        let (ra, rb) = (crate::az::tail_encode::Row::of_az(&a, viewer), crate::az::tail_encode::Row::of_az(&b, viewer));
+        xa = ra.flat();
+        xb = rb.flat();
+        if let Some(i) = (0..xa.len().min(xb.len())).find(|&i| xa[i] != xb[i]).or((xa.len() != xb.len()).then(|| xa.len().min(xb.len()))) {
             panic!(
-                "match {seed} step {step}: same keys, different encodings of P{viewer} at {i} ({} / {}); decisions {:?} / {:?}; game {} sb {}
+                "match {seed} step {step}: same keys, different encodings of P{viewer} at {i} ({} / {}: {} / {}); decisions {:?} / {:?}; game {} sb {}
 {}
 ----
 {}",
-                xa[i],
-                xb[i],
+                xa.get(i).copied().unwrap_or(f32::NAN),
+                xb.get(i).copied().unwrap_or(f32::NAN),
+                ra.locate(i),
+                rb.locate(i),
                 a.pending_decision(),
                 b.pending_decision(),
                 a.m.game_no,

@@ -43550,6 +43550,129 @@ skipped: 17 live-run-hazard tests (fenced: live runs on this machine). zero-core
 (test_measure::test_heldout_make_losses_and_guards, 221.1) did not occur. The next commit adds this paragraph only
 (docs).
 
+## 223. A search's finds by place, not by search: the Doomsday-mirror hidden-information leak (branch `fix/dd-mirror-infoset`, 2026-11-21)
+
+**Why.** The Hogaak integration's first FUZZ_POOL=hogaak probe (220.4) hit a Doomsday-mirror post-sideboard match (seed
+163, games 2-3 with hidden decks) that failed `check_match_information_set`: same keys, different encodings of P1 at
+flat index 57219. That failure was already on main (1e7416c5, 45dbf2e1). The new `Row::locate` names the index: the
+`found` token slot 0, float `CODE + fs::DEPTH`, depth 1 against depth 0. Trace: P1's library held only two cards,
+Murktide Regent and Pact of Negation, both finds of P1's earlier Doomsday pile (140.9, 142.12). P1 cracked a fetch land:
+search, then `shuffle_library`. The shuffle kept both marked (the library was finds only), and the two worlds' RNGs put
+them in different orders. `write_found` wrote each find's depth **by its slot in the order of the searches**, so slot
+0's depth was "which find is on top": the shuffle's result, hidden from everyone (its owner too), was in P1's row. The
+key correctly omits the shuffle. So this was not merged search nodes: **the network's input showed hidden
+information**, in the real game too.
+
+**Same root, more cases** (found by reading the code; the regression tests below cover them):
+
+1. *A private reorder among finds.* After a Doomsday pile's `Op::PileTo` order, or Ponder over finds, the other player no
+   longer knows which find is where, but slot k still pointed at one object's depth. Worse, a pile's finds are marked
+   in **definition order** (`dd_pile_found` sorts the pile by definition before `found_by_search`), so slot k was "the
+   pile's k-th smallest definition" and **the opponent's row mapped definition rank to depth**. That is identity-correlated
+   hidden information (e.g. where Thassa's Oracle sits), from the moment the pile is ordered. In the opponent's worlds the
+   pile's definitions are dealt anew, so the walk could also diverge there.
+2. *Finds mixed with cards the other player knew.* 140.9's rule unmarked a scramble's finds only when its domain held a
+   card the viewer did NOT know that was not a find. Cases: a Doomsday pile with graveyard picks (public cards, never
+   finds); a pile card the viewer saw (Mishra's Bauble: `learn` unmarks it); a revealed card on top (Personal Tutor). After
+   the private order those cards are a cloud's, so which places hold finds is not public, yet the tokens showed each
+   find's exact depth.
+
+**The fix** (no layout change: the same `found` token, the same widths):
+
+* `Game::finds_told: Vec<CardIdx>` (game.rs), **the public fact**: the finds whose places everyone tells apart as their
+  owner's search's finds. A find is added in `found_by_search` under the same `keeps_sightings` gate as before. It is
+  added in a world too: a search inside the tree marks its finds as the real game's would. `found` itself stays
+  real-game only. A find is removed by `untrack_found` (seen, put into a hand, `forget_order`), and in `scramble` by the
+  **strict rule**: if the domain holds any card that is not a told find (the owner's told-apart hand cards excepted),
+  the domain's told finds leave `finds_told`. With that rule the **set of the told finds' places is always public**,
+  though which-is-which is not. A told find is created at a public place: on top after a tutor, the top n for a pile of
+  finds only, a face-down exile place. Its place then changes only by public moves (draws and mills from the top leave
+  and unmark it; cards put on top or bottom shift the places publicly; a search's removal comes after a whole-library
+  scramble) or by scrambles and shuffles, which now keep told finds only when the domain is told finds only (the
+  domain's places hold finds before and after). `determinize` keeps objects' places and the marks.
+* `Game::finds_by_place()` (hidden.rs): the told finds sorted by (owner, zone, depth from the top / exile place).
+  `write_found` (tail_encode.rs) and `Game::view_of` (testkit.rs) list them in that order: **slot k = the k-th find by
+  place**. Identity only where the viewer knows the card (`Cx::ref_def`, unchanged: after a shuffle the owner doesn't).
+* `Game::found` keeps 140.9's likelihood semantics exactly (same entries, same order, the deal's posterior unchanged).
+  It is reclassified **Hidden** in `public_state.rs`: it is the real game's sighting record, not the public fact.
+  `finds_told` is Public. The gate's two perturbations ("the top library card is its owner's search's find", "a
+  search's find is no longer told apart") now perturb `Game.finds_told`. Their names are unchanged, so the `V7_FIXED`
+  / `COMBO_EXCLUDED` entries still match.
+* `build.rs`: a described position must have neither `found` nor `finds_told`.
+* `check_match_information_set` reports where two rows differ (`Row::locate`: a head segment's slot and float, a tail
+  token's segment, slot and float, or an override) and handles rows of different lengths.
+
+**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8).** Once finds are mixed with other cards, the rows
+no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
+already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
+encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
+layout v8 question (P's payment segment, E's stale-reference LKI block): a group-level finds fact in v8, or counting a
+pile's graveyard picks as told members without a layout change (partial). **The user chose the group fact in the single
+additive v8** (one token per group of places: owner, zone, the places, how many hold search finds and other cards). Also noted, not
+changed: 140.9's likelihood reads the real mark when a find and a mixed-in known card share an identity (pre-existing);
+open-decklist games record no finds at all (A1's rule), so no cube or game-1 row has the fact.
+
+**Tests.**
+* `engine_223_doomsday_mirror_post_board_match_163_information_set` (tests/fuzz.rs): the repro. It also runs as a scan:
+  `ENGINE_223_DECKS=<p0>,<p1>` (files of data/decks), `ENGINE_223_START=1|2`, `ENGINE_223_SEEDS=a..b` or a list.
+* `engine_223_a_doomsday_piles_private_order_is_not_in_the_found_tokens` (tests/v7_tails.rs): a pile of five library
+  finds in two orders. Five tokens at depths 1-5 in both rows, the card at each depth in its owner's row only. The
+  opponent's tokens are equal across the two orders and in 16 of its worlds. Then a fetch land finds nothing and
+  shuffles: still five tokens at depths 1-5, no identity in either row (the owner no longer knows the order), equal in
+  each player's worlds. With the sort toggled back to search order the test fails (the owner's slot 0 at depth 2).
+* `engine_223_a_pile_mixing_finds_with_a_graveyard_pick_has_no_found_token` (tests/v7_tails.rs): the strict rule.
+* Unchanged and passing: `a_tutors_card_on_top_is_a_found_token`, the az public-state gate (the perturbations now on
+  `finds_told`), the hidden suite.
+
+**Digests.** Cube full 44372545881ef768, DIGEST_ENCODING=0 a965c3fc8d3bba8a, v5 9f4cb802bae20e3b, constructed
+91b6cf60576961a7 (dealt and dealt per seat as recorded), EoE c3a9c786030f42eb, driver 6a03572828250b86: **all equal**
+(open decklists record no finds; EoE's layout v6 has no `found` token). **Metagame be3766d1f943c95c -> 4039d04b7971975e**:
+12 of its 288 lines (games and matches of the meta3 spec: Delver, Doomsday, Sneak and Show with hidden decks). Every move
+explained by toggling (an uncommitted switch, on the desktop):
+* the old `found` segment (the 140.9 set in search order) with all the rest of the new code: **= be3766d1f943c95c**, so
+  the 12 lines move through the `found` segment's content alone (no play, no other float);
+* only the order changed (the old set, by place): 11 of the 12 lines move (the leak: case 1 and the shuffle);
+* only the set changed (the strict rule, search order): 10 of the 12 move (case 2). The instrument logged 14 drops,
+  every one a scramble whose domain mixed told finds with cards the viewer knew (a Doomsday pile with Thoughtseize,
+  Force of Will, Dark Ritual... picked from the graveyard, or cards seen before);
+* the 12 lines are exactly the union (mm 18 11 and mp 7 11 by the order only; mp 10 11 by the strict rule only); no
+  other line moves under any toggle.
+Re-recorded with DIGEST_WRITE=1 (`digests_metagame.txt`).
+
+**How often** (the metagame digest's games as a stand-in for meta3's rows: random and heuristic play, not the run's self-play; an uncommitted counter in `write_found`, on the Mac): of about 14,500 rows encoded (real positions and `hash_world`'s worlds), 147 hold a find (the old or the new set), and **144 of them showed hidden information under the old code**: 12 by the order (the old set in search order, not by place: case 1 and the shuffle) and 132 by a mixed group (case 2: the old code kept those finds with exact depths). About 1% of the rows, all in hidden-deck games where a Doomsday player has piled. The live run's own rate depends on how often its Doomsday player piles in games 2-3; it was not measured from its game records.
+
+**Checks** (on the Mac, at a17fd01b = this fix's code): the full engine suite (`cargo test --release -p engine -p
+card_ir --no-fail-fast`) passed; fuzz: FUZZ_POOL=cross 20,000 games + 1,000 matches + 1,000 post-sideboard, doomsday
+2,000, delver 2,000 (+100 matches, +100 post-sideboard), sneak_show 2,000, hogaak 2,000 (+100, +100), the default 2,000
+(+100 matches), all passed. FUZZ_HIDDEN_DECKS=1 with `cross` is refused by main's own guard (129.3), and with `doomsday`
+it plays no Doomsday deck (the pool's played-card checks fail by design), so neither applies. **The widened
+post-sideboard scan** (the repro test as a scan, every check of `play_match_spec` incl. the information-set walk):
+2,000 matches each of the Doomsday, Delver, Sneak and Show and Hogaak mirrors from game 2, and of Doomsday-Delver
+(both seats), Doomsday-Sneak and Show and Hogaak-Doomsday from game 1: **16,000 matches, all passed**.
+
+**The live run.** legacy-meta3 self-plays best-of-three matches whose games 2-3 have hidden decks, where `found` is kept
+and Doomsday piles are the deck's core. So it trained on this leak: the opponent's row after a pile ordered by
+definition rank, and both rows after a shuffle of a library of finds only. The fix moves encodings only in those
+states. A checkpoint keeps its layout (no layout change), so a run can re-pin onto the fix with no fork.
+
+**The suite gate** (on 1115a8bf, this section's commit, in its worktree; steps on the Mac beside the live legacy-meta3 runs):
+`python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,doomsday,cross,hogaak,delver` - **GATE PASSED
+suite 1115a8bff898 in 978s**: privacy 0 findings; the full engine suite 2,870 passed (24 binaries); the sharded 2,000-game
+fuzz of each pool passed (the default with 100 matches; default with hidden decklists; delver_dealt, cross, hogaak and
+delver each with 100 matches + 100 post-sideboard; doomsday games only).
+
+**The engine gate** (on 6048fb79 = this branch merged with main 76973535, zero-core pin 84bb5e1; in the branch's worktree,
+steps on the Mac and the desktop's throttled beside the live legacy-meta3 runs): `python tools/gate.py engine --tested-sha
+1115a8bff898 --expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine
+6048fb7978fd in 1355s** (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live runs): privacy 0
+findings; the build and the release worker; the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (=
+expected); the formats constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame
+4039d04b7971975e and dealt f0bfffd26a70a753 (each = the checkout's recorded file); `az` 57, `limits` 13, `hidden` 28
+passed; pytest on the Mac 214 + 114 + 143 + 196 passed and the desktop part 49 (5 skipped); the desktop smoke config;
+**farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609
+rows); the suite evidence of 1115a8bff898; the Mac's full-suite recheck not needed (main's 21 files outside engine/ and
+card_ir/). The next commit adds this paragraph only (docs).
+
 ## 222. The stew: specialists, deck stews and a main stew, distilled upward (branches `feat/stew-distill`, `feat/stew`, zero-core `feat/multi-distill`; 2026-11-21)
 
 ### 222.1 Several teachers, each on its own rows: `tools/distill.py --sources` and the MTG row selector (zero-core pin c850a5d -> ae3bc6c, zero-core `feat/multi-distill`, docs/az.md 71)
