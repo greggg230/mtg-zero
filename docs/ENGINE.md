@@ -42012,3 +42012,37 @@ legacy-meta3-r1 iter_1040 against iter_1024, the yardsticks' best-of-one spec, 3
 * *zero-core's eval gate* (`tools/worker_eval_gate.py`, the new worker against `zero.farm_eval.match_driver`, groups 1,
   sparse rows, 4 search + 4 ONNX Runtime threads, untraced): **8 of 8 rows identical, 60 batches identical**; both sides'
   rows equal the old worker's.
+
+### 221.1 Measured on the farm, the gate, and the pin c850a5d -> 0dd8a1f (docs only)
+
+**Test campaigns** (2026-11-21; `tools/farm_campaign.py submit` through a wrapper that can put settings over the match
+settings, `--no-alternates` so every lease played on a PC's CPU; legacy-meta3-r1 iter_1040 against iter_1024, `--bo1
+--sims 32 --seed 11`, 128 games each, 32 or 64 games a lease; all paused when done): the old build (main 1e7416c5's
+release 5e4023e2), the old build with the campaign's `groups` 1, and two measurement builds of this branch released with
+`tools/farm_release.py release <sha> --no-mac --no-speed` from side commits not merged here (two groups / four lanes:
+8506cfa0; one group / two lanes, this layout: 89533c80; farm gates passed for both). Per farm PC from D1's lease stats
+(zero-core docs/az.md 70 has the whole table): two 16-thread PCs **237 -> 645 and 204 -> 655 games/h** with 32-game
+leases (392 -> 1,055 and 335 -> 1,047 leaves/s; leaves per ONNX Runtime call 2.4 -> 6.6-7.3), **768 games/h** (1,243
+leaves/s, 12.4 leaves a call) with 64-game leases; a 20-thread laptop 81 (one wide session) -> 182 games/h. The
+two-group layout lost at both lease sizes (576 / 656 games/h). **Every game identical across the campaigns** - rows and
+trace digests of the same 128 games played by the old and the new builds on four PCs in five layouts.
+
+**A CUDA lease** (a farm PC with an NVIDIA GPU, paused on the coordinator for the 31 minutes of the measurement; the CUDA
+alternates of both builds, float16 variants, 64 games, the job's groups 2): 407 -> 436 games/h (+7%, a lane per
+generation), all 64 rows and digests identical. One group there: 556 games/h, but 59 of 64 games differ (the float16
+GPU graph's answers depend on the batch shape), so GPU jobs keep the agent's groups.
+
+**Gate of 2023ffac** (optin-core, this worktree, baseline main 1e7416c5 in a warm worktree, `--offload local`,
+throttled beside the live run): every step passed - core tests 215, checkpoint_compat byte identity (visits and cq,
+3,185 samples each), the digests as recorded (constructed 16441662701e233d, EoE c3a9c786030f42eb, driver
+6a03572828250b86, metagame 56ff52ffef1b1913, dealt a890c27da3c7d1a8), farm compat identical (gate 2: 6 games, 2,890 rows,
+150 batches; gate 3: 6 games, 2,556 rows), az 57 and hidden 28, the three other games built against this core - but
+core pytest 814 passed, 1 failed: `tests/test_measure.py::test_heldout_make_losses_and_guards`, which compares the
+`seconds` of two separate held-out evaluations (0.0 against 0.01 on the loaded machine); it passes alone 3 of 3 and
+this branch changes no Python. So formally GATE FAILED (a pre-existing timing flake). Also: MTG Zero's
+`tests/test_worker_farm.py -k eval` with the gate's worker: 2 passed.
+
+**WIP / not merged** (2026-11-21): main moved to 45dbf2e1 (the Hogaak lanes; no pin change, ENGINE.md 220 - this
+section conflicts only at the end of this file). Left: merge main, the optin-core gate on the merged commit (baseline
+main), then main. The pin 0dd8a1f differs from f1b5a8c by zero-core docs only. zero-core's `feat/farm-guards` also
+takes docs/az.md 70: this branch's section should become 71 at the integration.
