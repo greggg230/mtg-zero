@@ -44354,7 +44354,7 @@ cast (its 2004-10-04 ruling; the user's correction) - the step honours that and 
 
 ### 230.1 The step
 
-* **`Task::CastMana { id, card, again }`, `DecisionKind::CastMana`** (`cast_mana.rs`): pushed by `begin_cast_face`
+* **`Task::CastMana { id, card, again, after }`, `DecisionKind::CastMana`** (`cast_mana.rs`): pushed by `begin_cast_face`
   after `Task::Delve`, so it runs once the total cost is determined (601.2b-f's announcements run first) and before
   delve, the cost's parts and the mana (601.2h). Not asked when the total cost has no mana (601.2g's "if"), nor when
   `PASS` is the only option that leaves the payment completable. Options: each permanent with a mana ability the caster
@@ -44495,28 +44495,78 @@ cost has no mana has no step: the search asks its payment as it is.
 
 ### 230.6 Tests
 
-`tests/rules_cast_mana.rs` (16; rules_suite): Petal / Star delved for Hogaak and Treasure Cruise, a Petal activated
+`tests/rules_cast_mana.rs` (17; rules_suite): Petal / Star delved for Hogaak and Treasure Cruise, a Petal activated
 with its mana unspent, an unneeded Star's trigger above the spell vs below when floated first, Lion's Eye Diamond never
 offered (and floated first, delve fuel), plain lands collapsed, Mana Confluence / Talismans offered, the timing
 restrictions card by card on two boards, **Hogaak castable only through a Star whose {1} a land pays**, a creature that
 pays a Star's {1} doesn't convoke, a Star feeding escape's exile for Lightning Bolt, **the brute-force agreement test**
 (500 random Hogaak boards: castability = a brute force over fed Stars x Petal x Elves as payer x delve x convoke's
 matching, and every decision path of every castable cast ends cast; 129 castable, 23 only through a Star, 24,565
-paths), the delve fix, the zero-mana rule. `cast_mana.rs` unit tests: the collapse's equality, the cost lock. Lane A's
+paths), the delve fix, the zero-mana rule, a land a mana ability may sacrifice (Squandered Resources) offered while an artifact it can't is collapsed. `cast_mana.rs` unit tests: the collapse's equality, the cost lock. Lane A's
 `cr_601_2g_a_lotus_petal_sacrificed_while_hogaak_is_cast_feeds_escapes_exile` (was "never fed": 220.1.4's reading,
 which this section replaces). `tests/az.rs` `cast_mana_positions` in the public-state gate. Tests of the payment pass
 the step (`Game::pass_cast_mana`; testkit `choose` and `drive_until` pass a step a test answers past). The
 seed-pinned fuzz replays: the step changes every game that reaches one (a decision draws from the game's random
 stream), so their steward games are gone. `scan_seeds_for_the_seed_pinned_tests` (ignored; every check, each test's
 checkpoint denominator) re-found the Etali enclosing-picks game: interactions seed 12,471 (seeds 0..24,000 scanned;
-its rows carry the enclosing picks for both viewers, 2 and 2). The other three - a look at a hand card that left the
-hand in its step (hidden-decklist seed 100,017,685), one that came into it and left (default 100,037,121), the
-exponential Ocelot Pride run (default 100,061,919) - were steward finds of farm-scale runs: 12,000 + 12,000 + 20,000
-scanned games (every check) found none; they stay failing until a farm-scale scan re-pins them (230.8).
+its rows carry the enclosing picks for both viewers, 2 and 2). The other four games - a look at a hand card that left
+the hand in its step (hidden-decklist seed 100,017,685), one that came into it and left (default 100,037,121), one at a
+card that changed zones after the look (hidden-decklist 100,098,483), the exponential Ocelot Pride run (default
+100,061,919) - were steward finds of farm-scale runs: the scans (every check; 12,000 + 12,000 + 20,000 games, then
+100,000 of each look kind and 200,000 Ocelot games in 90 minutes on the Mac) found none. Their tests are
+`#[ignore = "seed lost ..."]` (`a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step`,
+`the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483` - split out of
+`a_look_at_the_viewers_hand_that_its_step_changes_around_the_look`, which keeps its delver_dealt2 match and passes -
+and `an_exponential_run_of_ocelot_pride_copies_ends_default_seed_100061919`) until a farm-scale scan re-pins them
+(230.8): meanwhile the fuzz's look checks run in every game but no pinned game proves a left-hand look is checked, and
+the token limit stays tested by its rules_numbers scenario.
 
 ### 230.7 Results
 
-RESULTS_PLACEHOLDER
+**Digests** (main 6357848a -> this branch, merged; re-recorded on the merged engine, 229.10):
+
+| Digest | main 6357848a | this branch | moved |
+|---|---|---|---|
+| cube (`digest`) | 14e6735d8eb9cb4a | 9473f7debc4bceb3 | 2,277 / 2,500 |
+| cube, `DIGEST_ENCODING=0` | 5674f63cc335d204 | d3c144b6cc2977e5 | |
+| constructed | 498c263f7048e81d | 4a03293608edeba2 | 215 / 570 |
+| metagame | 0d13940b6d659a83 | d72ae0c904a0ffbd | 180 / 288 |
+| EoE | 7e45b554b95820ed | 5ffb850dd963bad0 | 139 / 160 |
+| dealt | fb7532e8a30a63f4 | f858b1880091d94f | 11 / 80 |
+| dealt per seat | 7da4211ed6ab4f3e | 2719fdd478d14fa3 | 4 / 60 |
+| driver | 6a03572828250b86 | equal | 0 |
+
+**Per game** (a bisect with scratch toggles, never committed: the step, castability's open-step counting and
+`feed_castable`, the delve fix, the zero-mana rule, each switchable): every part off reproduces main's eight digests
+exactly; the delve fix and the zero-mana rule alone (step and castability off) move no game in any format; with
+castability's part off and the step on, constructed, metagame, EoE and dealt equal the full branch, so every move there
+is the step's. In the cube, the games that move are **exactly the 2,277 that ask the step** at least once (17,481 asks
+in all; no game moves without an ask, none asks without moving: an ask is a decision of its own, the random agent's draw
+from the game's stream shifts after it). Castability moves one cube game besides (r 1128, whose step is asked anyway):
+Rain of Filth's lands may be sacrificed in Treasure Cruise's step, so delve counts them and the Cruise is offered at the
+priority before any mana is floated (with castability's part off, only after a land's mana was floated). The digest games are random agents,
+so a step is asked whenever a non-collapsed mana ability (a Petal, a Star, a painland, a Talisman, a creature) is
+available while a spell with mana is cast: that is why most cube games move.
+
+**Search impact** (1,000 random games per pool, the step off -> on, merged engine, the Mac):
+
+| Pool | decisions / game | options / decision | CastMana / game (its options) | decisions / s |
+|---|---|---|---|---|
+| cube | 443.19 -> 447.64 (+1.0%) | 3.226 -> 3.225 | 5.757 (3.240) | 112,372 -> 107,644 (-4.2%) |
+| Delver | 389.66 -> 391.97 (+0.6%) | 2.683 -> 2.683 | 0.287 (3.314) | 158,103 -> 157,646 (-0.3%) |
+| Doomsday | 315.32 -> 323.65 (+2.6%) | 2.796 -> 2.800 | 0.647 (2.087) | 170,024 -> 169,497 (-0.3%) |
+| Hogaak A | 313.85 -> 313.81 | 2.740 -> 2.743 | 0.137 (3.044) | 154,402 -> 150,983 (-2.2%) |
+
+The collapse's tightening (230.3) took the cube from 7.6 to 5.76 step decisions a game; what still asks is mostly
+abilities outside 230.3's conditions (a cost beyond {T}: a sacrifice, life, damage; a condition; a trigger or a
+cost of the cast reading tapped status).
+
+**Delver canary library** (229.10's second merger): re-recorded with main 6357848a as the old engine
+(`--any-old-engine`: its build's sha differs from the library's 395f72ca524c5a74, the same engine code): 72 / 72, 0
+dropped; 12 spots gain 18 "CastMana: Pay the cost" (the step the old engine never asked, answered as it behaved);
+`check` 72 / 72. RULES_EPOCH (`tools/position_lab.py`) 1795330000.
+
+**Fuzz** FUZZ_PLACEHOLDER
 
 ### 230.8 Known follow-ups
 
@@ -44526,5 +44576,7 @@ RESULTS_PLACEHOLDER
 * Castability treats a delve spell's delve-reduced mana as a mana payment (230.5): exact unless its total cost is zero,
   which no delve card's cost reaches without an alternative cost of no mana, and such a cost and an exile cost are never
   combined (escape is itself the alternative cost).
+* **Re-pin the four lost fuzz seeds** (230.6) by a farm-scale scan (`scan_seeds_for_the_seed_pinned_tests`,
+  `SCAN_KIND` left_look / entered_look / ocelot), then drop their `#[ignore]`.
 * The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
   counts): measured in 230.7.
