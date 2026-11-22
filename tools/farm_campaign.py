@@ -594,7 +594,7 @@ def analysis_main(argv, client=None):
                     tilts = Y.bo1_seat(a.a).get('belief_tilts') or {}
                 else:
                     from zero import h2h
-                    spec = a.spec or h2h.run_eval_spec(a.a, C.GAME)
+                    spec = a.spec or h2h.run_eval_spec(a.a, C.ckpt_game(a.a))
                     tilts = json.loads(a.tilts) if a.tilts is not None else None
                 if not a.samples:
                     settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b, chance_k=a.chance_k,

@@ -125,11 +125,11 @@ def test_presets_and_defaults():
         json.loads(c4['spec']), decks='eval')                           # evaluation and Elo: matches
     assert {k for k in c3 if c3[k] != c4[k]} == {'spec', 'eval_spec', 'max_steps', 'preset'}
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {})
-    assert cfg['game'] == 'mtg' and cfg['yardstick'] == 'heuristic'
+    assert cfg['game'] == 'mtg_v8' and cfg['yardstick'] == 'heuristic'      # (layout v8: new runs, ENGINE.md 232)
     assert json.loads(cfg['spec'])['max_turns'] == 60
     assert cfg['eval_spec'] == ''                                      # the package's evaluation spec
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-1']), {})
-    assert cfg['game'] == 'mtg' and cfg['iters'] >= 4 and cfg['infer_device'] == 'cpu'
+    assert cfg['game'] == 'mtg_v8' and cfg['iters'] >= 4 and cfg['infer_device'] == 'cpu'
     a = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-2']), {})
     b = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-2-mlp']), {})
     assert (a['arch'], a['policy_target'], a['sims_minor']) == ('tokens', 'cq', 4) and b['arch'] == 'mlp'

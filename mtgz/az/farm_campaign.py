@@ -98,10 +98,15 @@ SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,62}$')
 
 
 def ckpt_game(a, b=None):
-    """The game checkpoints `a` (and `b`) record (mtgz.az.layouts): refused when the two differ."""
+    """The game of checkpoints `a` (and `b`): their run's saved config's (runs/<run>/config.json, as the run plays it),
+    else the one the checkpoint records (mtgz.az.layouts); refused when the two differ."""
+    from zero import h2h
     from mtgz.az import layouts
-    ga = layouts.checkpoint_game(a)
-    return layouts.same_game(ga, layouts.checkpoint_game(b), where=f'{a} and {b}') if b else ga
+
+    def one(ck):
+        return (h2h.run_settings(ck) or {}).get('game') or layouts.checkpoint_game(ck)
+    ga = one(a)
+    return layouts.same_game(ga, one(b), where=f'{a} and {b}') if b else ga
 RELEASE = 'release'                     # `alternates`: the release index's for the build (docs/ENGINE.md 215)
 # the live runs' variants (zero-core docs/az.md 46.10, 67): NVIDIA's CUDA alternate the float16 graph, AMD's DirectML
 # alternate the float32 MatMul form (the one zero-onnx/2 graph DirectML runs deterministically there)
@@ -872,9 +877,9 @@ def resume(d, client=None, opts=None, log=log_stderr):
 def _setup(d, st, client, opts, log):
     from zero import farm_def as FD
     if not st.get('gens'):
-        gens = {'1': export_gen(st['a'], 1, st['game'], st['spec'], st['run'], log, opts.get('export_cache'))}
+        gens = {'1': export_gen(st['a'], 1, st.get('game', 'mtg'), st['spec'], st['run'], log, opts.get('export_cache'))}
         if st['b']:
-            gens['2'] = export_gen(st['b'], 2, st['game'], st['spec'], st['run'], log, opts.get('export_cache'))
+            gens['2'] = export_gen(st['b'], 2, st.get('game', 'mtg'), st['spec'], st['run'], log, opts.get('export_cache'))
         st['gens'] = gens
         save_state(d, st)
     cl = client or FD.Client(opts.get('url', FD.URL))
@@ -1189,7 +1194,7 @@ def spot_check(d, st, frac=None, engine=None, log=log_stderr):
     for g in pick:
         r = rows[g]
         try:
-            FE.replay_trace(r, st['game'], st['spec'], engine, st['seed'], st['paired'], samples=samples_job(st),
+            FE.replay_trace(r, st.get('game', 'mtg'), st['spec'], engine, st['seed'], st['paired'], samples=samples_job(st),
                             aux=bool(r.get('aux')))
         except FE.TraceMismatch as e:
             _refuse(d, st, f'spot check: machine {r.get("by", {}).get("machine")}: {e}')
@@ -1217,7 +1222,7 @@ def describe(row, spec, engine=None, states=False, game=None):
         import mtgz.az  # noqa: F401
         from mtgz import _engine as engine
     rec = row['rec']
-    # (the campaign's game, `st['game']`; a row of a campaign made before layout v8: layout v7's `mtg`)
+    # (the campaign's game, `st.get('game', 'mtg')`; a row of a campaign made before layout v8: layout v7's `mtg`)
     g = engine.Game(game or row.get('game') or 'mtg', spec, int(rec['n']), int(rec['seed']))
     eps = [{'moves': []}]
     for i, s in enumerate(rec['steps']):

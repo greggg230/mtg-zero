@@ -29,7 +29,7 @@ E = DA.DB.load_engine(ROOT)
 def random_record(tmp, gid='20990101-000000-aaaaaa', seed=4242, moves=160, you=0):
     """A Play-tab-shaped record of a random Delver mirror game (seed + root actions) and its view (the
     engine's state as the human sees it)."""
-    g = E.Game('mtg', SPEC, 2, seed)
+    g = E.Game('mtg_v8', SPEC, 2, seed)
     DA.auto_step(g)
     r = random.Random(seed)
     acts = []
@@ -90,17 +90,17 @@ def test_the_builder_checks_every_position_and_lists_what_it_skips(tmp_path):
         assert st['deal'] == 'actual' and set(st) == {'seed', 'actions', 'deal'}
         s = json.loads(SPEC)
         s['start'] = dict(st, deal='none')
-        g = E.Game('mtg', json.dumps(s), 2, 0)
+        g = E.Game('mtg_v8', json.dumps(s), 2, 0)
         assert DA.DB.spot_sig(json.loads(g.export_state())) == e['sig'] and g.to_move == e['decider']
         if e['kind'] == 'human':
             assert 3 <= e['turn'] <= 8
     # the archive loads for the run's spec, not for another
-    A2 = FK.load_archive(str(tmp_path / 'archive.json'), 'mtg', SPEC)
+    A2 = FK.load_archive(str(tmp_path / 'archive.json'), 'mtg_v8', SPEC)
     assert A2['n'] == len(arch['entries'])
     other = json.loads(SPEC)
     other['max_turns'] = 59
     with pytest.raises(SystemExit) as ex:
-        FK.load_archive(str(tmp_path / 'archive.json'), 'mtg', json.dumps(other))
+        FK.load_archive(str(tmp_path / 'archive.json'), 'mtg_v8', json.dumps(other))
     assert 'another spec' in str(ex.value)
 
 
@@ -108,12 +108,12 @@ def test_the_delver_driver_branches_and_starts_from_the_archive(tmp_path):
     lib, spots = library_file(tmp_path, n=3)
     (tmp_path / 'play').mkdir()
     arch, _ = build(tmp_path, lib)
-    A2 = FK.load_archive(str(tmp_path / 'archive.json'), 'mtg', SPEC)
+    A2 = FK.load_archive(str(tmp_path / 'archive.json'), 'mtg_v8', SPEC)
     seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, sims_minor=2, temp_moves=60)
-    d = G.Driver('mtg', [[seat, seat]] * 12, spec=SPEC, concurrency=12, seed=3, record=True, threads=4,
+    d = G.Driver('mtg_v8', [[seat, seat]] * 12, spec=SPEC, concurrency=12, seed=3, record=True, threads=4,
                  branch={'p': 0.5, 'moves': 3, 'temp': 2.0}, starts={'p': 0.5, 'specs': A2['specs']}, move_log=4000)
     rows = []
-    tw = G.tail_widths(G.info('mtg'))                # (layout v7's rows carry tails: ENGINE.md 125)
+    tw = G.tail_widths(G.info('mtg_v8'))                # (layout v7's rows carry tails: ENGINE.md 125)
     drive(d, {'m': UniformEvaluator()}, on_batch=lambda lb: rows.extend(split_games(d.take_results(), d.take_samples(), tw)))
     rows.extend(split_games(d.take_results(), d.take_samples(), tw))
     main = [r for r, _ in rows if 'branch' not in r]
