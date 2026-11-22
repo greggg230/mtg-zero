@@ -339,7 +339,7 @@ pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
     describe_as(g, viewer, false)
 }
 
-/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 226): the same description, finer where the key
+/// `describe` for the near-tie merge key (`merge_key.rs`, ENGINE.md 227): the same description, finer where the key
 /// needs it and wider where the key covers the rest itself. A stale reference or a gone token also carries its age
 /// (`"age"`: the card's zone changes since that object, so two earlier objects of one card never read alike); the
 /// sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (the key adds them);

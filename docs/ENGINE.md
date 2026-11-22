@@ -43672,3 +43672,143 @@ passed; pytest on the Mac 214 + 114 + 143 + 196 passed and the desktop part 49 (
 **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609
 rows); the suite evidence of 1115a8bff898; the Mac's full-suite recheck not needed (main's 21 files outside engine/ and
 card_ir/). The next commit adds this paragraph only (docs).
+
+## 227. Near-tie branches, the game side: the merge key and the alternative check (`SearchGame::merge_key`, `branch_alt_ok`; zero-core pin 84bb5e1 -> 92568b5; branch `feat/neartie-merge-key`, 2026-11-21)
+
+**Why.** zero-core's near-tie branch rule (its docs/search.md 2.11, built on a zero-core branch of its own) replays a
+self-play game from a decision where the move played and a runner-up were within 2 pp of root Q, with the runner-up
+forced. Sequencing ties often converge: if the branch reaches a state equivalent to one its game reached after the branch
+point, it ends there and its rows take the game's outcome (the game's actual hidden order is one draw of the same
+future). Two hooks on `SearchGame` (zero-core 92568b5; defaults: never merge, every alternative ok) are the game's part:
+**`merge_key`** (equal only for equivalent states) and **`branch_alt_ok`** (is the runner-up a real alternative). **A
+false merge labels a branch's rows with another future's outcome; a missed merge only costs compute**, so every case the
+key cannot settle is None. Nothing calls either hook unless the driver's near-tie rule is on: with it off, play is byte
+for byte as before (227.6).
+
+### 227.1 The key (`engine/src/az/merge_key.rs`)
+
+A stable 128-bit hash (`StableHash`: two SplitMix64 lanes over little-endian 64-bit words, the length mixed in; no
+`HashMap`, no process state, the same on every platform) of, in order:
+
+1. **Both seats' descriptions**, `build::describe_for_key(g, 0)` and `(g, 1)`: 95's `describe` (id-free, cards by name,
+   objects by place, timing by turn, every known library position and who knows it, the hand cards the opponent knows,
+   counters, the stack, the turn, step, priority and passes, the clouds) in a key mode, finer where the key needs it and
+   wider where the key covers the rest itself:
+   * a stale reference or a gone token carries its **age** (the card's zone changes since that object), so two earlier
+     objects of one card never read alike;
+   * the turn's **last known information** of gone objects (`lki_counters`, `lki_copy`, `lki_attached`, `lki_damage`,
+     `lki_toughness`, `spell_lki`, and `lki_power` - kept across turns - but for a card now in a library, which no
+     reference can name), each entry by its gone object, sorted (the rules look entries up by object, one each); and the
+     turn's **loop actions** (`loop_taken`, `loops.rs`: a view's loop hash, a battlefield place, action ids - no ids),
+     sorted. The rules read both and the build has no key for them;
+   * the **graveyards by identity** when no card of the game (its objects, the sideboards, their faces) is a positional
+     graveyard reader (R17, `lower::graveyard_order`; a per-table flag, computed once), references to graveyard cards by
+     that place; else in their order (227.2);
+   * the sideboards, the hidden decks' known pools and the hidden decklists' sightings are not refused (item 2 keys them);
+     EoE's W3 last known information and W6 state are refused.
+2. **The hidden parts as multisets**: each library's cards at the positions nobody knows, each hand's cards with who knows
+   each, the sideboards, the known pools (`Game::known_pools`), and the sightings (140.9) per viewer and owner, by
+   definition, then in the order seen, with their terms (what the hidden deck's deal reads, `seen_of`), and
+   `sightings_lost`.
+3. **The match**: the format, the game number, the results, wins and draws, who chose and who started each game, the
+   turns before, the reveals of this game and the earlier ones (`seen`, `earlier`, `earlier_by_game`), each seat's deck,
+   and the settings that differ by seat or by match (keep, the choice table, a deck prior, dealt; keep_known, post_board,
+   constructed_bo3, game_episodes, the first-pick priors, the metagame pairing).
+4. **The decision**: who moves, its tag (`decision_tag`), its legal actions.
+5. **Both seats' layout v7 rows**, bit for bit (`encode_row`: the head and the sealed tail tokens; the decider's pointer
+   overrides), as a guard: anything the network reads that differs stops a merge, even where items 1-4 would miss it.
+
+**Deliberately not keyed.** The true order of library cards nobody knows (under the engine's knowledge model, the one
+`determinize` deals from, ENGINE.md 10, it is a uniform arrangement of their multiset in both states: Lightning Bolt then
+a fetchland vs the fetchland then Bolt shuffle at different moments and merge); the RNG states, the game's and the
+match's (future chance, uniform in both lines; the dealt seat's deal seed too); object ids and incarnations; the log; the
+counters that only number things (timestamps beyond their order, stack ids, event groups, decisions answered, the
+sightings' clock). The match's fixed parts (its pools, the spec) are not keyed: keys compare states of one match, a branch
+and its game.
+
+**No key (None).** Sideboarding, the deck choice, between games, a match over; a position-lab game; a game over; a
+determinized world (`observer`); a forced-find spec (ENGINE.md 180: its records are not keyed); a library search's finds
+the other player tells apart (`found`, `finds_told`, 140.9, 223); a loop action's activation in progress; and everything
+`describe` refuses: every decision but priority, the combat declarations, the cleanup discard and the setup's (a decision
+inside a cast or a resolution: a target, a payment, Brainstorm's put-back, a search), **a private peek** (192: a card a
+player saw in the other's library that its owner never did, after a shuffle), a reference into a zone the viewer does not
+see, and the rare states `describe` does not cover (face-down cards, copies, links, permissions, waiting triggers, extra
+turns, companions, dungeons, ...).
+
+### 227.2 Decisions
+
+* **Graveyard order: by identity unless a card of the game reads it.** The rules read a graveyard's order only through the
+  card table's positional readers (R17: Shallow Grave's "the top creature card"), and the network sees it only there
+  (`graveyard_order` tokens) and in the list block of a decision about graveyard cards (65.10; 125's D5: graveyards are
+  bags of identities). Keeping the order would never merge Bolt-then-fetch with fetch-then-Bolt (Bolt and the fetchland
+  reach the graveyard in the other order, for the rest of the game). With no reader in the game the key takes the
+  graveyards as multisets. The one residual: a later graveyard-card decision (delve) lists the graveyard in order, so the
+  two lines' rows there list the same cards in another order. With a reader in the game the order is kept.
+* **Within a turn the turn's records keep sequencing ties apart; they merge as the next turn begins.** A fetchland or a
+  Bauble activation is a loop action (`loops.rs`): its record holds the loop hash of the view it was taken in, which
+  differs between the two orders, and the loop rule may read it again in the turn. A Brainstorm cast in the draw step
+  counts its draws as draw-step draws (`draw_step_draws`, encoded), one cast in the main phase does not. Dropping either
+  would be a guess, so the key keeps them; the lines merge at the next turn's first decision, once the turn's counters,
+  last known information and loop records are gone. The driver checks each decision of the branch against every key its
+  game reached after the branch point, so this costs the rest of the turn, not the merge.
+* **Best-of-three: keyed.** One episode per game (the presets' match, 121) keys the game with the match's state (item 3),
+  the sideboards, the known pools and the sightings; sideboarding and the deck choice have no key.
+
+### 227.3 The alternative check (`merge_key::branch_alt_ok`)
+
+False for the same action; for decisions not worth a branch by their kind (`PayMana`, `PayPool`, `ChooseMana`,
+`ActivateMana`, `OrderTriggers`); at priority for opening the mana-ability window (`YES`, "Activate mana abilities") or
+activating a permanent's mana ability (a float); and for two options that are the same card doing the same thing: the
+same kind of choice (a card, a play, a cast, a face, an ability of the same slot, an object target) of **twins** - two
+objects with every field equal but the incarnation and the timestamp, the same identity and counters, neither named by an
+effect, a mark, a link, an attachment or a stack target (the opponent's two untapped Volcanic Islands as Wasteland's
+target). True otherwise, including every sideboarding and deck-choice option. (Priority and the hand-card choices already
+offer one option for twin hand cards: the engine's canonical hand.)
+
+### 227.4 Cost
+
+`merge_key_cost` (ignored; `--ignored --nocapture`): 20 games each, moves half the heuristic's, half random, the key at
+every decision; release, on the desktop beside the live runs (noisy, about +-30%). **Delver mirror: 6,025 decisions,
+66.3% keyed, about 220 us a call; best-of-three dealt: 5,915 decisions, 59.6% keyed, about 200 us a call.** A refused
+position returns almost at once (`describe` stops at its decision). The two rows are most of it (about 120 us), the
+descriptions and their JSON most of the rest. For scale, 64 x (clone + determinize + the decider's row) - a
+64-simulation search's game side without its steps and its network - took 0.9-1.2 ms in the same runs; with the network a
+64-simulation search takes several milliseconds on a GPU and far more on a CPU.
+
+### 227.5 Tests (`engine/tests/merge_key.rs`, in `misc_suite`)
+
+Two lines from one built Delver-mirror position (95), played by option label (`Game::reseed_rng`, a test hook, gives a
+line its own shuffles, as a branch's differ from its game's):
+* `bolt_then_fetch_merges_with_fetch_then_bolt`: different true library orders, the same multiset; apart within the turn
+  (the loop records), the same key at the next turn's first decision;
+* `a_fetch_before_a_draw_does_not_merge_with_one_after` (Brainstorm's draws: the hands differ);
+* `brainstorm_in_the_draw_step_merges_with_brainstorm_in_the_main_phase` (apart for the turn: the draw-step draws);
+* `a_brainstorm_put_back_then_a_shuffle_merges_only_with_the_same_knowledge`: the put-back's order, shuffled away, merges;
+  the opponent's Bauble look at P0's top card before the Brainstorm vs after it (the same cards everywhere, a cloud in one
+  line) does not;
+* `renumbered_object_ids_keep_the_key` (Scenario positions whose cards were made in another order; another order of an
+  unknown library too);
+* `different_hands_knowledge_or_library_cards_give_different_keys` (a hand, a library multiset, a hand card the opponent
+  knows, P0's knowledge of its top card);
+* `a_private_peek_has_no_key` (a Bauble look at the opponent's top card keys; after the opponent's fetch shuffles it away,
+  None);
+* `branch_alt_ok_excludes_twins_and_mana_details` (the same action, the mana window, Wasteland's twin targets vs P0's own
+  land, `ActivateMana`, `ChooseMana`, Bolt's two player targets).
+
+### 227.6 Checks
+
+With the near-tie rule off nothing calls either hook, and `describe` outside its key mode is unchanged (the graveyard
+order and the references as before; the build round trip `misc_suite build::` 6 passed). On c3c0b6dd (desktop, CPU,
+below-normal priority, beside the live runs): **every digest as recorded** - the cube 44372545881ef768, constructed
+91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame 4039d04b7971975e, dealt f0bfffd26a70a753,
+dealt per seat c67b186ba7d00e51; `cargo test --release -p engine --test az` 57 passed; `misc_suite` 222 passed (the
+merge-key tests included); `tools/build_py.sh` then `python -m pytest tests -q` 3,473 passed, 32 skipped (the live-run
+fence and private data); `tools/privacy_check.py` 0 findings.
+
+**Open.** (1) Within a turn the loop records keep fetch and Bauble sequencing apart (227.2): a record whose source was
+sacrificed in its own activation (a fetchland, a Bauble) could only be read again at a state with its view's hash, which
+needs that permanent back where it was; dropping such records would merge within the turn, but that is an argument, not
+a check, so it is not done. (2) The graveyard order's one residual (227.2): the list block of a later graveyard-card
+decision. (3) Absolute timestamps (`ts`, written when continuous effects exist) can keep apart states equal up to a
+renumbering: a missed merge only. (4) The key's cost is mostly the two rows; a cheaper guard (the decider's row only) is
+the place to save if the driver's tallies show it matters.
