@@ -335,24 +335,12 @@ impl Game {
         if !self.cast_timing_ok(p, c, sorcery_ok) {
             return false;
         }
-        // Improvise (CR 702.126): the untapped artifacts help pay (not with
-        // the shared plain candidates, which have none).
-        let with_artifacts;
-        let cls = if def.casting.no_mana {
-            // "You can't spend mana to cast this spell": its convoke's and
-            // improvise's taps only (ENGINE.md 220.1).
-            with_artifacts = self.no_mana_classes(p, c);
-            &with_artifacts[..]
-        } else if def.improvise {
-            with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
-            &with_artifacts[..]
-        } else if def.casting.convoke {
-            // Convoke (CR 702.51a): the untapped creatures help pay.
-            with_artifacts = [classes, &self.convoke_classes(p, None)[..]].concat();
-            &with_artifacts[..]
-        } else {
-            classes
-        };
+        // Improvise (CR 702.126) and convoke (702.51a): the untapped
+        // artifacts and creatures help pay (not with the shared plain
+        // candidates, which have none); "you can't spend mana to cast this
+        // spell": those only (ENGINE.md 220.1). `spell_classes`.
+        let with_artifacts = self.spell_classes(p, c, classes);
+        let cls = &with_artifacts[..];
         // Delve: its mana sources that sacrifice themselves too (ENGINE.md
         // 18).
         let delved = self.delve_classes(p, c, cls);
@@ -913,24 +901,9 @@ impl Game {
     /// the card's own)?
     pub(crate) fn route_payable(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, classes: &[crate::pay::Class]) -> bool {
         let def = self.def_of(card);
-        // Improvise (CR 702.126).
-        let with_artifacts;
-        let classes = if def.casting.no_mana {
-            // (Its mana can't be spent: its convoke's and improvise's taps
-            // only, ENGINE.md 220.1.)
-            with_artifacts = self.no_mana_classes(p, card);
-            &with_artifacts[..]
-        } else if def.improvise {
-            with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
-            &with_artifacts[..]
-        } else if def.casting.convoke {
-            // Convoke (CR 702.51a).
-            with_artifacts = [classes, &self.convoke_classes(p, None)[..]].concat();
-            &with_artifacts[..]
-        } else {
-            classes
-        };
-        let delved = self.delve_classes(p, card, classes);
+        // Improvise (CR 702.126), convoke (702.51a): `spell_classes`.
+        let with_artifacts = self.spell_classes(p, card, classes);
+        let delved = self.delve_classes(p, card, &with_artifacts);
         let classes = &delved[..];
         let keep = self.escape_exiles(card, from);
         // Bolas's Citadel: life equal to its mana value (CR 119.4), kept from
@@ -1053,8 +1026,11 @@ impl Game {
             // (Any amount up to the life total: `pay::Keep::life` is a u32.)
             let life = self.players[p as usize].life.max(0) as u64;
             let cost = self.total_mana(card, item);
-            let classes = self.mana_classes(p, None);
             let allow = self.spend_allow_from(card, item.from);
+            // (Its convoke's and improvise's sources too, as its payment's:
+            // ENGINE.md 221.3.)
+            let def = self.def_of(card);
+            let classes = self.spell_pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke, allow);
             crate::decision::most_allowed(0, life, |v| {
                 let life = u32::try_from(v).expect("X life within the life total");
                 self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life, allow, ..Default::default() })
@@ -1406,7 +1382,9 @@ impl Game {
                 // (The sources after it may be delved as well: castability
                 // counted each, `delve_classes`; ENGINE.md 49.)
                 let later = late.len() - j - 1;
-                if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.can_pay_for(p, &rest.less_generic(d), allow)) {
+                // (Its convoke and improvise too: `delve_rest_payable`,
+                // ENGINE.md 221.5.)
+                if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.delve_rest_payable(p, card, &rest.less_generic(d), allow)) {
                     opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
                 }
             }
@@ -2343,15 +2321,11 @@ impl Game {
         if k >= self.def_of(card).alt_costs.len() && from != crate::game::CastFrom::Hand {
             return false;
         }
-        // (Its mana can't be spent: its convoke's and improvise's taps only,
-        // ENGINE.md 220.1.)
-        let own;
-        let classes = if self.def_of(card).casting.no_mana {
-            own = self.no_mana_classes(p, card);
-            &own[..]
-        } else {
-            classes
-        };
+        // (Its convoke's creatures and improvise's artifacts too, and with
+        // mana that can't be spent those only: `spell_classes`, ENGINE.md
+        // 220.1, 221.3.)
+        let own = self.spell_classes(p, card, classes);
+        let classes = &own[..];
         let Some((a, _)) = self.alt_at(card, k) else { return false };
         if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
             return false;
@@ -2438,20 +2412,37 @@ impl Game {
         }
     }
 
+    /// The payment sources castability counts for spell `card` cast by `p`
+    /// (CR 601.2g-h), as its payment has them (`pay_classes`): `classes`
+    /// (its mana abilities', `mana_classes`) with its convoke's untapped
+    /// creatures (702.51a) and its improvise's untapped artifacts (702.126a)
+    /// - for every spell with either, whatever else pays (ENGINE.md 221.3:
+    /// `normal_payable` and `alt_payable` left them out of a spell whose mana
+    /// is spent); with "you can't spend mana to cast this spell" those alone
+    /// (`no_mana_classes`, ENGINE.md 220.1). `classes` that hold them already
+    /// (an `IMPROVISE` source: a caller's own `spell_classes`, delve's
+    /// `delve_classes` of them) are kept.
+    pub(crate) fn spell_classes<'a>(&self, p: PlayerId, card: CardIdx, classes: &'a [crate::pay::Class]) -> std::borrow::Cow<'a, [crate::pay::Class]> {
+        let def = self.def_of(card);
+        if def.casting.no_mana {
+            return std::borrow::Cow::Owned(self.no_mana_classes(p, card));
+        }
+        let improvise = if def.improvise { types::ARTIFACT } else { 0 };
+        if (improvise == 0 && !def.casting.convoke) || classes.iter().any(|cl| cl.members.first().is_some_and(|s| s.slot == crate::pay::IMPROVISE)) {
+            return std::borrow::Cow::Borrowed(classes);
+        }
+        std::borrow::Cow::Owned(self.with_alternatives(p, None, classes.to_vec(), improvise, def.casting.convoke))
+    }
+
     /// Can `p` cast `card` for its mana cost (with its additional cost, if
     /// any)?
     pub(crate) fn normal_payable(&self, p: PlayerId, card: CardIdx, classes: &[crate::pay::Class]) -> bool {
         let def = self.def_of(card);
-        // (Its mana can't be spent: its convoke's and improvise's taps only,
-        // ENGINE.md 220.1.)
-        let own;
-        let classes = if def.casting.no_mana {
-            own = self.no_mana_classes(p, card);
-            &own[..]
-        } else {
-            classes
-        };
-        let delved = self.delve_classes(p, card, classes);
+        // (Its convoke's creatures and improvise's artifacts too, and with
+        // mana that can't be spent those only: `spell_classes`, ENGINE.md
+        // 220.1, 221.3.)
+        let own = self.spell_classes(p, card, classes);
+        let delved = self.delve_classes(p, card, &own);
         let classes = &delved[..];
         let cost = self.spell_cost(card, p);
         let cost = self.delve_reduced(card, p, cost, 0);

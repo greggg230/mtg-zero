@@ -127,11 +127,16 @@ impl Game {
         if ab.modes.is_some() || ab.targets.len() != 1 || def.x_pips > 0 || !def.additional.is_empty() {
             return false;
         }
+        // (Its convoke's and improvise's sources too, and the spending
+        // restrictions casting it satisfies, as its payment's: ENGINE.md
+        // 221.3.)
+        let classes = self.spell_classes(p, card, classes);
+        let keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), ..Default::default() };
         def.discounts.iter().any(|d| {
             let crate::db::Discount::IfTargets(f, n) = d else { return false };
             let mut cost = self.route_mana(card, p, from);
             cost.generic = cost.generic.saturating_sub(*n as u64);
-            self.can_pay_without(p, &cost, classes, &Default::default(), Some(card))
+            self.can_pay_without(p, &cost, &classes, &keep, Some(card))
                 && self.as_cast(card, p, |g, r| {
                     let ctx = crate::cast::Ctx { controller: p, source: Some(r) };
                     g.target_candidates(&ab.targets[0], &ctx, &[]).iter().any(|&t| g.filter_ok(f, t, &ctx))

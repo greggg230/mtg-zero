@@ -147,12 +147,19 @@ impl Game {
 
     /// Delve's question while choosing its cards (CR 702.66a): can `p` pay
     /// `cost`, the rest of spell `card`'s mana once its cards are exiled,
-    /// with the payment's other sources: mana (`can_pay_for`), or for a
-    /// spell whose mana can't be spent (`Allow::no_mana`) its convoke alone
-    /// (ENGINE.md 220.1).
+    /// with the payment's other sources: its mana abilities and the pool,
+    /// and its convoke's creatures and improvise's artifacts as its payment
+    /// has them (`spell_pay_classes`; ENGINE.md 221.5: the mana alone before,
+    /// `can_pay_for`), or for a spell whose mana can't be spent
+    /// (`Allow::no_mana`) its convoke alone (ENGINE.md 220.1).
     pub(crate) fn delve_rest_payable(&self, p: PlayerId, card: CardIdx, cost: &ManaCost, allow: crate::doomsday_b::Allow) -> bool {
         if allow.no_mana {
             return self.no_mana_payable(p, card, cost);
+        }
+        let def = self.def_of(card);
+        if def.improvise || def.casting.convoke {
+            let classes = self.spell_pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke, allow);
+            return self.can_pay_with(p, cost, &classes, &crate::pay::Keep { allow, ..Default::default() });
         }
         self.can_pay_for(p, cost, allow)
     }
