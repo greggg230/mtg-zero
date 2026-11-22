@@ -831,6 +831,9 @@ TORCH_PRUNE_DIRS = ('torch/include/', 'torch/share/', 'torch/bin/', 'torch/_indu
 TORCH_PRUNE_PARTS = ('/tests/',)
 TORCH_PRUNE_EXT = ('.lib', '.pyi', '.h', '.hpp', '.cuh')
 MANIFEST_MAX = 1 << 20                  # a signed manifest's limit (zero-farm common MAX_MANIFEST_BYTES)
+# the checkout's data files the game package reads at import and in play (measured with an audit hook on a real job,
+# docs/ENGINE.md 241): the decklists a spec names, EoE's card list
+TORCH_BUILD_DATA = ('data/decks/', 'engine/src/az/eoe_cards.txt')
 PROBE = r'''
 import json, sys, time
 import torch
@@ -1024,10 +1027,15 @@ def build_torch_worker(a):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(os.path.join(core, rel), dst)
         n += 1
+    for rel in [r for x in TORCH_BUILD_DATA for r in tracked(ROOT, x)]:
+        dst = os.path.join(d, *rel.split('/'))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(os.path.join(ROOT, rel), dst)
+        n += 1
     shutil.copy2(pyd, os.path.join(d, 'mtgz', '_engine.pyd'))
     shutil.copy2(os.path.join(ROOT, 'tools', 'torch_worker_main.py'), os.path.join(d, 'worker_main.py'))
     shutil.copy2(a.pyshim, os.path.join(d, 'zf-pyshim.exe'))
-    print(f'torch worker {version}: {n} Python files, mtgz/_engine.pyd, worker_main.py, zf-pyshim.exe', flush=True)
+    print(f'torch worker {version}: {n} files (Python, the package data), mtgz/_engine.pyd, worker_main.py, zf-pyshim.exe', flush=True)
     if a.no_sign:
         bid = None
     else:
