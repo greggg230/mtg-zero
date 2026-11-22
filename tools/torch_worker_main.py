@@ -1,6 +1,6 @@
 """MTG Zero's torch worker entry (docs/ENGINE.md 241; zero-core docs/az.md 78): shipped as `worker_main.py` at the root of
 a torch worker build (tools/farm_build.py --torch), next to the commit's `mtgz/` (with its `_engine.pyd`) and zero-core's
-`python/zero/`. zero-farm's `zf-pyshim.exe` runs it with the torch runtime pack's Python:
+`third_party/zero-core/python/zero/` (a checkout's layout: `mtgz` finds its pinned core there). zero-farm's `zf-pyshim.exe` runs it with the torch runtime pack's Python:
 
     <runtime>/python/python.exe -I -X utf8 -u <build>/worker_main.py serve
 
@@ -13,12 +13,15 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def is_build():
+    """This file at a build's root (next to mtgz/), not in a checkout's tools/."""
+    return os.path.isdir(os.path.join(HERE, 'mtgz'))
+
+
 def paths():
-    """The import roots: a build's (this file at its root, zero-core's package under python/), else a checkout's (this
-    file in tools/: `python tools/torch_worker_main.py serve` plays from the checkout, its tests and gate)."""
-    if os.path.isdir(os.path.join(HERE, 'python', 'zero')):
-        return HERE, [HERE, os.path.join(HERE, 'python')]
-    repo = os.path.dirname(HERE)
+    """The import roots: a build's (this file at its root), else a checkout's (this file in tools/: `python
+    tools/torch_worker_main.py serve` plays from the checkout, its tests and gate); both lay zero-core out as a checkout."""
+    repo = HERE if is_build() else os.path.dirname(HERE)
     return HERE, [repo, os.path.join(repo, 'third_party', 'zero-core', 'python')]
 
 
@@ -32,7 +35,7 @@ def pycache():
 
 def main():
     build, roots = paths()
-    if os.path.isdir(os.path.join(HERE, 'python', 'zero')):
+    if is_build():
         pycache()
     sys.path[:0] = roots
     if len(sys.argv) > 1 and sys.argv[1] == 'serve':

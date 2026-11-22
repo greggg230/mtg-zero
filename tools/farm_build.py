@@ -1020,7 +1020,7 @@ def build_torch_worker(a):
     for rel in tracked(core, 'python/zero'):
         if rel.endswith('.pyd') or rel.endswith('.so'):
             continue
-        dst = os.path.join(d, *rel.split('/'))
+        dst = os.path.join(d, 'third_party', 'zero-core', *rel.split('/'))      # (a checkout's layout: mtgz finds its core)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(os.path.join(core, rel), dst)
         n += 1
