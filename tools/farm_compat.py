@@ -21,6 +21,11 @@ the uniform evaluator has no auxiliary head, the auxiliary targets are still rec
 3. **Features** (ENGINE.md 195): the worker's `info` announces the protocol feature `rolling` (zero-farm PROTOCOL rev
    15, 10.5) with this build's id: farm runs get rolling self-play leases by default (zero-core `pool_rolling` 'auto',
    docs/az.md 54.7) and their pool refuses a worker without it, so a build that loses the feature fails here first.
+4. **The torch worker** (ENGINE.md 241; zero-core tools/torch_worker_gate.py): this checkout's torch worker entry
+   (`tools/torch_worker_main.py serve`, the owner's machines' farm worker) plays a job on a small token network of the
+   preset's layout on the CPU at float32, and its records, replayed by the trainer's path, must be the trainer's own
+   local self-play rows of the same seed, game ids and network, game for game, bit for bit (pi and q at the float16 a
+   record keeps) - the same seat, seeds, ids, evaluator and records as the run.
 
 What this smoke does NOT cover (tools/farm_gates.py, run on a farm run's real config and checkpoint before it
 attaches the farm, ENGINE.md 114.8): the run's own network on both sides through ONNX Runtime (zero-onnx/1 or /2:
@@ -87,6 +92,20 @@ def checkpoint(cfg, path):
     _, aux = aux_settings(cfg, info)
     torch.manual_seed(0)
     m = make_net(info, cfg['game'], cfg.get('arch', 'mlp'), 16, 1, 8, 2, aux=aux or None)
+    save(m, path, {'iter': 0})
+
+
+def token_checkpoint(cfg, path):
+    """A small token network of the settings' layout (the torch worker check: a game with tail segments needs a token
+    network, docs/az.md 43.8)."""
+    import torch
+    from zero import games as G
+    from zero.net import make_net, save
+    from zero.run import aux_settings
+    info = G.info(cfg['game'])
+    _, aux = aux_settings(cfg, info)
+    torch.manual_seed(0)
+    m = make_net(info, cfg['game'], 'tokens', 16, 1, 8, 2, 32, aux=aux or None)
     save(m, path, {'iter': 0})
 
 
@@ -174,7 +193,22 @@ def main(argv=None):
     feats = worker_features(a.worker)
     okf = feats['passed']
     summary['features'] = feats
-    ok = ok2 and ok3 and okf
+    tck = os.path.join(out, 'torch', 'iter_0000.pt')
+    os.makedirs(os.path.dirname(tck), exist_ok=True)
+    token_checkpoint(cfg, tck)
+    rept = os.path.join(out, 'torch.json')
+    rct, _, st_, tailt = run([py, os.path.join(CORE_TOOLS, 'torch_worker_gate.py'), '--root', ROOT, '--package', 'mtgz.az',
+                              '--worker', os.path.join(ROOT, 'tools', 'torch_worker_main.py'), '--no-isolate', '--settings',
+                              cfg_path, '--checkpoint', tck, '--out', os.path.join(out, 'torch'), '--games', str(a.games),
+                              '--seed', '29', '--gid-base', '5', '--device', 'cpu', '--precision', 'fp32', '--groups', '1',
+                              '--threads', str(a.threads), '--json', rept], os.path.join(out, 'torch.log'))
+    rt = None
+    if os.path.exists(rept):
+        with open(rept, encoding='utf-8') as f:
+            rt = json.load(f)
+    okt = rct == 0 and bool(rt) and rt.get('identical') == rt.get('compared') == a.games and rt.get('rows', 0) > 0
+    summary['torch'] = {'passed': okt, 'seconds': st_, 'result': rt, **({} if okt else {'tail': tailt})}
+    ok = ok2 and ok3 and okf and okt
     summary['passed'] = ok
     with open(os.path.join(out, 'summary.json'), 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=1)
@@ -187,7 +221,9 @@ def main(argv=None):
     gf = (f'features {",".join(REQUIRED_FEATURES)} announced (build {feats["build_id"]})' if okf else
           f'features: the worker does NOT announce {feats["missing"]} (announces {feats["features"]}'
           f'{"; " + feats["error"] if feats.get("error") else ""})')
-    print(f'farm compat: {"PASSED" if ok else "FAILED"} - {a.preset}: {g2}; {g3}; {gf} ({out})')
+    gt = (f'torch worker {"identical to the trainer" if okt else "DIFFERENT or failed"}: '
+          f'{(rt or {}).get("identical", 0)} of {(rt or {}).get("compared", 0)} games, {(rt or {}).get("rows", 0)} rows')
+    print(f'farm compat: {"PASSED" if ok else "FAILED"} - {a.preset}: {g2}; {g3}; {gf}; {gt} ({out})')
     return 0 if ok else 1
 
 

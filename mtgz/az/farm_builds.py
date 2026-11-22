@@ -231,7 +231,7 @@ def lookup(rev='HEAD', root=None, path=None, runtime=None):
 # the GPU variant each alternate of a release plays (zero-core docs/az.md 67, 46.10; docs/ENGINE.md 211, 213.2): the
 # CUDA alternate the gen's graph in float16, AMD's DirectML alternate the fast-matmul graph in float32 - what
 # legacy-meta3-r1 runs with and what match campaigns name by default (farm_campaign.submit, ENGINE.md 215)
-VARIANT_OF = {'cuda': 'gpu=fp16', 'dml': 'dml=matmul@amd'}
+VARIANT_OF = {'cuda': 'gpu=fp16', 'dml': 'dml=matmul@amd', 'torch': 'torch=weights'}
 MAC_PLATFORM = 'macos-arm64'
 
 
@@ -268,11 +268,21 @@ def pool_settings(e, alternates=True, cfg=None, log=None):
     pass the platform check (`mac_check`; '' when there is none) - and pool_variants naming the variant each GPU
     alternate plays (`VARIANT_OF`: 'gpu=fp16' with a CUDA alternate, 'dml=matmul@amd' with a DirectML one; left out
     with neither): without 'dml=matmul@amd' an AMD PC runs the gen's default graph, which DirectML refuses, on its CPU.
-    A route left out is said through `log` (docs/ENGINE.md 218)."""
+    The torch alternate (docs/ENGINE.md 241: the owner's opted-in machines, `torch=weights`) comes first, so the
+    machines opted in get it before the CUDA one - and only when it was built for exactly the commit asked (the torch
+    build is the commit's Python; a reused entry's is another commit's). A route left out is said through `log`
+    (docs/ENGINE.md 218)."""
     say = log or (lambda m: None)
     out = {'pool_build': e['build_id'], 'pool_runtime': e['runtime'], 'pool_worker': e['worker']}
     if alternates:
         alts, variants = [], []
+        t = e.get('torch') or {}
+        if t.get('build_id') and t.get('commit') == e.get('asked', e['commit']):
+            alts.append(t['build_id'])
+            variants.append(VARIANT_OF['torch'])
+        elif t.get('build_id'):
+            say(f"farm build: no torch alternate - the entry's torch build is commit {t.get('commit', '?')[:12]}'s, not "
+                f"{e.get('asked', e['commit'])[:12]}'s (farm_release.py release builds one per commit)")
         for k in ('cuda', 'dml'):
             b = (e.get(k) or {}).get('build_id')
             if b:
@@ -332,6 +342,8 @@ def describe(e):
     return (f"commit {e.get('asked', e['commit'])[:12]}: build {e['build_id']} (runtime {e['runtime']}"
             + (f", CUDA alternate {c['build_id']} for {c['runtime']}" if c.get('build_id') else ', no CUDA alternate')
             + (f", DirectML alternate {(e.get('dml') or {})['build_id']}" if (e.get('dml') or {}).get('build_id') else '')
+            + (f", torch alternate {(e.get('torch') or {})['build_id']} (commit {(e.get('torch') or {}).get('commit', '?')[:12]})"
+               if (e.get('torch') or {}).get('build_id') else '')
             + describe_mac(e)
             + (')' if e.get('exact', True) else f"; released for {e['commit'][:12]}, the same Rust inputs)"))
 
