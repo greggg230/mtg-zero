@@ -815,22 +815,21 @@ TORCH_WHEEL = ('torch', '2.11.0+cu128', 'cp313-cp313-win_amd64', 'https://downlo
                '6f367e62fd81b75cdf23ca4b75ced834d2db2cf98d1588ac935bde345de9de23')
 TORCH_PYPI = (('numpy', '2.3.5', 'cp313-cp313-win_amd64'), ('typing_extensions', '4.15.0', 'py3-none-any'))
 TORCH_CUDA = '12.8'
-# the pack's hard requirement (PROTOCOL 9.2): an NVIDIA GPU whose driver runs CUDA 12.x (minor-version compatibility from
-# 527.41 on Windows, cuDNN 9's minimum - the CUDA pack's), the torch provider, and the owner's opt-in (zero-farm's
-# per-machine `opt_in`, contract section 2)
-TORCH_GPU = ('nvidia', '527.41', 'torch-cuda')
+# the pack's hard requirement (PROTOCOL 9.2, 19.1): an NVIDIA GPU whose driver is CUDA 12.8's (570.65: torch cu128's
+# toolkit, Blackwell included), the torch provider, and the owner's opt-in (zero-farm's per-machine `opt_in`)
+TORCH_GPU = ('nvidia', '570.65', 'torch-cuda')
 TORCH_OPT_IN = 'torch'
-TORCH_MIN_AGENT = '0.3.18'
+TORCH_MIN_AGENT = '0.3.19'                # (zero-farm PROTOCOL rev 27, 19: agents that read opt-in packs; sign --opt-in needs it)
 # what a pack leaves out of the wheels: nothing the worker loads - C++ headers and import libraries for building
-# extensions, CMake files, type stubs, a protobuf compiler, bytecode caches, test suites, and the packages its play path
-# never imports (measured on the worker's import set, CPU and CUDA, docs/ENGINE.md 241: torch.compile's dynamo and
-# inductor, the ONNX exporter, the benchmark utilities, numpy's f2py and typing). A signed manifest lists every file and
-# holds at most 1 MiB (~3,500 entries): the whole wheels are ~4,000 files.
-TORCH_PRUNE_DIRS = ('torch/include/', 'torch/share/', 'torch/bin/', 'torch/_inductor/', 'torch/_dynamo/', 'torch/onnx/',
-                    'torch/utils/benchmark/', 'numpy/f2py/', 'numpy/typing/', 'numpy/_pyinstaller/')
+# extensions, CMake files, type stubs, a protobuf compiler, bytecode caches, test suites (every importable package stays:
+# an opt-in manifest may list 20,000 files in 8 MiB, zero-farm PROTOCOL 19.1)
+TORCH_PRUNE_DIRS = ('torch/include/', 'torch/share/', 'torch/bin/', 'numpy/_pyinstaller/')
 TORCH_PRUNE_PARTS = ('/tests/',)
 TORCH_PRUNE_EXT = ('.lib', '.pyi', '.h', '.hpp', '.cuh')
-MANIFEST_MAX = 1 << 20                  # a signed manifest's limit (zero-farm common MAX_MANIFEST_BYTES)
+MANIFEST_MAX = 8 << 20                  # an opt-in runtime manifest's limits (zero-farm PROTOCOL 19.1): 8 MiB, 20,000 files
+MANIFEST_MAX_FILES = 20000
+# a path segment the coordinator takes (zero-farm: [A-Za-z0-9._-]; torch's dist-info is `torch-2.11.0+cu128.dist-info`)
+SEGMENT_OK = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-')
 # the checkout's data files the game package reads at import and in play (measured with an audit hook on a real job,
 # docs/ENGINE.md 241): the decklists a spec names, EoE's card list
 TORCH_BUILD_DATA = ('data/decks/', 'engine/src/az/eoe_cards.txt')
@@ -882,7 +881,12 @@ def unpack_wheel(path, what, dest, prune=True):
                           or any(x in '/' + m for x in TORCH_PRUNE_PARTS)):
                 continue
             data = z.read(m) if m == rec else wheel_member(z, rows, m, what)
-            out = os.path.join(dest, *m.split('/'))
+            # (a dist-info directory named with the local version's '+', which the coordinator refuses in a path:
+            # '-' instead; its METADATA keeps the version, nothing imports by the directory's name)
+            parts = m.split('/')
+            if parts[0].endswith('.dist-info'):
+                parts[0] = parts[0].replace('+', '-')
+            out = os.path.join(dest, *parts)
             os.makedirs(os.path.dirname(out), exist_ok=True)
             with open(out, 'wb') as f:
                 f.write(data)
@@ -960,6 +964,9 @@ def build_torch_pack(a):
     if not probe.get('available') and not a.no_gpu_check:
         die(f'torch sees no CUDA device through the pack on this PC (--no-gpu-check to sign anyway): {probe}')
     files = [os.path.relpath(os.path.join(r, f), d).replace('\\', '/') for r, _, fs in os.walk(d) for f in fs]
+    bad = [f for f in files if len(f) > 260 or any(not seg or set(seg) - SEGMENT_OK for seg in f.split('/'))]
+    if bad:
+        die(f'{len(bad)} path(s) the coordinator refuses ([A-Za-z0-9._-] per segment, at most 260 characters): {bad[:8]}')
     total = sum(os.path.getsize(os.path.join(d, f)) for f in files)
     est = sum(len(f) + 230 for f in files) + 4096
     vendor, min_driver, provider = TORCH_GPU
@@ -973,8 +980,9 @@ def build_torch_pack(a):
         json.dump(rj, f, indent=1)
     print(f'runtime pack {pack}: Python {pyv}, torch {probe["torch"]} (CUDA {probe["cuda"]}, cuDNN {probe["cudnn"]}), '
           f'{len(files)} files, {total / 1e9:.2f} GB; probe {probe}')
-    if est > MANIFEST_MAX * 0.9:
-        die(f'{len(files)} files: the signed manifest would be ~{est:,} bytes, near its {MANIFEST_MAX:,}-byte limit')
+    if est > MANIFEST_MAX * 0.9 or len(files) > MANIFEST_MAX_FILES:
+        die(f'{len(files)} files: the signed manifest would be ~{est:,} bytes, near its {MANIFEST_MAX:,}-byte limit '
+            f'({MANIFEST_MAX_FILES:,} files at most)')
     if a.no_sign:
         print('--no-sign: the directory is built and checked, not signed')
         return None, d
