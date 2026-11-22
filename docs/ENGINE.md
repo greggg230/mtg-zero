@@ -45208,3 +45208,11 @@ pytest on the Mac and the desktop passed, the encoding tier's v7 checkpoint load
 farm compat (the Delver dealt preset, now `mtg_v8`) identical; `tools/farm_compat.py --set game="mtg"` (layout v7) and
 `--set game="mtg_v8"` both identical (6 games, 2,468 rows, 150 batches; records 2,598 rows; 0 and 698 v8 tokens in their
 shards). The next commit adds this paragraph only.
+
+**After merging origin/main b11fa163** (main's 232-234 and zero-core pin 52134c3; this section renumbered 232 -> 235;
+`MtgV8Az` forwards the pin's new `merge_key` / `branch_alt_ok`): every digest as before (cube full c2b04fed925eed67,
+encoding-free d3c144b6cc2977e5, formats and dealt as recorded). On 94b768b6: **GATE PASSED suite 94b768b68163 in 666s**;
+**GATE PASSED WITH SKIPS engine 94b768b68163 in 1838s**; **GATE PASSED WITH SKIPS encoding 94b768b68163 in 833s** (the
+live-run fence's one desktop test; a first encoding run failed only `test_cells_local_parallel`'s 300 s timing bound on
+a loaded Mac, as on 191aa9dc, and passed on the rerun); farm compat with `--set game="mtg_v8"` and `--set game="mtg"`:
+both PASSED. The next commit adds this paragraph only.
