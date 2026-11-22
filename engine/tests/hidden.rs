@@ -243,6 +243,7 @@ fn a_payment_in_progress_completes_in_every_determinized_world() {
     let dbl = g.card(0, "Test Double", Zone::Hand);
     let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
     g.choose(Choice::Cast(dbl));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana));
     // Before any pick: the guide is hidden from P1 but pinned.
     assert!(!g.knows(1, guide));

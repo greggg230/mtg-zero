@@ -269,6 +269,7 @@ fn sunken_ruins_filters_while_paying_cr605_3a() {
     let dr = g.card(0, "Dark Ritual", Zone::Hand);
     g.choose(Choice::Cast(dr));
     g.drive_until(|g| !at_priority(g));
+    g.pass_cast_mana();
     assert_eq!(opts(&g), vec![act(r, 1)], "the Ruins (several mana) first");
     g.choose(act(r, 1));
     assert_eq!(g.kind(), Some(DecisionKind::ChooseMana));
@@ -323,6 +324,7 @@ fn orcish_lumberjack_sacrifices_a_forest_for_three_cr605_3a() {
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
     g.choose(Choice::Target(Target::Player(1)));
     g.drive_until(|g| !at_priority(g));
+    g.pass_cast_mana();
     let lj = Choice::Ability(f, AbilitySlot::Trigger(u8::MAX - 3));
     assert!(g.has_option(lj), "{:?}", g.options_desc());
     g.choose(lj);
@@ -354,6 +356,7 @@ fn squandered_resources_mana_the_sacrificed_land_could_make_cr106_7() {
     let ei = g.card(0, "Expressive Iteration", Zone::Hand);
     assert!(g.has_option(Choice::Cast(ei)), "{:?}", g.options_desc());
     g.choose(Choice::Cast(ei));
+    g.pass_cast_mana();
     pay(&mut g);
     assert_eq!(g.obj(v).zone, Zone::Graveyard, "{}", g.log_lines().join("\n"));
 }
@@ -1146,6 +1149,7 @@ fn delighted_halfling_mana_for_legends_that_cant_be_countered_cr101_2() {
 /// Pay with sources on the named permanents (one pick each), in order.
 fn pay_with(g: &mut Game, cards: &[CardIdx]) {
     for &c in cards {
+        g.pass_cast_mana();
         assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", g.log_lines().join("\n"));
         let pick = *opts(g).iter().find(|o| matches!(o, Choice::Ability(x, _) if *x == c)).expect("a source of that card");
         g.choose(pick);

@@ -4835,6 +4835,7 @@ mod tests {
         let others: Vec<CardIdx> = g.permanents_of(0).filter(|&c| matches!(g.def_of(c).name.as_str(), "Island" | "Mountain")).collect();
         // (Priority's "cast or play from the graveyard", then the card: ENGINE.md 100.5.)
         g.choose(Choice::Cast(fl));
+        g.pass_cast_mana();
         assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
         let granted = Choice::Ability(pol, AbilitySlot::Activated(1));
         assert!(g.has_option(granted), "the Pollinator's granted {{U}}: {:?}", g.options_desc());

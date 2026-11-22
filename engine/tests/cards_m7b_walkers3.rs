@@ -185,6 +185,7 @@ fn a_retrace_cast_in_progress_keeps_its_land_card_under_determinize() {
     let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
     g.choose(Choice::Cast(bolt));
     g.choose(Choice::Target(Target::Player(1)));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana));
     for seed in 0..20 {
         let mut d = g.clone();

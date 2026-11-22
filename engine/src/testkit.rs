@@ -432,6 +432,14 @@ impl Game {
     /// holds or a real decision other than priority is pending. Meant for
     /// games with `auto_single = false`, where it stops exactly at `stop`.
     /// Returns the chance keys.
+    /// A cast's 601.2g step pending (ENGINE.md 228): `PASS` - the cost paid with no mana ability activated while
+    /// casting (tests of the payment that follows).
+    pub fn pass_cast_mana(&mut self) {
+        while self.pending.as_ref().is_some_and(|d| d.kind == DecisionKind::CastMana && d.action_of(Choice::Pass).is_some()) {
+            self.choose(Choice::Pass);
+        }
+    }
+
     pub fn drive_until(&mut self, stop: impl Fn(&Game) -> bool) -> Vec<u64> {
         let mut keys = Vec::new();
         for _ in 0..100_000 {

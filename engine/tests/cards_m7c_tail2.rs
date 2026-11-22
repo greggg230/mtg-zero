@@ -875,6 +875,7 @@ fn bilbo_casts_a_flashback_card_for_the_cost_its_offer_was_checked_for_cr601_2f(
     g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseGraveyardCard));
     let souls = g.card(0, "Lingering Souls", Zone::Graveyard);
     g.choose(Choice::Card(souls));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
     pay(&mut g);
     settle(&mut g);

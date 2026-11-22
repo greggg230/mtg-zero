@@ -409,6 +409,7 @@ fn cr_601_2h_the_pool_paying_the_rest_with_no_source_to_pay_instead_is_keyed() {
     let sr = g.card(0, "Sol Ring", Zone::Hand);
     let ssg = g.card(0, "Simian Spirit Guide", Zone::Hand);
     let keys = g.choose(Choice::Cast(sr));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
     let o = options(&g);
     assert!(o.len() == 2 && o.contains(&Choice::Pass) && o.iter().any(|c| matches!(c, Choice::Ability(x, _) if *x == ssg)), "{o:?}");
@@ -430,6 +431,7 @@ fn cr_601_2g_wizards_rockets_pays_while_a_land_could() {
     let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
     g.choose(Choice::Cast(bolt));
     g.choose(Choice::Target(engine::Target::Player(1)));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
     let o = options(&g);
     assert!(o.contains(&act(mountain, 0)), "{o:?}");
@@ -964,6 +966,7 @@ fn cr_601_2g_which_pollinator_activates_is_the_players_choice() {
     let island = bf(&g, 0, "Island");
     let ring = g.card(0, "Sol Ring", Zone::Hand);
     g.choose(Choice::Cast(ring));
+    g.pass_cast_mana();
     // The Island by its own id: tapped for a Pollinator's ability.
     assert!(options(&g).contains(&Choice::Card(island)), "{:?}", g.options_desc());
     g.choose(Choice::Card(island));
@@ -986,6 +989,7 @@ fn cr_601_2g_which_lumberjack_sacrifices_the_forest_is_the_players_choice() {
     let forest = bf(&g, 0, "Forest");
     let ring = g.card(0, "Sol Ring", Zone::Hand);
     g.choose(Choice::Cast(ring));
+    g.pass_cast_mana();
     // The Lumberjacks' sacrifice of the Forest: after the Forest's own ability.
     let sac = options(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, s) if *x == forest && *s != AbilitySlot::Activated(0)));
     g.choose(sac.unwrap_or_else(|| panic!("the Lumberjacks' source on the Forest: {:?}", g.options_desc())));
@@ -1199,6 +1203,7 @@ fn cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more() {
     let cast = options(&g).into_iter().find(|c| matches!(c, Choice::Cast(x) if *x == scroll));
     g.choose(cast.unwrap_or_else(|| panic!("All-Fates Scroll from the top of the library: {:?}", g.options_desc())));
     g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    g.pass_cast_mana();
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
     let granted = Choice::Ability(pol, AbilitySlot::Activated(1));
     assert!(g.has_option(granted), "the Pollinator's granted {{U}}: {:?}", g.options_desc());
@@ -2210,6 +2215,7 @@ fn cr_602_2b_a_shared_mana_ability_sacrifices_its_own_permanent_last() {
     assert!(g.has_option(Choice::Cast(stone)), "{:?}", g.options_desc());
     let mut g = g;
     g.choose(Choice::Cast(stone));
+    g.pass_cast_mana();
     let ends = every_end(&g);
     assert!(!ends.is_empty());
     for h in &ends {
@@ -2244,6 +2250,7 @@ fn cr_602_2b_two_mana_abilities_that_sacrifice_each_others_permanent() {
     assert!(!g.has_option(Choice::Cast(relic)), "{{C}}{{C}} at most: {:?}", g.options_desc());
     assert!(g.has_option(Choice::Cast(stone)), "{:?}", g.options_desc());
     g.choose(Choice::Cast(stone));
+    g.pass_cast_mana();
     let ends = every_end(&g);
     assert_eq!(ends.len(), 2, "the Altar or the Golem sacrificed");
     for h in &ends {
