@@ -31,6 +31,11 @@ def pycache():
     so torch's ~2,000 modules compile once per machine, not at every start."""
     import tempfile
     sys.pycache_prefix = os.environ.get('ZEROFARM_PYCACHE_DIR') or os.path.join(tempfile.gettempdir(), 'zero-farm-pycache')
+    # (zf-pyshim runs python -B: nothing compiled is written at all. torch's own caches - extensions, kernels, hub - go
+    # to the work directory, never next to the signed files)
+    cache = os.path.join(os.getcwd(), '.torch-cache')
+    for k in ('TORCH_HOME', 'TORCH_EXTENSIONS_DIR', 'TORCHINDUCTOR_CACHE_DIR', 'TRITON_CACHE_DIR', 'XDG_CACHE_HOME'):
+        os.environ.setdefault(k, cache)
 
 
 def main():
