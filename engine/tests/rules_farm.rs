@@ -231,6 +231,25 @@ fn hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_an_evoke_cost_pins_t
 /// Castability counted it (fuzz drafted match 10001565: Crabomination cast
 /// P0's Petal for P1, then the Frog's ability was offered and asked
 /// `ChooseGraveyardCard` with no options).
+/// With priority, activate every mana ability of the permanents named `name` (`ActivateMana`, opened by `YES`; their
+/// mana floats), the rest of each activation answered with its first option.
+fn float_all(g: &mut Game, name: &str) {
+    g.choose(Choice::Yes);
+    for _ in 0..50 {
+        if g.kind() == Some(DecisionKind::Priority) {
+            return;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::ActivateMana) => {
+                g.offered().into_iter().find(|c| matches!(c, Choice::Card(x) | Choice::Ability(x, _) if g.name(*x) == name)).unwrap_or(Choice::Pass)
+            }
+            _ => g.offered()[0],
+        };
+        g.choose(c);
+    }
+    panic!("no priority: {:?}", g.options_desc());
+}
+
 #[test]
 fn cr_400_3_an_opponents_lotus_petal_does_not_feed_your_graveyard_costs() {
     let start = |mine: bool, hand: &[&str]| {
@@ -256,8 +275,12 @@ fn cr_400_3_an_opponents_lotus_petal_does_not_feed_your_graveyard_costs() {
     let g = start(false, &[]);
     let frog = bf(&g, 0, "Psychic Frog");
     assert!(!g.has_option(act(frog, 1)), "two cards in P0's graveyard and P1's Petal: no exile of three\n{}", log(&g));
-    let g = start(true, &[]);
-    assert!(g.has_option(act(frog, 1)), "P0's own Petal: the Frog's ability");
+    // P0's own Petal: not while the ability is activated - its cost has no mana payment (CR 605.3a; ENGINE.md 228) -
+    // but floated first with priority, its card is P0's third.
+    let mut g = start(true, &[]);
+    assert!(!g.has_option(act(frog, 1)), "no mana ability while paying a cost of no mana\n{}", log(&g));
+    float_all(&mut g, "Lotus Petal");
+    assert!(g.has_option(act(frog, 1)), "P0's own Petal floated: the Frog's ability\n{}", log(&g));
     let mut budget = 200;
     assert!(every_path_completes(&{
         let mut h = g.clone();
