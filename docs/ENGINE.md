@@ -45681,4 +45681,8 @@ identical.
 loads a `toy` checkpoint (fails before the fix with the release's refusal), `toy_match` with its record plays it and
 refuses a `toy` checkpoint, a record 4 is refused as `encoding`; the remote evaluation's mirror (both commands); an eval
 job's match driver; `tests/test_worker_settings.py`: an eval match's reads are the worker's `EVAL_READS` whole, `game_layout`
-included.
+included. This repo's `tests/test_mac_remote.py` wrote mirror configs from DEFAULTS and a preset unresolved (`mtg`,
+`game_layout` null - by the alias rule a config of before layout v8, the game `mtg_v7`) beside layout-8 checkpoints;
+the old worker read the name as `mtg` and passed, the resolving one refused them (the engine gate's pytest: the
+remote evaluation of a resolver mirror and of an eval-net mirror, the worker in both modes). They now write the
+config as a run's first start does (`resolve_run_game`: `mtg` with layout 8), as every real mirror is written.
