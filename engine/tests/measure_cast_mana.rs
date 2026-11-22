@@ -1,4 +1,4 @@
-//! ENGINE.md 230.7: the search impact of the 601.2g step (`cast_mana.rs`) - decisions per game and options per
+//! ENGINE.md 231.7: the search impact of the 601.2g step (`cast_mana.rs`) - decisions per game and options per
 //! decision of random play in the fuzz's games of a pool (`FUZZ_POOL`, `fuzz::games::new_game`; the cube without
 //! one), and the step's own (`CastMana` decisions, their options). Ignored; run on a branch and on its base with
 //! the same seeds:

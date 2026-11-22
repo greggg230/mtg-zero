@@ -149,10 +149,10 @@ fn a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game() {
 /// and the check, which read the hand after the step, failed "P1's private key (kind 3) carries the card's identity
 /// (337) in a world of P0". The engine keyed nothing private (the card was the viewer's own); the check now reads the
 /// hand the look saw. Replayed at the `fuzz` profile's denominator (4) in every profile, every check of `play_hidden`;
-/// it must check a look at a card that left the hand in its step (positive evidence). Ignored since ENGINE.md 230 (the
-/// game is gone, 230.8).
+/// it must check a look at a card that left the hand in its step (positive evidence). Ignored since ENGINE.md 231 (the
+/// game is gone, 231.8).
 #[test]
-#[ignore = "seed lost: ENGINE.md 230's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 230.6; a farm-scale scan re-pins it (230.8)"]
+#[ignore = "seed lost: ENGINE.md 231's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 231.6; a farm-scale scan re-pins it (231.8)"]
 fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
     use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_LEFT_HAND_LOOKS};
     use std::sync::atomic::Ordering::Relaxed;
@@ -188,7 +188,7 @@ fn a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step() {
 /// record of it (`Game::hand_looks`). Replayed at the `fuzz` profile's denominator (4) in every profile with every check;
 /// each must check its kind of look (positive evidence): a card that came into the hand in the step (the first two), one
 /// that changed zones after the look (the last two). (The default-pool and hidden-decklist games are
-/// `the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483`, ignored since ENGINE.md 230: the match only.)
+/// `the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483`, ignored since ENGINE.md 231: the match only.)
 #[test]
 fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
     use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENTERED_HAND_LOOKS, PK_LEFT_HAND_LOOKS};
@@ -215,11 +215,11 @@ fn a_look_at_the_viewers_hand_that_its_step_changes_around_the_look() {
 
 /// ENGINE.md 206's default-pool game 100,037,121 and hidden-decklist game 100,098,483 (see
 /// `a_look_at_the_viewers_hand_that_its_step_changes_around_the_look`): a look at a card that came into the viewer's hand
-/// and left it in the same step, one at a card that changed zones after the look. Ignored since ENGINE.md 230 (the games
+/// and left it in the same step, one at a card that changed zones after the look. Ignored since ENGINE.md 231 (the games
 /// are gone; until a scan re-pins them only the delver_dealt2 match's look, a card that came into the hand, is replayed:
-/// 230.8).
+/// 231.8).
 #[test]
-#[ignore = "seed lost: ENGINE.md 230's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 230.6; a farm-scale scan re-pins it (230.8)"]
+#[ignore = "seed lost: ENGINE.md 231's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 231.6; a farm-scale scan re-pins it (231.8)"]
 fn the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483() {
     use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENTERED_HAND_LOOKS, PK_LEFT_HAND_LOOKS};
     use std::sync::atomic::Ordering::Relaxed;
@@ -313,10 +313,10 @@ fn a_game_won_in_the_middle_of_a_resolution_leaves_its_spell_on_the_stack() {
 /// - billions of tokens, made one at a time at a cost growing with the copies (the completion check's paths through the
 /// ordering never ended). Token creation now ends the game aborted at the permanents a row can show
 /// (`rules_numbers::cr_111_2_tokens_past_the_permanents_a_row_can_show_end_the_game_aborted`): the game plays to its end with
-/// every check, at the `fuzz` profile's denominator (4) in every profile. Ignored since ENGINE.md 230 (the game is gone;
-/// the token limit itself stays tested by that rules_numbers scenario until a scan re-pins it, 230.8).
+/// every check, at the `fuzz` profile's denominator (4) in every profile. Ignored since ENGINE.md 231 (the game is gone;
+/// the token limit itself stays tested by that rules_numbers scenario until a scan re-pins it, 231.8).
 #[test]
-#[ignore = "seed lost: ENGINE.md 230's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 230.6; a farm-scale scan re-pins it (230.8)"]
+#[ignore = "seed lost: ENGINE.md 231's 601.2g step changed the game (its decisions draw from the game's random stream); no new seed in the scans of 231.6; a farm-scale scan re-pins it (231.8)"]
 fn an_exponential_run_of_ocelot_pride_copies_ends_default_seed_100061919() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     if pool_mode() != PoolMode::Default || sealed_mode() || hidden_decks_mode() {
@@ -440,7 +440,7 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Interactions)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(40)));
-    // (ENGINE.md 230.6: the 601.2g step changed these games; the scan `scan_seeds_for_the_seed_pinned_tests` re-found
+    // (ENGINE.md 231.6: the 601.2g step changed these games; the scan `scan_seeds_for_the_seed_pinned_tests` re-found
     // 12,471 in interactions seeds 0..24,000 (every check, the checkpoint at 40), its rows with the enclosing picks for
     // both viewers.)
     for seed in [12471] {
@@ -523,7 +523,7 @@ fn same_seed_and_actions_replay_matches_identically() {
     }
 }
 
-/// ENGINE.md 230: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
+/// ENGINE.md 231: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
 /// games (a new decision draws from each game's random stream). Ignored; `SCAN_KIND` = `left_look` (hidden-decklist
 /// default games with a look at a card that left the viewer's hand in its step), `entered_look` (default games with a
 /// look at a card that came into the hand and left it in its step), `etali` (interactions games whose rows carry an

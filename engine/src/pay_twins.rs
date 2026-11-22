@@ -288,7 +288,7 @@ impl Named<'_> {
             Task::ManaNow { src, step: _ } => self.card(src.card),
             Task::ChooseCreatureType { card, step: _ } => self.card(*card),
             // (The step's permanent picked for its ability; `after`, the payment search's order mark, names no object:
-            // a card index, a bound only, ENGINE.md 230.4.)
+            // a card index, a bound only, ENGINE.md 231.4.)
             Task::CastMana { id: _, card, again: _, after: _ } => {
                 if let Some(c) = card {
                     self.card(*c);
@@ -625,7 +625,7 @@ impl Game {
             repl_decided: _,
             route_choice,
             entering_dash: _,
-            // (A spell's locked total cost by stack id; the search's mana of no chosen type: no object, ENGINE.md 230.)
+            // (A spell's locked total cost by stack id; the search's mana of no chosen type: no object, ENGINE.md 231.)
             cast_lock: _,
             pool_wild: _,
             entering_warp: _,

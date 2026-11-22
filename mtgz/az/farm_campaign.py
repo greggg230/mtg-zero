@@ -84,6 +84,11 @@ STATE_ROOT = os.path.join(os.path.expanduser('~'), '.zero-farm', 'campaigns')
 EXPORT_CACHE = os.path.join(STATE_ROOT, '_exports')
 PREFIX = 'cmp-'
 DEFAULT_SHARE = 0.25
+# A campaign's eval job plays in one group (docs/ENGINE.md 230): a CPU lease does whatever the settings say (the worker's
+# EVAL_GROUPS, zero-core docs/az.md 71), a GPU lease takes the template's `groups` (the agent clamps it to 1..2) - one
+# group gives its batches every game in flight (+37% games/h on a CUDA lease). The float16 GPU graph answers by batch
+# shape, so a GPU lease's games differ from the run's own groups'; a campaign made before this keeps its template.
+EVAL_GROUPS = 1
 DEFAULT_SPOT = 0.05
 DEFAULT_DEADLINE_S = 3 * 3600
 EXPIRES_DAYS = 30
@@ -229,7 +234,8 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
     """The eval job's settings of zero.h2h.match(ckpt_a, ckpt_b, sims=sims, chance_k, c_puct, spec=spec,
     seat_a=seat_b=<A's run's rule with root belief tilts `tilts`>, paired) - the yardsticks' best-of-one
     (mtgz.az.yardsticks.bo1_seat: tilts = the run's without 'deck'): A's run's settings resolved, then eval_sims,
-    c_puct, chance_k, max_steps, eval_spec, the belief tilts, sparse 0 (h2h's dense batches), eval_trace 1. Checked:
+    c_puct, chance_k, max_steps, eval_spec, the belief tilts, sparse 0 (h2h's dense batches), eval_trace 1, groups
+    EVAL_GROUPS (a GPU lease's batching; docs/ENGINE.md 230). Checked:
     the farm's seats (Run.nn_seat) are exactly the match's for both sides (B with its own run's margin_w / redet /
     eval_cache), else CampaignError naming the difference (e.g. an opponent whose run evaluates with another cache:
     no per-side option sets it) -> (settings, rule).
@@ -247,7 +253,7 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
         rule = h2h.with_belief(rule, tilts=dict(tilts))
         cfg['eval_belief_tilts'] = {k: float(v) for k, v in sorted(dict(tilts).items()) if v}
     cfg.update(eval_sims=int(sims), c_puct=float(c_puct), chance_k=int(chance_k), max_steps=int(max_steps),
-               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=GAME)
+               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=GAME, groups=EVAL_GROUPS)
     if sides is None:
         want = [match_seat(ckpt_a, sims, rule, chance_k, c_puct),
                 match_seat(ckpt_b or ckpt_a, sims, rule, chance_k, c_puct)]

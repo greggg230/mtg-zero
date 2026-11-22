@@ -236,7 +236,7 @@ fn cr_601_2h_two_lotus_petals_for_psychic_frogs_graveyard_cost() {
     let frog = g.card(0, "Psychic Frog", Zone::Battlefield);
     let exile3 = Choice::Ability(frog, AbilitySlot::Activated(1));
     // (Not while the ability is activated: its cost has no mana payment, so no mana ability then - CR 601.2g, 602.2b,
-    // 605.3a; ENGINE.md 230. The Petals floated first with priority, their cards are graveyard cards.)
+    // 605.3a; ENGINE.md 231. The Petals floated first with priority, their cards are graveyard cards.)
     assert!(!g.has_option(exile3), "{:?}", g.options_desc());
     float_all(&mut g, "Lotus Petal");
     assert!(g.has_option(exile3), "{:?}", g.options_desc());

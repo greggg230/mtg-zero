@@ -44338,7 +44338,36 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
 * Bug 4 waits for layout v8 (229.4). The loop rule's hash reading twins' raw turn numbers and places is stated in 229.2,
   not changed.
 
-## 230. Mana abilities while a spell is cast: the 601.2g step (fix agent M, bug 1 of the Hogaak lanes' findings; branch `fix/hogaak-midcast-mana`, 2026-11-21)
+## 230. Campaigns' eval jobs in one group (`EVAL_GROUPS` 1): a GPU lease's batches hold every game in flight (mtgz/az/farm_campaign.py `match_settings`; the user's OK, 2026-11-22)
+
+**Why.** zero-core docs/az.md 71 made a CPU eval job play in one group and left a GPU job its groups: the settings'
+`groups`, which the agent clamps to 1..2 for a GPU lease (zero-farm agent/src/probe.rs `choose`). One group on a CUDA
+lease measured +37% games/h (az.md 71: 556 against 436 on one PC) - but the float16 CUDA graph answers a row by its
+batch's shape (cuBLAS picks kernels by shape), so a GPU lease's games differ from those of the run's own groups. The
+user weighed it (comparability of GPU games with earlier ones against a third more GPU eval) and chose one group.
+
+**What.** `match_settings` - every campaign's eval settings: head-to-heads, cells, yardsticks, `tools/farm_campaign.py
+submit` - sets `groups` = `EVAL_GROUPS` = 1. A CPU lease is unchanged (its worker plays one group whatever the settings
+say); a GPU lease (CUDA, DirectML) gets the template's 1 and the agent sends no `groups`. No agent release: the change
+reaches only campaigns made from this commit on - a campaign keeps the template it was made with, so none mixes layouts.
+A run's own farm evaluation (`eval_remote` pools) is not a campaign and is unchanged. DirectML at one group is not
+measured (the farm's one AMD GPU).
+
+**The check** (farm campaigns cmp-g1check-g2 / -g1, 2026-11-22: legacy-meta3-r1 iter_1040 against iter_1024, bo1, 32
+simulations, seed 11, 256 paired games each, routed CUDA-only - gpu 'required', providers ['cuda'] - through a scratch
+wrapper putting `groups` 2 / 1 over the match settings; build 67ca9553 of main e73e64a6): A's score **0.508 +- 0.031**
+(groups 2) and **0.492 +- 0.031** (groups 1), the paired difference +0.016 +- 0.027 - no shift; 21 of the 256 games
+identical (the batch shape changes the rest, as expected). Spot checks 13 of 13 equal on each. Speed: the one PC that
+played both on CUDA, 385 s (groups 1) against 581 s (groups 2) for a 32-game lease (1.5x); the other groups-2 PC played
+its CUDA alternate's leases on its CPU (the agent's own faster-provider choice; the routing names allowed providers),
+so the farm check confirms "no shift" more than it measures the gain. Found on the way: a collect run from a checkout
+whose `mtgz/_engine.pyd` predates the commit's engine refuses the spot check ("the game's setup differs") - collect
+from a checkout with its own build.
+
+**Tests.** `tests/test_farm_play.py::test_match_settings_give_the_local_matchs_seats` (the settings' groups 1);
+`tests/test_farm_play.py`, `tests/test_h2h_farm.py`, `tests/test_cells_yardstick.py` 40 passed.
+
+## 231. Mana abilities while a spell is cast: the 601.2g step (fix agent M, bug 1 of the Hogaak lanes' findings; branch `fix/hogaak-midcast-mana`, 2026-11-21)
 
 **Why.** Lane A found it (220.1.5, 220.1.9) and the user asked for the fix: CR 601.2g - "If the total cost includes a
 mana payment, the player then has a chance to activate mana abilities. Mana abilities must be activated before costs
@@ -44352,7 +44381,7 @@ activated while casting, its draw trigger put on the stack above the spell (601.
 did not reach. **Not** Lion's Eye Diamond: "activate only as an instant" means it can't be activated while a spell is
 cast (its 2004-10-04 ruling; the user's correction) - the step honours that and every other timing restriction.
 
-### 230.1 The step
+### 231.1 The step
 
 * **`Task::CastMana { id, card, again, after }`, `DecisionKind::CastMana`** (`cast_mana.rs`): pushed by `begin_cast_face`
   after `Task::Delve`, so it runs once the total cost is determined (601.2b-f's announcements run first) and before
@@ -44372,7 +44401,7 @@ cast (its 2004-10-04 ruling; the user's correction) - the step honours that and 
   (601.2f fixed it already). `cast_lock` is Public (the public-state gate perturbs it; `view_of` shows it).
 * **Bots** answer the step `PASS` (it is action 0, the options are sorted; both heuristic bots say so explicitly).
 
-### 230.2 What castability counts
+### 231.2 What castability counts
 
 The payment's castability (`delve_classes` while the step may still come, `before_cast_mana`) counts the cards mana
 abilities activated in the step may put into the graveyard: every source that sacrifices its card (incl. one with a
@@ -44387,7 +44416,7 @@ additional option castability considers, escalate's discards, one spree mode, ea
 searches the cast's own 601.2g step (`payment_completes`) - the same search the step makes when the spell is cast, so
 castability and the cast agree by construction.
 
-### 230.3 The collapse (a proof)
+### 231.3 The collapse (a proof)
 
 The step does not offer permanent c's own mana ability A when activating A in the step and activating it with the
 priority the caster receives right after the cast reach the same states (`cast_mana_collapsed`). Conditions:
@@ -44438,7 +44467,7 @@ reads nothing the rest may change but types, abilities or power/toughness (if th
 anyway, so the set is exact whenever it is read); counters removed are unsettling only on a creature, planeswalker or
 battle (704.5f-g, i, v) - elsewhere only a continuous effect reads them, which `chars_may_change` counts.
 
-### 230.4 Completability: the step's search (an exactness argument)
+### 231.4 Completability: the step's search (an exactness argument)
 
 Every option of the step, and every decision of an ability it activates, must leave the cast's payment completable
 (601.2h: a cost is paid whole; `cost_order::completing`, floor `cast_mana_floor`). In the search (`Game::oracle`
@@ -44477,7 +44506,7 @@ or false by the other activation, so then every order is searched (a cube digest
 past 2,000,000 copies). A spell whose total
 cost has no mana has no step: the search asks its payment as it is.
 
-### 230.5 Found and fixed on the way
+### 231.5 Found and fixed on the way
 
 * **Delve counted another use of a source it delves** (cube board 2213 of `rules_castpay`, reachable after step
   activations): a Lotus Petal or Wizard's Rockets chosen in delve (`Mark::DelveLate`) is activated by its own ability as
@@ -44493,7 +44522,7 @@ cost has no mana has no step: the search asks its payment as it is.
   triggered ability (a state the engine can't reach, which the step's searches now resolve events through): it picks a
   permanent whose definition has one.
 
-### 230.6 Tests
+### 231.6 Tests
 
 `tests/rules_cast_mana.rs` (17; rules_suite): Petal / Star delved for Hogaak and Treasure Cruise, a Petal activated
 with its mana unspent, an unneeded Star's trigger above the spell vs below when floated first, Lion's Eye Diamond never
@@ -44518,10 +44547,10 @@ ranges of 100,000 per look kind and 200,000 Ocelot games under a 90-minute cap o
 `the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483` - split out of
 `a_look_at_the_viewers_hand_that_its_step_changes_around_the_look`, which keeps its delver_dealt2 match and passes -
 and `an_exponential_run_of_ocelot_pride_copies_ends_default_seed_100061919`) until a farm-scale scan re-pins them
-(230.8): meanwhile the fuzz's look checks run in every game but no pinned game proves a left-hand look is checked, and
+(231.8): meanwhile the fuzz's look checks run in every game but no pinned game proves a left-hand look is checked, and
 the token limit stays tested by its rules_numbers scenario.
 
-### 230.7 Results
+### 231.7 Results
 
 **Digests** (main 6357848a -> this branch, merged; re-recorded on the merged engine, 229.10):
 
@@ -44557,8 +44586,8 @@ available while a spell with mana is cast: that is why most cube games move.
 | Doomsday | 315.32 -> 323.65 (+2.6%) | 2.796 -> 2.800 | 0.647 (2.087) | 170,024 -> 169,497 (-0.3%) |
 | Hogaak A | 313.85 -> 313.81 | 2.740 -> 2.743 | 0.137 (3.044) | 154,402 -> 150,983 (-2.2%) |
 
-The collapse's tightening (230.3) took the cube from 7.6 to 5.76 step decisions a game; what still asks is mostly
-abilities outside 230.3's conditions (a cost beyond {T}: a sacrifice, life, damage; a condition; a trigger or a
+The collapse's tightening (231.3) took the cube from 7.6 to 5.76 step decisions a game; what still asks is mostly
+abilities outside 231.3's conditions (a cost beyond {T}: a sacrifice, life, damage; a condition; a trigger or a
 cost of the cast reading tapped status).
 
 **Delver canary library** (229.10's second merger): re-recorded with main 6357848a as the old engine
@@ -44568,7 +44597,7 @@ dropped; 12 spots gain 18 "CastMana: Pay the cost" (the step the old engine neve
 
 **Fuzz** (the Mac, 2d471c97: the final engine, before the four lost seeds were ignored): 20,000 games each of default
 (+ 1,000 matches), doomsday, hogaak_a, hogaak, delver_dealt, eoe, cross (each with matches) and sneak_show **PASSED**;
-default's "rest" failed only the three tests 230.6 ignores (14 passed); FUZZ_CHANCE=10 600, FUZZ_BELIEF=2 600 and the
+default's "rest" failed only the three tests 231.6 ignores (14 passed); FUZZ_CHANCE=10 600, FUZZ_BELIEF=2 600 and the
 `fuzz` profile's 1,000 passed. EoE's two blow-ups of the search (Cascading Cataracts' n-mana combinations, seeds
 12,951 and 16,949) are gone in that run.
 
@@ -44577,15 +44606,15 @@ default, default hidden and delver_dealt 2k fuzz); `gate.py engine --tested-sha 
 9473f7debc4bceb3 --expect-digest0 d3c144b6cc2977e5` **GATE PASSED WITH SKIPS** (the live-run fence's one pytest; every
 digest as recorded, farm compat identical, pytest 698 passed on the Mac and 49 on the desktop).
 
-### 230.8 Known follow-ups
+### 231.8 Known follow-ups
 
 * **Activating an ability has the same step** (CR 602.2b: 601.2b-i apply to activating an ability): not on this branch
   (the orchestrator's follow-up todo: reuse `Task::CastMana`'s machinery for `ActPay`). Until then a mana ability is
   activated during an activation only by its payment (and `exile_sources`' forced need-free sacrifices).
-* Castability treats a delve spell's delve-reduced mana as a mana payment (230.5): exact unless its total cost is zero,
+* Castability treats a delve spell's delve-reduced mana as a mana payment (231.5): exact unless its total cost is zero,
   which no delve card's cost reaches without an alternative cost of no mana, and such a cost and an exile cost are never
   combined (escape is itself the alternative cost).
-* **Re-pin the four lost fuzz seeds** (230.6) by a farm-scale scan (`scan_seeds_for_the_seed_pinned_tests`,
+* **Re-pin the four lost fuzz seeds** (231.6) by a farm-scale scan (`scan_seeds_for_the_seed_pinned_tests`,
   `SCAN_KIND` left_look / entered_look / ocelot), then drop their `#[ignore]`.
 * The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
-  counts): measured in 230.7.
+  counts): measured in 231.7.

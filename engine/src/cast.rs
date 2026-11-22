@@ -401,7 +401,7 @@ impl Game {
             // may be payable too (asked on casting)
         } else if let Some(extras) = &extras {
             // (Or with mana abilities activated while it is cast that feed
-            // its graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 230.4.)
+            // its graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 231.4.)
             if !extras.iter().any(|x| payable(x)) && !self.feed_castable(p, c, crate::game::CastFrom::Hand, 0) {
                 return false;
             }
@@ -885,7 +885,7 @@ impl Game {
         let warp_only = self.warp_only(p, card, from);
         let free = !warp_only && self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
         // (Or with mana abilities activated while it is cast that feed its
-        // graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 230.4.)
+        // graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 231.4.)
         let plain = !warp_only
             && (self.route_payable(p, card, from, classes) || self.target_discount_castable(p, card, from, classes) || self.feed_castable(p, card, from, 0));
         if !(alt_ok || free || plain) {
@@ -1264,7 +1264,7 @@ impl Game {
         // graveyard feeds delve too: one with a mana cost (Chromatic Star), a
         // sacrifice for another's ability (Squandered Resources' land, Rain of
         // Filth's); of a spell whose mana can't be spent, its card only (its
-        // mana pays nothing): ENGINE.md 230.4.
+        // mana pays nothing): ENGINE.md 231.4.
         let step = self.before_cast_mana(card);
         let feeds = |cl: &crate::pay::Class| crate::pay::delve_source(cl) || step && (cl.sac_self || cl.members.first().is_some_and(|s| crate::pay::is_sac_slot(s.slot)));
         let no_mana = step && self.def_of(card).casting.no_mana;
@@ -1393,7 +1393,7 @@ impl Game {
         let late = if allow.no_mana { Vec::new() } else { self.delve_sources(p) };
         let committed: Vec<CardIdx> = late.iter().copied().filter(|&c| self.delve_late(c)).collect();
         // (The sources committed to delve are activated by their own ability: no other use of their cards pays the
-        // rest, `delve_rest_payable_using`; ENGINE.md 230.)
+        // rest, `delve_rest_payable_using`; ENGINE.md 231.)
         let need = (0..=cost.generic.min(gy_cards)).find(|&d| self.delve_rest_payable_using(p, card, &cost.less_generic(d), allow, &committed)).unwrap_or(cost.generic) as usize;
         let floor = item.delve_floor as usize;
         let keep = self.escape_exiles(card, item.from) as usize;
@@ -1424,7 +1424,7 @@ impl Game {
                 // counted each, `delve_classes`; ENGINE.md 49.)
                 let later = late.len() - j - 1;
                 // (Each source delved is activated by its own ability: this one, the committed ones, and the later
-                // ones a count past the graveyard's takes - each set of them, ENGINE.md 230.)
+                // ones a count past the graveyard's takes - each set of them, ENGINE.md 231.)
                 let pays = |d: u64| {
                     let extra = (d as usize).saturating_sub(gy_left);
                     crate::cast_mana::subsets(&late[j + 1..], extra).into_iter().any(|more| {
@@ -2237,7 +2237,7 @@ impl Game {
     /// improvise pay from it later (702.66b, 702.126b).
     pub(crate) fn total_mana(&self, card: CardIdx, item: &StackItem) -> crate::mana::ManaCost {
         // (Locked once a mana ability is activated during the cast, CR
-        // 601.2f-g: `Game::cast_lock`, ENGINE.md 230.)
+        // 601.2f-g: `Game::cast_lock`, ENGINE.md 231.)
         if let Some(c) = self.locked_cost(item.id) {
             return c;
         }
@@ -2415,7 +2415,7 @@ impl Game {
         // (A card cast from hand is on the stack while its cost is paid.)
         // (Escalate's discards with it: `escalate_any`.)
         // (Or with mana abilities activated while it is cast that feed its
-        // graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 230.4.)
+        // graveyard cost, CR 601.2g: `feed_castable`, ENGINE.md 231.4.)
         self.escalate_any(p, card, Some(rest), |r| self.cost_payable(p, card, r.expect("a cost"), &mana, classes, Some(card), from))
             || self.feed_castable(p, card, from, k as u8 + 1)
     }
@@ -2726,7 +2726,7 @@ impl Game {
         // CR 601.2g: once the total cost is determined (601.2b-f, the tasks
         // pushed after this one), the caster may activate mana abilities
         // before it is paid (delve's cards, the cost's parts, the mana:
-        // 601.2h); `cast_mana.rs`, ENGINE.md 230.
+        // 601.2h); `cast_mana.rs`, ENGINE.md 231.
         self.agenda.push(Task::CastMana { id, card: None, again: false, after: 0 });
 
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
@@ -3142,7 +3142,7 @@ impl Game {
     /// trigger.
     pub(crate) fn cast_done(&mut self, id: u32) {
         // (Its total cost was locked for its mana abilities, CR 601.2f-g:
-        // paid now, ENGINE.md 230.)
+        // paid now, ENGINE.md 231.)
         if !self.cast_lock.is_empty() {
             self.cast_lock.retain(|x| x.0 != id);
         }

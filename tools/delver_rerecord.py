@@ -42,7 +42,7 @@ decision the old engine never asked is answered only as the old engine behaved:
   options of their own, so a payment the old engine finished by itself - one class left - may ask): each
   option is tried, and the one whose later states equal the old engine's is kept (the permanent the old
   engine tapped: permanents are never paired anew, so at most one does);
-* CastMana offering "Pay the cost" (ENGINE.md 230: a cast's 601.2g step, which the old engine never asked - it
+* CastMana offering "Pay the cost" (ENGINE.md 231: a cast's 601.2g step, which the old engine never asked - it
   went straight to the payment): that;
 * OrderTriggers, ChooseReplacement, OrderTimestamps (questions 100.3 added): each option is tried, and
   the one whose later states equal the old engine's is kept. When several do (the order shows in no
@@ -84,7 +84,7 @@ import delver_blunders as DB  # noqa: E402  (load_engine, engine_info, spot_sig,
 
 TRACE_FORMAT = 'delver-canary-trace/1'
 PASS, FLOAT, POOL = 'Pass priority', 'Activate mana abilities', 'Pay the rest from the pool'
-STEP_PASS = 'Pay the cost'   # a cast's 601.2g step (ENGINE.md 230)
+STEP_PASS = 'Pay the cost'   # a cast's 601.2g step (ENGINE.md 231)
 ORDERS = ('OrderTriggers', 'ChooseReplacement', 'OrderTimestamps')
 PILE = ('PutOnTop', 'PutOnBottom')        # a looked-at pile put back card by card (docs/ENGINE.md 152.1, 157)
 OLD_INDEX_KEYS = ('k_main1',)             # spot fields that index the old path (the Bauble miner's main-1 decision)
