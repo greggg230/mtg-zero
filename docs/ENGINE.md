@@ -44020,8 +44020,8 @@ on retry) and a412d697 (both fixes on main a99e9ca7, PASSED WITH SKIPS). The nex
 **Why.** Lane A's Hogaak write-up (220.1.5) found payment defects outside its card; the user asked for them to be fixed
 now (the fix brief's bugs 2-5; bug 1, 601.2g/h's order, is agent M's, numbered at its merge; bug 6 agent E's, 226). Branch
 `fix/hogaak-payment` from hogaak-a 29ca2296, main 45dbf2e1 (220.4) merged into it before the digests were explained and
-re-recorded; main 76973535 (217-222, no engine file), 52d0bf9b (223, a search's finds by place), a99e9ca7 (224-225) and
-50205980 (226, fix E) merged since, the digests checked again on each (228.7). The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
+re-recorded; main 76973535 (217-222, no engine file), 52d0bf9b (223, a search's finds by place), a99e9ca7 (224-225),
+50205980 (226, fix E) and 33720aab (227, a zero-core pin) merged since, the digests checked again on each (228.7). The user's rules: no approximation of any class (options collapsed only when rules-equivalent in every
 reachable state, proved here; no docs/shortcuts.md entry), no encoding gap, digests re-recorded on purpose with what
 moved and why, a regression test per bug (CR in the name; castability by brute force), the search impact measured.
 
@@ -44254,7 +44254,8 @@ and only the metagame's combined digest differs from the values above - re-recor
 (36 of 288 lines from main's). The traces above were taken before 223's merge; the moved games are the same.
 Then a99e9ca7 (224-225, no engine file) and 50205980 (226, fix E: a departed copy's last-known mana value; it moves no
 digest) merged: on 8efb600d every part off = main's seven files line for line again, and every part on = this branch's
-recorded files line for line (the same 129 / 154 / 36 / 94 / 26 / 11 games): nothing re-recorded.
+recorded files line for line (the same 129 / 154 / 36 / 94 / 26 / 11 games): nothing re-recorded. 33720aab (227) changes
+no engine file (the zero-core pin only); on its merge 32ff0419 the engine gate finds every digest as recorded (below).
 
 ### 228.8 Search impact
 
@@ -44278,9 +44279,9 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
 
 * **Full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast` on the Mac, incl. `az`'s public-state
   gate: no new gap - a payment's classes are not part of the input): its first run on the merged code found the stale
-  `leaving_card` name and the three moved tests of 228.6; after them, every binary passed. On the final engine (60ccf3d4,
-  main 50205980 merged) the suite gate's run: **2,896 passed**, 24 binaries (16 new). Pytest: the engine gate's
-  (below), 759 passed.
+  `leaving_card` name and the three moved tests of 228.6; after them, every binary passed. On the final head (32ff0419,
+  main 33720aab merged) the suite gate's run: **2,896 passed**, 24 binaries (16 new). Pytest: the engine gate's
+  (below), 786 passed.
 * **Fuzz** on the Mac (`tools/fuzz_shards.py`, 24 shards, 12 at once; 0c2482fe, the tested engine), 20,000 games each,
   every one **PASSED**: default (+1,000 matches) 200 s, eoe 544 s, delver (+1,000 matches, +1,000 post-sideboard) 158 s,
   doomsday 169 s, hogaak_a 111 s, sneak_show 99 s, cross (+1,000 matches, +1,000 post-sideboard) 171 s, hogaak (+1,000
@@ -44291,18 +44292,18 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
   15,804 belief worlds; 19 passed.
   (These 20,000-game runs are of 0c2482fe, before main's 223 was merged; the merged engine's are the suite gate's.)
 * **The gates** (this worktree, its Mac steps on the Mac, the desktop's throttled beside the live legacy-meta3 runs;
-  the system Python), on the final engine 60ccf3d4 (main 50205980 merged): `python tools/gate.py suite --fuzz-pools
-  default,eoe,delver_dealt,hogaak,cross` - **GATE PASSED suite 60ccf3d4edc6 in 787s** (privacy 0 findings; the full
+  the system Python), on 32ff0419 (main 33720aab merged): `python tools/gate.py suite --fuzz-pools
+  default,eoe,delver_dealt,hogaak,cross` - **GATE PASSED suite 32ff04192975 in 739s** (privacy 0 findings; the full
   engine suite 2,896 passed; the sharded 2,000-game fuzz of each pool, with 100 matches + 100 post-sideboard where the
-  pool has them; the checkout unchanged; `gates/60ccf3d4edc6-suite.json`); `python tools/gate.py engine --tested-sha
-  60ccf3d4edc6 --expect-digest 14e6735d8eb9cb4a --expect-digest0 5674f63cc335d204` - **GATE PASSED WITH SKIPS engine
-  60ccf3d4edc6 in 1141s** (skipped: one live-run-hazard test of the desktop's pytest, fenced by the live run here): the
-  digests full 14e6735d8eb9cb4a and encoding-free 5674f63cc335d204 (= expected), the formats constructed
-  498c263f7048e81d, EoE 7e45b554b95820ed, driver 6a03572828250b86, metagame 0d13940b6d659a83 and dealt fb7532e8a30a63f4
-  (each = the recorded file); `az` 57, `limits` 13, `hidden` 28; pytest on the Mac 150 + 181 + 181 + 198 passed and its
-  desktop part 49 passed (5 skipped); the smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2:
-  6 games, 2,452 rows, 150 batches); `gates/60ccf3d4edc6-engine.json`. (Earlier merges' gates, all passed: suite
-  506797fe and 94b2b780, engine 94b2b780 and 878d1623.) The next commit adds this paragraph only (docs).
+  pool has them; the checkout unchanged; `gates/32ff04192975-suite.json`); `python tools/gate.py engine --tested-sha
+  32ff0419 --expect-digest 14e6735d8eb9cb4a --expect-digest0 5674f63cc335d204` - **GATE PASSED WITH SKIPS engine
+  32ff04192975 in 1233s** (skipped: seven live-run-hazard pytest tests, fenced by the live run here): the digests full
+  14e6735d8eb9cb4a and encoding-free 5674f63cc335d204 (= expected), the formats constructed 498c263f7048e81d, EoE
+  7e45b554b95820ed, driver 6a03572828250b86, metagame 0d13940b6d659a83 and dealt fb7532e8a30a63f4 (each = the recorded
+  file); `az`, `limits`, `hidden` passed; pytest 164 + 238 + 164 + 171 passed and the desktop part 49 (5 skipped); the
+  smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,452 rows, 150 batches);
+  `gates/32ff04192975-engine.json`. (Earlier merges' gates, all passed: suite 506797fe, 94b2b780, 60ccf3d4; engine
+  94b2b780, 878d1623, 60ccf3d4.) The next commit adds this paragraph only (docs).
 
 ### 228.10 For the merge with agent M and open items
 
