@@ -895,9 +895,12 @@ pub struct Game {
     /// Slots made as copies, not cards (token copies, copies of spells and
     /// of cards), in increasing order.
     pub(crate) copy_objs: Vec<CardIdx>,
-    /// Copiable values of permanents that left the battlefield this turn,
-    /// as they last existed there (CR 608.2h).
-    pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals)>,
+    /// Copiable values and mana value of permanents that left the
+    /// battlefield this turn, as they last existed there (CR 608.2h): the
+    /// mana value `mana_value_of` gave it then, copy effects included (a
+    /// copy of a back face 0, CR 202.3b; ENGINE.md 226), which its copiable
+    /// values alone don't tell (copy-ness isn't copiable, 707.2).
+    pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals, u64)>,
     /// The permanents that permanents leaving the battlefield this turn were
     /// attached to, as they last existed there ("enchanted creature" of an
     /// Aura that left, CR 608.2h; ENGINE.md 99.11).
@@ -920,11 +923,15 @@ pub struct Game {
     /// are not kept; at each turn's start only the departures a reference of
     /// the public state still names stay (`Game::for_each_public_ref`).
     pub(crate) ref_lki: Vec<(ObjRef, DefId, u8)>,
-    /// Last known power of the slots that left the battlefield (CR 608.2h),
-    /// the latest departure of each: (slot, its `inc` on the battlefield,
-    /// its power as it left; an amount, the game aborts past
-    /// `num::AMOUNT_MAX`). Read through `Game::lki_power_of`; out of `Obj`
-    /// (rare and wide: objects stay small to copy, ENGINE.md 17).
+    /// Last known power of the objects that left the battlefield (CR 608.2h):
+    /// (slot, its `inc` on the battlefield, its power as it left; an amount,
+    /// the game aborts past `num::AMOUNT_MAX`). Every departure of this turn
+    /// (a slot that leaves, returns and leaves again keeps the first object's
+    /// power for an ability about it, ENGINE.md 226), and of each earlier turn
+    /// the latest of each slot plus any a public reference still names
+    /// (`prune_lki_power` as a turn begins). Read
+    /// through `Game::lki_power_of`; out of `Obj` (rare and wide: objects stay
+    /// small to copy, ENGINE.md 17).
     pub(crate) lki_power: Vec<(CardIdx, u32, i64)>,
     /// Loyalty activations (CR 606.3) of the slots that have any in their
     /// current incarnation (an entry goes as its object changes zones):
@@ -944,8 +951,10 @@ pub struct Game {
     /// (`Game::moon_on`; ENGINE.md 99.12).
     pub(crate) moon_game: bool,
     /// Spells that left the stack while a triggered ability about them
-    /// waited: their definition and item (CR 608.2h: "copy it").
-    pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
+    /// waited: their definition and item (CR 608.2h: "copy it"), and their
+    /// mana value as they last existed there ("that spell's mana value":
+    /// `mana_value_with_x`, its X and a copy's 202.3b; ENGINE.md 226).
+    pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem, u64)>,
     /// The token being created is a copy with these values (consumed as it
     /// enters).
     pub(crate) entering_copy: Option<crate::copies::CopyVals>,
@@ -1570,16 +1579,43 @@ impl Game {
         &self.objs
     }
     /// Object `r`'s power as it last existed on the battlefield (CR
-    /// 608.2h), if `r` is its slot's latest incarnation there to leave.
+    /// 608.2h), if it left this turn, was its slot's latest incarnation there
+    /// to leave, or a public reference still names it (`lki_power`).
     pub fn lki_power_of(&self, r: ObjRef) -> Option<i64> {
-        self.lki_power.iter().find(|x| x.0 == r.idx).and_then(|&(_, inc, p)| (inc == r.inc).then_some(p))
+        self.lki_power.iter().find(|x| x.0 == r.idx && x.1 == r.inc).map(|x| x.2)
     }
-    /// Slot `idx` left the battlefield as incarnation `inc`, its power `p`.
+    /// Slot `idx` left the battlefield as incarnation `inc`, its power `p`:
+    /// the slot's earlier departures stay (an ability about one of them reads
+    /// that object's power, not the latest's; ENGINE.md 226).
     pub(crate) fn set_lki_power(&mut self, idx: CardIdx, inc: u32, p: i64) {
-        match self.lki_power.iter_mut().find(|x| x.0 == idx) {
-            Some(x) => *x = (idx, inc, p),
+        match self.lki_power.iter_mut().find(|x| x.0 == idx && x.1 == inc) {
+            Some(x) => x.2 = p,
             None => self.lki_power.push((idx, inc, p)),
         }
+    }
+    /// As a turn begins (with the other last known information, `flow.rs`):
+    /// each slot keeps its latest departure's power, and an earlier
+    /// departure's stays only while a reference of the public state still
+    /// names that object (`for_each_public_ref`: a delayed trigger about it
+    /// reads it in a later turn; ENGINE.md 226).
+    pub(crate) fn prune_lki_power(&mut self) {
+        let older = |all: &[(CardIdx, u32, i64)], c: CardIdx, inc: u32| all.iter().any(|&(c2, inc2, _)| c2 == c && inc2 > inc);
+        if !self.lki_power.iter().any(|&(c, inc, _)| older(&self.lki_power, c, inc)) {
+            return;
+        }
+        let mut named: Vec<ObjRef> = Vec::new();
+        self.for_each_public_ref(|r| {
+            if !self.live(r) {
+                named.push(r);
+            }
+            false
+        });
+        let all = std::mem::take(&mut self.lki_power);
+        self.lki_power = all
+            .iter()
+            .copied()
+            .filter(|&(c, inc, _)| !older(&all, c, inc) || named.iter().any(|r| r.idx == c && r.inc == inc))
+            .collect();
     }
     /// Permanent `c`'s loyalty activations (CR 606.3); none: all 0.
     pub fn loyalty_of(&self, c: CardIdx) -> Loyalty {
@@ -2571,10 +2607,13 @@ impl Game {
         }
         let lost_granted = from == Zone::Battlefield && !self.marks.is_empty() && self.lost_abilities(idx);
         // Its copiable values as it last existed on the battlefield (CR
-        // 608.2h: "create a token that's a copy of it").
+        // 608.2h: "create a token that's a copy of it"), and its mana value
+        // then, with the copy effects still on it ("damage equal to its mana
+        // value", ENGINE.md 226).
         if from == Zone::Battlefield {
             let v = self.copiable(idx);
-            self.lki_copy.push((old, v));
+            let mv = self.mana_value_of(idx);
+            self.lki_copy.push((old, v, mv));
             if let Some(h) = self.objs[idx.i()].attached {
                 self.lki_attached.push((old, h));
             }

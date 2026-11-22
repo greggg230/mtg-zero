@@ -813,7 +813,7 @@ impl Game {
         for c in copies {
             n.obj(c.obj);
         }
-        for (r, _) in lki_copy {
+        for (r, _, _) in lki_copy {
             n.obj(*r);
         }
         for &(a, b) in lki_attached {
@@ -832,7 +832,7 @@ impl Game {
         for &(c, inc, _) in lki_power {
             n.obj(ObjRef { idx: c, inc });
         }
-        for (r, _, s) in spell_lki {
+        for (r, _, s, _) in spell_lki {
             n.obj(*r);
             n.item(s);
         }

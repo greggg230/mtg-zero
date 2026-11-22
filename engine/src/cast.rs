@@ -1061,6 +1061,20 @@ impl Game {
     /// Mana value (CR 202.3), with X on the stack (202.3e): exact (a card's
     /// `u8` plus a `u32` X times its X pips fits a `u64`).
     pub(crate) fn mana_value_of(&self, c: CardIdx) -> u64 {
+        let x = if self.objs[c.i()].zone == Zone::Stack {
+            self.stack.iter().find(|s| s.kind == StackKind::Spell { card: c }).map_or(0, |s| s.x)
+        } else {
+            0
+        };
+        self.mana_value_with_x(c, x)
+    }
+
+    /// Object `c`'s mana value with `x` the value of its X (CR 202.3: the
+    /// number chosen while it is a spell, 0 anywhere else, 202.3e): the one
+    /// rule of mana value, read now (`mana_value_of`) and as the object
+    /// leaves the battlefield or the stack, for its last known information
+    /// (CR 608.2h: `Game::lki_copy`, `Game::spell_lki`; ENGINE.md 226).
+    pub(crate) fn mana_value_with_x(&self, c: CardIdx, x: u32) -> u64 {
         // A copy "with no mana cost" (eternalize) has mana value 0.
         if self.exc(c).is_some_and(|e| e.no_cost) {
             return 0;
@@ -1072,12 +1086,7 @@ impl Game {
         if self.def_of(c).front_mv.is_some() && (self.is_copy(c) || self.is_copy_obj(c)) {
             return 0;
         }
-        let mv = self.def_of(c).mana_value() as u64;
-        if self.objs[c.i()].zone != Zone::Stack {
-            return mv;
-        }
-        let x = self.stack.iter().find(|s| s.kind == StackKind::Spell { card: c }).map_or(0, |s| s.x);
-        mv + x as u64 * self.def_of(c).x_pips as u64
+        self.def_of(c).mana_value() as u64 + x as u64 * self.def_of(c).x_pips as u64
     }
 
     /// Can `p` pay one of the spell's additional-cost options (CR 601.2b),
