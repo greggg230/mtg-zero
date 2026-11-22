@@ -44618,3 +44618,55 @@ digest as recorded, farm compat identical, pytest 698 passed on the Mac and 49 o
   `SCAN_KIND` left_look / entered_look / ocelot), then drop their `#[ignore]`.
 * The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
   counts): measured in 231.7.
+
+## 232. The fuzz's shown cards of a hidden deck and a companion manifested face down (fuzz steward queue 2eeffcef33d5 / 88f4716ce1e7; branch `fix/lutri-hidden-deck`, 2026-11-22)
+
+**The failure.** `FUZZ_HIDDEN_DECKS=1`, seed 100,200,667 (the default pool): "a hidden-decklist world for P1 (mover P1):
+the sampled deck lacks a shown Lutri, the Spellchaser" (`check_determinize_hidden`, engine/src/fuzz/games.rs). Found by
+the farm's fuzz on main 6a44afdb (2026-11-20), still failing on 3e4094bd and e9ff0e24 (the queue's second id is the
+same failure at a moved line); replayed on Windows at e9ff0e24. On main e445ba27 the seed passes only because 231's
+step moves the game's random stream (it no longer reaches the state); the check's code is unchanged there.
+
+**The state** (a diagnostic at e9ff0e24, not kept). P0 revealed Lutri, the Spellchaser as its companion (CR 103.2b),
+took the special action (116.2g: Lutri into the hand, known to both players), and Lutri went back into P0's library,
+which was shuffled: P1 lost track of it (its identity is one of P1's cloud of P0's hidden cards). Then P0's Test
+Manifester manifested a card from the top of the library (look at two, manifest one: CR 701.40a) - Lutri: the
+companion's object (index 80, outside P0's 40 deck objects 0..40) became a face-down 2/2 on the battlefield that P1
+does not know (CR 708.2), its card Lutri (`sample::card_of`: a face-down permanent's card).
+
+**The cause: the check, not the deal.** `hd_shown` (the cards the viewer has seen of the other player's deck, which
+every world's deck must hold) adds the deck objects the viewer knows and the identities of the viewer's clouds of that
+player's cards, then drops the identity of every card of theirs outside the deck that is hidden from the viewer (a
+token, a companion put into the hand and lost track of): those identities are in a cloud but are no deck card. "Hidden"
+was written as three zones, Hand, Library, FaceDown (= `Zone::is_hidden`), which misses a face-down permanent (and a
+face-down spell): its zone is the battlefield (the stack). So the face-down companion's Lutri stayed among the shown
+deck cards, while the deck - `hd_deck`: the game's cards less one copy of the revealed companion (140.10, 152.5) -
+holds no Lutri, in any world and in the game itself (P0's real 40 had none). The check failed every world of that
+state. The engine's own knowledge was right: `sample::knowledge` takes the viewer's hidden slots
+(`Game::hidden_slots`, face-down permanents included) and deals the companion's identity as an `extras` card with the
+deck's (the world gave Lutri to a library object and a deck card to the face-down object: which of the hidden cards
+is the companion is hidden, 140.10), and every other check of the seed's worlds passed.
+
+**Not a hidden-information bug; no effect on self-play.** Nothing the engine deals, keys, shows or encodes changes;
+worlds used by search (any commit, so runs pinned to older ones too) were right. The fuzz check alone was wrong.
+
+**The fix** (engine/src/fuzz/games.rs). `hd_shown` drops the identity of every card of theirs outside the deck that
+the viewer does not know: `!Game::knows(viewer, c)` is false exactly for a card in a hidden zone or a face-down
+permanent or spell (`Game::hidden_obj`) that the viewer does not know - the case the comment always meant. The same
+filter in tests/dealt_decks.rs's copy (`shown`). **A new self-check**: `check_determinize_hidden` first asserts that
+the game's own deck holds every shown card ("the game's own deck of P_ lacks a ... P_ was shown (`hd_shown`)"): the
+game is one of the viewer's worlds, so a shown card it lacks blames the shown cards, not the deal - this failure would
+have named the check at once. (`hd_lacks`: the multiset test both use.)
+
+**Regression test** (seed-independent): `fuzz::games::hidden_shown_tests::a_companion_manifested_face_down_is_not_a_shown_deck_card`
+(engine lib tests). A hidden-decklist match of the default pool's table (as `play_hidden` makes it: the table's prior,
+32 cached decks), P0 40 Islands with Lutri revealed as companion, P1 40 Islands, played to P0's first priority; then the
+engine's own steps of the seed's line (`companion_to_hand`; `move_card` to the library's top; `shuffle_library`; P0
+looks at the card, as manifest's look does - else P0 would not know its own face-down permanent, CR 708.5 - and
+`put_onto_battlefield` entering face down), the decision asked again (`refresh_pending`), invariants and knowledge
+checked. It asserts the state (the companion's object a face-down permanent P1 doesn't know, Lutri in P1's cloud of
+P0's cards, no Lutri in P0's deck), that Lutri is not shown, and runs `check_determinize_hidden` (both viewers, six
+world seeds each) on three match seeds. Before the fix it fails with the fuzz's own message ("a hidden-decklist world
+for P1 (mover P0): the sampled deck lacks a shown Lutri, the Spellchaser"; with the self-check, "the game's own deck of
+P0 lacks a Lutri, the Spellchaser P1 was shown"); after, it passes. The seed itself passes at e9ff0e24 with the fix
+(264 worlds).
