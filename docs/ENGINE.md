@@ -46404,10 +46404,60 @@ Not measured again here: lane 2 measured decisions per full best-of-three match 
 * `tools/matchup_agreement.py` and `tools/delverai_matchup.py` are mirror-only (they read `table`); not adapted.
 * The farm fuzz steward has no `meta_pair` mode yet (the worker knows the pool).
 
-## 241. zero-core pin 324b2b7 -> 1b7d4ee (the eager CUDA evaluator's priors), and the core's pytest in six shards (branch `pin/core-gpu-fix-shards6`, 2026-11-22)
+## 241. zero-core pin 324b2b7 -> 00eb2d7 (the merge of c36a566 into zero-core main 1b7d4ee): a saved config read back resolves its games (the farm release's gate 2 after layout v8; zero-core `fix/remote-worker-alias` c36a566, docs/az.md 73.2; 2026-11-22)
 
-zero-core `main` 1b7d4ee (on top of the pinned 324b2b7: three commits and main's merge of it): its docs/az.md 76 - `NetEvaluator`'s eager path on CUDA sums a leaf's options with
-`segment_reduce` instead of `index_add_`, whose order of additions on CUDA changed a prior's last bit from call to
-call (the CPU path, the CUDA graphs and the ONNX export untouched: this repo's digests and gates run on the CPU) - and
-75.2, a test's bar. `--core-pytest-shards` defaults to 6 (4): with the desktop's eight slots the four shards of 7 to 12
-minutes each were the core tiers' longest steps (238.8).
+**Merged onto main c40d496d (2026-11-22).** Branch `fix/remote-worker-alias` was gated on zero-core c36a566 (from 688e753); main meanwhile pinned 324b2b7 (section 239's stew, zero-core main 1b7d4ee). zero-core 00eb2d7 merges c36a566 into 1b7d4ee without conflicts (their changes share no file but `docs/az.md`), and this section moved from 239 (taken by the stew) to 241. The merged head is re-gated (suite, engine) and gate 2 re-run on the farm's reference config.
+
+**Why.** The farm release of c8dd218d (the first after section 237's fix) passed its DirectML self-test and failed at
+its farm gates (`tools/farm_release.py` step 8, `tools/farm_gates.py`): gate 3 passed (the native worker resolved the
+reference config's game to `mtg_v7`), gate 2 failed - the Python remote worker refused the checkpoint, `a network of
+another encoding than this build's (game 'mtg_v7' -> 'mtg'; ... token layout version 7 -> 8)`, exit 78. The farm's
+reference config is a run's config of before layout v8 (`"game": "mtg"`, no layout record), and gate 2
+(zero-core `tools/worker_parity.py`) copies it as it is into the remote worker's mirror. zero-core's
+`remoteplay.Worker` read its mirror's config.json without resolving the alias (`mtg` without a record = `mtg_v7`,
+zero-core docs/az.md 73), so it played `mtg` (layout 8) while the checkpoint loaded as `mtg_v7`. Runs never met it (the
+run resolves its config before it writes a mirror), but every farm release since layout v8 would fail the same way, and
+any other reader of a saved config with the same gap would play the wrong layout.
+
+**What.** zero-core: `package.resolve_saved_games(cfg, where)` resolves a saved config's games in place as a resumed
+run's are resolved (`game` with its `game_layout`, a co-training `resolver` with `resolver_cfg`'s record; a config
+written resolved reads back unchanged), and every reader that skipped it now calls it: `remoteplay.Worker` (the mirror's
+config.json; a layout record the checkout has no game for is refused as an `encoding` error, exit 78), the remote
+evaluation commands (`remote.evaluate_mirror`, `evaluate_net_mirror`: REFUSED on a bad record) and
+`farm_eval.match_driver` (an eval job's settings, as the native worker's `game_of` resolves them;
+`tools/worker_eval_gate.py`'s Python side). The other readers were audited and already resolved (the list is in
+docs/az.md 73.2). This repo's farm gates and worker are unchanged; no engine, encoding, search or self-play change.
+
+**Reproduced and fixed** (copies of the farm's reference config and checkpoint, the release's CPU runtime pack and its
+`mtgz-worker` under a scratch directory; nothing written under the farm builds directory): `python tools/farm_gates.py
+--config <copy> --checkpoint <copy> --worker <the release's worker> --runtime-dir <copy>` as the release runs it - with
+this checkout's core at the old Python (the fix stashed): `FARM GATES FAILED: gate 2 (plumbing) FAILED, gate 3 (records)
+passed`, gate 2's worker log the release's message (`game 'mtg_v7' -> 'mtg'`, exit 78); with this pin: `FARM GATES
+PASSED` - gate 2 8 games, 534 rows, 200 network batches, every shard array identical; gate 3 12 games, `mtg_v7`,
+identical.
+
+**Tests.** zero-core `tests/test_game_alias.py` (the stand-in alias `toy_match` rev 1 / before `toy`):
+`resolve_saved_games`; a remote Worker in-process on a mirror naming `toy_match` with `game_layout` null plays `toy` and
+loads a `toy` checkpoint (fails before the fix with the release's refusal), `toy_match` with its record plays it and
+refuses a `toy` checkpoint, a record 4 is refused as `encoding`; the remote evaluation's mirror (both commands); an eval
+job's match driver; `tests/test_worker_settings.py`: an eval match's reads are the worker's `EVAL_READS` whole, `game_layout`
+included. This repo's `tests/test_mac_remote.py` wrote mirror configs from DEFAULTS and a preset unresolved (`mtg`,
+`game_layout` null - by the alias rule a config of before layout v8, the game `mtg_v7`) beside layout-8 checkpoints;
+the old worker read the name as `mtg` and passed, the resolving one refused them (the engine gate's pytest: the
+remote evaluation of a resolver mirror and of an eval-net mirror, the worker in both modes). They now write the
+config as a run's first start does (`resolve_run_game`: `mtg` with layout 8), as every real mirror is written.
+
+## 242. The core's pytest in six shards; the eager CUDA evaluator's priors reach the pin (branch `pin/core-gpu-fix-shards6`, 2026-11-22)
+
+`--core-pytest-shards` defaults to 6 (4): with the desktop's eight slots the four shards of 7 to 12 minutes each were
+the core tiers' longest steps (238.8). The pin of 241 (00eb2d7) already holds zero-core's docs/az.md 76 - `NetEvaluator`'s
+eager path on CUDA sums a leaf's options with `segment_reduce` instead of `index_add_`, whose order of additions on
+CUDA changed a prior's last bit from call to call (the CPU path, the CUDA graphs and the ONNX export untouched: this
+repo's digests and gates run on the CPU) - and 75.2, a test's bar; this branch first pinned them itself (1b7d4ee, a
+parent of 00eb2d7) and was gated so:
+
+`python tools/gate.py optin-core --baseline-root <a warm worktree of main c40d496d, its module built>` on 8f7c8c4b (that
+pin and the six shards; before the merge of main's 241): **GATE PASSED WITH SKIPS optin-core 8f7c8c4b4d8e in 1046s**
+(the skips: the core's live-run-hazard tests, fenced) - the module and the worker built (169 + 118 s: main's Rust had
+changed) and the Mac's test binaries (208 s), then the group in about 520 s: the six core shards 237 to 520 s (641 to
+871 s as four), checkpoint_compat identical in 296 s, the build-only step 122 s.
