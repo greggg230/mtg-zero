@@ -546,7 +546,7 @@ impl Describer<'_> {
         empty(miracle_cast.is_some() as usize, "a miracle in progress")?;
         empty(page.is_some() as usize, "a paged decision (more than 95 permanents)")?;
         empty(releasing.len() + gy_arrivals.len() + held.len() + entries.len(), "a simultaneous move or entry in progress")?;
-        empty(cast_lock.len(), "a spell's total cost locked by a mana ability during its cast (ENGINE.md 222)")?;
+        empty(cast_lock.len(), "a spell's total cost locked by a mana ability during its cast (ENGINE.md 228)")?;
         empty(next_turn_controller.iter().flatten().count() + turn_controller.is_some() as usize, "a player controlling another's turn")?;
         empty(pool_restr.len(), "mana with a spending restriction")?;
         empty((0..2u8).map(|p| g.lands_entered_this_turn(p) as usize).sum::<usize>(), "the lands entered this turn (Bioengineered Future)")?;

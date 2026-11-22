@@ -1,4 +1,4 @@
-//! Mana abilities while a spell is cast (CR 601.2g-h; ENGINE.md 222): after the total cost is determined (601.2f)
+//! Mana abilities while a spell is cast (CR 601.2g-h; ENGINE.md 228): after the total cost is determined (601.2f)
 //! the caster may activate mana abilities, then pays the cost in any order (601.2h). A card a mana ability puts
 //! into the graveyard then is delve's to exile for that same spell; a mana ability whose mana isn't needed may be
 //! activated then, its triggered ability waiting until the spell is cast (601.2i, 603.3: above it); an "activate
@@ -320,7 +320,7 @@ fn cr_605_3a_lions_eye_diamond_activated_with_priority_before_the_cast_feeds_del
 #[test]
 fn cr_601_2g_plain_lands_are_left_to_the_priority_after_the_cast() {
     // A basic land's {T}: add one mana, nothing else: activated during the cast with its mana unspent it is the same
-    // as activated with the priority right after it (the collapse, ENGINE.md 222.3): no 601.2g decision.
+    // as activated with the priority right after it (the collapse, ENGINE.md 228.3): no 601.2g decision.
     let mut g = cube().battlefield(0, &["Mountain", "Mountain", "Island"]).hand(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
     let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
     g.choose(Choice::Cast(bolt));
@@ -376,7 +376,7 @@ fn cr_602_5_601_2g_timing_restricted_mana_abilities_while_casting_as_while_payin
                     // (`exact`: every mana ability of the card has an "only if" or "only during your turn": the
                     // card is offered exactly when one of them may be activated. A card with an unrestricted one
                     // besides - a Verge's first, a plain "{T}: add" the step leaves to the priority after the cast,
-                    // ENGINE.md 222.3 - is offered while casting only if the payment may activate it.)
+                    // ENGINE.md 228.3 - is offered while casting only if the payment may activate it.)
                     let all = def.activated.iter().filter(|a| a.mana().is_some()).all(|a| a.only_if.is_some() || a.your_turn);
                     found.push((t, def.name.clone(), ad.instant_only || ad.sorcery, all));
                 }
@@ -438,7 +438,7 @@ fn cr_601_2g_hogaak_is_castable_only_through_a_chromatic_star_its_cost_paid_by_a
     // Four graveyard cards and two green creatures: Hogaak's {5} is one card short. Chromatic Star ({1}, {T},
     // sacrifice: one mana) activated while Hogaak is cast, its {1} paid by the Swamp (no mana pays Hogaak, CR 113.6e,
     // but a mana ability's cost is another payment: 605.3a), is the fifth card delve exiles. Castability counts it
-    // (`feed_castable`, ENGINE.md 222.4); without a mana source for the Star's {1} Hogaak isn't castable.
+    // (`feed_castable`, ENGINE.md 228.4); without a mana source for the Star's {1} Hogaak isn't castable.
     let board = |swamp: bool| {
         let mut b = vec!["Chromatic Star", GREEN, GREEN];
         if swamp {

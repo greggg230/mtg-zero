@@ -384,7 +384,7 @@ impl Game {
             return keys;
         }
         // (A cast's 601.2g step asked where a test written before it answers the payment: `PASS` first, the step's
-        // "pay the cost" - no mana ability activated while casting; ENGINE.md 222.)
+        // "pay the cost" - no mana ability activated while casting; ENGINE.md 228.)
         if self.pending.as_ref().is_some_and(|d| d.kind == crate::decision::DecisionKind::CastMana && d.action_of(c).is_none() && d.action_of(Choice::Pass).is_some()) {
             let mut keys = self.choose(Choice::Pass);
             keys.extend(self.choose(c));
@@ -660,7 +660,7 @@ impl Game {
             // division, splices, a ninjutsu attack, a trigger's event and
             // noted permanents (objects by place, a stack item by position).
             v.extend([s.cost_option as u64, s.alt as u64, h64(&s.from), s.delved as u64, s.x as u64, s.origin as u64]);
-            // (Its total cost locked by a mana ability activated while it is cast, CR 601.2f-g: ENGINE.md 222.)
+            // (Its total cost locked by a mana ability activated while it is cast, CR 601.2f-g: ENGINE.md 228.)
             v.push(self.locked_cost(s.id).map_or(u64::MAX, |c| h64(&c)));
             v.extend(s.division.iter().map(|&n| n as u64));
             v.extend(s.spliced.iter().map(|&d| d as u64));

@@ -304,7 +304,7 @@ impl Game {
             (K::Priority, Choice::Yes) => "Activate mana abilities".into(),
             (K::ActivateMana, Choice::Card(i)) => format!("Activate a mana ability of {}", nm(i)),
             (K::ActivateMana, Choice::Pass) => "Done activating mana abilities".into(),
-            // Mana abilities while casting a spell (CR 601.2g; ENGINE.md 222).
+            // Mana abilities while casting a spell (CR 601.2g; ENGINE.md 228).
             (K::CastMana, Choice::Card(i)) => format!("Activate a mana ability of {} while casting", nm(i)),
             (K::CastMana, Choice::Pass) => "Pay the cost".into(),
             (K::PayMana, Choice::Pass) => "Pay the rest from the pool".into(),

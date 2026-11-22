@@ -333,13 +333,13 @@ fn filter_reads(f: &Filter) -> Reads {
     }
 }
 
-/// Does filter `f` read whether a permanent is tapped (`filter_reads`; ENGINE.md 222.3)?
+/// Does filter `f` read whether a permanent is tapped (`filter_reads`; ENGINE.md 228.3)?
 pub(crate) fn filter_reads_tapped(f: &Filter) -> bool {
     filter_reads(f).tapped
 }
 
 /// What the rest of a spell's cast may change of the permanents' mana abilities, from its 601.2g step on
-/// (`Game::cast_rest_reach`; ENGINE.md 222.3): `leave`, the permanents it may remove; `chars`, whether a continuous
+/// (`Game::cast_rest_reach`; ENGINE.md 228.3): `leave`, the permanents it may remove; `chars`, whether a continuous
 /// effect may change some permanent's types or abilities; `unsettled`, whether a permanent may lose counters or a
 /// toughness change (a state-based action could then remove a permanent).
 pub(crate) struct RestReach {
@@ -669,7 +669,7 @@ impl Game {
 
     /// [`chars_may_change`](Self::chars_may_change); with `public`, a Blood Moon's and W3's grants read from the
     /// permanents on the battlefield (the game's `moon_game`, `w3.seen`: any card of the game's decks, hidden ones
-    /// too - read by the 601.2g step's collapse, ENGINE.md 222.3, no hidden card may decide it).
+    /// too - read by the 601.2g step's collapse, ENGINE.md 228.3, no hidden card may decide it).
     fn chars_may_change_in(&self, p: PlayerId, w: &Writes, hand: bool, public: bool) -> Change {
         let mut out = Change::default();
         if w.is_empty() {
@@ -819,12 +819,12 @@ impl Game {
         }
     }
 
-    /// Does condition `k` read whether a permanent is tapped (`cond_reads`; ENGINE.md 222.3)?
+    /// Does condition `k` read whether a permanent is tapped (`cond_reads`; ENGINE.md 228.3)?
     pub(crate) fn cond_reads_tapped(&self, k: &Cond) -> bool {
         self.cond_reads(k, CardIdx::new(0), &Writes { tapped: vec![CardIdx::new(0)], ..Writes::default() })
     }
 
-    /// What the rest of spell `card`'s cast (`item`) may change from its 601.2g step on (ENGINE.md 222.3): the step's
+    /// What the rest of spell `card`'s cast (`item`) may change from its 601.2g step on (ENGINE.md 228.3): the step's
     /// other mana abilities and the payment's mana (`mana_writes` over every source `p` has, convoke's and improvise's
     /// taps, delve's exiles, the life paid after the mana), every mana ability `p` may activate (a sacrifice of
     /// another permanent: any of `p`'s may leave; of its own; a counter removed), the cost's other parts
@@ -1357,7 +1357,7 @@ impl Game {
             _ => None,
         };
         // (A cast's mana abilities before its cost is paid, CR 601.2g: the
-        // step's options and its abilities' decisions, ENGINE.md 222.)
+        // step's options and its abilities' decisions, ENGINE.md 228.)
         own.or_else(|| self.cast_mana_floor(task))
     }
 

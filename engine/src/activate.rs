@@ -1784,12 +1784,12 @@ impl Game {
             if self.oracle && step_next && picks > 0 && only == 0 && units && (wn == 0 || wm == unit_mask) && wn as u32 + picks <= u8::MAX as u32 {
                 // (In the payment search, the mana's types not chosen yet: each one mana of a type of the mask, as the
                 // payment's castability counts it, `Game::pool_wild` - the search asks whether some combination
-                // completes the payment; ENGINE.md 222.4.)
+                // completes the payment; ENGINE.md 228.4.)
                 self.pool_wild[p as usize] = (wn + picks as u8, unit_mask);
             } else if self.oracle && picks > 1 {
                 // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order
                 // the mana was chosen in, so every order of one combination reaches one state - each combination once,
-                // not each sequence; ENGINE.md 222.4.)
+                // not each sequence; ENGINE.md 228.4.)
                 let mut combos: Vec<[u8; 6]> = vec![[0; 6]];
                 for _ in 0..picks {
                     let mut next: Vec<[u8; 6]> = Vec::new();

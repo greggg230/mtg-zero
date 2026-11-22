@@ -1131,7 +1131,7 @@ fn cr_601_2g_a_lotus_petal_is_no_source_of_hogaak_but_floated_first_it_is_delve_
         .at(Step::Main1, 0)
         .start();
     // (Castable: the Petal sacrificed during the cast is delve's fifth card, CR
-    // 601.2g; ENGINE.md 222, `rules_cast_mana.rs`.)
+    // 601.2g; ENGINE.md 228, `rules_cast_mana.rs`.)
     assert!(castable(&g, 0, Zone::Hand), "four cards, the Petal and two creatures: {}", opts(&g));
     g.choose(Choice::Yes);
     let petal = bf(&g, 0, "Lotus Petal");
@@ -1466,7 +1466,7 @@ fn cr_601_2g_a_lotus_petal_sacrificed_while_hogaak_is_cast_feeds_escapes_exile()
     // there and a Lotus Petal on the battlefield, the Petal sacrificed for
     // mana while Hogaak is cast (CR 601.2g: mana abilities before the cost is
     // paid, its mana floating: Hogaak's can't be spent) is the third (ENGINE.md
-    // 222, which replaced lane A's reading that Hogaak's payment activates no
+    // 228, which replaced lane A's reading that Hogaak's payment activates no
     // mana source). Both permissions are routes; cast by escape, the 601.2g
     // step must sacrifice the Petal (`PASS` alone can't pay). The Petal floated
     // first (its mana stays) is the same.
