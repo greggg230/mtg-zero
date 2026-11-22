@@ -526,6 +526,33 @@ impl Game {
         self.ref_lki.iter().rev().find(|x| x.0 == r).filter(|x| x.2 >> viewer & 1 != 0).map(|x| x.1)
     }
 
+    /// `players` (a bit per player) lose track of which of `cards` is which
+    /// (ENGINE.md 233: a shuffle, a private rearrangement, cards put in an
+    /// order nobody knows): their library cards' `Obj::lost`. One card alone
+    /// is where it was put, so nobody loses track of it.
+    pub(crate) fn lose_track(&mut self, cards: &[CardIdx], players: u8) {
+        if cards.len() < 2 {
+            return;
+        }
+        for &c in cards {
+            let o = &mut self.objs[c.i()];
+            if o.zone == Zone::Library {
+                o.lost |= players;
+            }
+        }
+    }
+
+    /// Does `r` name an existing object as `viewer` sees it (ENGINE.md 233)?
+    /// Live (CR 400.7), and not a library card `viewer` lost track of
+    /// (`Obj::lost`): a draw, a mill or a search may have taken that card or
+    /// one it was mixed with, and the viewer can't tell which - in one of its
+    /// worlds the reference is live while in another, with the same keys, its
+    /// object left. So the viewer's view, row and loop hash show such a
+    /// reference as they show a gone object's.
+    pub(crate) fn ref_seen_live(&self, viewer: PlayerId, r: ObjRef) -> bool {
+        self.live(r) && !(self.objs[r.idx.i()].zone == Zone::Library && self.objs[r.idx.i()].lost >> viewer & 1 != 0)
+    }
+
     /// At a turn's start: the departures no reference of the public state
     /// names any more are forgotten (`Game::ref_lki`).
     pub(crate) fn prune_ref_lki(&mut self) {
@@ -993,6 +1020,9 @@ impl Game {
             if !self.finds_told.is_empty() && domain.iter().any(|&c| !told.contains(&c) && !self.finds_told.contains(&c)) {
                 self.finds_told.retain(|c| !domain.contains(c));
             }
+            // (ENGINE.md 233: which of the domain's cards is which is the owner's alone now.)
+            let mixed: Vec<CardIdx> = domain.iter().copied().filter(|c| !told.contains(c)).collect();
+            self.lose_track(&mixed, 1 << q);
             for c in domain {
                 if told.contains(&c) {
                     continue;
@@ -1054,6 +1084,8 @@ impl Game {
         for &c in cards {
             self.objs[c.i()].known &= !(1 << owner);
         }
+        // (ENGINE.md 233: nobody can tell these cards apart by where they are.)
+        self.lose_track(cards, 0b11);
         self.tidy_clouds();
     }
 

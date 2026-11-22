@@ -2185,7 +2185,8 @@ impl Game {
                     digits(&mut st[stack::EXILE_TARGET + 2..stack::EXILE_TARGET + 34], ids, self.objs[r.idx.i()].def);
                 }
             }
-            if let Some(&r) = item.noted.first().filter(|&&r| self.live(r)) {
+            // (A noted library card the knower lost track of: as a gone one, ENGINE.md 233.)
+            if let Some(&r) = item.noted.first().filter(|&&r| self.ref_seen_live(knower, r)) {
                 let ob = &self.objs[r.idx.i()];
                 if ob.zone == Zone::Battlefield {
                     st[stack::NOTED_PERM + (ob.controller != me) as usize] = 1.0;

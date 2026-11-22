@@ -473,6 +473,109 @@ fn cr_701_25a_a_surveiled_blightsteel_colossus_waits_where_the_pile_s_order_does
     assert_eq!(seen[0].0, seen[1].0, "P1's view: the order of P0's looked-at cards shows");
 }
 
+// ---- ENGINE.md 233: a reference to a library card its viewer lost track of -------
+
+/// ENGINE.md 233's state: P0 casts Faithless Looting with Ivora, Insatiable Heir on the battlefield and discards
+/// Blightsteel Colossus and an Island; the Colossus' replacement shuffles it into P0's library (CR 614.1a, 701.20a)
+/// while Ivora's discard trigger, on the stack, names it there. Then P0 casts Frantic Search, draws two cards of the
+/// three - the Colossus in some shuffles, not in others - and discards two Islands. The game at the priority after,
+/// Ivora's trigger still on the stack, and whether the Colossus was drawn.
+fn shuffled_colossus_then_a_draw(seed: u64) -> (Game, bool) {
+    let mut g = scen()
+        .seed(seed)
+        .battlefield(0, &["Ivora, Insatiable Heir", "Mountain", "Island", "Island", "Island"])
+        .hand(0, &["Faithless Looting", "Blightsteel Colossus", "Frantic Search", "Island"])
+        .library(0, &["Island"; 4])
+        .library(1, &["Island"; 8])
+        .at(Step::Main1, 0)
+        .start();
+    let bs = g.card(0, "Blightsteel Colossus", Zone::Hand);
+    let search = g.card(0, "Frantic Search", Zone::Hand);
+    let looting = g.card(0, "Faithless Looting", Zone::Hand);
+    // Discards: the Colossus while it is in the hand (Looting's), never Frantic Search; else an Island.
+    let discard = move |looting_now: bool| {
+        move |g: &Game| {
+            let opts = options(g);
+            if looting_now && opts.contains(&Choice::Card(bs)) {
+                return Some(Choice::Card(bs));
+            }
+            opts.into_iter().find(|&c| matches!(c, Choice::Card(x) if x != search && x != bs && g.obj(x).zone == Zone::Hand))
+        }
+    };
+    g.choose(Choice::Cast(looting));
+    finish(&mut g, |g| options(g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if g.name(*x) == "Mountain")));
+    g.pass();
+    g.pass();
+    finish(&mut g, discard(true));
+    assert_eq!(g.obj(bs).zone, Zone::Library, "{}", log(&g));
+    let named = g.stack().iter().any(|s| s.ev.obj.is_some_and(|r| r.idx == bs && g.live(r)));
+    assert!(named, "Ivora's trigger names the Colossus in the library: {}", log(&g));
+    assert_eq!(g.player(0).library.len(), 3, "{}", log(&g));
+    // Frantic Search above Ivora's triggers: two of the three cards drawn.
+    assert!(at_priority(&g) && g.to_move() == Some(0), "{}", log(&g));
+    g.choose(Choice::Cast(search));
+    finish(&mut g, |_| None);
+    g.pass();
+    g.pass();
+    finish(&mut g, discard(false));
+    assert!(at_priority(&g), "{}", log(&g));
+    assert_eq!(g.player(0).library.len(), 1, "the draws: {}", log(&g));
+    assert!(g.stack().iter().any(|s| s.ev.obj.is_some_and(|r| r.idx == bs)), "Ivora's trigger still names it: {}", log(&g));
+    (g.clone(), g.obj(bs).zone == Zone::Hand)
+}
+
+/// CR 701.20a (a shuffle: nobody knows the library's new order), 400.2 (a library is hidden), ENGINE.md 233 (the fuzz
+/// steward's queue entry 32da3af07aa6: default game 100219136 at e9ff0e24 under the `fuzz` profile, the open-decklist
+/// walk of P0's: "same keys, different views (first at 628 ...: Some(3000) / Some(7777))"): after the shuffle a draw
+/// may take the Colossus Ivora's trigger names or an Island, and the other player can't tell which. Its view and its
+/// row showed the reference live in the library in one game and gone in the other (`view_live_place` 3000 / 7777;
+/// `rf::LIVE` and the zone / `rf::STALE_KEY`). Now both show what a gone object's reference shows - to P0 too, who saw
+/// what it drew but not which of the library's places the Colossus had been shuffled to. A world of the other player's
+/// keeps the Colossus' slot where the real game has it, so the real game's rows told that player whether its owner
+/// had drawn it.
+#[test]
+fn cr_701_20a_a_reference_to_a_card_shuffled_into_a_library_does_not_show_whether_it_was_drawn() {
+    let mut seen: [Option<(Vec<u64>, Vec<f32>, Vec<u64>, Vec<f32>)>; 2] = [None, None];
+    for seed in 0..200 {
+        let (g, drawn) = shuffled_colossus_then_a_draw(seed);
+        g.check_knowledge().unwrap();
+        let x = (g.view_of(1), encoding(&g, 1), g.view_of(0), encoding(&g, 0));
+        match &seen[drawn as usize] {
+            None => seen[drawn as usize] = Some(x),
+            // (Every game of a kind looks the same to both players.)
+            Some(y) => assert!(x.0 == y.0 && x.1 == y.1, "seed {seed}: P1's view or row differs within a kind"),
+        }
+        if seen.iter().all(|s| s.is_some()) {
+            break;
+        }
+    }
+    let [Some(kept), Some(drawn)] = seen else { panic!("200 shuffles never put the Colossus on top, or always did") };
+    assert_eq!(kept.1, drawn.1, "P1's row shows whether P0 drew the Colossus the trigger names");
+    assert_eq!(kept.0, drawn.0, "P1's view shows whether P0 drew the Colossus the trigger names");
+    // P0 sees its own draw (its hand differs), but the trigger's reference shows it the same in both games.
+    assert_ne!(kept.2, drawn.2, "P0 knows what it drew");
+}
+
+/// ENGINE.md 233: what a library card's lost track (`Obj::lost`) leaves alone. A card put on top of a library
+/// stays a tracked object (its place is public), and a one-card "shuffle" leaves its card where it was; after a
+/// shuffle of several cards both players lost track of every card in it, its owner too, until the card leaves.
+#[test]
+fn engine_233_who_loses_track_of_a_library_card() {
+    let (g, drawn) = shuffled_colossus_then_a_draw(0);
+    let lib = g.player(0).library.clone();
+    for &c in &lib {
+        assert_eq!(g.obj(c).lost, 0b11, "a shuffled library card: both players lost track");
+    }
+    let bs = g.find_card(0, "Blightsteel Colossus", Zone::Library).or(g.find_card(0, "Blightsteel Colossus", Zone::Hand)).unwrap();
+    if drawn {
+        assert_eq!(g.obj(bs).lost, 0, "a zone change clears it (a new object)");
+    }
+    // P1's library was never shuffled: tracked.
+    for &c in &g.player(1).library {
+        assert_eq!(g.obj(c).lost, 0);
+    }
+}
+
 // ---- 51.5: a split card cast from Shelldock Isle -------------------------------
 
 /// CR 709.3 (a split card is cast as one of its halves), 712.11b / 601.2a

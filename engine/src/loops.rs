@@ -163,6 +163,9 @@ pub struct LoopOpen {
 /// its rank (module docs).
 pub(crate) struct Canon {
     ts: Vec<u32>,
+    /// Whose loop hash (the decider's view): a reference is live as this
+    /// player sees it (`Game::ref_seen_live`, ENGINE.md 233).
+    viewer: PlayerId,
 }
 
 impl Canon {
@@ -334,8 +337,8 @@ impl Game {
     }
 
     fn loop_hash_here(&self, viewer: PlayerId, frame: Option<&Frame>) -> u64 {
-        let stale = self.loop_stale_refs(frame);
-        let canon = self.loop_canon(&stale);
+        let stale = self.loop_stale_refs(viewer, frame);
+        let canon = self.loop_canon(&stale, viewer);
         let mut v: Vec<u64> = Vec::with_capacity(512);
         self.view_state(viewer, Some(&canon), &mut v);
         self.loop_extras(&canon, &mut v);
@@ -347,12 +350,12 @@ impl Game {
             // asking `Task::Run` is off the agenda both when the options are
             // made and when the answer comes).
             v.push(u64::MAX - 30);
-            self.frame_canon(f, &mut v);
+            self.frame_canon(viewer, f, &mut v);
             for t in &self.agenda {
                 match t {
                     Task::Run(fr) => {
                         v.push(u64::MAX - 31);
-                        self.frame_canon(fr, &mut v);
+                        self.frame_canon(viewer, fr, &mut v);
                     }
                     Task::FinishResolve { id } => v.extend([u64::MAX - 32, self.stack_pos(*id)]),
                     t => v.push(h64(&std::mem::discriminant(t))),
@@ -391,11 +394,12 @@ impl Game {
     /// The gone objects (stale references, CR 400.7) that stack items,
     /// waiting and delayed triggered abilities and the frames name: their
     /// last known information is hashed (`loop_lki`). In order of first
-    /// mention.
-    fn loop_stale_refs(&self, frame: Option<&Frame>) -> Vec<ObjRef> {
+    /// mention. (Gone as `viewer` sees them: a library card it lost track of
+    /// too, ENGINE.md 233.)
+    fn loop_stale_refs(&self, viewer: PlayerId, frame: Option<&Frame>) -> Vec<ObjRef> {
         let mut out: Vec<ObjRef> = Vec::new();
         let mut add = |r: ObjRef| {
-            if !self.live(r) && !out.contains(&r) {
+            if !self.ref_seen_live(viewer, r) && !out.contains(&r) {
                 out.push(r);
             }
         };
@@ -449,7 +453,7 @@ impl Game {
     /// the phased-out ones'), the continuous effects', the copy and control
     /// effects', the granted triggered abilities', and when the gone objects
     /// `stale` lost their abilities.
-    fn loop_canon(&self, stale: &[ObjRef]) -> Canon {
+    fn loop_canon(&self, stale: &[ObjRef], viewer: PlayerId) -> Canon {
         let mut ts: Vec<u32> = Vec::new();
         ts.extend(self.battlefield.iter().chain(self.w3.phased.iter()).map(|&c| self.objs[c.i()].timestamp));
         ts.extend(self.effects.iter().filter(|e| !inert(e)).map(|e| e.ts));
@@ -462,33 +466,33 @@ impl Game {
         ts.extend(self.w3.lki_loss.iter().filter(|x| stale.contains(&x.0)).map(|x| x.1));
         ts.sort_unstable();
         ts.dedup();
-        Canon { ts }
+        Canon { ts, viewer }
     }
 
     /// A duration, its object by place.
-    fn until_canon(&self, u: &Until) -> u64 {
+    fn until_canon(&self, viewer: PlayerId, u: &Until) -> u64 {
         match u {
             Until::EndOfTurn => 0,
             Until::Forever => 1,
             Until::YourNextTurn => 2,
             Until::WhileSource => 4,
-            Until::WhileOnBattlefield(r) => 3000 + self.view_live_place(*r),
+            Until::WhileOnBattlefield(r) => 3000 + self.view_live_place(viewer, *r),
         }
     }
 
     /// An event: its subjects by place, its spell or ability by stack
     /// position.
-    fn ev_canon(&self, e: &EvCtx, v: &mut Vec<u64>) {
+    fn ev_canon(&self, viewer: PlayerId, e: &EvCtx, v: &mut Vec<u64>) {
         let EvCtx { player, obj, obj2, amount, item } = e;
-        let lp = |r: &Option<ObjRef>| r.map_or(u64::MAX, |r| self.view_live_place(r));
+        let lp = |r: &Option<ObjRef>| r.map_or(u64::MAX, |r| self.view_live_place(viewer, r));
         v.extend([player.map_or(9, |p| p as u64), lp(obj), lp(obj2), *amount, self.stack_pos(*item)]);
     }
 
     /// A target by place (a stack item by position; a gone object apart).
-    fn target_canon(&self, t: &Target) -> u64 {
+    fn target_canon(&self, viewer: PlayerId, t: &Target) -> u64 {
         match *t {
             Target::Player(p) => p as u64,
-            Target::Obj(o) => ((!self.live(o) as u64) << 32) | (100 + self.view_place(o.idx)),
+            Target::Obj(o) => ((!self.ref_seen_live(viewer, o) as u64) << 32) | (100 + self.view_place(o.idx)),
             Target::Stack(id) => 9000 + self.stack_pos(id),
         }
     }
@@ -507,7 +511,7 @@ impl Game {
         // while its permanents enter, `Game::begin_entering`).
         for e in &self.entries {
             v.extend([e.held.len() as u64, k.rank(e.since), e.base as u64, e.open as u64]);
-            v.extend(e.held.iter().flat_map(|&(r, note)| [self.view_live_place(r), note as u64]));
+            v.extend(e.held.iter().flat_map(|&(r, note)| [self.view_live_place(k.viewer, r), note as u64]));
         }
         v.push(u64::MAX - 22);
         // An object's power and toughness switches, by parity (module docs):
@@ -517,7 +521,7 @@ impl Game {
             .iter()
             .filter(|e| is_object_switch(e))
             .map(|e| match e.on {
-                Affected::Obj(r) => (self.view_live_place(r), self.until_canon(&e.until)),
+                Affected::Obj(r) => (self.view_live_place(k.viewer, r), self.until_canon(k.viewer, &e.until)),
                 Affected::Group(_) => unreachable!("is_object_switch"),
             })
             .collect();
@@ -539,7 +543,7 @@ impl Game {
         // Copy effects (CR 707, 613.2): in their timestamp order.
         for x in &self.copies {
             let crate::copies::CopyFx { obj, ts, until, vals, own } = x;
-            v.extend([self.view_live_place(*obj), k.rank(*ts), self.until_canon(until), h64(vals), *own as u64]);
+            v.extend([self.view_live_place(k.viewer, *obj), k.rank(*ts), self.until_canon(k.viewer, until), h64(vals), *own as u64]);
         }
         v.push(u64::MAX - 23);
         let mut ctl = self.w6.control.clone();
@@ -552,24 +556,24 @@ impl Game {
         for s in self.stack.iter().filter(|s| !loop_product(s)) {
             v.push(s.discarded_land as u64);
             v.push(match s.kind {
-                StackKind::Ability { source, .. } if self.live(source) => self.objs[source.idx.i()].flips.wrapping_sub(s.flips) as u64,
+                StackKind::Ability { source, .. } if self.ref_seen_live(k.viewer, source) => self.objs[source.idx.i()].flips.wrapping_sub(s.flips) as u64,
                 _ => u64::MAX,
             });
         }
         v.push(u64::MAX - 25);
         // Triggered abilities: their sources and full events.
         for w in &self.waiting {
-            v.push(self.view_live_place(w.source));
-            self.ev_canon(&w.ev, v);
+            v.push(self.view_live_place(k.viewer, w.source));
+            self.ev_canon(k.viewer, &w.ev, v);
         }
         v.push(u64::MAX - 26);
         for d in &self.delayed {
-            v.push(self.view_live_place(d.source));
-            self.ev_canon(&d.ev, v);
+            v.push(self.view_live_place(k.viewer, d.source));
+            self.ev_canon(k.viewer, &d.ev, v);
         }
         v.push(u64::MAX - 27);
         for t in &self.temp_triggers {
-            v.extend([self.view_live_place(t.source), t.obj.map_or(u64::MAX, |r| self.view_live_place(r))]);
+            v.extend([self.view_live_place(k.viewer, t.source), t.obj.map_or(u64::MAX, |r| self.view_live_place(k.viewer, r))]);
         }
         v.push(u64::MAX - 28);
     }
@@ -591,7 +595,7 @@ impl Game {
         v.push(u64::MAX - 42);
         for &(x, h) in &self.lki_attached {
             if x == r {
-                v.push(self.view_live_place(h));
+                v.push(self.view_live_place(k.viewer, h));
             }
         }
         v.push(u64::MAX - 43);
@@ -599,7 +603,7 @@ impl Game {
             if *x == r {
                 let crate::game::DamageSource { controller, deathtouch, lifelink, infect, spell, colors, types, obj } = d;
                 v.extend([*controller as u64, *deathtouch as u64, *lifelink as u64, *infect as u64, *spell as u64]);
-                v.extend([h64(colors), *types as u64, obj.map_or(u64::MAX, |o| self.view_live_place(o))]);
+                v.extend([h64(colors), *types as u64, obj.map_or(u64::MAX, |o| self.view_live_place(k.viewer, o))]);
             }
         }
         v.push(u64::MAX - 44);
@@ -618,13 +622,13 @@ impl Game {
         for (x, d, item, mv) in &self.spell_lki {
             if *x == r {
                 v.extend([*d as u64, *mv]);
-                self.item_canon(item, v);
+                self.item_canon(k.viewer, item, v);
             }
         }
         v.push(u64::MAX - 47);
         for &(x, h) in &self.w3.lki_host {
             if x == r {
-                v.push(self.view_live_place(h));
+                v.push(self.view_live_place(k.viewer, h));
             }
         }
         v.push(u64::MAX - 48);
@@ -638,7 +642,7 @@ impl Game {
 
     /// A stack item that left the stack (`spell_lki`), every field
     /// (objects by place).
-    fn item_canon(&self, s: &StackItem, v: &mut Vec<u64>) {
+    fn item_canon(&self, viewer: PlayerId, s: &StackItem, v: &mut Vec<u64>) {
         let StackItem {
             id: _,
             kind,
@@ -663,19 +667,19 @@ impl Game {
         } = s;
         match *kind {
             StackKind::Spell { card } => v.extend([1, self.view_place(card)]),
-            StackKind::Ability { ability, source } => v.extend([2, h64(&ability), self.view_live_place(source)]),
+            StackKind::Ability { ability, source } => v.extend([2, h64(&ability), self.view_live_place(viewer, source)]),
         }
         v.extend([*controller as u64, *cost_option as u64, *alt as u64, h64(from), *delved as u64, *delve_floor as u64]);
         v.extend([*discarded_land as u64, *x as u64, *flips as u64, h64(origin), *times as u64]);
-        v.extend(targets.iter().flat_map(|(r, t)| [*r as u64, self.target_canon(t)]));
+        v.extend(targets.iter().flat_map(|(r, t)| [*r as u64, self.target_canon(viewer, t)]));
         v.push(u64::MAX - 50);
         v.extend(modes.iter().map(|&m| m as u64));
         v.push(u64::MAX - 51);
-        self.ev_canon(ev, v);
+        self.ev_canon(viewer, ev, v);
         v.extend(division.iter().copied());
         v.push(u64::MAX - 52);
-        v.push(attack_as.map_or(u64::MAX, |a| a.map_or(u64::MAX - 1, |r| self.view_live_place(r))));
-        v.extend(noted.iter().map(|&r| self.view_live_place(r)));
+        v.push(attack_as.map_or(u64::MAX, |a| a.map_or(u64::MAX - 1, |r| self.view_live_place(viewer, r))));
+        v.extend(noted.iter().map(|&r| self.view_live_place(viewer, r)));
         v.push(u64::MAX - 53);
         v.extend(spliced.iter().map(|&d| d as u64));
         v.push(u64::MAX - 54);
@@ -684,7 +688,7 @@ impl Game {
     /// A resolution frame, every field (exhaustive: a new field is a compile
     /// error here), objects by public place: the program and op running
     /// (`ability`, `pc`) and its state.
-    fn frame_canon(&self, f: &Frame, v: &mut Vec<u64>) {
+    fn frame_canon(&self, viewer: PlayerId, f: &Frame, v: &mut Vec<u64>) {
         let Frame {
             ability,
             pc,
@@ -712,16 +716,16 @@ impl Game {
             page,
             step,
         } = f;
-        let lp = |r: ObjRef| self.view_live_place(r);
+        let lp = |r: ObjRef| self.view_live_place(viewer, r);
         let pl = |c: &CardIdx| self.view_place(*c);
         v.extend([h64(ability), *pc as u64, lp(*source), *source_def as u64, *controller as u64, *legal, *i as u64]);
-        v.extend(targets.iter().flat_map(|(r, t)| [*r as u64, self.target_canon(t)]));
+        v.extend(targets.iter().flat_map(|(r, t)| [*r as u64, self.target_canon(viewer, t)]));
         v.push(u64::MAX - 60);
         v.push(lki.map_or(u64::MAX, |l| h64(&l)));
         v.extend(pile.iter().map(pl));
         v.push(u64::MAX - 61);
         v.extend([*floor as u64, *x as u64]);
-        self.ev_canon(ev, v);
+        self.ev_canon(viewer, ev, v);
         v.extend(picked.iter().map(pl));
         v.push(u64::MAX - 62);
         v.extend(picked_defs.iter().map(|&d| d as u64));
@@ -735,7 +739,7 @@ impl Game {
         v.extend(noted.iter().map(|&r| lp(r)));
         v.push(u64::MAX - 66);
         // (Transformations of the source since, CR 701.27f.)
-        v.push(if self.live(*source) { self.objs[source.idx.i()].flips.wrapping_sub(*flips) as u64 } else { u64::MAX });
+        v.push(if self.ref_seen_live(viewer, *source) { self.objs[source.idx.i()].flips.wrapping_sub(*flips) as u64 } else { u64::MAX });
         v.extend([h64(page), h64(step)]);
     }
 }

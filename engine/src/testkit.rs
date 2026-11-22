@@ -564,10 +564,11 @@ impl Game {
         }
     }
 
-    /// [`view_place`](Self::view_place) of a reference; a stale one names
-    /// no object (7777).
-    pub(crate) fn view_live_place(&self, r: crate::ids::ObjRef) -> u64 {
-        if self.live(r) {
+    /// [`view_place`](Self::view_place) of a reference as `viewer` sees it; a
+    /// stale one names no object (7777), nor does a library card `viewer`
+    /// lost track of (`Game::ref_seen_live`, ENGINE.md 233).
+    pub(crate) fn view_live_place(&self, viewer: PlayerId, r: crate::ids::ObjRef) -> u64 {
+        if self.ref_seen_live(viewer, r) {
             self.view_place(r.idx)
         } else {
             7777
@@ -664,7 +665,7 @@ impl Game {
         // not observable): battlefield position, stack position, their
         // definition in another public zone (`view_place`).
         let place = |c: CardIdx| -> u64 { self.view_place(c) };
-        let live_place = |r: crate::ids::ObjRef| -> u64 { self.view_live_place(r) };
+        let live_place = |r: crate::ids::ObjRef| -> u64 { self.view_live_place(viewer, r) };
         for s in &self.stack {
             // (The loop hash reads the board: a loop action's own stack
             // object is no progress, `loops::loop_product`.)
@@ -832,14 +833,14 @@ impl Game {
         }
         v.push(u64::MAX);
         for p in 0..2usize {
-            for r in &self.players[p].attacked_with {
-                v.push(if self.live(*r) { place(r.idx) } else { 7777 });
+            for &r in &self.players[p].attacked_with {
+                v.push(live_place(r));
             }
             v.push(u64::MAX);
         }
         for &(r, n) in &self.resolved {
             // (Which object, by its place; `inc` is not observable.)
-            v.extend([if self.live(r) { place(r.idx) } else { 7777 }, n as u64]);
+            v.extend([live_place(r), n as u64]);
         }
         v.push(u64::MAX);
         for d in &self.delayed {

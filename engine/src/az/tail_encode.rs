@@ -72,7 +72,11 @@ pub mod seg {
 /// that no longer names its object: (k + 1) / 32, k its rank among the row's stale references in
 /// the order the encoder meets them (equal keys: the same gone object, Memory Jar's links and its
 /// delayed trigger); `DIGITS` the identity (`encode::digits`) where the viewer knows it: a
-/// permanent's as its slot shows it, any other card's only where `knows`.
+/// permanent's as its slot shows it, any other card's only where `knows`. A live reference to a
+/// library card the viewer lost track of (`Game::ref_seen_live`, ENGINE.md 233) is written as a
+/// stale one (a key, no zone, no identity): whether it still names its object is not the viewer's
+/// to know. An object named by where it is now (a find by its place, a pick in progress, a
+/// counter's or a face-down card's object: `Cx::write_obj`) is live.
 pub mod rf {
     pub const PRESENT: usize = 0;
     pub const LIVE: usize = 1;
@@ -775,11 +779,27 @@ impl<'g> Cx<'g> {
     ///   viewer knew it then. Never the card's identity now: that is a new
     ///   object, which may have joined a hand's interchangeable twins or a
     ///   library dealt again in each world.
+    /// * **A library card the viewer lost track of** (`Game::ref_seen_live`,
+    ///   ENGINE.md 233): as a stale reference - nothing (it has no departure
+    ///   recorded), as its departure would record for the viewer.
     pub fn ref_def(&self, r: ObjRef) -> Option<DefId> {
-        let g = self.g;
-        if !g.live(r) {
-            return g.lki_identity(self.knower, r);
+        if !self.live(r) {
+            return self.g.lki_identity(self.knower, r);
         }
+        self.live_def(r)
+    }
+
+    /// The identity the viewer sees of the object at card slot `c` now, named
+    /// by where it is (a find by its place, a pick in progress, a counter's or
+    /// a face-down card's object), not by a reference the public state holds:
+    /// [`ref_def`](Self::ref_def)'s live branch (ENGINE.md 233: a library card
+    /// the viewer lost track of is lost only to a reference made before).
+    pub fn obj_def(&self, c: CardIdx) -> Option<DefId> {
+        self.live_def(self.g.obj_ref(c))
+    }
+
+    fn live_def(&self, r: ObjRef) -> Option<DefId> {
+        let g = self.g;
         let o = &g.objs[r.idx.i()];
         assert!(
             !(o.zone == Zone::Hand && o.owner != self.knower && g.decider_of(o.owner) != self.knower) || g.told_apart(r.idx),
@@ -789,21 +809,46 @@ impl<'g> Cx<'g> {
         self.seen_def(r.idx)
     }
 
+    /// Does reference `r` name an existing object as the knower sees it
+    /// (`Game::ref_seen_live`, ENGINE.md 233)? A library card the knower lost
+    /// track of is written as a gone object is.
+    pub fn live(&self, r: ObjRef) -> bool {
+        self.g.ref_seen_live(self.knower, r)
+    }
+
     /// An object reference (`rf::*`), its identity [`ref_def`](Self::ref_def)'s.
     pub fn write_ref(&self, out: &mut [f32], r: ObjRef) {
         let d = self.ref_def(r);
         self.write_ref_as(out, r, d);
     }
 
-    /// An object reference (`rf::*`) with identity `d` (`write_ref`; a pick in
-    /// progress whose card is hidden from the viewer: none).
+    /// The object at card slot `c` now (`rf::*`), named by where it is - not a
+    /// reference the public state holds - with its identity
+    /// [`obj_def`](Self::obj_def)'s: written live.
+    pub fn write_obj(&self, out: &mut [f32], c: CardIdx) {
+        let d = self.obj_def(c);
+        self.write_obj_as(out, c, d);
+    }
+
+    /// [`write_obj`](Self::write_obj) with identity `d` (a pick in progress
+    /// whose card is hidden from the viewer: none).
+    fn write_obj_as(&self, out: &mut [f32], c: CardIdx, d: Option<DefId>) {
+        self.write_ref_parts(out, self.g.obj_ref(c), d, true);
+    }
+
+    /// An object reference (`rf::*`) with identity `d` (`write_ref`).
     fn write_ref_as(&self, out: &mut [f32], r: ObjRef, d: Option<DefId>) {
+        self.write_ref_parts(out, r, d, self.live(r));
+    }
+
+    /// `rf::*` of the object `r` names: as a live one's (`live`) or a gone one's.
+    fn write_ref_parts(&self, out: &mut [f32], r: ObjRef, d: Option<DefId>, live: bool) {
         let g = self.g;
         let c = r.idx;
         let o = &g.objs[c.i()];
         out[rf::PRESENT] = 1.0;
         let side_of = |p: PlayerId| if p == self.me { rf::MINE } else { rf::THEIRS };
-        if g.live(r) {
+        if live {
             out[rf::LIVE] = 1.0;
             out[rf::ZONE + zone_index(o.zone)] = 1.0;
             let who = match o.zone {
@@ -1022,7 +1067,7 @@ fn write_face_down(cx: &Cx, tail: &mut TailBuf) {
         let s = &mut x[CODE..];
         s[fd::PRESENT] = 1.0;
         s[if exiled { fd::EXILED } else { fd::PERMANENT }] = 1.0;
-        cx.write_ref(&mut s[fd::OBJ..fd::OBJ + rf::W], g.obj_ref(c));
+        cx.write_obj(&mut s[fd::OBJ..fd::OBJ + rf::W], c);
         s[if o.owner == cx.me { fd::OWNER_MINE } else { fd::OWNER_THEIRS }] = 1.0;
         s[fd::OWNER_KNOWS] = (o.known >> o.owner & 1) as f32;
         s[fd::OTHER_KNOWS] = (o.known >> crate::ids::opp(o.owner) & 1) as f32;
@@ -1278,12 +1323,12 @@ fn write_counters(cx: &Cx, tail: &mut TailBuf) {
         for (kind, n) in g.counters_of(c) {
             let x = tail.token(seg::COUNTERS, k);
             k += 1;
-            if let Some(d) = cx.ref_def(g.obj_ref(c)) {
+            if let Some(d) = cx.obj_def(c) {
                 code(&mut x[..CODE], g.db, cx.ids, d);
             }
             let s = &mut x[CODE..];
             s[ct::PRESENT] = 1.0;
-            cx.write_ref(&mut s[ct::OBJ..ct::OBJ + rf::W], g.obj_ref(c));
+            cx.write_obj(&mut s[ct::OBJ..ct::OBJ + rf::W], c);
             let i = match kind {
                 K::P1P1 => 0,
                 K::M1M1 => 1,
@@ -1315,7 +1360,7 @@ fn number(cx: &Cx, tail: &mut TailBuf, k: &mut u32, p: Option<PlayerId>, c: Opti
     let x = tail.token(seg::NUMBERS, *k);
     *k += 1;
     if let Some(c) = c {
-        if let Some(d) = cx.ref_def(g.obj_ref(c)) {
+        if let Some(d) = cx.obj_def(c) {
             code(&mut x[..CODE], g.db, cx.ids, d);
         }
     }
@@ -1325,7 +1370,7 @@ fn number(cx: &Cx, tail: &mut TailBuf, k: &mut u32, p: Option<PlayerId>, c: Opti
         s[if p == cx.me { nb::PLAYER_ME } else { nb::PLAYER_OPP }] = 1.0;
     }
     if let Some(c) = c {
-        cx.write_ref(&mut s[nb::OBJ..nb::OBJ + rf::W], g.obj_ref(c));
+        cx.write_obj(&mut s[nb::OBJ..nb::OBJ + rf::W], c);
     }
     s[nb::WHICH + which] = 1.0;
     s[nb::NEG] = (v < 0) as u8 as f32;
@@ -1431,7 +1476,7 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     }
     // The marks that relate an object to another object or an ability, any number per object.
     for &(o, m) in &g.marks {
-        if !g.live(o) {
+        if !cx.live(o) {
             continue;
         }
         let (kind, def, slot, b): (usize, Option<DefId>, Option<u8>, Option<ObjRef>) = match m {
@@ -1511,7 +1556,7 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
                 code(&mut x[..CODE], g.db, ids, d);
             }
             let st = &mut x[CODE..];
-            cx.write_ref_as(&mut st[lk::B..lk::B + rf::W], g.obj_ref(c), d);
+            cx.write_obj_as(&mut st[lk::B..lk::B + rf::W], c, d);
             st[lk::RANK] = (rank + 1) as f32 / 8.0;
             st[if by_me { lk::BY_ME } else { lk::BY_OPP }] = 1.0;
             st[lk::DEPTH] = depth as f32 / 8.0;
@@ -1540,14 +1585,14 @@ fn write_found(cx: &Cx, tail: &mut TailBuf) {
         return;
     }
     for (k, c) in g.finds_by_place().into_iter().enumerate() {
-        let r = g.obj_ref(c);
         let x = tail.token(seg::FOUND, k as u32);
-        if let Some(d) = cx.ref_def(r) {
+        // (By its place: the object there now, ENGINE.md 233.)
+        if let Some(d) = cx.obj_def(c) {
             code(&mut x[..CODE], g.db, cx.ids, d);
         }
         let s = &mut x[CODE..];
         s[fs::PRESENT] = 1.0;
-        cx.write_ref(&mut s[fs::OBJ..fs::OBJ + rf::W], r);
+        cx.write_obj(&mut s[fs::OBJ..fs::OBJ + rf::W], c);
         let o = &g.objs[c.i()];
         if o.zone == Zone::Library {
             let lib = &g.players[o.owner as usize].library;

@@ -111,6 +111,14 @@ pub struct Obj {
     pub struck_first: bool,
     /// Bit p: player p knows the card's identity (hidden zones; ENGINE.md 10).
     pub known: u8,
+    /// Bit p: player p lost track of this library card among others since it
+    /// entered the library - a shuffle (CR 701.20a), a private rearrangement
+    /// p didn't make, cards put in an order nobody knows - so p can't tell it
+    /// from the cards it was mixed with, and a reference naming it tells p no
+    /// more than a reference to a gone object would (`Game::ref_seen_live`,
+    /// ENGINE.md 233). Read only in a library; a zone change clears it (a new
+    /// object, CR 400.7).
+    pub lost: u8,
     /// The permanent this one (an Equipment) is attached to (CR 301.5);
     /// stale once the host leaves, until SBA 704.5n unattaches it.
     pub attached: Option<ObjRef>,
@@ -1512,6 +1520,7 @@ impl Game {
             blocking: None,
             struck_first: false,
             known: 0,
+            lost: 0,
             attached: None,
             evoked: false,
             flashback: false,
@@ -2692,6 +2701,10 @@ impl Game {
         {
             let public = !lki_hidden || from == Zone::Battlefield || (!to.is_hidden() && to != Zone::Nowhere && !fd_enter) || choose.is_some();
             let known = if public { 0b11 } else if from == Zone::Hand && !told { fd_known & (1 << owner) } else { fd_known };
+            // (A library card a player lost track of, ENGINE.md 233: that player sees a card leave - a draw, a mill,
+            // a search's find - but not that it is this object, which in another of its worlds is still in the
+            // library while a card it was mixed with left.)
+            let known = if from == Zone::Library { known & !self.objs[idx.i()].lost } else { known };
             if known != 0 {
                 self.ref_lki.push((old, lki_def, known));
             }
@@ -2717,6 +2730,7 @@ impl Game {
             o.blocking = None;
             o.struck_first = false;
             o.known = if to.is_hidden() || fd_enter { known_before } else { 0b11 };
+            o.lost = 0;
             o.attached = None;
             o.evoked = to == Zone::Battlefield && std::mem::take(&mut self.entering_evoked);
             o.flashback = false;
@@ -3439,6 +3453,8 @@ impl Game {
         for &c in &lib {
             self.objs[c.i()].known = 0;
         }
+        // (Nobody, its owner included, can tell its cards apart by where they are now: ENGINE.md 233.)
+        self.lose_track(&lib, 0b11);
         self.players[p as usize].library = lib;
     }
 
