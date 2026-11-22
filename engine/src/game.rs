@@ -925,6 +925,11 @@ pub struct Game {
     /// they last existed there (CR 608.2h, 113.7a; kept when
     /// `SEEN_LKI_DAMAGE`).
     pub(crate) lki_damage: Vec<(ObjRef, DamageSource)>,
+    /// The same qualities of every permanent that left the battlefield this turn, recorded whatever the cards
+    /// of the game (ENGINE.md 232): `lki_damage` is kept only when a card of the game reads it
+    /// (`SEEN_LKI_DAMAGE`, a bit of every card in the game, hidden ones too), so its presence would tell the
+    /// network of a hidden card; layout v8's `lki` tokens read this one. No rule reads it.
+    pub(crate) lki_qualities: Vec<(ObjRef, DamageSource)>,
     /// Permanents that left the battlefield this turn, their toughness and
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
@@ -1433,6 +1438,7 @@ impl Game {
             lki_copy: Vec::new(),
             lki_attached: Vec::new(),
             lki_damage: Vec::new(),
+            lki_qualities: Vec::new(),
             lki_toughness: Vec::new(),
             ref_lki: Vec::new(),
             lki_power: Vec::new(),
@@ -2640,10 +2646,11 @@ impl Game {
             if let Some(h) = self.objs[idx.i()].attached {
                 self.lki_attached.push((old, h));
             }
+            let d = self.damage_source_of(idx);
             if self.seen & SEEN_LKI_DAMAGE != 0 {
-                let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
             }
+            self.lki_qualities.push((old, d));
             // (Its controller as it last existed too: "that creature's
             // controller", ENGINE.md 99.12.)
             if self.db.watch_toughness || self.db.watch_lki_controller {

@@ -22,7 +22,8 @@
 //! * **`lki`** (`lk8::*`): per stale reference the row holds (slot k = its `rf::STALE_KEY` k, the
 //!   key every holder of the reference shows) the gone object's last known information (CR 608.2h):
 //!   its copiable values and mana value, power, toughness and controller, its qualities as a damage
-//!   source, what it was attached to (an Aura's host), whether a spell's item is recorded and its
+//!   source (recorded whatever the cards of the game: `Game::lki_qualities`), what it was attached to (an
+//!   Aura's host), whether a spell's item is recorded and its
 //!   mana value; and one token per kind of counter it had.
 //! * **`lki_spells`** / **`lki_relations`**: a gone spell's item (`Game::spell_lki`: "copy it") as a
 //!   stack slot shows an item, and its targets, divisions, noted objects, spliced cards and
@@ -236,9 +237,7 @@ pub mod lk8 {
     pub const D_OBJ_REF: usize = D_OBJ + 1;
     pub const HAS_ATTACHED: usize = D_OBJ_REF + rf::W;
     pub const ATTACHED: usize = HAS_ATTACHED + 1;
-    pub const HAS_HOST: usize = ATTACHED + rf::W;
-    pub const HOST: usize = HAS_HOST + 1;
-    pub const HAS_SPELL: usize = HOST + rf::W;
+    pub const HAS_SPELL: usize = ATTACHED + rf::W;
     pub const SPELL_MV: usize = HAS_SPELL + 1;
     pub const SPELL_MV_BITS: usize = SPELL_MV + 1;
     pub const OBJECT_END: usize = SPELL_MV_BITS + 64;
@@ -676,7 +675,6 @@ pub(crate) struct Lki<'a> {
     pub toughness: Option<(i64, PlayerId)>,
     pub damage: Option<crate::game::DamageSource>,
     pub attached: Option<ObjRef>,
-    pub host: Option<ObjRef>,
     pub spell: Option<&'a (ObjRef, crate::ids::DefId, StackItem, u64)>,
     pub counters: Vec<(crate::db::Counter, crate::num::Count)>,
 }
@@ -688,7 +686,6 @@ impl Lki<'_> {
             && self.toughness.is_none()
             && self.damage.is_none()
             && self.attached.is_none()
-            && self.host.is_none()
             && self.spell.is_none()
             && self.counters.is_empty()
     }
@@ -697,7 +694,7 @@ impl Lki<'_> {
 /// `r`'s last known information (empty for a live reference: an object that is there has none).
 pub(crate) fn lki_of(g: &Game, r: ObjRef) -> Lki<'_> {
     if g.live(r) {
-        return Lki { copy: None, power: None, toughness: None, damage: None, attached: None, host: None, spell: None, counters: Vec::new() };
+        return Lki { copy: None, power: None, toughness: None, damage: None, attached: None, spell: None, counters: Vec::new() };
     }
     // (Counters: the record's entries of `r`, in their order; a kind once, its latest count.)
     let mut counters: Vec<(crate::db::Counter, crate::num::Count)> = Vec::new();
@@ -713,9 +710,10 @@ pub(crate) fn lki_of(g: &Game, r: ObjRef) -> Lki<'_> {
         copy: g.lki_copy.iter().rev().find(|x| x.0 == r),
         power: g.lki_power_of(r),
         toughness: g.lki_toughness.iter().rev().find(|x| x.0 == r).map(|x| (x.1, x.2)),
-        damage: g.lki_damage.iter().rev().find(|x| x.0 == r).map(|x| x.1),
+        // (Recorded whatever the cards of the game: `Game::lki_qualities`, not the rules' `lki_damage`.)
+        damage: g.lki_qualities.iter().rev().find(|x| x.0 == r).map(|x| x.1),
+        // (EoE W3's `lki_host` is the same entry, kept when a card reads it.)
         attached: g.lki_attached.iter().find(|x| x.0 == r).map(|x| x.1),
-        host: g.w3.lki_host.iter().rev().find(|x| x.0 == r).map(|x| x.1),
         spell: g.spell_lki.iter().rev().find(|x| x.0 == r),
         counters,
     }
@@ -788,10 +786,6 @@ fn write_lki(cx: &Cx, tail: &mut TailBuf) {
                 if let Some(a) = l.attached {
                     s[lk8::HAS_ATTACHED] = 1.0;
                     cx.write_ref(&mut s[lk8::ATTACHED..lk8::ATTACHED + rf::W], a);
-                }
-                if let Some(h) = l.host {
-                    s[lk8::HAS_HOST] = 1.0;
-                    cx.write_ref(&mut s[lk8::HOST..lk8::HOST + rf::W], h);
                 }
                 if let Some((_, _, _, mv)) = l.spell {
                     s[lk8::HAS_SPELL] = 1.0;
@@ -933,16 +927,12 @@ pub(crate) fn lki_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
         e.push(l.toughness.map_or(u64::MAX, |t| h64(&t)));
         e.push(l.damage.map_or(u64::MAX, |d| h64(&(d.controller, d.deathtouch, d.lifelink, d.infect, d.spell, d.colors, d.types, d.obj.map(live)))));
         e.push(l.attached.map_or(u64::MAX, live));
-        e.push(l.host.map_or(u64::MAX, live));
         e.push(h64(&l.counters));
         if let Some(d) = l.damage.and_then(|d| d.obj) {
             more(d);
         }
         if let Some(a) = l.attached {
             more(a);
-        }
-        if let Some(h) = l.host {
-            more(h);
         }
         if let Some((_, def, item, mv)) = l.spell {
             e.extend([*def as u64, *mv, item.controller as u64, item.cost_option as u64, item.alt as u64, h64(&item.from), item.delved as u64]);

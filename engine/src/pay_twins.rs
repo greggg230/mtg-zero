@@ -647,6 +647,7 @@ impl Game {
             lki_copy,
             lki_attached,
             lki_damage,
+            lki_qualities: _,
             lki_toughness,
             ref_lki,
             lki_power,

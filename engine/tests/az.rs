@@ -1835,6 +1835,10 @@ fn public_states_encode_apart() {
     let seed: u64 = std::env::var("GATE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(4242);
     let live: Vec<usize> = (0..ps.len()).filter(|&k| !lim.contains(&ps[k].name)).collect();
     let combinable: Vec<usize> = live.iter().copied().filter(|&k| !COMBO_EXCLUDED.contains(&ps[k].name)).collect();
+    // (Layout v8's perturbations, ENGINE.md 232, draw their partners from a stream of their own, among every
+    // combinable one; the others draw from the others as before, so their pairs are main's.)
+    let v8p = engine::public_state::v8_perturbation_names();
+    let combinable_old: Vec<usize> = combinable.iter().copied().filter(|&k| !v8p.contains(&ps[k].name)).collect();
     // ENGINE.md 151.4: CR 508.8's record (`Turn::had_attackers`, game float `g5::COMBAT_GOES_ON`)
     // is compared with every state: the states it reaches, on layout v7 and on v6 (never vacuous).
     let goes_on = ps.iter().position(|p| p.name == "the declare blockers step follows an attacker that left combat").expect("151.4's perturbation");
@@ -1852,6 +1856,7 @@ fn public_states_encode_apart() {
         let v6 = v6 == Some(true);
         let stream = seed ^ (pi as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
         let mut partner_rng = Rng::new(stream ^ 0x5bd1_e995);
+        let mut partner8_rng = Rng::new(stream ^ 0x0232_0232);
         // the states: (perturbations, description, views, v7 row hashes, v6 hashes)
         struct St {
             atoms: Vec<usize>,
@@ -1889,7 +1894,11 @@ fn public_states_encode_apart() {
             if !combinable.contains(&k) {
                 continue;
             }
-            let j = combinable[partner_rng.below(combinable.len() as u32) as usize];
+            let j = if v8p.contains(&ps[k].name) {
+                combinable[partner8_rng.below(combinable.len() as u32) as usize]
+            } else {
+                combinable_old[partner_rng.below(combinable_old.len() as u32) as usize]
+            };
             if j == k || (hidden && HIDDEN_BY_DECKLISTS.contains(&ps[j].name)) || pairs_done.contains(&(k.min(j), k.max(j))) {
                 continue;
             }

@@ -174,7 +174,8 @@ pub fn fields() -> Vec<Field> {
         copy_objs: Derived "which slots are copies (the copy flags of permanents and spells)",
         lki_copy: Public "the copiable values and mana value of permanents that left this turn as they last existed (CR 608.2h, 707.2; ENGINE.md 226): layout v8's lki tokens (ENGINE.md 232)",
         lki_attached: Public "what permanents that left this turn were attached to (CR 608.2h: an Aura's enchanted creature): layout v8's lki tokens (ENGINE.md 232)",
-        lki_damage: Public "the qualities as damage sources of permanents that left this turn (CR 608.2h, 113.7a): layout v8's lki tokens (ENGINE.md 232)",
+        lki_damage: Derived "the rules' copy of lki_qualities' entries, kept only when a card of the game reads it (SEEN_LKI_DAMAGE, a bit of every card in the game, hidden ones too: its presence would tell one, ENGINE.md 232)",
+        lki_qualities: Public "the qualities as damage sources of permanents that left this turn (CR 608.2h, 113.7a), recorded whatever the cards of the game: layout v8's lki tokens (ENGINE.md 232)",
         lki_toughness: Public "the toughness and controller of permanents that left this turn (CR 608.2h): layout v8's lki tokens (ENGINE.md 232)",
         ref_lki: Derived "last known identities of gone objects (CR 400.7, 608.2h): what a stale reference shows, through the references the encoding writes (ENGINE.md 156)",
         lki_power: Public "the power of objects that left the battlefield as they last existed (CR 608.2h; ENGINE.md 226): layout v8's lki tokens (ENGINE.md 232)",
@@ -213,7 +214,7 @@ pub fn fields() -> Vec<Field> {
             no_regen: Derived "transient: set and cleared around one destruction (\"it can't be regenerated\")",
             granted: Derived "a fast path: some permanent may have a granted triggered ability (Game.marks)",
             seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
-            lki_host: Public "what a gone attached object enchanted (CR 608.2h; EoE W3): layout v8's lki tokens (ENGINE.md 232)",
+            lki_host: Derived "last known information (CR 608.2h): what a gone attached object enchanted, kept when SEEN_W3_HOST - the entry Game.lki_attached holds for it whatever the cards (that one is public, ENGINE.md 232)",
             lki_loss: Derived "last known information (CR 603.10a): when a gone permanent lost its abilities - read only while its simultaneous move's leave triggers are gathered (`granted_observers` with `Game::leaving`), before any decision",
             entering_spent: Derived "transient: set and taken around one move",
             phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
@@ -2968,9 +2969,6 @@ pub fn known_gaps() -> Vec<KnownGap> {
             alone: vec![],
             alike: vec![
                 "the other player learns a hand card",
-                // (the same fact for a hand card past the 16th: found by the pairwise pass's partners as ENGINE.md
-                // 232's perturbations reshuffled them)
-                "the other player learns a hand card past the 16th",
                 "the active player is controlled this turn",
                 "the controlled player learns a hand card of its controller",
             ],
@@ -2996,10 +2994,7 @@ pub fn known_gaps() -> Vec<KnownGap> {
             layouts: V6,
             // (and a latent ability an effect gave, `Mod::GainLatent`: rare, none of the gate's EoE positions has one)
             alone: vec!["an effect's duration is another", "a permanent gains a latent ability of its card"],
-            // (A copy effect reaches v6's row only through the characteristics it gives too: with a types effect
-            // that adds a type the copied card has, the two read alike - found by the pairwise pass's partners as
-            // ENGINE.md 232's perturbations reshuffled them.)
-            alike: effects.into_iter().chain(["an effect ends", "a permanent becomes a copy of another"]).collect(),
+            alike: effects.into_iter().chain(["an effect ends"]).collect(),
         },
     ]
 }
@@ -3307,12 +3302,12 @@ fn v8_perturbations() -> Vec<Perturbation> {
             }
             Some(format!("{}'s last known toughness", a.g.name(x.idx)))
         }),
-        p!("a gone permanent dealt damage with deathtouch", "Game.lki_damage", |a, r| {
+        p!("a gone permanent dealt damage with deathtouch", "Game.lki_qualities", |a, r| {
             let x = pick(&public_stale(&a.g), r)?;
             let owner = a.g.objs[x.idx.i()].owner;
-            match a.g.lki_damage.iter_mut().rev().find(|y| y.0 == x) {
+            match a.g.lki_qualities.iter_mut().rev().find(|y| y.0 == x) {
                 Some(e) => e.1.deathtouch = !e.1.deathtouch,
-                None => a.g.lki_damage.push((
+                None => a.g.lki_qualities.push((
                     x,
                     crate::game::DamageSource { controller: owner, deathtouch: true, lifelink: false, infect: false, spell: false, colors: 0, types: types::CREATURE, obj: Some(x) },
                 )),
@@ -3335,16 +3330,6 @@ fn v8_perturbations() -> Vec<Perturbation> {
                 None => a.g.lki_attached.push((x, hr)),
             }
             Some(format!("{} was attached to {}", a.g.name(x.idx), a.g.name(h)))
-        }),
-        p!("a gone object enchanted a permanent (EoE W3)", "W3State.lki_host", |a, r| {
-            let x = pick(&public_stale(&a.g), r)?;
-            let h = pick(&slots(&a.g), r)?;
-            let hr = a.g.obj_ref(h);
-            if a.g.w3.lki_host.iter().rev().find(|y| y.0 == x).is_some_and(|y| y.1 == hr) {
-                return None;
-            }
-            a.g.w3.lki_host.push((x, hr));
-            Some(format!("{} enchanted {}", a.g.name(x.idx), a.g.name(h)))
         }),
         p!(rare "a gone spell's last known X is one higher", "Game.spell_lki", |a, r| {
             let s = public_stale(&a.g);
@@ -3411,9 +3396,17 @@ fn v8_perturbations() -> Vec<Perturbation> {
     ]
 }
 
+/// Every perturbation of layout v8's facts (ENGINE.md 232; the gate's pairwise pass draws their partners from a
+/// stream of their own, so the pairs of the perturbations before them stay main's).
+///
 /// Layout v8's facts (ENGINE.md 232): the perturbations of `v8_perturbations` whose change layout v7
 /// (the game `mtg`) and layout v6 (`mtg_eoe`) leave out - all but the innermost payment's cost, which
 /// their context block's cost floats show (layout v8's `payment` tokens show every part exactly).
+pub fn v8_perturbation_names() -> Vec<&'static str> {
+    v8_perturbations().iter().map(|p| p.name).collect()
+}
+
+/// (`v8_fixed`'s doc above.)
 pub fn v8_fixed() -> Vec<&'static str> {
     v8_perturbations().iter().map(|p| p.name).filter(|&n| n != "a payment's cost has one more generic mana").collect()
 }
