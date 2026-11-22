@@ -1419,6 +1419,27 @@ fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// An Edge of Eternities position with a card its owner exiled face up (ENGINE.md 229): the witness of layout v6's
+/// known gap "an exiled card is turned face down" (v6 shows the owner its own face-down card as an exiled one). The
+/// gate's sampled EoE positions held one by chance; the 601.2g step changed their games (229.7), so it is built here.
+fn eoe_exile_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::Step;
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60}"#).unwrap();
+    let g = Scenario::new(CardDb::eoe())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Plains"; 8])
+        .library(1, &["Plains"; 8])
+        .battlefield(0, &["Plains", "Plains"])
+        .exile(0, &["Rig for War"])
+        .battlefield(1, &["Plains"])
+        .at(Step::Main1, 0)
+        .start();
+    let mut a = MtgAz::new_game(&sp, 2, 229).unwrap();
+    a.g = g;
+    vec![("eoe", a)]
+}
+
 fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     let mut x = g.g.view_of(v);
     x.push(u64::MAX - 77);
@@ -1508,6 +1529,7 @@ fn public_state_reaches_the_encoding() {
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
     pos.extend(cast_mana_positions());
+    pos.extend(eoe_exile_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1724,6 +1746,7 @@ fn public_states_encode_apart() {
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
     pos.extend(cast_mana_positions());
+    pos.extend(eoe_exile_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
