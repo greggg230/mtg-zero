@@ -44670,3 +44670,24 @@ world seeds each) on three match seeds. Before the fix it fails with the fuzz's 
 for P1 (mover P0): the sampled deck lacks a shown Lutri, the Spellchaser"; with the self-check, "the game's own deck of
 P0 lacks a Lutri, the Spellchaser P1 was shown"); after, it passes. The seed itself passes at e9ff0e24 with the fix
 (264 worlds).
+
+**Digests**: all equal (no engine change; the fuzz's new self-check draws nothing from a random stream): cube
+9473f7debc4bceb3, `DIGEST_ENCODING=0` d3c144b6cc2977e5, constructed, EoE, driver, metagame and dealt as recorded.
+
+**Gates** (1952ff58): `gate.py suite` **GATE PASSED** (2,914 engine tests: main's 2,913 and this one; default, default
+hidden and delver_dealt 2k fuzz); `gate.py engine --tested-sha 1952ff588283 --expect-digest 9473f7debc4bceb3
+--expect-digest0 d3c144b6cc2977e5` **GATE PASSED WITH SKIPS** (the live-run fence's one desktop pytest; every digest
+equal, farm compat identical, pytest 698 passed on the Mac and 49 on the desktop).
+
+**Fuzz** (the Mac, 1952ff58, fresh seeds from 232,000,000): default 20,000 games + 1,000 matches **PASSED**; default
+with hidden decklists 20,000 games: 19,999 passed, one failed - seed 232,013,638, "option 404 (Priority P0: cast or
+play from the graveyard) of Priority for P0 can't be completed: the payment search passed 2000000 copies" (100.4.9's
+cap, `cost_order.rs`), not this section's: it fails the same on main 4dbf0ee1 (whose engine is e445ba27's), where
+this check never runs before it. The seeds after it in its shard (232,013,639..232,015,000) and the 15 other fuzz
+tests then passed.
+
+### 232.1 Known follow-ups
+
+* **Seed 232,013,638 (hidden decklists, release)**: the payment search's 2,000,000-copy cap in an option completion
+  of "cast or play from the graveyard" (Kaldra Compleat and Minsc & Boo in P0's hand) - for the payment-search lanes
+  (231's step, 100.4.9).
