@@ -512,6 +512,9 @@ fn scan_seeds_for_the_seed_pinned_tests() {
     let kind = std::env::var("SCAN_KIND").expect("SCAN_KIND");
     let from: u64 = std::env::var("SCAN_FROM").ok().and_then(|s| s.parse().ok()).unwrap_or(100_000_000);
     let n: u64 = std::env::var("SCAN_N").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);
+    // (`SCAN_CHECKS=0`: the games without the checks, a pre-filter for the kinds the checks don't count - the games are
+    // the same, the checks read copies; each hit is then replayed by its test with every check.)
+    let checks = std::env::var("SCAN_CHECKS").map_or(true, |v| v != "0");
     let pool = if kind == "etali" { PoolMode::Interactions } else { PoolMode::Default };
     POOL_OVERRIDE.with(|c| c.set(Some(pool)));
     CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(if kind == "etali" { 40 } else { 4 })));
@@ -520,9 +523,9 @@ fn scan_seeds_for_the_seed_pinned_tests() {
         let hit = match kind.as_str() {
             "left_look" => std::panic::catch_unwind(|| play_hidden(seed)).is_ok() && PK_LEFT_HAND_LOOKS.load(Relaxed) > l0,
             "entered_look" => std::panic::catch_unwind(|| play(seed, true)).is_ok() && PK_ENTERED_HAND_LOOKS.load(Relaxed) > e0 && PK_LEFT_HAND_LOOKS.load(Relaxed) > l0,
-            "ocelot" => std::panic::catch_unwind(|| play(seed, true)).is_ok_and(|p| p.outcome.reason == engine::game::EndReason::Aborted),
+            "ocelot" => std::panic::catch_unwind(|| play(seed, checks)).is_ok_and(|p| p.outcome.reason == engine::game::EndReason::Aborted),
             "etali" => std::panic::catch_unwind(|| {
-                let p = play(seed, true);
+                let p = play(seed, checks);
                 let mut g = new_game(seed);
                 let mut keys = Vec::new();
                 let mut deep = [0u32; 2];
@@ -538,6 +541,9 @@ fn scan_seeds_for_the_seed_pinned_tests() {
                 }
                 if std::env::var("SCAN_VERBOSE").is_ok() {
                     println!("seed {seed}: deep {deep:?} turns {}", p.turns);
+                }
+                if deep[0] + deep[1] > 0 {
+                    println!("SCAN etali_any seed {seed} deep {deep:?}");
                 }
                 deep[0] > 0 && deep[1] > 0
             })
