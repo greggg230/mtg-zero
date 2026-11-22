@@ -554,7 +554,7 @@ pub(crate) struct PayMana {
     pub chosen: Vec<Src>,
     /// The class of the last pick: the picks go up the classes (ENGINE.md
     /// 18). A u32: a payment's classes are split into runs of twins
-    /// (`split_unlike`, ENGINE.md 228.2), up to one a permanent.
+    /// (`split_unlike`, ENGINE.md 229.2), up to one a permanent.
     pub min_class: u32,
     /// `vm` is known.
     pub pooled: bool,
@@ -1013,7 +1013,7 @@ impl Game {
     /// permanents a cost tapped already (`Keep::committed`: teamwork's
     /// creatures, docs/shortcuts.md 13.17); each class split into runs of
     /// twins, the sources the rest of the game can't tell apart (`split_unlike`,
-    /// ENGINE.md 228.2): a class is one option, its first free member picked.
+    /// ENGINE.md 229.2): a class is one option, its first free member picked.
     pub(crate) fn payment_classes(&self, pm: &PayMana) -> Vec<Class> {
         let classes = self.spell_pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke, pm.keep.allow);
         let classes = if pm.keep.committed.is_empty() { classes } else { self.classes_without(&classes, &pm.keep.committed) };
@@ -1496,7 +1496,7 @@ impl Game {
     /// (which one: asked next, `PayMana::which`): they are not one tap -
     /// convoke pays a pip of the creature's colours where Urza's ability
     /// makes {U}, and convoke and improvise spend no mana where its {U} is
-    /// mana spent and a colour spent (ENGINE.md 228.2; ENGINE.md 31.4 left
+    /// mana spent and a colour spent (ENGINE.md 229.2; ENGINE.md 31.4 left
     /// improvise out of such an artifact, convoke out of such a creature).
     pub(crate) fn with_alternatives(&self, p: PlayerId, exclude: Option<CardIdx>, mut classes: Vec<Class>, improvise: u16, convoke: bool) -> Vec<Class> {
         if convoke {

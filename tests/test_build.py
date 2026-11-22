@@ -52,7 +52,7 @@ def play_and_round_trip(p1_deck, games, seed0, share=0.15):
 # The rare states the schema does not build, by name (each a documented limit of `az::build`).
 RARE = {
     # a look at the opponent's library card, then a shuffle (ENGINE.md 192; reached by the mirror's random games
-    # since ENGINE.md 228 moved their payments)
+    # since ENGINE.md 229 moved their payments)
     "unsupported: a cloud entry naming a card its owner never saw",
 }
 

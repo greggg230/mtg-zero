@@ -1,5 +1,5 @@
 //! Which sources of a mana payment are interchangeable (CR 601.2g-h, 702.51a, 702.126a;
-//! ENGINE.md 228.2). Named after the rule, never after a card.
+//! ENGINE.md 229.2). Named after the rule, never after a card.
 //!
 //! The payment (`pay::PayMana`) offers its sources by class (`pay::Class`): one option a class,
 //! and the pick takes the class's first free member whose pick leaves the payment payable
@@ -559,7 +559,7 @@ impl Game {
             next_stack_id: _,
             outcome: _,
             // (What each player knows of hidden zones' cards, by identity: twins are public, on
-            // the battlefield, of one definition; ENGINE.md 228.2.)
+            // the battlefield, of one definition; ENGINE.md 229.2.)
             clouds: _,
             sightings: _,
             sight_at: _,

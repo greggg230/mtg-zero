@@ -726,7 +726,11 @@ class Release:
                '--out', out]
         if fuzz:
             cmd += ['--fuzz-worker', self.local_fuzz_worker(), '--mac-fuzz-worker', fuzz['mac_path']]
-        self.run('mac-gates', cmd, cwd=self.wt, env=dict(os.environ, CUDA_VISIBLE_DEVICES=''), slot=True, timeout=12 * 3600)
+        # (ZERO_FARM_ENGINE_COMMIT: the commit the local fuzz build's failures name in their repro - a bare cargo build
+        # has no manifest.json, so it would say "(at unknown)" where the Mac's published build says its commit, and part
+        # (d) compares the repros: the macOS part of 50205980's release failed on exactly that)
+        env = dict(os.environ, CUDA_VISIBLE_DEVICES='', ZERO_FARM_ENGINE_COMMIT=git('rev-parse', 'HEAD', cwd=self.wt))
+        self.run('mac-gates', cmd, cwd=self.wt, env=env, slot=True, timeout=12 * 3600)
         with open(os.path.join(out, 'summary.json'), encoding='utf-8') as f:
             sm = json.load(f)
         if not sm.get('passed'):
@@ -734,7 +738,8 @@ class Release:
         return {k: v for k, v in sm['parts'].items()}
 
     def local_fuzz_worker(self):
-        """This commit's Windows fuzz build (the fuzz identity's other side): built in the release target dir."""
+        """This commit's Windows fuzz build (the fuzz identity's other side): built in the release target dir. It has no
+        manifest.json: `mac_gates` gives its commit through ZERO_FARM_ENGINE_COMMIT."""
         env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(self.target, 'farm-build'), RUSTFLAGS='-C target-feature=+crt-static')
         env.setdefault('CARGO_BUILD_JOBS', '8')
         self.run('mac-gates', ['cargo', 'build', '--profile', 'fuzz', '-p', 'mtgz_worker'], cwd=self.wt, env=env, slot=True,

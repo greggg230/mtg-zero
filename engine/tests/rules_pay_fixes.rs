@@ -1,8 +1,8 @@
-//! The payment fixes the Hogaak lanes found (ENGINE.md 228; 220.1.5's findings): a payment's
+//! The payment fixes the Hogaak lanes found (ENGINE.md 229; 220.1.5's findings): a payment's
 //! sources grouped as interchangeable only when the rest of the game can't tell them apart (CR
-//! 601.2g-h; 228.2), castability counting convoke's and improvise's sources for a spell whose mana
-//! is spent too (601.2f, 702.51a, 702.126a; 228.3), and delve's need counting them (702.66a;
-//! 228.5). Test names cite the CR.
+//! 601.2g-h; 229.2), castability counting convoke's and improvise's sources for a spell whose mana
+//! is spent too (601.2f, 702.51a, 702.126a; 229.3), and delve's need counting them (702.66a;
+//! 229.5). Test names cite the CR.
 //!
 //! The table: the cube's and the legacy pool's cards, Vote Out (Edge of Eternities: {3}{B} sorcery,
 //! "Convoke / Destroy target creature."), and two test cards with delve beside convoke or improvise
@@ -126,7 +126,7 @@ fn begin(g: &mut Game, name: &str) -> CardIdx {
     c
 }
 
-// ---- 228.2: a payment's sources the rest of the game tells apart -----------------------------
+// ---- 229.2: a payment's sources the rest of the game tells apart -----------------------------
 
 /// Vote Out's leaves on a board of `bf` (with a Swamp: its {B}) against P1's Dark Confidant: for each
 /// way to pay, the creature left untapped.
@@ -250,7 +250,7 @@ fn cr_302_6_601_2g_a_land_that_entered_this_turn_is_apart_from_an_older_twin() {
 fn cr_601_2h_twins_stay_one_option_whatever_their_card_slot() {
     // The first card the game holds (slot 0) is one of two alike Swamps: still one option. (A
     // field that keeps its last card - or card 0 - when unused named it: `Game::leaving_card`
-    // outside a replacement choice, ENGINE.md 228.2.)
+    // outside a replacement choice, ENGINE.md 229.2.)
     let mut g = Scenario::new(db())
         .spec(|s| s.auto_single = false)
         .battlefield(0, &["Swamp", "Swamp"])
@@ -314,7 +314,7 @@ fn cr_702_51a_605_3a_an_artifact_creature_urza_can_tap_convokes_for_its_colour()
     assert!(ws.iter().any(|w| w.obj(lib).tapped && !log(w).contains(&convoked)), "the Librarian tapped for Urza's {{U}} on another");
 }
 
-// ---- 228.3: castability counts convoke and improvise for a spell whose mana is spent ---------
+// ---- 229.3: castability counts convoke and improvise for a spell whose mana is spent ---------
 
 #[test]
 fn cr_118_9_702_51a_omniscience_still_offers_vote_outs_mana_cost_paid_with_convoke() {
@@ -535,7 +535,7 @@ fn cr_601_2f_702_51a_702_126a_castability_and_the_payment_agree_on_random_boards
     assert!(castable_n >= 200 && paths_n >= 1500 && alt_n >= 60, "castable boards {castable_n}, payment paths {paths_n}, cost choices {alt_n}");
 }
 
-// ---- 228.5: delve's need counts convoke and improvise -----------------------------------------
+// ---- 229.5: delve's need counts convoke and improvise -----------------------------------------
 
 /// The graveyard cards a delve decision offers, by their place in P0's graveyard; and whether it
 /// offers `PASS`.
