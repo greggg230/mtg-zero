@@ -44316,7 +44316,17 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   the forced find at p 1, `E:/mtg-zero-scratch/stew/lane3/table_spec.py`): PASSED - gate 2 identical, 2,980 rows, 150
   batches; gate 3 identical, 2,839 rows.
 * **The CPU smoke** (`legacy-pair-bo3-varied-smoke`, 4 iterations x 16 matches): iterations 1-2 self-play with no table, the retrain of v0002 (the games of iterations 1-2: 88 games) and v0003 as subprocesses, versions published with `"model": "pair"`; at the preset's guard (`matchup_table_min_gain` 0.005) neither published a table - held-out log loss 0.711 vs play / draw 0.577, gain -0.134 nats on 88 games of a tiny network - and iteration 4's chosen-60 seats sideboarded by search, as the guard says. Run again with `--matchup-table-min-gain -10` (the tables forced through, `E:/mtg-zero-scratch/stew/lane3/smoke2`): v0002 and v0003 each published two tables (one per deck), iteration 4's self-play sideboarded by them ("the chosen-60 seats sideboard by the matchup model's choice tables v0002.json"), and the game log's spec lines of those matches carry `"tables": ["v0002", "v0002"]`. The stew's row selector (222.1) on this smoke's rows - two different 75s, dealt per seat, post-board 60s hidden: 19,204 rows, 8,979 Delver acting and 10,225 Doomsday acting, 0 undecided.
-* **The fuzz** (`meta_pair` 2,000 games, beside `meta` and `delver_dealt`) and the suite: the suite gate (223.11).
+* **The fuzz found one bug** (the suite gate's `meta_pair` shard, match 0): the lockstep's pairing spec
+  (`Metagame::pair_json`) carried the metagame's forced find into a pairing with no Doomsday deck (the Delver mirror,
+  Delver-Sneak, the Sneak mirror), which the engine rightly refuses ("no deck's 75 holds both Doomsday and Thassa's
+  Oracle: it could never apply", 180). In the metagame the option is inert for such a pairing's games - the spell never
+  resolves, `ff_draw` is a pure function of the game's seed read only at a resolution, nothing of it is encoded - so
+  `pair_json` now leaves the forced find out exactly when neither deck of the pair holds both cards (75 in best of
+  three, main in best of one: the engine's own rule) and the fixed spec is still the metagame game's twin; test
+  `pair_json_leaves_out_a_forced_find_the_pairing_can_never_apply` (kept for Delver-Doomsday, the Doomsday mirror and
+  Sneak-Doomsday, left out for the other three, each fixed spec parses, the kept form refused). Then `meta_pair` 2,000
+  games: PASSED (2,000 games, 100 matches + 100 post-sideboard, the lockstep, tables, dealt 60s and forced
+  resolutions seen); every digest unchanged. The suite gate: 223.11.
 
 ### 223.8 Rows per full best-of-three match (lane 2 sizes an iteration from it)
 

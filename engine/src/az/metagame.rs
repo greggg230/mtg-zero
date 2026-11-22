@@ -246,7 +246,11 @@ impl Metagame {
     /// whose game of any seed is the metagame spec's game of a seed with that pairing (module docs; the tests and the
     /// fuzz check it). Each seat's sideboard as `pN_sideboard` when it has one, its deck's choice table as `pN_table`
     /// when it has one (ENGINE.md 223: the table follows the deck to the seat that plays it; every other key of the
-    /// spec - `dealt_decks`, `forced_find`, ... - as it is).
+    /// spec - `dealt_decks`, `forced_find`, ... - as it is, but a `forced_find` neither of the pair's decks can ever
+    /// apply to (no deck of the two holds both its spell and its card: in its 75 in best of three, its main in best of
+    /// one - the engine's own rule, which refuses such a spec, ENGINE.md 180) is left out: in the metagame it is inert
+    /// for that pairing's games - the spell never resolves, nothing of it is drawn from the game's RNG or encoded -, so
+    /// the game is the same without it).
     pub fn pair_json(json: &str, p: [u8; 2]) -> Result<String, String> {
         let mut v: Value = serde_json::from_str(json).map_err(|e| format!("mtg spec: {e}"))?;
         let o = v.as_object_mut().ok_or("mtg spec: not a JSON object")?;
@@ -264,6 +268,21 @@ impl Metagame {
             }
         }
         o.insert("decks".into(), Value::Object(decks));
+        if let Some(ff) = o.get("forced_find") {
+            let name = |k: &str| ff.get(k).and_then(|x| x.as_str()).map(str::to_owned);
+            let (spell, card) = (name("spell"), name("card"));
+            let bo3 = o.get("format").and_then(|f| f.as_str()) == Some("bo3");
+            let holds = |i: u8, n: &str| {
+                let d = &list[i as usize];
+                let has = |k: &str| d.get(k).and_then(|x| x.as_array()).is_some_and(|a| a.iter().any(|c| c.as_str() == Some(n)));
+                has("main") || (bo3 && has("sideboard"))
+            };
+            if let (Some(s), Some(c)) = (spell, card) {
+                if !p.iter().any(|&i| holds(i, &s) && holds(i, &c)) {
+                    o.remove("forced_find");
+                }
+            }
+        }
         Ok(v.to_string())
     }
 }

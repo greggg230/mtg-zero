@@ -258,6 +258,26 @@ fn pair_json_puts_each_decks_table_on_the_seat_that_plays_it() {
     assert!(f["decks"].get("p0_table").is_none() && f["decks"]["p1_table"] == t1);
 }
 
+/// The forced find through `pair_json` (ENGINE.md 180, 223): kept for a pairing one of whose decks holds both Doomsday
+/// and Thassa's Oracle (in its 75: best of three), left out for one where it could never apply - the engine refuses
+/// such a fixed spec, and in the metagame it is inert for that pairing (the fuzz pool meta_pair's lockstep plays it).
+#[test]
+fn pair_json_leaves_out_a_forced_find_the_pairing_can_never_apply() {
+    let m = meta(&[0, 1, 2], json!([[1, 1, 1], [1, 1, 1], [1, 1, 1]]), &[None, None, None], json!({"forced_find": wheel(0.5)}));
+    parse(&m).unwrap();
+    for (p, kept) in [([0u8, 1], true), ([1, 1], true), ([2, 1], true), ([0, 0], false), ([0, 2], false), ([2, 2], false)] {
+        let f: Value = serde_json::from_str(&Metagame::pair_json(&m.to_string(), p).unwrap()).unwrap();
+        assert_eq!(f.get("forced_find").is_some(), kept, "pairing {p:?}");
+        parse(&f).unwrap_or_else(|e| panic!("pairing {p:?}: {e}"));
+        // (the engine's own rule: the same spec with the forced find kept is refused)
+        if !kept {
+            let mut g = f.clone();
+            g["forced_find"] = wheel(0.5);
+            assert!(parse(&g).unwrap_err().contains("could never apply"), "pairing {p:?}");
+        }
+    }
+}
+
 #[test]
 fn a_decks_table_follows_the_deck_to_its_seat() {
     let (t0, t1) = (table_of(&deck(0), 1), table_of(&deck(1), 2));
