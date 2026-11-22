@@ -1421,7 +1421,8 @@ fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {
 }
 
 /// An Edge of Eternities position with a card its owner exiled face up (ENGINE.md 230): the witness of layout v6's
-/// known gap "an exiled card is turned face down" (v6 shows the owner its own face-down card as an exiled one). The
+/// known gap "an exiled card is turned face down" (v6 shows the owner its own face-down card as an exiled one; no
+/// permanent, so the gate's permanent perturbations add nothing here). The
 /// gate's sampled EoE positions held one by chance; the 601.2g step changed their games (230.7), so it is built here.
 fn eoe_exile_positions() -> Vec<(&'static str, MtgAz)> {
     use engine::testkit::Scenario;
@@ -1431,9 +1432,7 @@ fn eoe_exile_positions() -> Vec<(&'static str, MtgAz)> {
         .spec(|s| s.auto_single = false)
         .library(0, &["Plains"; 8])
         .library(1, &["Plains"; 8])
-        .battlefield(0, &["Plains", "Plains"])
         .exile(0, &["Rig for War"])
-        .battlefield(1, &["Plains"])
         .at(Step::Main1, 0)
         .start();
     let mut a = MtgAz::new_game(&sp, 2, 229).unwrap();

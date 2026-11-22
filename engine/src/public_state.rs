@@ -1090,12 +1090,15 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         // ENGINE.md 100.5: a triggered ability an effect gave a permanent
         // (`Mark::Granted`, CR 613.1f; EoE W3). (The first permanent in the
-        // encoded slots whose definition has one - slot 0 names it: a state the
-        // engine can reach, its searches resolving events through it, ENGINE.md
-        // 228; no draw from the gate's random stream.)
+        // encoded slots, when its definition has one - slot 0 names it: else a
+        // mark naming no ability, which triggers nothing and is no state the
+        // engine reaches, ENGINE.md 230; no draw from the gate's random stream.)
         p!("a permanent gained a triggered ability", "Game.marks", |a, _r| {
-            let c = *slots(&a.g).iter().find(|&&c| !a.g.def_of(c).triggers.is_empty())?;
+            let c = *slots(&a.g).first()?;
             let (def, ts) = (a.g.objs[c.i()].def, a.g.next_ts);
+            if a.g.db.def(def).triggers.is_empty() {
+                return None;
+            }
             a.g.w3.granted = true;
             mark(&mut a.g, c, crate::game::Mark::Granted { def, slot: 0, this_turn: true, ts })
         }),
