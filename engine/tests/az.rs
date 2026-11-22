@@ -427,6 +427,49 @@ fn layout_json_is_checked_in() {
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
 }
 
+/// Layout v8 (ENGINE.md 232, the game `mtg_v8`): `mtgz/az/layout_v8.json` = `encode::layout_json_v8`
+/// (MTGZ_WRITE_LAYOUT=1 rewrites it), and it widens layout v7 additively and exactly: the same
+/// features and head (the widen's map is the identity), v7's 25 segments unchanged (names, slots,
+/// widths, gates, columns), then the six tail-only gated segments of `tail_v8` (zero-core's widen
+/// gives them a gate of exactly 0: docs/az.md 43.8), `pay_options` with a pointer column; the tail
+/// segments are `TAILS_V8`, the game `mtg_v8`'s.
+#[test]
+fn layout_v8_is_checked_in_and_widens_layout_v7_exactly() {
+    let want = encode::layout_json_v8(CardDb::cube());
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v8.json");
+    if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
+        std::fs::write(&path, &want).unwrap();
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    assert!(have == want, "{} differs from encode::layout_json_v8 (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az layout)", path.display());
+    let (l7, l8) = (read_layout("layout_v7.json"), read_layout("layout_v8.json"));
+    assert_eq!(l8.features, l7.features);
+    let id: Vec<usize> = (0..NUM_FEATURES).collect();
+    assert_eq!(widen_map(&l7, &l8), id, "the widen's map is the identity");
+    let j7: serde_json::Value = serde_json::from_str(&encode::layout_json(CardDb::cube())).unwrap();
+    let j8: serde_json::Value = serde_json::from_str(&want).unwrap();
+    assert_eq!(j8["version"], 8);
+    assert_eq!(j8["revision"].as_u64(), Some(encode::LAYOUT_V8_REVISION as u64));
+    for k in ["features", "vocab", "bags", "globals", "cards", "option_pointers", "max_row_tokens", "draft"] {
+        assert_eq!(j7[k], j8[k], "{k}");
+    }
+    let (s7, s8) = (j7["segments"].as_array().unwrap(), j8["segments"].as_array().unwrap());
+    assert_eq!(s8[..25], s7[..], "v7's segments, unchanged");
+    let names: Vec<&str> = s8[25..].iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["payment", "pay_options", "lki", "lki_spells", "lki_relations", "find_groups"]);
+    for s in &s8[25..] {
+        assert_eq!((s["count"].as_u64(), s["tail"].as_bool(), s["gate"].as_bool(), s["offset"].is_null()), (Some(0), Some(true), Some(true), true), "{}", s["name"]);
+    }
+    assert_eq!(s8[26]["columns"], 1);
+    assert!(s8[25..].iter().filter(|s| s["name"] != "pay_options").all(|s| s.get("columns").is_none()));
+    let tails: Vec<(&str, usize)> = s8.iter().filter(|s| s["tail"] == true).map(|s| (s["name"].as_str().unwrap(), s["width"].as_u64().unwrap() as usize)).collect();
+    let want: Vec<(&str, usize)> = engine::az::tail_encode::TAILS_V8.iter().map(|t| (t.name, t.width)).collect();
+    assert_eq!(tails, want, "the tail segments are TAILS_V8");
+    for t in engine::az::tail_encode::TAILS_V8.iter() {
+        assert_eq!(s8[t.seg as usize]["name"].as_str().unwrap(), t.name);
+    }
+}
+
 /// Layout v7 widens layout v6 exactly (ENGINE.md 124.2, 125): the map a widen derives from the
 /// two checked-in descriptions is `encode::v6_projection` (v6's segments, bags and global blocks
 /// the same, the permanents', hand's, stack's, triggers' and list's slots wider at their ends, the

@@ -702,6 +702,12 @@ pub struct Game {
     /// show them by place (`Game::finds_by_place`). Kept in every world too (unlike `found`): a search in a world
     /// marks its finds as the real game's would.
     pub(crate) finds_told: Vec<CardIdx>,
+    /// The public groups of places that hold search finds mixed with other cards (ENGINE.md 232, 223's
+    /// decision 4): a scramble that mixes told finds (or a group) with any other card makes one - "k of
+    /// these places hold their owner's search's finds" - where `finds_told` drops them. A group lasts
+    /// while its members keep their zone and the other player doesn't learn one (`move_card`, `learn`
+    /// end it); public moves shift its places. Layout v8's `find_groups` tokens.
+    pub(crate) find_groups: Vec<crate::hidden::FindGroup>,
     /// The state was changed by hand (tests' perturbations, `Game::lose_sightings`): the sightings no longer
     /// describe it, and the deals weigh every seen card blind (ENGINE.md 140.9).
     pub(crate) sightings_lost: bool,
@@ -1365,6 +1371,7 @@ impl Game {
             sight_at: 0,
             found: Vec::new(),
             finds_told: Vec::new(),
+            find_groups: Vec::new(),
             sightings_lost: false,
             ff: crate::forced_find::FfState::new(seed),
             tokens: 0,
@@ -2518,6 +2525,10 @@ impl Game {
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
         let from = self.objs[idx.i()].zone;
+        // (A find group's member leaving its zone ends the group: ENGINE.md 232.)
+        if from != to && !self.find_groups.is_empty() {
+            self.end_find_group(idx);
+        }
         // Entering face down (manifest, CR 701.40a): its identity stays as
         // hidden as in the library it comes from.
         let fd_enter = to == Zone::Battlefield && std::mem::take(&mut self.moving_face_down);

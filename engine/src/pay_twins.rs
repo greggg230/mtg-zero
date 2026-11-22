@@ -572,6 +572,7 @@ impl Game {
             sight_at: _,
             found: _,
             finds_told: _,
+            find_groups: _,
             sightings_lost: _,
             ff: _,
             tokens: _,

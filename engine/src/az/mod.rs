@@ -41,6 +41,8 @@ pub mod sample;
 pub mod sbtable;
 pub mod sealed;
 pub mod tail_encode;
+pub mod tail_v8;
+pub mod v8;
 pub mod view;
 
 use crate::db::CardDb;
@@ -887,7 +889,8 @@ impl MtgSpec {
     /// never fed another's encodings through the wrong game's name.
     pub fn check_game(&self, game: &str) -> Result<(), String> {
         let mine = self.game();
-        if mine == game {
+        // (`mtg_v8` is `mtg` in layout v8, ENGINE.md 232: the same specs.)
+        if mine == game || (mine == "mtg" && game == v8::NAME) {
             return Ok(());
         }
         Err(if mine == "mtg_eoe" {
@@ -1299,6 +1302,37 @@ impl Bot<MtgAz> for HeuristicBot {
     }
 }
 
+impl MtgAz {
+    /// The row of `viewer` in layout v8 (`v8`: the game `mtg_v8`, ENGINE.md 232) or v7 (the game
+    /// `mtg`): the deck choice's and sideboarding's encodings have no tail (their lists fit the
+    /// head) and are the same in both.
+    pub fn encode_row_layout(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf, v8: bool) {
+        if self.m.choice.is_some() {
+            encode::encode_deck_choice(self, viewer as u8, head);
+        } else if self.m.sb.is_some() {
+            encode::encode_sideboarding(self, viewer as u8, head);
+        } else {
+            if v8 {
+                self.g.encode_features_row_v8(viewer as u8, head, tail);
+            } else {
+                self.g.encode_features_row(viewer as u8, head, tail);
+            }
+            encode::encode_match(self, viewer as u8, head);
+        }
+        // What the other player knows of the frame's pool: its earlier games' reveals (ENGINE.md 125.7).
+        tail_encode::write_my_revealed(&self.m, self.frame_seat(viewer as u8), tail);
+    }
+
+    /// The pointer overrides of `viewer`'s row in layout v8 (`v8`) or v7: none during the deck
+    /// choice and sideboarding (their options keep the static table).
+    pub fn option_overrides_layout(&self, viewer: usize, legal: &[u16], out: &mut Vec<(u32, i64)>, v8: bool) {
+        if self.m.choice.is_some() || self.m.sb.is_some() {
+            return;
+        }
+        tail_encode::option_overrides_layout(&self.g, viewer as u8, legal, out, v8);
+    }
+}
+
 impl SearchGame for MtgAz {
     type Spec = MtgSpec;
     const NAME: &'static str = "mtg";
@@ -1520,25 +1554,13 @@ impl SearchGame for MtgAz {
     /// Layout v7's row: the head and the tail tokens (`tail_encode`). The deck choice's and
     /// sideboarding's encodings have no tail (their lists fit the head).
     fn encode_row(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf) {
-        if self.m.choice.is_some() {
-            encode::encode_deck_choice(self, viewer as u8, head);
-        } else if self.m.sb.is_some() {
-            encode::encode_sideboarding(self, viewer as u8, head);
-        } else {
-            self.g.encode_features_row(viewer as u8, head, tail);
-            encode::encode_match(self, viewer as u8, head);
-        }
-        // What the other player knows of the frame's pool: its earlier games' reveals (ENGINE.md 125.7).
-        tail_encode::write_my_revealed(&self.m, self.frame_seat(viewer as u8), tail);
+        self.encode_row_layout(viewer, head, tail, false);
     }
 
     /// The pointer overrides (`tail_encode::option_overrides`): none during the deck choice and
     /// sideboarding (their options keep the static table).
     fn option_overrides(&self, viewer: usize, legal: &[u16], out: &mut Vec<(u32, i64)>) {
-        if self.m.choice.is_some() || self.m.sb.is_some() {
-            return;
-        }
-        tail_encode::option_overrides(&self.g, viewer as u8, legal, out);
+        self.option_overrides_layout(viewer, legal, out, false);
     }
 
     /// The turns of the match's games.

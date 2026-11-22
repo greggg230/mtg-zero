@@ -58,8 +58,20 @@ pub mod seg {
     /// ENGINE.md 142.12: the cards found by their owner's library search that the other player still
     /// tells apart (`Game::found`, ENGINE.md 140.9).
     pub const FOUND: u16 = 24;
-    /// The number of segments.
+    /// The number of segments (layout v7).
     pub const N: usize = 25;
+    /// Layout v8 (ENGINE.md 232, the game `mtg_v8`): tail-only gated segments appended after v7's
+    /// (`tail_v8`): a payment's state and picks in progress, the payment decisions' option
+    /// meanings, a gone object's last known information (by its stale key), a gone spell's item
+    /// and its relations, and the groups of places holding search finds mixed with other cards.
+    pub const PAYMENT: u16 = 25;
+    pub const PAY_OPTIONS: u16 = 26;
+    pub const LKI: u16 = 27;
+    pub const LKI_SPELLS: u16 = 28;
+    pub const LKI_RELATIONS: u16 = 29;
+    pub const FIND_GROUPS: u16 = 30;
+    /// The number of segments of layout v8.
+    pub const N_V8: usize = 31;
 }
 
 /// An object reference (`ObjRef`) inside a token: what it names now, publicly (ENGINE.md 125).
@@ -531,6 +543,55 @@ pub const TAILS: [TailSeg; 21] = [
     ts(seg::FOUND, "found"),
 ];
 
+/// Every segment's slot width in layout v8 (ENGINE.md 232): v7's, then the six tail-only
+/// segments of `tail_v8`.
+pub const SEG_W_V8: [usize; seg::N_V8] = {
+    let mut w = [0usize; seg::N_V8];
+    let mut i = 0;
+    while i < seg::N {
+        w[i] = SEG_W[i];
+        i += 1;
+    }
+    w[seg::PAYMENT as usize] = super::tail_v8::PM_W;
+    w[seg::PAY_OPTIONS as usize] = super::tail_v8::PO_W;
+    w[seg::LKI as usize] = super::tail_v8::LK8_W;
+    w[seg::LKI_SPELLS as usize] = super::tail_v8::LS_W;
+    w[seg::LKI_RELATIONS as usize] = super::tail_v8::LR_W;
+    w[seg::FIND_GROUPS as usize] = super::tail_v8::FG_W;
+    w
+};
+
+/// A segment's slot width (layouts v7 and v8: v8 only appends segments).
+pub fn seg_w(sg: u16) -> usize {
+    SEG_W_V8[sg as usize]
+}
+
+/// A segment's head slots (v8's appended segments have none).
+pub fn seg_head(sg: u16) -> usize {
+    SEG_HEAD.get(sg as usize).copied().unwrap_or(0)
+}
+
+const fn ts8(seg: u16, name: &'static str) -> TailSeg {
+    TailSeg { seg, name, width: SEG_W_V8[seg as usize], head: 0 }
+}
+
+/// The tail segments of layout v8 (the game `mtg_v8`, ENGINE.md 232): v7's, then its own.
+pub const TAILS_V8: [TailSeg; 27] = {
+    let mut t = [ts8(seg::PAYMENT, "payment"); 27];
+    let mut i = 0;
+    while i < TAILS.len() {
+        t[i] = TAILS[i];
+        i += 1;
+    }
+    t[21] = ts8(seg::PAYMENT, "payment");
+    t[22] = ts8(seg::PAY_OPTIONS, "pay_options");
+    t[23] = ts8(seg::LKI, "lki");
+    t[24] = ts8(seg::LKI_SPELLS, "lki_spells");
+    t[25] = ts8(seg::LKI_RELATIONS, "lki_relations");
+    t[26] = ts8(seg::FIND_GROUPS, "find_groups");
+    t
+};
+
 /// The index of a zone in a reference's one-hot (exhaustive: a new zone is a compile error here).
 fn zone_index(z: Zone) -> usize {
     match z {
@@ -744,6 +805,12 @@ impl<'g> Cx<'g> {
         }
     }
 
+    /// The stale references met so far, in key order (`rf::STALE_KEY` k is entry k; layout v8's
+    /// `lki` tokens, ENGINE.md 232).
+    pub(crate) fn stale_refs(&self) -> Vec<ObjRef> {
+        self.stale.borrow().clone()
+    }
+
     /// The identity the viewer sees of card `c` where it is now, if any: the
     /// zone readers' (a card of the list, an exile offer, a pick). A reference
     /// reads [`ref_def`](Self::ref_def).
@@ -797,7 +864,7 @@ impl<'g> Cx<'g> {
 
     /// An object reference (`rf::*`) with identity `d` (`write_ref`; a pick in
     /// progress whose card is hidden from the viewer: none).
-    fn write_ref_as(&self, out: &mut [f32], r: ObjRef, d: Option<DefId>) {
+    pub(crate) fn write_ref_as(&self, out: &mut [f32], r: ObjRef, d: Option<DefId>) {
         let g = self.g;
         let c = r.idx;
         let o = &g.objs[c.i()];
@@ -1043,7 +1110,7 @@ pub fn name_id(name: &str) -> u32 {
 }
 
 /// A number's floats (`ef::NUM_W`): squashed / 8, negative, its magnitude's 64 binary digits.
-fn num(out: &mut [f32], v: i64) {
+pub(crate) fn num(out: &mut [f32], v: i64) {
     out[0] = squash(v as f32 / 8.0);
     out[1] = (v < 0) as u8 as f32;
     bits(&mut out[2..ef::NUM_W], v.unsigned_abs());
@@ -1237,38 +1304,44 @@ fn write_effects(cx: &Cx, tail: &mut TailBuf) {
         cx.write_ref(&mut x[CODE + ef::OBJ..CODE + ef::OBJ + rf::W], c.obj);
         let s = &mut x[CODE..];
         s[ef::PRESENT] = 1.0;
-        s[ef::COPY] = 1.0;
-        digits(&mut s[ef::COPY_DEF..ef::COPY_DEF + 32], cx.ids, c.vals.def);
-        s[ef::COPY_DFC] = c.vals.dfc as u8 as f32;
-        let e = &c.vals.exc;
-        type_mask(&mut s[ef::TYPES..], e.types);
-        let st: Vec<u16> = (0..64u8).filter(|&b| e.subtypes >> b & 1 == 1).map(|b| g.db.exc_subtype_of_bit(b)).collect();
-        subtypes(g, s, &st);
-        for kw in encode::KWS.iter().chain(encode::KWS_V7.iter()) {
-            s[ef::KWS + kw_index(*kw)] = e.kws.has(*kw) as u8 as f32;
-        }
-        if let Some((pw, th)) = e.pt {
-            num(&mut s[ef::POWER..ef::POWER + ef::NUM_W], pw as i64);
-            num(&mut s[ef::TOUGHNESS..ef::TOUGHNESS + ef::NUM_W], th as i64);
-            s[ef::PT_PRESENT] = 1.0;
-        }
-        if let Some(n) = e.name {
-            s[ef::EXC_NAME] = 1.0;
-            digits(&mut s[ef::EXC_NAME_DIGITS..ef::EXC_NAME_DIGITS + 32], cx.ids, n);
-        }
-        if let Some(m) = e.colors {
-            bits(&mut s[ef::COLORS..ef::COLORS + 6], m as u64);
-            s[ef::COLORS_SET] = 1.0;
-        }
-        s[ef::EXC_NO_COST] = e.no_cost as u8 as f32;
-        bits(&mut s[ef::EXC_SUPERS..ef::EXC_SUPERS + 8], e.supers as u64);
+        copy_vals(g, cx.ids, s, &c.vals);
         until(cx, s, c.until);
     }
 }
 
+/// Copiable values (CR 707.2) in an `effects` token's copy-effect fields (`ef::COPY` ...
+/// `ef::COPY_DFC`): a copy effect's, and a gone object's last known ones (layout v8's `lki`
+/// tokens, ENGINE.md 232).
+pub(crate) fn copy_vals(g: &Game, ids: &[u16], s: &mut [f32], vals: &crate::copies::CopyVals) {
+    s[ef::COPY] = 1.0;
+    digits(&mut s[ef::COPY_DEF..ef::COPY_DEF + 32], ids, vals.def);
+    s[ef::COPY_DFC] = vals.dfc as u8 as f32;
+    let e = &vals.exc;
+    type_mask(&mut s[ef::TYPES..], e.types);
+    let st: Vec<u16> = (0..64u8).filter(|&b| e.subtypes >> b & 1 == 1).map(|b| g.db.exc_subtype_of_bit(b)).collect();
+    subtypes(g, s, &st);
+    for kw in encode::KWS.iter().chain(encode::KWS_V7.iter()) {
+        s[ef::KWS + kw_index(*kw)] = e.kws.has(*kw) as u8 as f32;
+    }
+    if let Some((pw, th)) = e.pt {
+        num(&mut s[ef::POWER..ef::POWER + ef::NUM_W], pw as i64);
+        num(&mut s[ef::TOUGHNESS..ef::TOUGHNESS + ef::NUM_W], th as i64);
+        s[ef::PT_PRESENT] = 1.0;
+    }
+    if let Some(n) = e.name {
+        s[ef::EXC_NAME] = 1.0;
+        digits(&mut s[ef::EXC_NAME_DIGITS..ef::EXC_NAME_DIGITS + 32], ids, n);
+    }
+    if let Some(m) = e.colors {
+        bits(&mut s[ef::COLORS..ef::COLORS + 6], m as u64);
+        s[ef::COLORS_SET] = 1.0;
+    }
+    s[ef::EXC_NO_COST] = e.no_cost as u8 as f32;
+    bits(&mut s[ef::EXC_SUPERS..ef::EXC_SUPERS + 8], e.supers as u64);
+}
+
 /// The `counters` segment (`ct::*`; ENGINE.md 142.7).
 fn write_counters(cx: &Cx, tail: &mut TailBuf) {
-    use crate::db::Counter as K;
     let g = cx.g;
     if g.counters.is_empty() {
         return;
@@ -1284,26 +1357,33 @@ fn write_counters(cx: &Cx, tail: &mut TailBuf) {
             let s = &mut x[CODE..];
             s[ct::PRESENT] = 1.0;
             cx.write_ref(&mut s[ct::OBJ..ct::OBJ + rf::W], g.obj_ref(c));
-            let i = match kind {
-                K::P1P1 => 0,
-                K::M1M1 => 1,
-                K::Stun => 2,
-                K::Kw(kw) => {
-                    s[ct::KW + kw_index(kw)] = 1.0;
-                    3
-                }
-                K::Named(id) => {
-                    bits(&mut s[ct::NAME..ct::NAME + 32], name_id(g.db.subtype_name(id)) as u64);
-                    4
-                }
-                K::Loyalty => 5,
-                K::Lore => 6,
-            };
-            s[ct::KIND + i] = 1.0;
-            s[ct::COUNT] = squash(n as f32 / 4.0);
-            bits(&mut s[ct::COUNT_BITS..ct::COUNT_BITS + 64], n as u64);
+            counter_floats(g, s, kind, n);
         }
     }
+}
+
+/// A kind of counter and its number in a `counters` token's fields (`ct::KIND` ... `ct::COUNT_BITS`):
+/// an object's, and a gone object's last known ones (layout v8's `lki` tokens, ENGINE.md 232).
+pub(crate) fn counter_floats(g: &Game, s: &mut [f32], kind: crate::db::Counter, n: crate::num::Count) {
+    use crate::db::Counter as K;
+    let i = match kind {
+        K::P1P1 => 0,
+        K::M1M1 => 1,
+        K::Stun => 2,
+        K::Kw(kw) => {
+            s[ct::KW + kw_index(kw)] = 1.0;
+            3
+        }
+        K::Named(id) => {
+            bits(&mut s[ct::NAME..ct::NAME + 32], name_id(g.db.subtype_name(id)) as u64);
+            4
+        }
+        K::Loyalty => 5,
+        K::Lore => 6,
+    };
+    s[ct::KIND + i] = 1.0;
+    s[ct::COUNT] = squash(n as f32 / 4.0);
+    bits(&mut s[ct::COUNT_BITS..ct::COUNT_BITS + 64], n as u64);
 }
 
 /// One `numbers` token (`nb::*`) if `v` is past `nb::BIG`: a player's (`p`) or a permanent's (`c`).
@@ -1667,69 +1747,86 @@ pub(crate) fn head_target(g: &Game, t: Target) -> bool {
     }
 }
 
-/// A new `stack_relations` token at the next slot `k`: kind `kind` of the item at `pos` from the
-/// top, index `index` in its list.
-fn sr_token<'a>(tail: &'a mut TailBuf, k: &mut u32, kind: usize, pos: usize, index: usize) -> &'a mut [f32] {
-    let x = tail.token(seg::STACK_RELATIONS, *k);
+/// A new relations token at the next slot `k` of segment `sg` (`stack_relations`; layout v8's
+/// `lki_relations`): kind `kind` of the item at `pos` from the top (a gone spell: none), index
+/// `index` in its list; `key` (layout v8): where the gone spell's stale key goes, and the key.
+fn sr_token<'a>(tail: &'a mut TailBuf, sg: u16, k: &mut u32, kind: usize, pos: Option<usize>, index: usize, key: Option<(usize, usize)>) -> &'a mut [f32] {
+    let x = tail.token(sg, *k);
     *k += 1;
     x[CODE + sr::PRESENT] = 1.0;
     x[CODE + sr::KIND + kind] = 1.0;
-    x[CODE + sr::ITEM_POS] = (pos + 1) as f32 / 32.0;
+    if let Some(pos) = pos {
+        x[CODE + sr::ITEM_POS] = (pos + 1) as f32 / 32.0;
+    }
     x[CODE + sr::INDEX] = (index + 1) as f32 / 8.0;
+    if let Some((at, key)) = key {
+        x[at] = (key + 1) as f32 / 32.0;
+        bits(&mut x[at + 1..at + 17], key as u64);
+    }
     x
 }
 
 /// The `stack_relations` segment (`sr::*`), the stack from the top.
 fn write_stack_relations(cx: &Cx, tail: &mut TailBuf) {
-    let g = cx.g;
     let mut k = 0u32;
-    for (pos, item) in g.stack.iter().rev().enumerate() {
-        for (j, &(req, t)) in item.targets.iter().enumerate() {
-            if j < 2 && head_target(g, t) {
-                continue;
+    for (pos, item) in cx.g.stack.iter().rev().enumerate() {
+        item_relations(cx, item, Some(pos), tail, seg::STACK_RELATIONS, &mut k, None);
+    }
+}
+
+/// An item's relations as tokens of segment `sg` from slot `k` on (`sr::*`): an item on the stack
+/// at `pos` (`stack_relations`: what its stack slot doesn't hold - targets past the first two or
+/// that the head's target block can't name, divisions past two, noted objects past the first and
+/// a first one off the battlefield, the spliced cards, a ninjutsu creature's planeswalker), or a
+/// gone spell's (`pos` None, layout v8's `lki_relations`, ENGINE.md 232: every one, with `key`).
+pub(crate) fn item_relations(cx: &Cx, item: &crate::game::StackItem, pos: Option<usize>, tail: &mut TailBuf, sg: u16, k: &mut u32, key: Option<(usize, usize)>) {
+    let g = cx.g;
+    let all = pos.is_none();
+    for (j, &(req, t)) in item.targets.iter().enumerate() {
+        if !all && j < 2 && head_target(g, t) {
+            continue;
+        }
+        let x = sr_token(tail, sg, k, sr::K_TARGET, pos, j, key);
+        x[CODE + sr::REQ] = (req as f32 + 1.0) / 8.0;
+        match t {
+            Target::Player(p) => {
+                x[CODE + sr::PLAYER] = 1.0;
+                x[CODE + if p == cx.me { sr::PLAYER_ME } else { sr::PLAYER_OPP }] = 1.0;
             }
-            let x = sr_token(tail, &mut k, sr::K_TARGET, pos, j);
-            x[CODE + sr::REQ] = (req as f32 + 1.0) / 8.0;
-            match t {
-                Target::Player(p) => {
-                    x[CODE + sr::PLAYER] = 1.0;
-                    x[CODE + if p == cx.me { sr::PLAYER_ME } else { sr::PLAYER_OPP }] = 1.0;
+            Target::Obj(r) => {
+                if let Some(d) = cx.ref_def(r) {
+                    code(&mut x[..CODE], g.db, cx.ids, d);
                 }
-                Target::Obj(r) => {
-                    if let Some(d) = cx.ref_def(r) {
-                        code(&mut x[..CODE], g.db, cx.ids, d);
-                    }
-                    cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], r);
-                }
-                Target::Stack(id) => cx.write_item_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], id),
+                cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], r);
             }
+            Target::Stack(id) => cx.write_item_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], id),
         }
-        for (j, &n) in item.division.iter().enumerate().skip(2) {
-            let x = sr_token(tail, &mut k, sr::K_DIVISION, pos, j);
-            x[CODE + sr::AMOUNT] = squash(n as f32 / 8.0);
-            bits(&mut x[CODE + sr::AMOUNT_BITS..CODE + sr::AMOUNT_BITS + 64], n);
+    }
+    for (j, &n) in item.division.iter().enumerate().skip(if all { 0 } else { 2 }) {
+        let x = sr_token(tail, sg, k, sr::K_DIVISION, pos, j, key);
+        x[CODE + sr::AMOUNT] = squash(n as f32 / 8.0);
+        bits(&mut x[CODE + sr::AMOUNT_BITS..CODE + sr::AMOUNT_BITS + 64], n);
+    }
+    for (j, &r) in item.noted.iter().enumerate() {
+        if !all && j == 0 && g.live(r) && g.objs[r.idx.i()].zone == Zone::Battlefield {
+            continue;
         }
-        for (j, &r) in item.noted.iter().enumerate() {
-            if j == 0 && g.live(r) && g.objs[r.idx.i()].zone == Zone::Battlefield {
-                continue;
-            }
-            let x = sr_token(tail, &mut k, sr::K_NOTED, pos, j);
-            if let Some(d) = cx.ref_def(r) {
-                code(&mut x[..CODE], g.db, cx.ids, d);
-            }
-            cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], r);
-        }
-        for (j, &d) in item.spliced.iter().enumerate() {
-            let x = sr_token(tail, &mut k, sr::K_SPLICED, pos, j);
+        let x = sr_token(tail, sg, k, sr::K_NOTED, pos, j, key);
+        if let Some(d) = cx.ref_def(r) {
             code(&mut x[..CODE], g.db, cx.ids, d);
         }
-        if let Some(Some(pw)) = item.attack_as {
-            let x = sr_token(tail, &mut k, sr::K_ATTACK_AS, pos, 0);
-            if let Some(d) = cx.ref_def(pw) {
-                code(&mut x[..CODE], g.db, cx.ids, d);
-            }
-            cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], pw);
+        cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], r);
+    }
+    for (j, &d) in item.spliced.iter().enumerate() {
+        let x = sr_token(tail, sg, k, sr::K_SPLICED, pos, j, key);
+        code(&mut x[..CODE], g.db, cx.ids, d);
+    }
+    if let Some(Some(pw)) = item.attack_as {
+        let x = sr_token(tail, sg, k, sr::K_ATTACK_AS, pos, 0, key);
+        if let Some(d) = cx.ref_def(pw) {
+            code(&mut x[..CODE], g.db, cx.ids, d);
         }
+        cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], pw);
     }
 }
 
@@ -1778,6 +1875,17 @@ fn write_graveyard_order(cx: &Cx, tail: &mut TailBuf) {
 /// object in that slot (the list's `LIBRARY` + 63 on a paged list's first page, whose slot 63 holds
 /// the pile's 64th card). A row whose objects all fit their head slots, unpaged and without exile
 /// offers, gets none: every option keeps the logit of before (a widened network's, exactly).
+/// The pointer overrides of `viewer`'s row in layout v8 (`v8`: v7's, then those into the
+/// `pay_options` tokens, `tail_v8::pay_overrides`; ENGINE.md 232) or v7, by option index.
+pub(crate) fn option_overrides_layout(g: &Game, viewer: PlayerId, legal: &[u16], out: &mut Vec<(u32, i64)>, v8: bool) {
+    let n0 = out.len();
+    option_overrides(g, viewer, legal, out);
+    if v8 {
+        super::tail_v8::pay_overrides(g, viewer, legal, out);
+        out[n0..].sort_by_key(|o| o.0);
+    }
+}
+
 pub(crate) fn option_overrides(g: &Game, viewer: PlayerId, legal: &[u16], out: &mut Vec<(u32, i64)>) {
     let Some(d) = g.pending.as_ref() else { return };
     // (The common row: an unpaged decision whose object options all name objects at head slots,
@@ -1903,24 +2011,45 @@ pub struct Row {
 impl Row {
     /// `viewer`'s row of game `g` (its pending decision's options, if the viewer decides them).
     pub fn of(g: &Game, viewer: PlayerId) -> Row {
+        Row::of_layout(g, viewer, false)
+    }
+
+    /// `viewer`'s layout v8 row of game `g` (ENGINE.md 232: v7's row and the tokens of v8's
+    /// segments, with the overrides into them).
+    pub fn of_v8(g: &Game, viewer: PlayerId) -> Row {
+        Row::of_layout(g, viewer, true)
+    }
+
+    /// `viewer`'s row of game `g` in layout v8 (`v8`) or v7.
+    pub fn of_layout(g: &Game, viewer: PlayerId, v8: bool) -> Row {
         let mut head = vec![0.0f32; encode::NUM_FEATURES];
-        let mut t = TailBuf::new(&TAILS);
-        g.encode_features_row(viewer, &mut head, &mut t);
-        t.seal();
-        let mut tail = Vec::with_capacity(t.len());
-        let mut off = 0;
-        for (&sg, &sl) in t.seg().iter().zip(t.slot()) {
-            let w = SEG_W[sg as usize];
-            tail.push((sg, sl, t.val()[off..off + w].to_vec()));
-            off += w;
+        let mut t = TailBuf::new(if v8 { &TAILS_V8 } else { &TAILS });
+        if v8 {
+            g.encode_features_row_v8(viewer, &mut head, &mut t);
+        } else {
+            g.encode_features_row(viewer, &mut head, &mut t);
         }
+        let tail = Row::sealed(&mut t);
         let mut ov = Vec::new();
         let mut legal = Vec::new();
         g.legal_actions(&mut legal);
         if !legal.is_empty() {
-            option_overrides(g, viewer, &legal, &mut ov);
+            option_overrides_layout(g, viewer, &legal, &mut ov, v8);
         }
         Row { head, tail, ov }
+    }
+
+    /// A buffer's tokens, sealed, as `(seg, slot, floats)`.
+    fn sealed(t: &mut TailBuf) -> Vec<(u16, u32, Vec<f32>)> {
+        t.seal();
+        let mut tail = Vec::with_capacity(t.len());
+        let mut off = 0;
+        for (&sg, &sl) in t.seg().iter().zip(t.slot()) {
+            let w = seg_w(sg);
+            tail.push((sg, sl, t.val()[off..off + w].to_vec()));
+            off += w;
+        }
+        tail
     }
 
     /// The row as one vector: the head, then each tail token's segment, slot and floats, then the
@@ -1970,7 +2099,7 @@ impl Row {
         for (sg, sl, x) in &self.tail {
             let w = 3 + x.len();
             if i < at + w {
-                let name = TAILS.iter().find(|t| t.seg == *sg).map_or("?", |t| t.name);
+                let name = TAILS_V8.iter().find(|t| t.seg == *sg).map_or("?", |t| t.name);
                 return match i - at {
                     0 => format!("tail token {name} slot {sl}: its segment"),
                     1 | 2 => format!("tail token {name} slot {sl}: its slot"),
@@ -1989,7 +2118,7 @@ impl Row {
     /// token.
     pub fn token(&self, sg: u16, slot: u32) -> Option<&[f32]> {
         let i = sg as usize;
-        if (slot as usize) < SEG_HEAD[i] {
+        if (slot as usize) < seg_head(sg) {
             let (o, w) = (encode::LAY7.off[i], SEG_W[i]);
             let x = &self.head[o + slot as usize * w..o + (slot as usize + 1) * w];
             let p = match sg {
@@ -2005,7 +2134,7 @@ impl Row {
 
     /// The tokens of segment `sg` by slot: its present head slots, then its tail tokens.
     pub fn tokens(&self, sg: u16) -> Vec<(u32, &[f32])> {
-        let mut v: Vec<(u32, &[f32])> = (0..SEG_HEAD[sg as usize] as u32).filter_map(|s| self.token(sg, s).map(|x| (s, x))).collect();
+        let mut v: Vec<(u32, &[f32])> = (0..seg_head(sg) as u32).filter_map(|s| self.token(sg, s).map(|x| (s, x))).collect();
         v.extend(self.tail.iter().filter(|t| t.0 == sg).map(|t| (t.1, &t.2[..])));
         v
     }
@@ -2178,23 +2307,27 @@ impl Row {
     /// `viewer`'s row of match `a` (zero-core's `encode_row` and `option_overrides`: the match block
     /// too, sideboarding's and the deck choice's encodings).
     pub fn of_az(a: &super::MtgAz, viewer: usize) -> Row {
+        Row::of_az_layout(a, viewer, false)
+    }
+
+    /// `viewer`'s layout v8 row of match `a` (the game `mtg_v8`'s `encode_row` and
+    /// `option_overrides`, ENGINE.md 232).
+    pub fn of_az_v8(a: &super::MtgAz, viewer: usize) -> Row {
+        Row::of_az_layout(a, viewer, true)
+    }
+
+    /// `viewer`'s row of match `a` in layout v8 (`v8`) or v7.
+    pub fn of_az_layout(a: &super::MtgAz, viewer: usize, v8: bool) -> Row {
         use zero_search::game::SearchGame;
         let mut head = vec![0.0f32; encode::NUM_FEATURES];
-        let mut t = TailBuf::new(&TAILS);
-        a.encode_row(viewer, &mut head, &mut t);
-        t.seal();
-        let mut tail = Vec::with_capacity(t.len());
-        let mut off = 0;
-        for (&sg, &sl) in t.seg().iter().zip(t.slot()) {
-            let w = SEG_W[sg as usize];
-            tail.push((sg, sl, t.val()[off..off + w].to_vec()));
-            off += w;
-        }
+        let mut t = TailBuf::new(if v8 { &TAILS_V8 } else { &TAILS });
+        a.encode_row_layout(viewer, &mut head, &mut t, v8);
+        let tail = Row::sealed(&mut t);
         let mut ov = Vec::new();
         let mut legal = Vec::new();
         a.legal_actions(&mut legal);
         if !legal.is_empty() {
-            a.option_overrides(viewer, &legal, &mut ov);
+            a.option_overrides_layout(viewer, &legal, &mut ov, v8);
         }
         Row { head, tail, ov }
     }

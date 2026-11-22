@@ -541,6 +541,11 @@ impl Game {
             let depth = self.players[o.owner as usize].library.iter().rev().position(|&x| x == c).map_or(u64::MAX, |d| d as u64);
             v.extend([o.owner as u64, h64(&o.zone), depth]);
         }
+        // Layout v8's facts (ENGINE.md 232): the payments in progress and their 601.2g steps, the last known
+        // information of the gone objects the public state names, the groups of places holding finds.
+        crate::az::tail_v8::payment_view(self, viewer, &mut v);
+        crate::az::tail_v8::lki_view(self, viewer, &mut v);
+        crate::az::tail_v8::find_groups_view(self, &mut v);
         v
     }
 
@@ -1009,6 +1014,7 @@ impl Game {
         self.lki_copy.hash(&mut h);
         self.lki_damage.hash(&mut h);
         self.spell_lki.hash(&mut h);
+        self.find_groups.hash(&mut h);
         self.loop_taken.hash(&mut h);
         self.loop_open.hash(&mut h);
         self.initiative.hash(&mut h);
