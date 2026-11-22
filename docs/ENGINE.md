@@ -42926,3 +42926,179 @@ on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 
 compared); the suite evidence of 1052673bd712 (`gates/1052673bd712-suite.json`); the Mac's full-suite recheck not
 needed (the tested sha differs in docs only); the checkout unchanged (`gates/93513ea86b60-engine.json`). The next
 commit adds this paragraph only (docs).
+
+## 228. Mana abilities while a spell is cast: the 601.2g step (fix agent M, bug 1 of the Hogaak lanes' findings; branch `fix/hogaak-midcast-mana`, 2026-11-21)
+
+**Why.** Lane A found it (220.1.5, 220.1.9) and the user asked for the fix: CR 601.2g - "If the total cost includes a
+mana payment, the player then has a chance to activate mana abilities. Mana abilities must be activated before costs
+are paid" - then 601.2h, the total cost paid in any order (delve's exiles, convoke's taps, the cost's other parts, the
+mana). The engine had no 601.2g step: the payment (`PayMana`, 34, 13.12) activated only the mana abilities whose mana
+it spent, and delve chose its cards first. So (a) a card a mana ability puts into the graveyard during the cast (Lotus
+Petal, Chromatic Star, a land Squandered Resources sacrifices) could not be delve's or escape's for that same spell
+(Treasure Cruise, Murktide Regent, Hogaak; Underworld Breach) unless the payment spent its mana - for Hogaak, whose mana
+can't be spent (113.6e), never; and (b) an unneeded mana ability could not be activated mid-cast: Chromatic Star
+activated while casting, its draw trigger put on the stack above the spell (601.2i, 117.2), was a legal line the engine
+did not reach. **Not** Lion's Eye Diamond: "activate only as an instant" means it can't be activated while a spell is
+cast (its 2004-10-04 ruling; the user's correction) - the step honours that and every other timing restriction.
+
+### 228.1 The step
+
+* **`Task::CastMana { id, card, again }`, `DecisionKind::CastMana`** (`cast_mana.rs`): pushed by `begin_cast_face`
+  after `Task::Delve`, so it runs once the total cost is determined (601.2b-f's announcements run first) and before
+  delve, the cost's parts and the mana (601.2h). Not asked when the total cost has no mana (601.2g's "if"), nor when
+  `PASS` is the only option that leaves the payment completable. Options: each permanent with a mana ability the caster
+  may activate now (`MY_PERM`; `ChooseMode` for which of its abilities), each hand card's (`HAND_ABILITY`, one per
+  definition as `ActivateMana`'s), `PASS` ("pay the cost"). The kind is the 52nd of the context block's 64 one-hot
+  slots and the task code 17 with the spell and its cost floats as delve's: no layout change.
+* **What may be activated**: `mana_ability_now` with no sorcery timing (a spell is on the stack): "only during your
+  turn", "only if", boast, locks, latent and exhaust as with priority; **never** `instant_only` (Lion's Eye Diamond).
+  Unlike floating with priority (`mana_float_sources`), abilities whose mana is usable only at priority (Chromatic Star,
+  Wizard's Rockets) are offered: activated here, they are a different outcome (the trigger above the spell).
+* **An activation** runs as `ActivateMana`'s (`begin_activate`; Rain of Filth's granted sacrifice) but with **no
+  state-based check and no priority** (601.2, 117.5): its triggered abilities wait and are put on the stack after
+  601.2i with the spell's cast triggers. **The total cost is locked** at the first activation (`Game::cast_lock`, read
+  first by `total_mana`, cleared by `cast_done`): an artifact or creature the ability sacrifices no longer changes it
+  (601.2f fixed it already). `cast_lock` is Public (the public-state gate perturbs it; `view_of` shows it).
+* **Bots** answer the step `PASS` (it is action 0, the options are sorted; both heuristic bots say so explicitly).
+
+### 228.2 What castability counts
+
+The payment's castability (`delve_classes` while the step may still come, `before_cast_mana`) counts the cards mana
+abilities activated in the step may put into the graveyard: every source that sacrifices its card (incl. one with a
+mana cost of its own, Chromatic Star, whose cost the class model pays within the payment) or another permanent (a
+sacrifice slot); for a spell of no mana, `no_mana_feeders` (need-free sacrificing sources, the delve unit only), kept by
+`spendable_classes`. What it can't express exactly - a feeder with a mana cost for a spell of no mana (the Star's {1}
+paid by other mana, its mana floating), a feeder of an escape exile beyond `delve_sources`, a discarding feeder, one
+whose last counter sacrifices it - is **`Game::feed_castable`** (the user's decision 3: an exact bespoke search, no Tag
+change): asked where castability says no (`hand_castable`, `castable_via`, `cast_alt`, `alt_payable`) and only when
+such a feeder exists (`feed_gap`, `gap_feeder`), it puts the spell on the stack of a copy as casting would (each
+additional option castability considers, escalate's discards, one spree mode, each emerge candidate; X least) and
+searches the cast's own 601.2g step (`payment_completes`) - the same search the step makes when the spell is cast, so
+castability and the cast agree by construction.
+
+### 228.3 The collapse (a proof)
+
+The step does not offer permanent c's own mana ability A when activating A in the step and activating it with the
+priority the caster receives right after the cast reach the same states (`cast_mana_collapsed`). Conditions:
+
+1. A's cost is exactly {T}, its production fixed (`One`, `Fixed`, `SameType`, `Combo`, `OneOf`, `Chosen`, `ChosenN`),
+   no X, damage, life, sacrifice, condition, "only if", "your turn", sorcery or instant restriction; c's tap adds no
+   bonus mana (`tap_bonus_wide`).
+2. The caster receives priority right after the cast (the task under `CastDone` is `Priority`, `turn.priority` = the
+   caster).
+3. No triggered ability that may be put on the stack before that priority reacts to a permanent becoming tapped or
+   reads tapped status (its event, condition - exhaustive `pred_reads_tapped` - targets or modes): the definitions of
+   the battlefield, command zone, both graveyards, the spell, the waiting and temporary triggers, and the caster's
+   hand mana sources; no EoE W3 grant in play.
+4. No card leaves the caster's hand during the rest of the cast but a mana source's own (no discard / exile-from-hand
+   cost in the spell's rest or any mana ability the caster may activate: `rest_moves_hand`).
+5. The caster controls no permanent another player owns.
+6. The rest of the cast (`cast_rest_reach`: the payment's writes over every source, every mana ability's sacrifices /
+   returns / counters / life / zones, the cost's parts, emerge) can't remove c, change a permanent's types or
+   abilities (`chars_may_change_in`, public), or change a toughness or remove counters a state-based action reads.
+
+**Claim.** Under 1-6, for every complete continuation R1 of the cast after A is activated in the step there is a
+continuation of the cast without A, followed by A activated by the payment or at the caster's next priority, that
+reaches the same state at that priority; the converse (the cast without A) is offered (`PASS`). **Proof.** Let S1 be
+the state after A in the step (c tapped, A's mana M in the pool), S0 the state before.
+(i) *R1 is legal from S0.* Every decision of R1 is the caster's (5: the only other-player decision a payment can ask is
+616.1's order for a permanent that player owns, `payment_completes`). Its options can depend on c's tapped status only
+through costs that tap untapped permanents (more options with c untapped: nothing in a cast needs a tapped permanent
+untapped... except a filter reading tapped status, which then is one of the reads 3 or 6's `filter_reads` cover) and
+on M only by spending it. Where R1 spends some of M, replace that by the paying payment activating A itself (c is
+untapped in the run from S0 and A has no restriction: 1); mana from the pool and from activating A within the payment
+are one mana of the same type and riders (fixed production, 1), so every later decision has the same options.
+(ii) *The same state.* After R1 from S1 and its counterpart from S0 (plus A at the priority when R1 left M unspent),
+the objects, zones, counters and pool agree: A's only effects are c tapped and M added (1), at a different moment;
+nothing between reads c's tapped status (3, 6) or the pool's M except by spending it (i); no hidden card is read to
+decide this (4: the hand's other cards can't trigger or move; a payment pins the hand's mana sources, ENGINE.md 10) and
+no game-wide flag set by hidden cards (`chars_may_change_in(.., public)`, Rain of Filth by its effect) - so the other
+player's worlds agree on the step. Triggered abilities: A triggers nothing (2's tap bonus, 3's tapped reads), so the
+waiting triggers and the 601.2i triggers are the same objects in the same order; state-based actions at that priority
+read neither tapped status nor the pool (704.5), and 6 keeps every state-based action that a counter or toughness
+change could start the same. A at the priority in the counterpart triggers nothing and the following SBA check finds
+the state the first found. (iii) *Twins*: when the payment's class takes another, interchangeable source than c (its
+first free member), the counterpart activates that one: the states are equal up to which of two twins is tapped -
+the equality the unit test checks (`a_collapsed_land_activated_while_casting_reaches_the_states_of_activating_it_after`:
+both players' loop hashes, twins canonicalised by tapped count). (iv) Information: in S1 no other player decides before
+the caster's priority (5), so the earlier tap shows nobody anything a decision could read. **Tightening (this
+session)**: a sacrifice or return cost of another permanent counts the permanents its filter takes now when the filter
+reads nothing the rest may change but types, abilities or power/toughness (if those may change, 6 keeps the collapse off
+anyway, so the set is exact whenever it is read); counters removed are unsettling only on a creature, planeswalker or
+battle (704.5f-g, i, v) - elsewhere only a continuous effect reads them, which `chars_may_change` counts.
+
+### 228.4 Completability: the step's search (an exactness argument)
+
+Every option of the step, and every decision of an ability it activates, must leave the cast's payment completable
+(601.2h: a cost is paid whole; `cost_order::completing`, floor `cast_mana_floor`). In the search (`Game::oracle`
+copies) the step node offers only the feeders castability does not count (`gap_feeder`: for delve, of a spell spending
+mana, any non-sacrificing feeder - a discard, a last counter; of a spell of no mana, any with a mana cost too; for an
+escape exile, any but a need-free self-sacrifice of a mana spell; all for a spell of no mana) plus the leaf `YES`
+(`cast_mana_open_ok`: the payment's castability with the step still open, so the class model counts the counted
+feeders as activatable in it); `PASS` answered in the search is the closed step (`cast_mana_pass_ok`).
+**Argument.** Completion exists from a step node iff some sequence of step activations and then the payment
+completes. Split any such sequence into its gap-feeder activations G and the rest N. (a) The search explores every
+order and every sub-decision (payments, colours, sacrifices) of G - nothing is cut there. (b) For N: each activation in
+N is a counted feeder (its card's graveyard arrival the class model counts in open-step mode, its mana a source of the
+payment, its need paid within the payment with the chain order, 13.15) or not a feeder; a non-feeder's mana is a
+payment source whose activation the payment itself makes - where its activatability or yield depends on what a feeder
+changes (a metalcraft Mox, Tolarian Academy's count, a land Squandered Resources sacrifices after tapping), the payment
+model orders conditional sources before sacrificing ones and combines a card's TAP and SAC uses (100.4.7: `res`), as in
+any payment. So the leaf's class model is exactly the question "do N and the payment complete" (its castability, the
+same model the engine's castability is held to by `rules_castpay`'s agreement test and the brute-force tests). An
+activation in N that must precede one of G (its mana paying G's cost) is made within G's own payment (605.3a: a mana
+ability may be activated while paying), which the search explores. **Speed without cuts**: (1) "X mana in any
+combination" is one choice of the combination in the search (the pool keeps amounts, not the order they were chosen in:
+each combination once instead of each sequence); for the step's own activation the types stay unchosen
+(`Game::pool_wild`: (count, mask), units of the mask for `add_pool` / `might_pay`) until a gap feeder's activation
+needs concrete mana (a `ManaNowPick` of the combinations first) or the spell's cost has a part besides its mana (each
+combination tried: that part's castability is a search of its own) - the class model's units are masks, so a unit of
+the mask is exactly "some type of the mask"; (2) a paged decision of a step activation filters its items by
+`completing` (`ask_paged_ranges`: Cascading Cataracts' 126 productions); (3) one `completing` pass per step decision
+(`ask_completed`). A spell whose total cost has no mana has no step: the search asks its payment as it is.
+
+### 228.5 Found and fixed on the way
+
+* **Delve counted another use of a source it delves** (cube board 2213 of `rules_castpay`, reachable after step
+  activations): a Lotus Petal or Wizard's Rockets chosen in delve (`Mark::DelveLate`) is activated by its own ability as
+  the payment begins (`PayMana::forced`), yet delve's "how many more cards" and its offer of further sources counted
+  other uses of the same card - Urza, Lord High Artificer tapping the Rockets for {U} - so delve offered `PASS` and the
+  payment had "no way to pay {5}{U}{U}". Now `delve_rest_payable_using` drops those uses (the source's own ability
+  stays: activated anyway); test `cr_702_66a_a_source_delved_isnt_also_tapped_by_another_ability` (fails before).
+* **No mana ability while paying a cost of no mana** (601.2g, 602.2b, 605.3a): `exile_sources` forced a Lotus Petal for
+  an escape of X = 0 (Walking Ballista); now none when the payment's mana is nothing (for a spell being paid, its total
+  cost before delve; castability keeps a delve spell's delve-reduced mana as a payment, delve paying part of it). Test
+  `cr_605_3a_no_mana_ability_while_paying_a_cost_of_no_mana`.
+* The public-state gate's "a permanent gained a triggered ability" perturbation granted slot 0 of a definition with no
+  triggered ability (a state the engine can't reach, which the step's searches now resolve events through): it picks a
+  permanent whose definition has one.
+
+### 228.6 Tests
+
+`tests/rules_cast_mana.rs` (16; rules_suite): Petal / Star delved for Hogaak and Treasure Cruise, a Petal activated
+with its mana unspent, an unneeded Star's trigger above the spell vs below when floated first, Lion's Eye Diamond never
+offered (and floated first, delve fuel), plain lands collapsed, Mana Confluence / Talismans offered, the timing
+restrictions card by card on two boards, **Hogaak castable only through a Star whose {1} a land pays**, a creature that
+pays a Star's {1} doesn't convoke, a Star feeding escape's exile for Lightning Bolt, **the brute-force agreement test**
+(500 random Hogaak boards: castability = a brute force over fed Stars x Petal x Elves as payer x delve x convoke's
+matching, and every decision path of every castable cast ends cast; 129 castable, 23 only through a Star, 24,565
+paths), the delve fix, the zero-mana rule. `cast_mana.rs` unit tests: the collapse's equality, the cost lock. Lane A's
+`cr_601_2g_a_lotus_petal_sacrificed_while_hogaak_is_cast_feeds_escapes_exile` (was "never fed": 220.1.4's reading,
+which this section replaces). `tests/az.rs` `cast_mana_positions` in the public-state gate. Tests of the payment pass
+the step (`Game::pass_cast_mana`; testkit `choose` and `drive_until` pass a step a test answers past). The four
+seed-pinned fuzz tests re-pinned by the scan `scan_seeds_for_the_seed_pinned_tests` (228.7).
+
+### 228.7 Results
+
+RESULTS_PLACEHOLDER
+
+### 228.8 Known follow-ups
+
+* **Activating an ability has the same step** (CR 602.2b: 601.2b-i apply to activating an ability): not on this branch
+  (the orchestrator's follow-up todo: reuse `Task::CastMana`'s machinery for `ActPay`). Until then a mana ability is
+  activated during an activation only by its payment (and `exile_sources`' forced need-free sacrifices).
+* Castability treats a delve spell's delve-reduced mana as a mana payment (228.5): exact unless its total cost is zero,
+  which no delve card's cost reaches without an alternative cost of no mana, and such a cost and an exile cost are never
+  combined (escape is itself the alternative cost).
+* The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
+  counts): measured in 228.7.

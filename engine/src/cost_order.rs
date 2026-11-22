@@ -849,8 +849,17 @@ impl Game {
             let ads = own.iter().chain(granted.iter().map(|g| self.db.def(g.def).activated_def(crate::db::AbilitySlot::Activated(g.slot))));
             for ad in ads.filter(|ad| ad.mana().is_some()) {
                 let k = &ad.cost;
-                if k.sacrifice.is_some() || k.bounce.is_some() {
-                    any_leaves = true;
+                // A sacrifice or return of another permanent: the permanents it may take now, when its filter reads
+                // nothing the rest may change but types, abilities and power or toughness - which, if they may change,
+                // keep the collapse off anyway (`chars`, `unsettled`), so the set holds whenever it is read; else any.
+                for s in k.sacrifice.iter().chain(k.bounce.iter()) {
+                    let r = filter_reads(&s.filter);
+                    if !r.tapped && !r.counters && !r.counts && r.kinds & !(kind::TYPES | kind::ABILITIES | kind::PT) == 0 {
+                        w.leave.extend(self.sacrifice_candidates(p, c, s));
+                        w.zones = true;
+                    } else {
+                        any_leaves = true;
+                    }
                 }
                 if k.sac_self || ad.mana().is_some_and(|m| m.sac_if_no.is_some()) {
                     w.leave.push(c);
@@ -866,10 +875,14 @@ impl Game {
                 }
             }
         }
-        // (Rain of Filth's granted sacrifice: its effect in play, public - not the game's `SEEN_SAC_MANA`, which hidden
-        // cards set.)
-        if any_leaves || self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
+        if any_leaves {
             w.leave.extend(self.permanents_of(p));
+            w.zones = true;
+        }
+        // (Rain of Filth's granted "sacrifice this land: add one mana": its effect in play, public - not the game's
+        // `SEEN_SAC_MANA`, which hidden cards set; the permanents it gives the ability now, `sac_mana_of`.)
+        if self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
+            w.leave.extend(self.permanents_of(p).filter(|&x| self.sac_mana_of(x) != 0));
             w.zones = true;
         }
         let emerge = if item.alt > 0 {
@@ -887,7 +900,11 @@ impl Game {
             w.leave.push(e);
         }
         let ch = self.chars_may_change_in(p, &w, false, true);
-        RestReach { unsettled: !w.counters.is_empty() || ch.0 & kind::PT != 0, chars: ch.0 & (kind::TYPES | kind::ABILITIES) != 0, leave: w.leave }
+        // (Counters removed matter only where a state-based action reads them - a creature's toughness, a
+        // planeswalker's loyalty, a battle's defense (CR 704.5f-g, 704.5i, 704.5v) - or a continuous effect does,
+        // which `chars_may_change` counts (`Change`'s power and toughness).)
+        let fragile = |x: CardIdx| self.is_creature(x) || self.is_type(x, crate::db::types::PLANESWALKER) || self.is_type(x, crate::db::types::BATTLE);
+        RestReach { unsettled: w.counters.iter().any(|&x| fragile(x)) || ch.0 & kind::PT != 0, chars: ch.0 & (kind::TYPES | kind::ABILITIES) != 0, leave: w.leave }
     }
 
     /// The first part of `parts` in the order `part::DOMINANT`.
