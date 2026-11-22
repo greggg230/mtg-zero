@@ -43833,7 +43833,131 @@ reference kept for a later publish, the judge's PUBLISH OFF; farm_campaign.py co
 uploader (experiment, title, labels, key, the saved result), PUBLISH OFF / SKIPPED / FAILED, the per-side labels, no
 key refused before waiting. The site is never contacted.
 
-## 226. zero-core pin 84bb5e1 -> 899e0eb: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good; an NVIDIA card's CUDA ordinal by its LUID, a second DXGI listing of a card left out (zero-core `fix/resume-fatal` f8a6211, `fix/cuda-luid-ordinal` 899e0eb; 2026-11-21)
+## 226. Last-known mana value of a departed copy; last known power of a slot that left twice (branch `fix/eoe-copy-mv`, 2026-11-21)
+
+**Why.** Bug 6 of the pre-existing engine gaps the Hogaak lanes found (220.2, 220.4's follow-ups): EoE W3's
+`DamageEachSourceMv` (Terminal Velocity's granted "When this permanent leaves the battlefield, it deals damage equal to
+its mana value to each creature") did not know that a departed source was a copy, so it missed the copy's mana value
+(lane B's 202.3b fix, 220.2). The audit of every last-known-information read found a second defect (`lki_power`).
+From hogaak-b c273ef11, merged with main 45dbf2e1. No layout change, no zero-core change, no docs/shortcuts.md entry.
+
+### 226.1 Root cause
+
+The last known information of a permanent that left the battlefield stored only its **copiable values**
+(`Game::lki_copy`: definition, exceptions, double-faced). Mana value isn't a function of copiable values alone: being a
+copy isn't copiable (CR 707.2), yet 202.3b gives a copy of a nonmodal back face mana value 0, and a copy exception "no
+mana cost" gives 0 (202.3a). `DamageEachSourceMv` recomputed the mana value as the definition's, which gives the front
+face's value for a departed copy of a back face and ignores `no_cost`; with nothing recorded it read the card in its new
+zone. A token copy created back face up (707.8a) has **the same copiable values** as the transformed original, so
+nothing in the record could tell them apart. `Amount::EventSpellMv` (Thor, God of Thunder's "that spell's mana value",
+cascade) made the same mistake for a spell that left the stack (`def mv + x * x_pips` from `spell_lki`), missing a spell
+that is a copy of a back face.
+
+`Game::lki_power` kept one departure per slot: a card that left the battlefield, returned (a new object, 400.7) and left
+again in the same turn overwrote the first object's power, and an ability about the first (Jacked Rabbit's attack
+trigger, `Amount::SourcePower`) fell back to the printed power.
+
+### 226.2 The fix
+
+* `cast.rs`: `mana_value_of` split. `mana_value_with_x(c, x)` is the one rule (no mana cost 0; a copy or copy slot of a
+  face with `front_mv` 0; else the face's mana value + x * X pips); `mana_value_of` passes the stack's X.
+* `game.rs`: `lki_copy: Vec<(ObjRef, CopyVals, u64)>`; `move_card` records `mana_value_of` as the permanent leaves,
+  before its copy effects end. `spell_lki: Vec<(ObjRef, DefId, StackItem, u64)>`.
+* `copies.rs`: `Game::mana_value_lki(r)` (now, or as it last existed on the battlefield); `note_spell_lki` records
+  `mana_value_with_x(card, item.x)`; `Game::spell_mana_value_lki(r)`.
+* `eoe_w3.rs` `DamageEachSourceMv`: a live source gives its current qualities and mana value; a departed one the
+  recorded `lki_damage` and `mana_value_lki`, each `expect`ed (the old fallback read the card in its new zone; it can't
+  be reached, because this op sets `SEEN_LKI_DAMAGE` through `seen_bits`, which scans every trigger, delayed included).
+* `resolve.rs` `Amount::EventSpellMv` reads `spell_mana_value_lki`.
+* `loops.rs` (`loop_lki`): the loop hash includes the recorded mana values (equality unchanged: the value is fixed per
+  departed object).
+* `lki_power`: every departure of the turn stays, keyed by slot and incarnation (`set_lki_power`, `lki_power_of`); as a
+  turn begins (`flow.rs`, with the other last known information) `prune_lki_power` keeps each slot's latest departure
+  (the old behaviour across turns) and any earlier one a reference of the public state still names
+  (`for_each_public_ref`: a delayed trigger about that object reads its power in a later turn too).
+
+### 226.3 The audit: every last-known-information read
+
+| Record / read | Verdict |
+|---|---|
+| `lki_copy` -> `copiable_of` (a token copy of it, `CopyOf::Source/Target` LKI) | correct: copiable values are exactly what a copy takes; the new copy's own mana value is computed live |
+| `lki_copy` -> `DamageEachSourceMv`'s mana value | **fixed** |
+| `spell_lki` -> `Amount::EventSpellMv` (Thor, cascade) | **fixed** |
+| `spell_lki` -> `spell_now_or_lki` (copy that spell), `event_spell_times` | correct (copiable values, times) |
+| `lki_damage` (from `damage_source_of`, layered) -> the W3 ops, `Ext::DamageFrom` | correct; `DamageEachSourceMv`'s dead fallback made loud |
+| `lki_toughness`, `lki_counters`, `lki_attached`, `w3.lki_host` / `lki_loss`, `triggers::Lki.def` (the copy's face) | correct |
+| `ev.amount` at a sacrifice (`CostMvPlus`), transmute, Mana Drain's `RememberSpellMv`, emerge | read live before the move: correct |
+| `def_of(..).mana_value()` of cards in graveyards, libraries, exile, hands (`FromGraveyard`, linked exiled cards, cascade's exiled cards, transmute's found card) | not copies, no X there: equal to `mana_value_of` |
+| `lki_power` (one entry per slot) | **fixed** (above) |
+| `lki_source` (eoe_w3) fallback `damage_source_of(card now)` | unreachable (the same seen bit); left as is |
+
+### 226.4 Tests
+
+`engine/tests/rules_lki_mana_value.rs` (rules_suite, 6; the table is the cube + the legacy cards + Terminal Velocity):
+Phyrexian Metamorph as a transformed Ulvenwald Oddity deals 0; a real transformed Concealing Curtains deals 1 (its front
+face's mana value); Metamorph as Curtains deals 1, not its card's 4; Mockingbird (put by Terminal Velocity, no mana
+spent) copying the Metamorph-as-Behemoth deals 0; Metamorph as Jacked Rabbit (an X creature) deals 2; Thor and a
+countered Green Sun's Zenith with X 2 deals 3. `copies.rs` `lki_mana_value_tests` (lib, 4; built states): a token copy
+back face up deals 0 against the original's 4, their copiable values equal; a copy with the no-cost exception deals 0; a
+spell made a copy of Jace, Telepath Unbound, countered under Thor's trigger: 0 against 2 for the card;
+`cr_608_2h_400_7_last_known_power_of_a_slot_that_left_twice_is_the_first_objects` (Jacked Rabbit with three counters
+attacks; with its trigger waiting it is exiled, returned and put into the graveyard: 4 tokens, the old record 1; the
+pruning keeps the first object's power while the trigger names it, drops it after, and the latest stays across the
+turn). The creature that takes the damage is a 6/7 in every damage test that expects 0, asserted still on the
+battlefield, so a 0 is the damage dealt and not a dead creature's.
+
+**Toggle check** (the old reads restored on a scratch commit, the new tests run on the Mac): 6 of the 10 fail - the
+token copy, the no-cost copy, the Thor copy spell, the Jacked Rabbit power (lib), the Metamorph copying a back face and
+the Mockingbird (rules) - and the 4 that don't are the cases whose value the old reads already gave (a real back face 1,
+Metamorph as Curtains 1, the X creature 2, the Thor X spell 3).
+
+Full engine suite on the Mac at the merged code (`cargo test --release -p engine -p card_ir --no-fail-fast`, az
+included): **2,882 passed, 0 failed, 37 ignored** (main's 2,872 + the 10 here; `cards_suite` 1,533, `rules_suite` 459,
+`rulings_suite` 397, `misc_suite` 212, lib 99, `az` 57, `hidden` 28, `fuzz` 19, `limits` 13). The public-state gate in
+`az`: no new gap.
+
+### 226.5 Digests
+
+**No digest moves; none re-recorded.** On the Mac at the merged code (a4fea0e1, bit-identical to the desktop, ENGINE.md
+44): the cube `--test digest` **44372545881ef768** (all 2,500 games equal to `tests/data/digests.txt`); `--test
+digest_formats` constructed **91b6cf60576961a7**, metagame **be3766d1f943c95c**, EoE **c3a9c786030f42eb**, driver
+**6a03572828250b86**; dealt **f0bfffd26a70a753**; dealt per seat **c67b186ba7d00e51** - each equal to main 45dbf2e1's
+recorded file (220.4.7). Expected: the changed reads matter only for a departed copy of a back face or a departed copy
+with no mana cost under Terminal Velocity's granted trigger, a spell copy of a back face under Thor or cascade, and a
+slot that leaves the battlefield twice in a turn with an ability about its first object waiting; no digest game reaches
+one (Terminal Velocity is in the EoE table only, which holds no card that enters as a copy).
+
+The constructed and metagame numbers in 220.2's Limits stand as history: 16441662701e233d / 56ff52ffef1b1913 there are
+main's files of that day, which lane B's branch (two cards added to the table) did not match - it measured
+2d00d87dc223dcc9 / 1213d7d29aad1f11, and this branch before the merge (6151d155) gave the same. 220.4.7 re-recorded the family once
+for all seven cards (91b6cf60576961a7 / be3766d1f943c95c, the values above), so 220.2's text needs no change.
+
+### 226.6 Fuzz
+
+On the Mac at a4fea0e1 (`tools/fuzz_shards.py`, 12 shards): `FUZZ_POOL=eoe` **20,000 games** (the pool this touches;
+games only), the default cube pool 2,000 games + 100 matches, `hogaak_b` 2,000, `hogaak` 2,000 + 100 matches + 100
+post-sideboard, `delver` 2,000 + 100 + 100, `doomsday` 2,000, `sneak_show` 2,000, `cross` 2,000 + 100 + 100 - **all
+PASSED**; the test binary directly (fuzz_shards strips `FUZZ_*`): the `fuzz` profile 1,000 games, `FUZZ_CHANCE=10` 600,
+`FUZZ_BELIEF=2` 600 - all ok. No search impact to measure: the fix adds no options (no decision point changes).
+
+### 226.7 Encoding
+
+No layout change. A pre-existing gap was found: a stale reference (`tail_encode::rf`) shows its own card without copy
+effects (ENGINE.md 156), so a departed copy's copied identity, last known mana value and power are not in the input
+while an ability about it waits on the stack (the public-state gate classes the LKI fields Derived). The fix doesn't
+widen it (before, the network was equally blind to the copied face; the rules now compute 0 instead of the front
+face's). The maintainer's decision: one additive layout v8 (a stale-object LKI block in `rf`, the LKI fields Public in
+the gate) built by a later encoding change, not here.
+
+### 226.8 Shared-file functions changed
+
+`cast.rs`: `mana_value_of` (now passes the stack's X), `mana_value_with_x` (new, next to it). `game.rs`: the `lki_copy`,
+`spell_lki`, `lki_power` fields, `lki_power_of`, `set_lki_power`, `prune_lki_power` (new), `move_card_ctl`'s LKI record.
+`copies.rs`: `mana_value_lki`, `spell_mana_value_lki` (new), `note_spell_lki`. `eoe_w3.rs`: `DamageEachSourceMv`.
+`resolve.rs`: `Amount::EventSpellMv`. `loops.rs`: `loop_lki`. `flow.rs`: `start_turn` (one line). No payment code
+(`pay.rs`, `cost_order.rs`, `hogaak_a.rs`) is touched.
+
+## 227. zero-core pin 84bb5e1 -> 899e0eb: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good; an NVIDIA card's CUDA ordinal by its LUID, a second DXGI listing of a card left out (zero-core `fix/resume-fatal` f8a6211, `fix/cuda-luid-ordinal` 899e0eb; 2026-11-21)
 
 **Why.** On 2026-11-21 a farm GPU lease went dead for 86 minutes after an owner-activity pause: at the `resume` the
 worker could not rebuild its GPU session (CUBLAS_STATUS_ALLOC_FAILED). The resume arm of the worker's control loop
@@ -43854,7 +43978,7 @@ or row change: the worker crate's control path only.
 `with_control_quits_the_job_on_a_failed_resume_and_returns_its_error` (end to end: yield, a failing resume, the job
 quit and joined, the error returned); `cargo test -p zero_worker --lib` 43 passed; clippy: nothing new.
 
-### 226.1 The CUDA ordinal by LUID (zero-core 899e0eb)
+### 227.1 The CUDA ordinal by LUID (zero-core 899e0eb)
 
 **Why.** The farm releases of main 76973535 and 52d0bf9b FAILED at `cuda-selftest`: "Invalid device ID: 1, must be
 between 0 (inclusive) and 1 (exclusive)". The desktop has one NVIDIA card, but its user was on a remote desktop
