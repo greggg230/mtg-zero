@@ -439,9 +439,11 @@ impl Game {
                 return keys;
             }
             let Some(d) = &self.pending else { return keys };
+            // (A cast's 601.2g step: `PASS`, the cost paid with no mana ability activated while casting - the default,
+            // as passing priority is; ENGINE.md 228.)
             let c = if d.options.len() == 1 {
                 d.options[0].choice
-            } else if d.kind == DecisionKind::Priority {
+            } else if d.kind == DecisionKind::Priority || (d.kind == DecisionKind::CastMana && d.action_of(Choice::Pass).is_some()) {
                 Choice::Pass
             } else {
                 return keys;
