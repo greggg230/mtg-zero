@@ -49,6 +49,13 @@ RULE = ('cq', 4, 50.0, 0.3)            # the Delver line's evaluation rule (cq-n
 INSTANTS = {'Brainstorm', 'Lightning Bolt', 'Daze', 'Force of Will', 'Unholy Heat', 'Prismari Charm'}
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def low_priority(threads):
     os.environ.setdefault('CUDA_VISIBLE_DEVICES', '-1')
     import torch
@@ -63,7 +70,7 @@ def low_priority(threads):
 def evaluator(path):
     from zero.infer import NetEvaluator
     from zero.net import load
-    m, _ = load(path, 'cpu', game='mtg')
+    m, _ = _lay().load_used(path, 'cpu')
     return NetEvaluator(m, 'cpu')
 
 
@@ -74,7 +81,7 @@ def search_all(games, ev, sims, view, seeds, root_min=0, pairs=None):
     viewer's value of it from the mover's row and from its own row: (mover-view, root-view). Rows carry their tails
     and overrides on a layout v7 engine (docs/ENGINE.md 125, tools/rowkit.py)."""
     import rowkit
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     trees = []
     for g, s in zip(games, seeds):
         t = g.search_tree(True, int(s))
@@ -219,7 +226,7 @@ def cmd_position(a):
     # the pass's first leaf: the opponent's priority decision, both views (value-only rows, whole: tools/rowkit.py)
     import rowkit
     from zero import mcts
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     for i, act in enumerate(g.legal()):
         h = g.clone()
         mcts.transition(h, act)
@@ -250,7 +257,7 @@ def cmd_selfplay(a):
                      cfg.get('temp_moves', 60), a.fast or None, a.p_full, 0, 0.0, True,
                      cfg.get('policy_target', 'cq'), 50.0, cfg.get('cq_c_scale', 0.3), sims_minor=a.minor or None,
                      leaf_value_view=a.view, view_samples=1.0, view_sample_target='next_q')
-    drv = G.Driver('mtg', [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=min(a.games, a.conc), seed=a.seed,
+    drv = G.Driver(_lay().current(), [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=min(a.games, a.conc), seed=a.seed,
                    record=True, threads=a.search_threads, groups=2, max_steps=20000)
     parts, order = [], []
 
@@ -298,7 +305,7 @@ def values(ev, s, rows):
     """The network's P(win) for each sample's own player (its row's view; the rows whole - their tails - on a layout
     v7 engine, as value-only rows: tools/rowkit.py)."""
     import rowkit
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     out = np.zeros(len(rows))
     B = 256
     for i in range(0, len(rows), B):
@@ -374,7 +381,7 @@ def cmd_finetune(a):
     tr, te = split_rows(s, n, a.split, a.seed)
     if a.decisions_only:
         tr = tr[n[tr] > 0]                      # the control: the decision rows alone (as training sees them now)
-    m, extra = load(a.model, 'cpu', game='mtg')
+    m, extra = _lay().load_used(a.model, 'cpu')
     ev0 = evaluator(a.model)
     before = calib_all(ev0, s, n, te)
     m.train()
@@ -447,7 +454,7 @@ def cmd_play(a):
         seat = NNSeat('m', a.sims, impl='rs', select='cq', select_min_visits=4, cq_c_visit=50.0, cq_c_scale=0.3,
                       leaf_value_view=view)
         # (mtgz.az.replays' recorder: the minor decisions - mana payments - at sims_minor, as self-play)
-        drv = type('Rec', (_Recorder,), {'sims_minor': a.minor})('mtg', a.games, lambda g: [seat, seat], spec=spec,
+        drv = type('Rec', (_Recorder,), {'sims_minor': a.minor})(_lay().current(), a.games, lambda g: [seat, seat], spec=spec,
                                                                  concurrency=a.conc, seed=a.seed, max_steps=5000)
         t0 = time.time()
         drive(drv, {'m': ev})
@@ -488,7 +495,7 @@ def cmd_speed(a):
     for view in ('mover', 'root'):
         seat = G.nn_seat('m', 64, selfplay=True, sims_fast=16, p_full=0.25, sims_minor=4, policy_target='cq',
                          cq_c_scale=0.3, temp_moves=60, leaf_value_view=view)
-        drv = G.Driver('mtg', [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
+        drv = G.Driver(_lay().current(), [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
                        record=False, threads=a.search_threads, groups=2, max_steps=20000)
         t0 = time.time()
         ev.seconds, ev.calls, ev.leaves = 0.0, 0, 0

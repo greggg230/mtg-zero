@@ -93,7 +93,15 @@ DEFAULT_SPOT = 0.05
 DEFAULT_DEADLINE_S = 3 * 3600
 EXPIRES_DAYS = 30
 SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,62}$')
-GAME = 'mtg'
+# (A campaign plays the game its checkpoints record - layout v7 `mtg` or v8 `mtg_v8`, docs/ENGINE.md 232 - never a
+# default: `ckpt_game`; a campaign made before layout v8 saved `mtg` in its state.)
+
+
+def ckpt_game(a, b=None):
+    """The game checkpoints `a` (and `b`) record (mtgz.az.layouts): refused when the two differ."""
+    from mtgz.az import layouts
+    ga = layouts.checkpoint_game(a)
+    return layouts.same_game(ga, layouts.checkpoint_game(b), where=f'{a} and {b}') if b else ga
 RELEASE = 'release'                     # `alternates`: the release index's for the build (docs/ENGINE.md 215)
 # the live runs' variants (zero-core docs/az.md 46.10, 67): NVIDIA's CUDA alternate the float16 graph, AMD's DirectML
 # alternate the float32 MatMul form (the one zero-onnx/2 graph DirectML runs deterministically there)
@@ -253,7 +261,7 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
         rule = h2h.with_belief(rule, tilts=dict(tilts))
         cfg['eval_belief_tilts'] = {k: float(v) for k, v in sorted(dict(tilts).items()) if v}
     cfg.update(eval_sims=int(sims), c_puct=float(c_puct), chance_k=int(chance_k), max_steps=int(max_steps),
-               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=GAME, groups=EVAL_GROUPS)
+               eval_spec=G.spec_json(spec), sparse=0, eval_trace=1, game=ckpt_game(ckpt_a, ckpt_b), groups=EVAL_GROUPS)
     if sides is None:
         want = [match_seat(ckpt_a, sims, rule, chance_k, c_puct),
                 match_seat(ckpt_b or ckpt_a, sims, rule, chance_k, c_puct)]
@@ -310,7 +318,7 @@ def selfplay_settings(ckpt, overrides=None):
     if not cfg:
         raise CampaignError(f'{ckpt}: no run config next to it (runs/<run>/config.json)')
     cfg.update(overrides or {})
-    cfg['game'] = GAME
+    cfg['game'] = ckpt_game(ckpt)
     return cfg
 
 
@@ -520,7 +528,7 @@ def export_variant(form, g, gen, spec, log, cache=None):
         if form == 'fp16':
             to_float16(g['model'], dst)
         else:
-            ex = FH.export_cached(g['checkpoint'], gen, os.path.join(d, f'v-{form}'), GAME, G.spec_json(spec),
+            ex = FH.export_cached(g['checkpoint'], gen, os.path.join(d, f'v-{form}'), ckpt_game(g['checkpoint']), G.spec_json(spec),
                                   os.path.join(cache or EXPORT_CACHE, 'templates'), f'ckpt-{g["checkpoint_sha256"][:12]}',
                                   checkpoint_iter=gen, graph='fast-matmul')
             if form == 'matmul':
@@ -837,7 +845,7 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
         if info.get('build_id') != build_id or 'eval' not in (info.get('kinds') or []):
             raise CampaignError(f'{worker} is build {info.get("build_id")} ({info.get("kinds")}), not the eval worker '
                                 f'build {build_id}')
-        st = {'run': run, 'name': name, 'game': GAME, 'a': os.path.abspath(a), 'b': os.path.abspath(b) if b else None,
+        st = {'run': run, 'name': name, 'game': ckpt_game(a, b), 'a': os.path.abspath(a), 'b': os.path.abspath(b) if b else None,
               'seats': seats, 'paired': bool(paired), 'seed': int(seed), 'games': int(games), 'batch': 'c1',
               'games_per_lease': games_per_lease, 'share': None if share is None else float(share),
               'priority': float(priority), 'build_id': build_id, 'runtime': runtime, 'worker': os.path.abspath(worker),
@@ -864,9 +872,9 @@ def resume(d, client=None, opts=None, log=log_stderr):
 def _setup(d, st, client, opts, log):
     from zero import farm_def as FD
     if not st.get('gens'):
-        gens = {'1': export_gen(st['a'], 1, GAME, st['spec'], st['run'], log, opts.get('export_cache'))}
+        gens = {'1': export_gen(st['a'], 1, st['game'], st['spec'], st['run'], log, opts.get('export_cache'))}
         if st['b']:
-            gens['2'] = export_gen(st['b'], 2, GAME, st['spec'], st['run'], log, opts.get('export_cache'))
+            gens['2'] = export_gen(st['b'], 2, st['game'], st['spec'], st['run'], log, opts.get('export_cache'))
         st['gens'] = gens
         save_state(d, st)
     cl = client or FD.Client(opts.get('url', FD.URL))
@@ -1181,7 +1189,7 @@ def spot_check(d, st, frac=None, engine=None, log=log_stderr):
     for g in pick:
         r = rows[g]
         try:
-            FE.replay_trace(r, GAME, st['spec'], engine, st['seed'], st['paired'], samples=samples_job(st),
+            FE.replay_trace(r, st['game'], st['spec'], engine, st['seed'], st['paired'], samples=samples_job(st),
                             aux=bool(r.get('aux')))
         except FE.TraceMismatch as e:
             _refuse(d, st, f'spot check: machine {r.get("by", {}).get("machine")}: {e}')
@@ -1199,7 +1207,7 @@ def _f32(bits):
     return struct.unpack('<f', struct.pack('<I', int(bits) & 0xffffffff))[0]
 
 
-def describe(row, spec, engine=None, states=False):
+def describe(row, spec, engine=None, states=False, game=None):
     """A traced row replayed into its per-game record (for analyses): {gid, seats (the job's, this game's order),
     result, rounds, over, digest, by, episodes: [{moves: [{i, seat, kind, a, t}], result}]} - each real move with the
     seat that decided it, the decision's kind and the option in words (the engine's spectator view of the state
@@ -1209,7 +1217,8 @@ def describe(row, spec, engine=None, states=False):
         import mtgz.az  # noqa: F401
         from mtgz import _engine as engine
     rec = row['rec']
-    g = engine.Game(GAME, spec, int(rec['n']), int(rec['seed']))
+    # (the campaign's game, `st['game']`; a row of a campaign made before layout v8: layout v7's `mtg`)
+    g = engine.Game(game or row.get('game') or 'mtg', spec, int(rec['n']), int(rec['seed']))
     eps = [{'moves': []}]
     for i, s in enumerate(rec['steps']):
         if isinstance(s, dict):                      # a chained contest's episode boundary

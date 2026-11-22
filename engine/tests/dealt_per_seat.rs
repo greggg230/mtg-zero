@@ -111,8 +111,11 @@ fn legal(g: &MtgAz) -> Vec<u16> {
     v
 }
 
+/// `viewer`'s whole row: layout v8's, the default game `mtg_v8`'s (ENGINE.md 232); with `DIGEST_ENCODING=v7` layout v7's
+/// (the game `mtg`'s, the compatibility layout).
 fn row(g: &MtgAz, viewer: usize) -> Vec<f32> {
-    engine::az::tail_encode::Row::of_az(g, viewer).flat()
+    let v7 = std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7");
+    engine::az::tail_encode::Row::of_az_layout(g, viewer, !v7).flat()
 }
 
 fn next(g: &MtgAz) -> Option<MtgAz> {
@@ -606,6 +609,10 @@ fn dealt_per_seat_digests() {
         }
     }
     println!("dealt_per_seat_digests: {} matches; combined digest {:016x}", lines.len(), all.0);
+    // (`DIGEST_ENCODING=v7`: layout v7's rows, the combined digest printed only: ENGINE.md 232.)
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v7") {
+        return;
+    }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/digests_dealt_per_seat.txt");
     if std::env::var("DIGEST_WRITE").is_ok() {
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();

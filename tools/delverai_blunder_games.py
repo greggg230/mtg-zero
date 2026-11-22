@@ -44,6 +44,13 @@ MAX_STEPS = 600          # a turn's steps at most (a spot's turn: a few dozen)
 SEED = 20261103
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def _driver_class():
     from zero import replay as core
 
@@ -56,7 +63,7 @@ def _driver_class():
             self.starts = starts
             self.first_only = first_only
             self.turn0 = {}
-            super().__init__('mtg', len(starts), lambda k: [seat, seat], spec=spec, concurrency=len(starts), seed=seed,
+            super().__init__(_lay().current(), len(starts), lambda k: [seat, seat], spec=spec, concurrency=len(starts), seed=seed,
                              max_steps=MAX_STEPS, **kw)
 
         def _refill(self):
@@ -96,7 +103,7 @@ def _run(Driver, starts, seat, spec, ev, first_only, seed):
     from zero.infer import drive
     kw = {}
     if ev.aux_layout:
-        kw = {'aux': {'a': ev}, 'aux_render': package.active().replay_aux_of('mtg')}
+        kw = {'aux': {'a': ev}, 'aux_render': package.active().replay_aux_of(_lay().current())}
     drv = Driver(starts, seat, spec, first_only=first_only, seed=seed, **kw)
     drive(drv, {'a': ev})
     return {r['gid']: r for r in drv.take_replays()}
@@ -116,7 +123,7 @@ def record(ckpt, spots, engine_path=B.ROOT, log=B.say, seed=SEED):
     R.check_encoding(ckpt)
     torch.set_num_threads(min(8, os.cpu_count() or 8))
     seat, cfg, info = play_seat(ckpt)
-    model, _ = load(ckpt, 'cpu', game='mtg')
+    model, _ = _lay().load_used(ckpt, 'cpu')
     ev = NetEvaluator(model, 'cpu')
     if ev.aux_layout:
         info['aux'] = [n for n, _, _ in ev.aux_layout]
@@ -189,7 +196,7 @@ def record(ckpt, spots, engine_path=B.ROOT, log=B.say, seed=SEED):
                    'passed': right >= D.PASS, 'played': labels.get(a, str(a)), 'played_right': right_of(sp, labels.get(a, str(a))),
                    'sims': info['sims'], 'select': 'visits'}
         out[sp['id']] = {
-            'format': 'zero-replay/1', 'game': 'mtg', 'spec': spec, 'seed': sp['seed'], 'game_index': k, 'created': created,
+            'format': 'zero-replay/1', 'game': _lay().current(), 'spec': spec, 'seed': sp['seed'], 'game_index': k, 'created': created,
             'title': f'{blunder["label"]} · {run} iter {it}', 'group': f'blunder test cases · {run} iter {it}',
             'selfplay': False, 'hint': None, 'source': {'checkpoint': os.path.basename(ckpt), 'run': run, 'iter': it},
             'seats': [dict(info), dict(info)], 'states': states, 'frames': frames, 'final': final, 'result': res,

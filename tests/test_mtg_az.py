@@ -648,3 +648,56 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
     assert h[-1]['view']['rows'] > 0 and h[-1]['decision']['rows'] > 0
     start = json.loads(open(out + '.log.jsonl').readline())
     assert start['aux'] == belief and start['train_view_rows'] > 0 and start['train_aux_rows'] == start['train_rows']
+
+
+def test_old_runs_stay_layout_v7_and_new_runs_are_layout_v8(tmp_path):
+    """ENGINE.md 232: layout v8 (the game `mtg_v8`) is every preset's and the package's default; the game name `mtg` stays
+    layout v7, the compatibility layout every run, checkpoint, farm run and record made before layout v8 records. A run
+    directory saved as `mtg` with a v7 checkpoint - an old run re-pinned onto this main, no fork - resolves its config as
+    `mtg` (its saved settings win over the preset's game), its game's layout is v7 and its checkpoint loads; loading that
+    checkpoint as `mtg_v8` is refused (the encoding guard). A new run of the same preset is `mtg_v8`, layout v8. A tool
+    loads a checkpoint as the game it records (`mtgz.az.layouts`) and refuses a second layout in one process."""
+    import os
+    import torch
+    import mtgz.az as A
+    from mtgz.az import layouts as L
+    from zero import package
+    from zero.net import EncodingMismatch, TokenNet, check_checkpoint, save
+    assert A.PACKAGE.game == 'mtg_v8' and L.GAME == 'mtg_v8' and L.GAME_V7 == 'mtg'
+    mtg_presets = [p for p in A.PRESETS.values() if p.get('game') in L.GAMES]
+    assert mtg_presets and all(p['game'] == 'mtg_v8' for p in mtg_presets)
+    assert package.active().tokens_of('mtg')['version'] == 7 and package.active().tokens_of('mtg_v8')['version'] == 8
+    assert len(G.info('mtg')['tails']) == 21 and len(G.info('mtg_v8')['tails']) == 27
+    info = G.info('mtg')
+    torch.manual_seed(1)
+    old = TokenNet(info['num_features'], info['num_actions'], A.LAYOUT, d=16, layers=1, heads=2, ff=32, game='mtg').eval()
+    run_dir = tmp_path / 'old-run'
+    (run_dir / 'models').mkdir(parents=True)
+    ck = str(run_dir / 'models' / 'iter_0003.pt')
+    save(old, ck, {'iter': 3})
+    with open(run_dir / 'config.json', 'w', encoding='utf-8') as f:
+        json.dump(dict(A.PRESETS['delver-mirror'], game='mtg', preset='delver-mirror'), f)
+    with open(run_dir / 'config.json', encoding='utf-8') as f:
+        saved = json.load(f)
+    cfg = run.resolve_config(run.parse(['--run', str(run_dir)]), saved)
+    assert cfg['game'] == 'mtg' and package.active().tokens_of(cfg['game'])['version'] == 7
+    check_checkpoint(ck, cfg['game'])
+    with pytest.raises(EncodingMismatch):
+        check_checkpoint(ck, 'mtg_v8')
+    new = run.resolve_config(run.parse(['--run', str(tmp_path / 'new-run'), '--preset', 'delver-mirror']), {})
+    assert new['game'] == 'mtg_v8' and package.active().tokens_of(new['game'])['version'] == 8
+    assert L.checkpoint_game(ck) == 'mtg'
+    m, _ = L.load(ck)
+    assert L.model_game(m) == 'mtg' and L.record_game({}) == 'mtg' and L.record_game({'game': 'mtg_v8'}) == 'mtg_v8'
+    L._USED = None
+    try:
+        L.use('mtg')
+        assert L.current() == 'mtg'
+        with pytest.raises(ValueError, match='cannot share'):
+            L.use('mtg_v8')
+    finally:
+        L._USED = None
+    assert L.current() == 'mtg_v8'
+    with pytest.raises(ValueError, match='different games'):
+        L.same_game('mtg', 'mtg_v8')
+    assert os.path.exists(ck)

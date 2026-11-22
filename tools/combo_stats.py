@@ -95,6 +95,13 @@ CHOICE_KINDS = ('ChooseGraveyardCard', 'SearchLibrary', 'PutOnTop')
 FF_CLASSES = ('voluntary', 'forced', 'in_hand', 'not_findable', 'missed')
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def say(*a):
     print(*a, flush=True)
 
@@ -160,7 +167,7 @@ def play(ckpt, decks, sims, games, out, label=None, seed=1, batch=25, threads=4,
     else:
         spec = FF.with_forced_find(spec, forced_find)
     seats = seats_for(ckpt, sims)
-    model, _ = load(ckpt, device, game='mtg')
+    model, _ = _lay().load_used(ckpt, device)
     ev = NetEvaluator(model, device)
     meta = {'format': FORMAT, 'label': label, 'ckpt': portable_path(os.path.abspath(ckpt)),
             'ckpt_sha256': sha256(ckpt)[:16], 'decks': list(decks), 'sims': [int(s) for s in sims], 'spec': spec,
@@ -182,7 +189,7 @@ def play(ckpt, decks, sims, games, out, label=None, seed=1, batch=25, threads=4,
         if os.path.exists(path):
             continue
         dseed = int(seed) + b
-        drv = G.Driver('mtg', [list(seats) for _ in range(n)], spec=spec, concurrency=min(conc or n, n), seed=dseed,
+        drv = G.Driver(_lay().current(), [list(seats) for _ in range(n)], spec=spec, concurrency=min(conc or n, n), seed=dseed,
                        threads=threads, groups=groups, max_steps=max_steps, move_log=1_000_000, sparse=bool(sparse))
         if sink is not None:
             drv.set_game_log(True)              # (game records: the games are the same)
@@ -212,7 +219,7 @@ def write_failures(out, fails, label, b):
     path = os.path.join(out, GF.FILE)
     fs = [json.loads(f) if isinstance(f, str) else f for f in fails]
     commit = head_commit()
-    GF.append(path, lambda first: [GF.record(f, it=f'{label}.b{b:03d}', source='local', game='mtg',
+    GF.append(path, lambda first: [GF.record(f, it=f'{label}.b{b:03d}', source='local', game=_lay().current(),
                                               engine_commit=commit, build=None, path=path, line=first + i,
                                               pkg='mtgz')
                                     for i, f in enumerate(fs)])
@@ -436,7 +443,7 @@ def scan_row(E, meta, row):
     """A game rebuilt from its seed and move log -> its stats line (module docs). Raises when it does not replay."""
     sp = json.loads(meta['spec'])
     sp['log'] = True
-    g = E.Game('mtg', json.dumps(sp), 2, E.game_seed_of(int(meta['driver_seed']), int(row['gid']), False))
+    g = E.Game(_lay().current(), json.dumps(sp), 2, E.game_seed_of(int(meta['driver_seed']), int(row['gid']), False))
     R = Reader(meta['decks'])
     st = json.loads(g.export_state())
     prev = None
@@ -821,7 +828,7 @@ def find_spots(paths, per_file=None):
         n = 0
         for row in rec['rows']:
             seed = E.game_seed_of(int(rec['driver_seed']), int(row['gid']), False)
-            g = E.Game('mtg', rec['spec'], 2, seed)
+            g = E.Game(_lay().record_game(rec), rec['spec'], 2, seed)
             acts, seen = [], set()
 
             def look(a):
@@ -869,12 +876,12 @@ def search_spots(ckpt, spots, sims_list, repeats=8, device='cpu', log=say):
     from zero.infer import NetEvaluator
     from zero.net import load
     from mtgz.az.yardsticks import bo1_seat
-    model, _ = load(ckpt, device, game='mtg')
+    model, _ = _lay().load_used(ckpt, device)
     ev = NetEvaluator(model, device)
     seat = bo1_seat(ckpt)
     base = []
     for sp in spots:
-        g = E.Game('mtg', sp['spec'], 2, int(sp['seed']))
+        g = E.Game(_lay().current(), sp['spec'], 2, int(sp['seed']))
         for a in sp['actions']:
             g.step(int(a))
         st = json.loads(g.export_state())
@@ -949,10 +956,10 @@ def selfplay_records(ckpt, decks, sims, games, p, seed=1, threads=4, groups=2, m
         ev = UniformEvaluator()
     else:
         from zero.net import load
-        model, _ = load(ckpt, device, game='mtg')
+        model, _ = _lay().load_used(ckpt, device)
         ev = NetEvaluator(model, device)
     seat = G.nn_seat('a', int(sims), selfplay=True)
-    drv = G.Driver('mtg', [[seat, seat]], spec=spec, concurrency=min(games, 16), seed=int(seed), record=True,
+    drv = G.Driver(_lay().current(), [[seat, seat]], spec=spec, concurrency=min(games, 16), seed=int(seed), record=True,
                    threads=threads, groups=groups, rolling=True, max_steps=max_steps)
     drv.set_trace(True)
     recs = []
@@ -976,7 +983,7 @@ def policy_rows(E, spec, rec):
     sp = json.loads(spec)
     unless = (sp.get('forced_find') or {}).get('unless_in_hand', True)
     sp['log'] = True
-    g = E.Game('mtg', json.dumps(sp), 2, int(rec['seed']))
+    g = E.Game(_lay().current(), json.dumps(sp), 2, int(rec['seed']))
     st = json.loads(g.export_state())
     at, to_move, res, lines = {}, [], {}, {}
     for k, a in enumerate(rec['steps']):
@@ -1035,7 +1042,7 @@ def rows(ckpt, decks, sims, games, p, out=None, seed=1, threads=4, groups=2, dev
     replayed = {'rows': 0, 'without_options': 0}
     for rec in recs:
         text = json.dumps(rec, separators=(',', ':'))
-        smp, info = E.replay_rows('mtg', spec, text, False)
+        smp, info = E.replay_rows(_lay().current(), spec, text, False)
         replayed['rows'] += info['rows']
         if smp is not None:
             import numpy as np

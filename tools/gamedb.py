@@ -84,6 +84,13 @@ NO_CHOICE_EVENT = ('Priority', 'PayMana')     # decisions that are not `choice` 
 TABLES += ('bauble',)                         # the Bauble activations (tools/gamedb_bauble.py, docs/ENGINE.md 194)
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def say(*a):
     print(*a, flush=True)
 
@@ -296,7 +303,7 @@ def replay_light(E, C, spec_txt, rec, decks):
     """Light replay (module docs): the game to its end with the log on, two exports. -> games fields."""
     sp = json.loads(spec_txt)
     sp['log'] = True
-    g = E.Game('mtg', json.dumps(sp), int(rec['n']), int(rec['seed']))
+    g = E.Game(_lay().record_game(rec), json.dumps(sp), int(rec['n']), int(rec['seed']))
     acts = actions_of(rec)
     n_dec = 0
     prev = None
@@ -328,7 +335,7 @@ def replay_full(E, C, spec_txt, rec, decks, mains):
     -> (games fields, events, combo dict)."""
     sp = json.loads(spec_txt)
     sp['log'] = True
-    g = E.Game('mtg', json.dumps(sp), int(rec['n']), int(rec['seed']))
+    g = E.Game(_lay().record_game(rec), json.dumps(sp), int(rec['n']), int(rec['seed']))
     R = C.Reader(decks)
     import gamedb_bauble
     B = gamedb_bauble.Reader()
@@ -1128,7 +1135,7 @@ def import_combo(out_run, files, it=1, log=say):
         items = []
         for row in rec['rows']:
             seed = E.game_seed_of(int(rec['driver_seed']), int(row['gid']), False)
-            g = E.Game('mtg', rec['spec'], 2, seed)
+            g = E.Game(_lay().record_game(rec), rec['spec'], 2, seed)
             acts = []
 
             def auto():

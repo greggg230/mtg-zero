@@ -37,6 +37,13 @@ LANDS = {'Flooded Strand', 'Island', 'Misty Rainforest', 'Polluted Delta', 'Scal
 KEEP, MULL = 0, 1
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def hands(spec, zero, one, control, seed=0):
     """-> [(game, lands, order)] seven-card mulligan declarations (order 0: the starting player's, 1: the
     other's): `zero` without a land, `one` with one, `control` with 2-4."""
@@ -47,7 +54,7 @@ def hands(spec, zero, one, control, seed=0):
     got = {0: [], 1: [], 2: []}
     s = 0
     while any(len(got[b]) < want[b] for b in got):
-        g = E.Game('mtg', spec, 2, 1_000 + s)
+        g = E.Game(_lay().current(), spec, 2, 1_000 + s)
         s += 1
         g.step(rng.choice(g.legal()))                     # PlayDraw
         for order in range(2):
@@ -70,7 +77,7 @@ def search_all(items, ev, sims, ks, reps):
     """Every (position, k, rep) searched in lockstep (one network batch per simulation step); the leaves' rows whole
     (their tails and overrides on a layout v7 engine: docs/ENGINE.md 125, tools/rowkit.py)."""
     import rowkit
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     trees = []
     for i, (g, _, _) in enumerate(items):
         for k in ks:
@@ -149,7 +156,7 @@ def small_positions(spec, ev, n, games=48, every=6, seed=1):
     from zero.games import engine
     E = engine()
     rng = np.random.default_rng(seed)
-    gs = [E.Game('mtg', spec, 2, 50_000 + i) for i in range(games)]
+    gs = [E.Game(_lay().current(), spec, 2, 50_000 + i) for i in range(games)]
     out = []
     seen = 0
     small_positions.counts = counts = {'decisions': 0, 'minor': 0, 'small': 0}
@@ -163,7 +170,7 @@ def small_positions(spec, ev, n, games=48, every=6, seed=1):
         if not batch:
             break
         import rowkit
-        rk = rowkit.kind('mtg')
+        rk = rowkit.kind(_lay().current())
         rows = [rowkit.row(g, g.to_move, rk, opts=True) for g in batch]
         acts = [np.asarray(g.legal(), np.int32) for g in batch]
         off = np.zeros(len(batch) + 1, np.int32)
@@ -244,7 +251,7 @@ def main(argv=None):
     from zero.net import load
     ks = [int(x) for x in a.ks.split(',')]
     t0 = time.time()
-    m, _ = load(a.model, 'cpu', game='mtg')
+    m, _ = _lay().load_used(a.model, 'cpu')
     ev = NetEvaluator(m, 'cpu')
     items = hands(A.SPEC_DELVER, a.zero, a.one, a.control)
     trees = search_all(items, ev, a.sims, ks, a.reps)

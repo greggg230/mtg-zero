@@ -53,13 +53,20 @@ SIGMA = (50.0, 0.3)                    # the Delver line's cq_c_visit / cq_c_sca
 MODES = {'puct': None, 'gumbel': (16, 0.0, 0.3), 'gumbel-s1': (16, 0.0, 1.0), 'gumbel-noise': (16, 1.0, 0.3)}
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def search_all(games, ev, sims, view, seeds, mode, noise_seed=0):
     """One Rust tree per (game, seed), `sims` simulations each in lockstep (one network batch per step,
     root-view leaves' value-only rows in the same batch); `mode` a MODES key (a Gumbel mode: a fresh
     root's sims - 1 root walks, noise from `noise_seed` + the tree's index). Rows carry their tails and overrides on
     a layout v7 engine (docs/ENGINE.md 125, tools/rowkit.py)."""
     import rowkit
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     trees = []
     g_cfg = MODES[mode]
     for j, (g, s) in enumerate(zip(games, seeds)):
@@ -223,7 +230,7 @@ def cmd_speed(a):
         kw = {} if mode == 'puct' else dict(root_search='gumbel', gumbel_m=16, gumbel_scale=1.0)
         seat = G.nn_seat('m', 64, selfplay=True, sims_fast=16, p_full=0.25, sims_minor=4, policy_target='cq',
                          cq_c_scale=0.3, temp_moves=60, **kw)
-        drv = G.Driver('mtg', [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
+        drv = G.Driver(_lay().current(), [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
                        record=False, threads=a.search_threads, groups=2, max_steps=20000)
         t0 = time.time()
         ev.seconds, ev.calls, ev.leaves = 0.0, 0, 0
@@ -256,7 +263,7 @@ def cmd_selfplay(a):
         kw = {} if mode == 'puct' else dict(root_search='gumbel', gumbel_m=16, gumbel_scale=1.0)
         seat = G.nn_seat('m', 64, selfplay=True, sims_fast=16, p_full=0.25, sims_minor=4, policy_target='cq',
                          cq_c_scale=0.3, temp_moves=60, **kw)
-        drv = G.Driver('mtg', [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
+        drv = G.Driver(_lay().current(), [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
                        record=True, threads=a.search_threads, groups=2, max_steps=20000, move_log=400)
         parts = []
         t0 = time.time()
@@ -266,7 +273,7 @@ def cmd_selfplay(a):
         rows = drv.take_results()
         s = concat_samples([p for p in parts if p is not None and len(p['player'])])
         import rowkit
-        rk = rowkit.kind('mtg')
+        rk = rowkit.kind(_lay().current())
         off = s['opt_off']
         n = len(off) - 1
         ent, off_fav, flip, maxp = [], [], [], []

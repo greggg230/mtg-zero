@@ -65,6 +65,13 @@ SPECS = {
 }
 # team draft events (M6 part 3): (players, the team_draft spec); their matches as a co-training run plays them
 # the Legacy Izzet Delver mirror (docs/ENGINE.md 54): the preset delver-mirror's spec
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def _mirror(deck):
     with open(os.path.join(ROOT, 'data', 'decks', deck + '.json'), encoding='utf-8') as f:
         main = [name for n, name in json.load(f)['main'] for _ in range(n)]
@@ -120,7 +127,7 @@ def one_draft(seed, spec, events, threads, conc, stall):
     pdrv = G.Driver('team_draft', [[seat] * players] * events, spec=json.dumps(dspec), concurrency=min(conc, events),
                     seed=seed, threads=threads, groups=c['groups'], record=True, max_steps=20_000)
     h = G.seat_dict('heuristic')
-    rdrv = G.Driver('mtg', [[h, h]], spec='{"format": "bo3"}', concurrency=64, seed=seed + 1, threads=threads,
+    rdrv = G.Driver(_lay().current(), [[h, h]], spec='{"format": "bo3"}', concurrency=64, seed=seed + 1, threads=threads,
                     groups=2, max_steps=60_000, rolling=True, queue_only=True)
     t0 = time.time()
     last = [time.time()]
@@ -212,7 +219,7 @@ def one(seed, spec, games, threads, sims, conc, preset, stall, run_config=None):
     if spec in OWN_SPECS:
         spec_obj, game = json.loads(c['spec'] or '{}'), c['game']
     else:
-        spec_obj, game = SPECS[spec], GAMES.get(spec, 'mtg')
+        spec_obj, game = SPECS[spec], GAMES.get(spec, _lay().GAME)
     # (a match is up to three games: three times the step cap)
     steps = c['max_steps'] * (3 if spec_obj.get('format') == 'bo3' else 1)
     drv = G.Driver(game, [[seat, seat]] * games, spec=json.dumps(spec_obj), concurrency=conc,

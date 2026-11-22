@@ -51,6 +51,13 @@ STEPS = ['setup', 'untap', 'upkeep', 'draw', 'main 1', 'begin combat', 'attacker
          'damage', 'end combat', 'main 2', 'end', 'cleanup']
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def load_rows(dirs, max_rows=None):
     """x float16 [N, F], aux float32 [N, D], shard index [N] of the shards in `dirs` (only shards with
     aux; a game's rows are consecutive in its shard, so a split by shard is a split by game but for
@@ -259,7 +266,7 @@ def main(argv=None):
     print(f'{len(xtr)} train rows, {len(xho)} held-out rows ({time.time() - t0:.0f}s)')
     model, _ = load(a.ckpt)
     model.eval()
-    lay = mtgz.az.PACKAGE.aux_of('mtg')
+    lay = mtgz.az.PACKAGE.aux_of(_lay().current())
     t1 = time.time()
     ztr, zho = trunk_z(model, xtr), trunk_z(model, xho)
     print(f'trunk states {tuple(ztr.shape)} + {tuple(zho.shape)} ({time.time() - t1:.0f}s)')

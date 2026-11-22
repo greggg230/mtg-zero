@@ -72,15 +72,18 @@ EVAL_SPEC = eval_spec(SPEC)
 # (`layout_eoe.json`, below).
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v7.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
-# Layout v8 (ENGINE.md 232), the game `mtg_v8`: the `mtg` game (the same specs, rules and head) whose rows add six
-# tail-only gated segments - a payment's state and picks in progress with its decisions' option meanings, a gone
-# object's last known information (and a gone spell's item), the groups of places holding search finds mixed with
-# other cards. A v7 network widens onto it bit for bit (`python tools/fork_run.py <checkpoint> <new run> --game
-# mtg_v8`: the new segments' gates exactly 0); a v7 run stays the game `mtg` (layout v7, unchanged) until forked.
+# Layout v8 (ENGINE.md 232), the game `mtg_v8` - the DEFAULT from now on (every preset, the package's default game, every
+# tool that starts fresh): the `mtg` game (the same specs, rules and head) whose rows add six tail-only gated segments - a
+# payment's state and picks in progress with its decisions' option meanings, a gone object's last known information (and
+# a gone spell's item), the groups of places holding search finds mixed with other cards. The game name `mtg` stays
+# layout v7: the compatibility layout of every run, checkpoint, farm run and record made before layout v8, which all
+# record that name (zero-core picks a layout by the game's name and its encoding guard compares the names: such a run
+# resumes as layout v7, byte for byte; `mtgz.az.layouts`). A v7 run moves by `python tools/fork_run.py <checkpoint> <new
+# run> --game mtg_v8` (the new segments' gates exactly 0).
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v8.json'), encoding='utf-8') as _f:
     LAYOUT_V8 = json.load(_f)
-# (the games of `mtg`'s rules and identity space: v7's and v8's rows)
-MTG_GAMES = ('mtg', 'mtg_v8')
+# (the games of `mtg`'s rules and identity space: v8's rows, the default, and v7's, the compatibility layout)
+MTG_GAMES = ('mtg_v8', 'mtg')
 # The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41, 47: layout draft_v2, the pack and pool
 # slots and 13 bags; `id_actions`: a slot scores its card's identity, the pick or adding it to the deck
 # next, zero-core's TokenNet since M6 part 3, ENGINE.md 45)
@@ -409,8 +412,13 @@ PRESETS['eoe-2e-smoke'] = dict(PRESETS['eoe-smoke'], spec=json.dumps(dict(json.l
 # Layout v7 (ENGINE.md 125.12): the `mtg` game's rows have tail tokens and pointer overrides, whose shards are sparse
 # only (format v2, zero-core R8: a dense shard would drop them), so every `mtg` preset writes sparse shards. (Its MLP
 # presets, mtg-1 and mtg-2-mlp, layout v6's, are refused on v7 at the start: an MLP takes no tail tokens, R4.)
-# Layout v8's end-to-end check (ENGINE.md 232): mtg-smoke as the game `mtg_v8`.
-PRESETS['mtg-v8-smoke'] = dict(PRESETS['mtg-smoke'], game='mtg_v8')
+# Layout v8 (ENGINE.md 232) is every MTG preset's: a new run is the game `mtg_v8` (a run made before keeps the `mtg` its
+# config saved: presets fill only settings a run has not saved).
+for _p in PRESETS.values():
+    if _p.get('game') == 'mtg':
+        _p['game'] = 'mtg_v8'
+    if _p.get('resolver') == 'mtg':
+        _p['resolver'] = 'mtg_v8'
 for _p in PRESETS.values():
     if _p.get('game') in MTG_GAMES:
         _p['shard_sparse'] = 1
@@ -467,7 +475,7 @@ ENGINE_PATHS = ('engine', 'card_ir', 'py', 'worker', 'data', 'Cargo.toml', 'Carg
                 'rust-toolchain.toml')
 
 PACKAGE = register(GamePackage(
-    'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
+    'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg_v8',
     # the belief target (docs/ENGINE.md 66, zero-core docs/az.md 15): the decider's opponent's hand by
     # card identity, learned as a distribution by an auxiliary head (run setting aux_belief_w, 0 = off);
     # replays of a checkpoint with the head show it per network decision (`mtgz.az.belief.render`);

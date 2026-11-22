@@ -326,7 +326,7 @@ fn finish(name: &str, file: &str, what: &str, lines: &[String], t: std::time::In
     if let Ok(dir) = std::env::var("DIGEST_LINES") {
         std::fs::write(std::path::Path::new(&dir).join(file), lines.join("\n") + "\n").unwrap();
     }
-    if (!encodings_on() || layout_v7()) && name != "driver" {
+    if layout_v7() || (!encodings_on() && name != "driver") {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(file);
@@ -503,6 +503,15 @@ const DRIVER_EVERY: u64 = 1_000;
 #[test]
 #[ignore]
 fn driver_digest() {
+    // (The default game's, `mtg_v8`, layout v8's rows, ENGINE.md 232; `DIGEST_ENCODING=v7`: the game `mtg`'s, layout v7.)
+    if layout_v7() {
+        driver_digest_of::<MtgAz>()
+    } else {
+        driver_digest_of::<engine::az::v8::MtgV8Az>()
+    }
+}
+
+fn driver_digest_of<G: SearchGame>() {
     let t = std::time::Instant::now();
     let threads = std::env::var("DIGEST_DRIVER_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
     let cfg = DriverCfg {
@@ -527,9 +536,9 @@ fn driver_digest() {
         starts: None,
         max_row_tokens: None,
     };
-    let mut d = Driver::<MtgAz>::new(cfg).unwrap();
+    let mut d = Driver::<G>::new(cfg).unwrap();
     d.resume(1_000_000, 0).unwrap();
-    let w = MtgAz::aux_width();
+    let w = G::aux_width();
     let mut h = H::new();
     let (mut batches, mut rows, mut samples, mut results) = (0u64, 0u64, 0u64, 0u64);
     let mut lines = Vec::new();

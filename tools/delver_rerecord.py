@@ -91,10 +91,17 @@ OLD_INDEX_KEYS = ('k_main1',)             # spot fields that index the old path 
 NODES = 200000                            # the walk's budget a spot (a loud failure, never a cut path)
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def new_game(E, sp):
     sj = json.loads(sp['spec'])
     sj['log'] = True
-    return E.Game('mtg', json.dumps(sj), 2, int(sp['seed']))
+    return E.Game(_lay().current(), json.dumps(sj), 2, int(sp['seed']))
 
 
 def options(st):

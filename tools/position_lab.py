@@ -82,6 +82,13 @@ PUBLISH_LOG = A.local_config.big_disk_path('mtg-zero-scratch/delverai-publish.lo
 MODES = ('belief', 'actual', 'pinned', 'uniform')
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 232): the game - layout v7 `mtg` or v8 `mtg_v8` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def low_priority(threads):
     import torch
     torch.set_num_threads(threads)
@@ -232,7 +239,7 @@ def start_spec(spot, start, log=False):
 
 def spot_game(spot, log=False):
     """The game at the spot, nothing dealt again (deal "none")."""
-    return engine().Game('mtg', start_spec(spot, {'deal': 'none'}, log=log), 2, 0)
+    return engine().Game(_lay().current(), start_spec(spot, {'deal': 'none'}, log=log), 2, 0)
 
 
 def check_spot(spot):
@@ -263,7 +270,7 @@ def options(g):
 def load_net(path):
     from zero.infer import NetEvaluator
     from zero.net import check_belief_head, load
-    m, _ = load(path, 'cpu', game='mtg')
+    m, _ = _lay().load_used(path, 'cpu')
     return NetEvaluator(m, 'cpu'), m, check_belief_head
 
 
@@ -284,7 +291,7 @@ def rows_kind():
     """The game's variable-length rows on the loaded engine (tools/rowkit.py; None on a layout v5 / v6 engine)."""
     if not _RK:
         import rowkit
-        _RK.append(rowkit.kind('mtg'))
+        _RK.append(rowkit.kind(_lay().current()))
     return _RK[0]
 
 
@@ -629,7 +636,7 @@ def play_one(spot, modes, cand, ci, si, ev, keys, c_puct, sims, games, seed=1, c
     kw = {'move_log': move_log} if move_log else {}
     # a rolling queue-only driver (zero-core docs/search.md 2.9): its slots start nothing but the queued
     # setups (a classic driver starts its first games with the driver's spec at construction)
-    drv = G.Driver('mtg', [[seat, seat]], spec=json.dumps(spot['spec']), concurrency=min(conc, len(setups)), seed=seed,
+    drv = G.Driver(_lay().current(), [[seat, seat]], spec=json.dumps(spot['spec']), concurrency=min(conc, len(setups)), seed=seed,
                    threads=threads, groups=2, max_steps=20000, rolling=True, queue_only=True, **kw)
     for tag, sp in setups:
         drv.enqueue(tag, sp)
@@ -774,7 +781,7 @@ def diagnose(spec, row, decider):
     top (a crack over the seen card)."""
     from zero import mcts
     E = engine()
-    g = E.Game('mtg', spec, 2, 0)
+    g = E.Game(_lay().current(), spec, 2, 0)
     info = {'cracked_over_seen': None, 'top_after_line': None}
     top, lib_n = None, None
     for (p, a, legal) in row.get('moves') or []:
@@ -894,7 +901,7 @@ def deal_summary(spot, si, md, cand, games, top=10):
     for mode, kw in list(md) + ([('uniform', {})] if all(m != 'uniform' for m, _ in md) else []):
         c = collections.Counter()
         for i in range(games):
-            g = E.Game('mtg', start_spec(spot, start_block(mode, cand, deal_seed(si, i), **kw)), 2, 0)
+            g = E.Game(_lay().current(), start_spec(spot, start_block(mode, cand, deal_seed(si, i), **kw)), 2, 0)
             c.update(set(x['name'] for x in json.loads(g.export_state())['players'][o]['hand']))
         out[mode] = {k: round(v / games, 3) for k, v in c.most_common(top)}
     return out
@@ -929,7 +936,7 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
     tilt, clip, mix, _ = belief_settings(cfg, 'eval')
     belief = (tilt or 1.0, clip, mix)
     if keys.get('belief_tilt') or 'belief' in modes or 'pinned' in modes:
-        check_head(model, 'mtg', f'the belief deal / belief_tilt of {model_path}')
+        check_head(model, _lay().model_game(model), f'the belief deal / belief_tilt of {model_path}')
     out = {'model': model_path, 'seat': keys, 'c_puct': c_puct, 'sims': sims, 'games': games, 'modes': modes,
            'hold': list(hold), 'exclude': list(exclude), 'belief': dict(zip(('tilt', 'clip', 'mix'), belief)),
            'threads': {'procs': procs, 'torch': threads, 'search': search_threads}, 'spots': []}
@@ -946,7 +953,7 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
         cands = cand_fn(spot, g, view)
         for c in cands:           # the engine refuses an ambiguous or unknown first label: say so before any play-out
             try:
-                engine().Game('mtg', start_spec(spot, start_block('none', c, 0)), 2, 0)
+                engine().Game(_lay().current(), start_spec(spot, start_block('none', c, 0)), 2, 0)
             except Exception as e:                              # noqa: BLE001
                 raise SystemExit(f'{spot["id"]}: candidate {c["name"]!r}: {e}')
         md, skipped = [], {}
@@ -955,7 +962,7 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
             if mode == 'pinned':
                 kw.update(hold=hold, exclude=exclude)
                 try:     # a pin no deal can hold at this spot: the spot skips the mode (said in the report)
-                    engine().Game('mtg', start_spec(spot, start_block(mode, cands[0], 0, **kw)), 2, 0)
+                    engine().Game(_lay().current(), start_spec(spot, start_block(mode, cands[0], 0, **kw)), 2, 0)
                 except Exception as e:                          # noqa: BLE001
                     skipped[mode] = str(e)
                     continue
@@ -1029,7 +1036,7 @@ def opening_spot(spec, seed):
     from zero import mcts
     E = engine()
     sp = dict(spec, log=True)
-    g = E.Game('mtg', json.dumps(sp), 2, int(seed))
+    g = E.Game(_lay().current(), json.dumps(sp), 2, int(seed))
     acts = []
     for _ in range(40):
         if g.over:
@@ -1060,7 +1067,7 @@ def opening_spot_draw(spec, seed, ev, keys, c_puct, sims=32):
     from zero import mcts
     E = engine()
     sp = dict(spec, log=True)
-    g = E.Game('mtg', json.dumps(sp), 2, int(seed))
+    g = E.Game(_lay().current(), json.dumps(sp), 2, int(seed))
     acts = []
     for k in range(200):
         if g.over:
@@ -1231,7 +1238,7 @@ def one_ply_t1(spot, ev, pred, belief, deals=200, log=print):
     rows = []
     for i in range(deals):
         st = start_block('belief', {'forced': []}, deal_seed(0, i), pred=pred, belief=belief)
-        g = E.Game('mtg', start_spec(spot, st), 2, 0)
+        g = E.Game(_lay().current(), start_spec(spot, st), 2, 0)
         after = scripted(g, d, look)
         if not after:
             continue
@@ -1296,7 +1303,7 @@ def t1_canary_game(spec, seed, moves):
     E = engine()
     sp = json.loads(spec) if isinstance(spec, str) else dict(spec)
     sp.pop('log', None)
-    g = E.Game('mtg', json.dumps(sp), 2, int(seed))
+    g = E.Game(_lay().current(), json.dumps(sp), 2, int(seed))
     out, cur, acts = {}, {}, []
     for mv in moves:
         p, a = mv[0], mv[1]
@@ -1323,7 +1330,7 @@ def t1_canary_game(spec, seed, moves):
         if r is not None and q == act and st['turn'] == r['turn']:
             r['actions'].append(t)
             if t == f'Target P{act + 1}' and st.get('stack') and st['stack'][-1].get('name') == BAUBLE and r['land'] is None:
-                lab_g = E.Game('mtg', json.dumps(dict(sp, start={'seed': int(seed), 'actions': acts, 'deal': 'none'})), 2, 0)
+                lab_g = E.Game(_lay().current(), json.dumps(dict(sp, start={'seed': int(seed), 'actions': acts, 'deal': 'none'})), 2, 0)
                 libs = json.loads(lab_g.export_state())['lab']['libraries'][act]
                 r['looked'], r['seen'] = True, (libs[0] if libs else None)
             if t.startswith('Play ') and r['land'] is None:
@@ -1714,7 +1721,7 @@ def cmd_t1(a):
                 o = opening_spot(json.loads(A.SPEC_DELVER), sd)
                 if o is None:
                     continue
-                lab = json.loads(engine().Game('mtg', start_spec(o, {'deal': 'none'}), 2, 0).export_state())['lab']
+                lab = json.loads(engine().Game(_lay().current(), start_spec(o, {'deal': 'none'}), 2, 0).export_state())['lab']
                 q = 1 - o['decider']
                 eight = sorted(c['name'] for c in o['state']['players'][q]['hand']) + lab['libraries'][q][:1]
                 if t1_composition(eight) not in ((a.composition,) if a.composition == 'clean' else ('clean', 'any')):
