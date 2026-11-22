@@ -49,17 +49,25 @@ def play_and_round_trip(p1_deck, games, seed0, share=0.15):
     return built, not_built
 
 
+# The rare states the schema does not build, by name (each a documented limit of `az::build`).
+RARE = {
+    # a look at the opponent's library card, then a shuffle (ENGINE.md 192; reached by the mirror's random games
+    # since ENGINE.md 221 moved their payments)
+    "unsupported: a cloud entry naming a card its owner never saw",
+}
+
+
 def test_round_trip_the_delver_mirror():
     built, not_built = play_and_round_trip(None, 30, 100, share=0.2)
     assert built >= 600, (built, not_built)
     # only decisions inside a cast or a resolution are not built (and the rare states, by name)
-    assert all(k.startswith('unsupported: the decision') for k in not_built), not_built
+    assert all(k.startswith('unsupported: the decision') or k in RARE for k in not_built), not_built
 
 
 def test_round_trip_delver_against_the_mtgo_test_deck():
     built, not_built = play_and_round_trip(MTGO_TEST_DECK, 24, 300, share=0.2)
     assert built >= 400, (built, not_built)
-    assert all(k.startswith('unsupported: the decision') for k in not_built), not_built
+    assert all(k.startswith('unsupported: the decision') or k in RARE for k in not_built), not_built
 
 
 def test_the_documented_example():
