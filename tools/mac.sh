@@ -113,11 +113,13 @@ git remote get-url mac >/dev/null 2>&1 || git remote add mac "$HOST:mtg-zero.git
 # several mac.sh of one checkout push the same refs at once (a gate's parallel steps): a push that lost the race for
 # the ref's lock is tried again
 push_retry() {
-  local k
+  local k err
   for k in 1 2 3 4 5; do
-    if "$@"; then return 0; fi
+    if err="$("$@" 2>&1)"; then return 0; fi
     sleep $((k * 2))
   done
+  printf '%s
+' "$err" >&2
   "$@"
 }
 push_retry git push -q -f mac "HEAD:refs/heads/$BRANCH"
