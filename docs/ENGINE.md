@@ -45492,4 +45492,31 @@ the tests' names swapped (`mtg_v8` -> `mtg`, a v7 meaning -> `mtg_v7`) and
 farm_campaign.py and a worker manifest's `game` (the build's repository name, zero-farm PROTOCOL 7); the game records'
 files (zero.gamerec: they name no game; gamedb replays rules, the same in both layouts).
 
-GATES_236_10
+**Digests** (on 256d1ef4, the Mac): layout v8 (the default) unchanged by the rename and the merge - full
+c2b04fed925eed67, encoding-free d3c144b6cc2977e5, constructed 38ef93512e0a7259, metagame ed86a2f5ed21c436, EoE
+5ffb850dd963bad0, driver cab97c01912f7e3f, dealt cc0d138ac5c80402, dealt per seat e2a91849b5b9f372 (each = the recorded
+file); `DIGEST_ENCODING=v7` (layout v7, the game `mtg_v7`) = origin/main c6ba3909's own digests exactly: full
+9473f7debc4bceb3, constructed 4a03293608edeba2, metagame d72ae0c904a0ffbd, EoE 5ffb850dd963bad0, driver
+6a03572828250b86, dealt f858b1880091d94f, dealt per seat 2719fdd478d14fa3 (computed in a checkout of main the same day).
+
+**Farm compat, both layouts** (the release worker of 256d1ef4, the Delver dealt preset): `tools/farm_compat.py` as is
+(`mtg`, `game_layout` 8), with `--set game="mtg_v7"`, and with `--set game="mtg" --set game_layout=null` (the name as a
+run of before layout v8 records it): all three PASSED - gate 2 identical (6 games, 2,468 rows, 150 batches), gate 3
+identical (2,598 rows, 6 decks compared); the v7 shards' metas say `mtg_v7` (no record) and the v8 shards' `mtg` /
+`game_layout` 8, with 698 more tail tokens (layout v8's segments).
+
+**The gates** (env MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME, the system Python, warm worktrees): on f9d04af3 (this section's
+code; the next commit adds this paragraph only) **GATE PASSED suite f9d04af3867f in 425s**; `python tools/gate.py engine
+--tested-sha f9d04af3867f --expect-digest c2b04fed925eed67 --expect-digest0 d3c144b6cc2977e5` - **GATE PASSED WITH SKIPS
+engine f9d04af3867f in 1446s**; `python tools/gate.py encoding --expect-digest c2b04fed925eed67 --expect-digest0
+d3c144b6cc2977e5 --checkpoint <a copy of legacy-meta3-r1's iteration 1234: game mtg, no layout record>` - **GATE PASSED
+WITH SKIPS encoding f9d04af3867f in 815s** (its checkpoint step loads and plays it as `mtg_v7`, 8 games). Both skips: the
+desktop's one live-run-hazard pytest test, fenced by a live run. The zero-core change alone, gated as an opt-in core
+feature: `python tools/gate.py optin-core --baseline-root <this branch's 330cba1f at the old pin 52134c3>` on 5082442f
+(330cba1f at zero-core feat/game-alias 6e54da5, no alias declared) - **GATE PASSED WITH SKIPS optin-core 5082442fb186 in
+1833s** (checkpoint_compat byte identity across both checkouts, 3,554 samples per target; core tests 223, core pytest 781
+passed with 17 live-run-hazard tests fenced; the other three games built against the core; farm compat identical). The
+Mac's full pytest of 9d01c425 had three failures, none of this change: `test_run_publisher`'s supervisor test passes alone
+(a timing flake under load), and `test_artifact_cache::test_check_scope_reads_cargo_dep_info` and
+`test_deck_scorer::test_the_engines_fixtures_are_reproducible` fail the same on the Mac at origin/main c6ba3909 (they pass
+on the desktop).
