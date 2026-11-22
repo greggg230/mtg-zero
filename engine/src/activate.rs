@@ -592,7 +592,10 @@ impl Game {
             pm
         };
         // (The mana, and what it may change, come first: ENGINE.md 100.4.10.)
-        let forced = self.exile_sources(p, card, cost, exclude);
+        // (A delve spell's `mana` is less the graveyard's cards: its total cost
+        // has a mana payment whenever delve may pay some of it, ENGINE.md 228.)
+        let paid = if cast && self.def_of(card).delve { crate::mana::ManaCost { generic: 1, ..Default::default() } } else { *mana };
+        let forced = self.exile_sources(p, card, cost, exclude, &paid);
         let paying = !(mana.is_zero() && forced.is_empty());
         let delve = cast && self.def_of(card).delve;
         if self.order_free_with(&o, || if paying || delve { self.mana_writes(&new_pm(Vec::new()), delve) } else { Default::default() }) {
@@ -704,7 +707,10 @@ impl Game {
         if short > 0 {
             // (Not for a spell whose mana can't be spent: its payment activates
             // no mana source, ENGINE.md 220.1.)
-            let d: Vec<CardIdx> = if allow.no_mana {
+            // (Nor for a cost of no mana: no mana ability is activated while
+            // paying it, CR 601.2g, 605.3a; ENGINE.md 228.)
+            let spell_delve = self.objs[card.i()].zone != Zone::Battlefield && self.def_of(card).delve;
+            let d: Vec<CardIdx> = if allow.no_mana || (mana.is_zero() && !spell_delve) {
                 Vec::new()
             } else {
                 self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c)).collect()
@@ -1006,7 +1012,7 @@ impl Game {
         let mut pm = PayMana::new(p, mana);
         pm.keep = Keep { exclude, allow: self.ability_allow(card), ..Keep::default() };
         pm.waterbend = ad.cost.waterbend;
-        let forced = self.exile_sources(p, card, &ad.cost, exclude);
+        let forced = self.exile_sources(p, card, &ad.cost, exclude, &mana);
         let paying = !(mana.is_zero() && forced.is_empty());
         // (The mana, and what it may change, come first: ENGINE.md 100.4.10;
         // as castability decides it, `cost_payable_order`.)
@@ -1037,7 +1043,7 @@ impl Game {
             pm.keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
         }
         pm.waterbend = ad.cost.waterbend;
-        pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
+        pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad), &mana);
         self.agenda.push(Task::PayMana(Box::new(pm)));
     }
 
@@ -1055,8 +1061,14 @@ impl Game {
 
     /// The mana sources a payment activates first so that they are in the
     /// graveyard for `cost`'s "exile n cards from your graveyard" (CR
-    /// 601.2g-h; the first in canonical order: Lotus Petals alike).
-    pub(crate) fn exile_sources(&self, p: PlayerId, card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Vec<(crate::pay::Src, bool)> {
+    /// 601.2g-h; the first in canonical order: Lotus Petals alike). None for
+    /// a cost whose mana, `mana`, is nothing: mana abilities are activated
+    /// while paying a cost only if it includes a mana payment (CR 601.2g,
+    /// 602.2b, 605.3a; ENGINE.md 228: an escape of X = 0).
+    pub(crate) fn exile_sources(&self, p: PlayerId, card: CardIdx, cost: &Cost, exclude: Option<CardIdx>, mana: &crate::mana::ManaCost) -> Vec<(crate::pay::Src, bool)> {
+        if mana.is_zero() {
+            return Vec::new();
+        }
         // (The cost's own discards are graveyard cards by then: ruling
         // bea302d9.)
         let short = self.exile_short(p, card, cost).saturating_sub(self.discards_feed(p, card, cost));

@@ -679,3 +679,29 @@ fn cr_702_66a_a_source_delved_isnt_also_tapped_by_another_ability() {
     assert_eq!(g.obj(dig).zone, Zone::Stack, "{}", log(&g));
     assert_eq!(g.obj(rockets).zone, Zone::Exile, "{}", log(&g));
 }
+
+#[test]
+fn cr_605_3a_no_mana_ability_while_paying_a_cost_of_no_mana() {
+    // Walking Ballista escaped by Underworld Breach for X = 0: its total cost has no mana payment, so no mana ability
+    // may be activated while it is paid (CR 601.2g, 605.3a): a Lotus Petal can't be sacrificed to be the third card
+    // escape exiles. (Before, the payment activated the Petal first for the exile; ENGINE.md 228.) With a third
+    // graveyard card it escapes.
+    let board = |third: bool| {
+        let mut gy = vec!["Walking Ballista", "Ponder", "Brainstorm"];
+        if third {
+            gy.push("Daze");
+        }
+        scen().battlefield(0, &["Underworld Breach", "Lotus Petal"]).graveyard(0, &gy).at(Step::Main1, 0).start()
+    };
+    let g = board(false);
+    let wb = g.card(0, "Walking Ballista", Zone::Graveyard);
+    assert!(!g.has_option(Choice::Cast(wb)), "{}", opts(&g));
+    let mut g = board(true);
+    let wb = g.card(0, "Walking Ballista", Zone::Graveyard);
+    let petal = bf(&g, 0, "Lotus Petal");
+    assert!(g.has_option(Choice::Cast(wb)), "{}", opts(&g));
+    g.choose(Choice::Cast(wb));
+    until_priority(&mut g, &|_| None);
+    assert_eq!(g.obj(wb).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(petal).zone, Zone::Battlefield, "{}", log(&g));
+}

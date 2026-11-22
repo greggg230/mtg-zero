@@ -3009,7 +3009,7 @@ impl Game {
             .as_deref()
             .map(|c| crate::cost_order::Order::new(p, card, c, 0, 0, floor as u32).with_moves(emerge_part, None))
             .filter(|o| {
-                let paying = !cost.is_zero() || !self.exile_sources(p, card, &o.cost, None).is_empty();
+                let paying = !cost.is_zero() || !self.exile_sources(p, card, &o.cost, None, &self.total_mana(card, &self.stack[pos])).is_empty();
                 !self.order_free_with(o, || {
                     if !(paying || delve) {
                         return Default::default();
@@ -3102,7 +3102,7 @@ impl Game {
             if !in_order {
                 pm.keep = Self::keep_for(card, extra, None);
             }
-            pm.forced.extend(self.exile_sources(p, card, extra, None));
+            pm.forced.extend(self.exile_sources(p, card, extra, None, &self.total_mana(card, &self.stack[pos])));
             if in_order {
                 // (Below the mana: teamwork's taps too, by the rules after
                 // the mana abilities, CR 601.2g-h.)
