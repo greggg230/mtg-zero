@@ -45676,3 +45676,98 @@ pin commit; this paragraph is the next commit, docs only): **GATE PASSED WITH SK
 checkpoint_compat identical in 540 s (1,808 s); the four core shards 641 to 871 s, now the tier's longest steps; the
 build-only step 149 s; the module, the worker and the core module from the artifact cache (the pin changed no Rust
 input).
+
+## 241. The farm's torch worker build and runtime pack: the owner's machines play farm self-play through torch (branch `feat/torch-worker`, zero-core docs/az.md 78; 2026-11-22)
+
+**Why.** The owner's decision (2026-11-22): farm machines are configurable per machine, and the owner's two machines play
+farm self-play with torch instead of the native ONNX worker, which reaches ~0.4x of the trainer's torch self-play on an
+RTX 5090 (the GPU, not the host, is the limit: ~26 us of GPU per leaf for the ORT fp16
+graph, ~9 us for torch bf16 with CUDA graphs). The bar is the trainer's local self-play (>= 95% of its leaves/s), so the
+worker plays through the trainer's own path: zero-core's `zero.farm_torch_worker` (docs/az.md 78 there). This repo builds
+what the farm ships of it; zero-farm (coordinator opt-in, agent, `zf-pyshim.exe`) is built alongside.
+
+### 241.1 The torch runtime pack (`tools/farm_build.py --runtime --pack torch`)
+
+`torch-2.11.0-cu128-py313`: Windows' embeddable CPython 3.13.14 (python.org's zip, pinned sha256, python.exe signed by
+the Python Software Foundation; its `._pth` names the stdlib zip, its own directory and `Lib\site-packages` - no `import
+site`, so nothing of a PC's own Python reaches it; zf-pyshim runs it `-I` too), torch 2.11.0+cu128 (download.pytorch.org,
+pinned sha256: CUDA 12.8, cuDNN 9.19, its own CUDA libraries), numpy 2.3.5 and typing_extensions 4.15.0 (PyPI, the JSON
+API's sha256) - the third-party modules the worker's play path imports (measured: numpy, typing_extensions; torch's
+wheel brings torchgen and functorch) - every member checked against its wheel's RECORD; the MSVC runtime torch's DLLs
+import, app-local next to python.exe (`--msvc-dir`, Microsoft-signed, at least torch's linker toolset), with its license
+files. Pruned (nothing the worker loads): C++ headers, import libraries, CMake files, type stubs, torch's protoc, test
+suites; every importable package stays (an opt-in manifest may list 20,000 files in 8 MiB, zero-farm PROTOCOL 19.1). A
+path segment is `[A-Za-z0-9._-]` and at most 260 characters (the coordinator's rule): torch's
+`torch-2.11.0+cu128.dist-info` becomes `torch-2.11.0-cu128.dist-info` (its METADATA unchanged; nothing imports by the
+directory's name), and the build refuses any other such path. The pack: 2,609 files, 4.33 GB (zstd level 12: ~2.06 GB,
+ratio 0.48, measured on the pack before the restored packages; the release signs level 19). `runtime.json`: every source (url, sha256), the versions, the MSVC files, the probe. Checked before signing: the
+pack's own Python, isolated (`-I -B`: no bytecode written into it), imports torch and multiplies on this PC's GPU
+(`--no-gpu-check` to sign without one). Signed `--kind runtime --gpu-vendor nvidia --gpu-min-driver 527.41
+--gpu-providers torch-cuda --opt-in torch --zst-level 19`, min_agent at least 0.3.19 (zero-farm PROTOCOL rev 27, 19.1:
+`--opt-in` writes the manifest's `opt_in`; min_driver 570.65, CUDA 12.8's), so the coordinator leases it only to machines
+the owner opted in.
+
+### 241.2 The torch worker build (`tools/farm_build.py --torch`)
+
+`mtg-<sha7>-torch`: the commit's tracked `mtgz/` (+ the `_engine.pyd` `tools/build_py.sh` gives exactly that commit),
+zero-core's tracked `python/zero/` laid out as in a checkout (`third_party/zero-core/python/zero/`: `mtgz` finds its
+pinned core there), the package data the worker reads (measured with an audit hook on a real job: `data/decks/`,
+`engine/src/az/eoe_cards.txt`; `mtgz/az/*.json` come with mtgz), `worker_main.py` (tools/torch_worker_main.py) and
+`zf-pyshim.exe` (`--pyshim`: zero-farm's `cargo build --release -p zf-pyshim` in `agent/`; the build's entry, which runs
+`%ZEROFARM_RUNTIME_DIR%\python\python.exe -I -B -X utf8 -u <its directory>\worker_main.py <its arguments>`, PROTOCOL 19.4). Signed `--kind worker --profile release --aw 1 --zero-onnx ''
+--entry zf-pyshim.exe --requires-runtime <torch pack>`; checked: `worker_main.py info` through the pack's Python
+(`--check-runtime`) answers the signed build id, kinds [selfplay], the feature rolling. `--no-sign` builds and checks a
+directory only. Nothing is written next to the signed files (the agent re-verifies a build and a pack before every
+start): python runs `-B`, and worker_main.py points `sys.pycache_prefix` (`ZEROFARM_PYCACHE_DIR`, else
+<temp>/zero-farm-pycache) and torch's caches (`TORCH_HOME`, `TORCH_EXTENSIONS_DIR`, `TORCHINDUCTOR_CACHE_DIR`,
+`TRITON_CACHE_DIR`, `XDG_CACHE_HOME`: <work dir>/.torch-cache) elsewhere. The agent sets `CUDA_VISIBLE_DEVICES=GPU-<uuid>`:
+the worker plays on `cuda:0`.
+
+### 241.3 The release and the pool
+
+`tools/farm_release.py`: step **torch** when release.json sets `torch_runtime` (the pack's build id, its directory in
+`<builds>/`) and `pyshim`: the torch build of the release worktree, then **torch-selftest** - the reference checkpoint as
+torch-weights/1 with the reference config's inference settings, self-tested by the build through the pack's Python on
+this GPU (`worker_main.py selftest`). Built for EVERY commit, a reused build's commit included (the torch build is the
+commit's Python, not its Rust inputs); the index entry's `torch` {build_id, runtime, min_agent, commit, selftest,
+worker}. `--no-torch` skips it. `mtgz.az.farm_builds.pool_settings` (lookup --pool-args, `--pool-build published`) lists
+the torch alternate FIRST with `torch=weights` in pool_variants - opted-in machines take it, every other machine falls
+through to the CUDA / DirectML / default build - and only when the entry's torch build is the commit asked's.
+
+### 241.4 The gate: farm-compat check 4
+
+`tools/farm_compat.py` (every tier that runs farm-compat) adds the torch worker: this checkout's
+`tools/torch_worker_main.py serve` plays a job on a small token network of the preset's layout on the CPU at float32
+(zero-core tools/torch_worker_gate.py), and its records, replayed by the trainer's path, must be the trainer's own local
+self-play rows of the same seed, game ids and network, game for game and bit for bit (pi and q at a record's float16).
+On the Delver best-of-three dealt preset: 6 of 6 games identical, 2,309 rows (worker 65 s, trainer 57 s), run by the
+venv's Python and again by the built worker through the pack's own isolated Python.
+
+### 241.5 Measured: the GPU smoke
+
+The torch worker build through the torch pack, started by zero-farm's `zf-pyshim.exe` as the agent starts it (a rolling
+job, `CUDA_VISIBLE_DEVICES` set, the agent's environment), on meta3-ab-ctrl1234's gen 1334 at the trainer's settings -
+conc 1536, groups 4, 16 search threads, bf16, CUDA graphs - on a PC with an RTX 5090 and no run on it:
+
+| | leaves/s | games/h | GPU | notes |
+|---|---|---|---|---|
+| the trainer's self-play path (that PC's bench, P0) | 93,450 | 81,463 | 82% | the remote worker's driver at bf16, 5 min |
+| the torch worker (this build) | **103,845** | 97,075 | 92%, 560 W | steady window 221 s of a 5-min job; 1.11x |
+
+hello 0.07 s after start, the first leaf at 11.8 s; the self-test on the gen's 256 reference rows max 0.078 (bf16, a
+value), deterministic; 8 records files in 5 min (flush_s 60); yield 40-120 ms - torch's reserved memory 1.9 GB -> 0 once
+the yield also clears cuBLAS's workspaces (the first smoke left 2.1 GB held: a local of the drive loop kept the
+evaluator alive, fixed), the CUDA context stays -, resume 0.1 s; quit: `end` with the games in flight in `unfinished`.
+Against the trainer's path, 48 games of the same network (zero-core tools/torch_worker_gate.py, conc 48, groups 2, 8
+threads, the worker through the pack): fp32 on the GPU with CUDA graphs 48 of 48 identical, bf16 16 of 48 (bf16
+autocast's kernels choose differently between processes; every record replay-valid, the same ids and seeds).
+
+### 241.6 What zero-farm provides (lane B, PROTOCOL rev 27 section 19) and what is left
+
+Relied on: zf-pyshim.exe's command line (`-I -B -X utf8 -u`, arguments passed through: `serve`, `info`, `selftest`) and
+exit codes 3 / 4 / 5; `ZEROFARM_RUNTIME_DIR` and `CUDA_VISIBLE_DEVICES=GPU-<uuid>` from the agent; one worker process per
+GPU; `farm-release sign --opt-in`; the coordinator's opt-in alternates (`when.opt_in`, the pack's `opt_in`), the
+`torch-cuda` provider (a run's `providers` allowlist: the pool sends none, null), opt-in manifests of up to 20,000 files.
+Left for the rollout (the user's OK at each step): sign and publish the pack and a torch build (release.json
+`torch_runtime`, `pyshim`), the coordinator and agent deploys, `opt-in torch` on the owner's machines, then a run with
+`pool_variants` 'gpu=fp16,torch=weights' and the torch alternate first (lookup --pool-args emits both).
