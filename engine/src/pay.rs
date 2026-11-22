@@ -1841,6 +1841,14 @@ impl Game {
     /// `any`, the cost's purposes and those of the needs mana abilities may
     /// add, ENGINE.md 100.4.5).
     fn add_pool(&self, p: PlayerId, any: crate::doomsday_b::Allow, c: &mut Cands) {
+        // (The payment search's mana whose type isn't chosen yet, one of a mask each: `Game::pool_wild`, ENGINE.md
+        // 222.4.)
+        let (wild, mask) = self.pool_wild[p as usize];
+        if wild > 0 && !any.no_mana {
+            for _ in 0..wild {
+                c.fixed.push(Unit::free(mask));
+            }
+        }
         let pool = &self.players[p as usize].pool;
         // (A payment of no mana spends none of the pool's: ENGINE.md 220.1.)
         if pool.total() == 0 || any.no_mana {
@@ -2035,7 +2043,7 @@ impl Game {
         if need == 0 {
             return true;
         }
-        let mut have = self.players[p as usize].pool.total() as u64;
+        let mut have = self.players[p as usize].pool.total() as u64 + self.pool_wild[p as usize].0 as u64;
         for cl in classes {
             if have >= need as u64 {
                 return true;

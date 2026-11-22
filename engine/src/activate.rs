@@ -1775,7 +1775,18 @@ impl Game {
             // (Its restriction and its rider go with the mana, CR 106.6.)
             // (Of its source's chosen creature type: ENGINE.md 124.2.)
             let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
-            if self.oracle && picks > 1 {
+            let unit_mask = prods.iter().fold(0u8, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)));
+            let units = prods.iter().all(|v| v.iter().map(|&n| n as u32).sum::<u32>() == 1);
+            let (wn, wm) = self.pool_wild[p as usize];
+            // (Only for the step's own activation: its next task is the step, the search's leaf or a feeding ability, which
+            // read the pool through castability or choose its types first.)
+            let step_next = matches!(self.agenda.last(), Some(Task::CastMana { card: None, .. }));
+            if self.oracle && step_next && picks > 0 && only == 0 && units && (wn == 0 || wm == unit_mask) && wn as u32 + picks <= u8::MAX as u32 {
+                // (In the payment search, the mana's types not chosen yet: each one mana of a type of the mask, as the
+                // payment's castability counts it, `Game::pool_wild` - the search asks whether some combination
+                // completes the payment; ENGINE.md 222.4.)
+                self.pool_wild[p as usize] = (wn + picks as u8, unit_mask);
+            } else if self.oracle && picks > 1 {
                 // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order
                 // the mana was chosen in, so every order of one combination reaches one state - each combination once,
                 // not each sequence; ENGINE.md 222.4.)

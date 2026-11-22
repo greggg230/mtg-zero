@@ -104,13 +104,13 @@ impl Game {
         let slots_of = |c: CardIdx| sources.iter().find(|(x, _)| *x == c).map(|(_, v)| v.clone()).unwrap_or_default();
         match self.answer.take() {
             Some(Choice::Pass) => {
-                if self.oracle && !self.cast_mana_pass_ok(id) {
+                if self.oracle && !self.wild_any(p, id, &|g: &Game| g.cast_mana_pass_ok(id)) {
                     self.oracle_dead = true;
                 }
             }
             // (The search's leaf: the step goes on with the abilities castability counts, then the payment.)
             Some(Choice::Yes) if self.oracle => {
-                if !self.cast_mana_open_ok(id) {
+                if !self.wild_any(p, id, &|g: &Game| g.cast_mana_open_ok(id)) {
                     self.oracle_dead = true;
                 }
             }
@@ -140,9 +140,18 @@ impl Game {
                 if self.oracle {
                     // The search (ENGINE.md 222.4): each feeding ability castability doesn't count, or the leaf.
                     if sources.is_empty() {
-                        if !self.cast_mana_open_ok(id) {
+                        if !self.wild_any(p, id, &|g: &Game| g.cast_mana_open_ok(id)) {
                             self.oracle_dead = true;
                         }
+                        return;
+                    }
+                    // (A feeding ability may pay its cost with the pool: the types of its mana chosen first, each
+                    // combination once.)
+                    if self.pool_wild[p as usize].0 > 0 {
+                        let prods = self.wild_combos(p);
+                        self.pool_wild[p as usize] = (0, 0);
+                        self.agenda.push(Task::CastMana { id, card: None, again });
+                        self.agenda.push(Task::ManaNowPick { p, prods, only: 0, page: crate::decision::Page::FIRST });
                         return;
                     }
                     let mut opts: Vec<Opt> = sources
@@ -370,6 +379,49 @@ impl Game {
             });
         }
         out
+    }
+
+    /// The combinations of the payment search's mana of no chosen type (`Game::pool_wild`) of `p`: each production of
+    /// that many mana, each of a type of the mask, once.
+    fn wild_combos(&self, p: PlayerId) -> Vec<[u8; 6]> {
+        let (n, mask) = self.pool_wild[p as usize];
+        let mut combos: Vec<[u8; 6]> = vec![[0; 6]];
+        for _ in 0..n {
+            let mut next: Vec<[u8; 6]> = Vec::new();
+            for c in &combos {
+                for t in (0..6).filter(|&t| mask & (1 << t) != 0) {
+                    let mut s = *c;
+                    s[t] += 1;
+                    if !next.contains(&s) {
+                        next.push(s);
+                    }
+                }
+            }
+            combos = next;
+        }
+        combos
+    }
+
+    /// Does `check` (the payment's castability for spell `id`, a leaf of the search) hold for some choice of the types of
+    /// the payment search's mana of no chosen type (`Game::pool_wild`)? A spell whose cost has no part besides its mana
+    /// is paid as castability counts the pool, each such mana a unit of the mask's types (`add_pool`): exact at once.
+    /// Otherwise (a part whose order with the mana can matter, its castability a search of its own reading the pool's
+    /// types) each combination is tried.
+    fn wild_any(&self, p: PlayerId, id: u32, check: &dyn Fn(&Game) -> bool) -> bool {
+        if self.pool_wild[p as usize].0 == 0 {
+            return check(self);
+        }
+        let Some(pos) = self.item_index(id) else { return check(self) };
+        let StackKind::Spell { card } = self.stack[pos].kind else { return check(self) };
+        if self.spell_rest(card, &self.stack[pos]).is_none() {
+            return check(self);
+        }
+        self.wild_combos(p).into_iter().any(|v| {
+            let mut g = self.clone();
+            g.pool_wild[p as usize] = (0, 0);
+            g.add_mana(p, &v);
+            check(&g)
+        })
     }
 
     /// The search's leaf (ENGINE.md 222.4): can the payment of spell `id` be completed from here, the 601.2g step going

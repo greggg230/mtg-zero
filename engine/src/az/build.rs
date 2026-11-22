@@ -514,7 +514,7 @@ impl Describer<'_> {
             observer: _, keys, forced: _, forced_at: _, decisions: _, no_auto: _, effects, any_loss: _, counters: _, n_static: _,
             n_self_types: _, leaving: _, links, delayed, resolved, permissions, combat_damage_now: _, quiet_leave: _, monarch,
             lki_counters: _, entering_escaped: _, entering_x: _, entering_sunburst: _, entering_exiled: _, entering_mods: _,
-            entering_counters: _, entering_tapped: _, discard_entered: _, repl_decided: _, route_choice: _, cast_lock, entering_dash: _,
+            entering_counters: _, entering_tapped: _, discard_entered: _, repl_decided: _, route_choice: _, cast_lock, pool_wild: _, entering_dash: _,
             entering_warp: _, miracle_cast, entering_face: _, day, done_once, discarded, temp_triggers, gy_exile, copies,
             copy_objs, lki_copy: _, lki_damage: _, spell_lki: _, entering_copy: _, entering_times: _, enter_note: _, defer_enters: _,
             pile_moving: _, pile_shuffles: _, prepared, seen: _, initiative, dungeons, rules_srcs,
