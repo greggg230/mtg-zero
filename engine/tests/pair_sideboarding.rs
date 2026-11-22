@@ -229,7 +229,7 @@ fn the_evaluation_spec_drops_the_tables_the_deals_and_the_forced_find() {
             d.remove("p0_table");
             d.remove("p1_table");
         }
-        if let Some(ds) = w["metagame"]["decks"].as_array_mut() {
+        if let Some(ds) = w.get_mut("metagame").and_then(|m| m.get_mut("decks")).and_then(|d| d.as_array_mut()) {
             ds.iter_mut().for_each(|d| {
                 d.as_object_mut().unwrap().remove("table");
             });
