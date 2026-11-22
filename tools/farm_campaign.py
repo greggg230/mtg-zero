@@ -11,7 +11,7 @@ Analysis campaigns:
     python tools/farm_campaign.py submit NAME --a CKPT --samples [--set KEY=JSON ...] --games N --build ID ...
     python tools/farm_campaign.py status NAME
     python tools/farm_campaign.py collect NAME [--no-local] [--threads 4] [--wrap CMD ...] [--no-describe]
-           [--allow-failed] [--poll 60] [--once]
+           [--allow-failed] [--poll 60] [--once] [--no-publish | --publish EXPERIMENT --title T ...]
   submit: A against B (paired games 2k, 2k + 1 share their deal, seats swapped) or A against itself (no --b), as
   zero.h2h.match plays them (mtgz.az.farm_campaign.match_settings: A's run's evaluation settings, `--sims`, the spec,
   the root belief tilts, `--chance-k` - zero.h2h's, default 2 as there; the seats checked equal to the local match's):
@@ -34,7 +34,12 @@ Analysis campaigns:
   collect: pull until done or the deadline, play what is missing here (the same worker; `--wrap`: a command prefix
   such as the slot throttle), check digests, replay the spot check, write games.jsonl and records.jsonl.gz; prints the
   result JSON (the games' digest, coverage, spot check, the head-to-head readout). `--once`: one pull (exit 3 while
-  games are out before the deadline).
+  games are out before the deadline). Then the head-to-head goes to delverai's Head-to-heads tab BY DEFAULT
+  (docs/ENGINE.md 225; mtgz.az.site_h2h's options: --publish EXPERIMENT, default the campaign's farm run name;
+  --title, default 'Farm campaign <name>'; --a-label / --b-label, default each checkpoint's run and generation),
+  checked before any waiting (no uploader or key: refused); `--no-publish`: a loud PUBLISH OFF line; a self-play or
+  unpaired campaign: PUBLISH SKIPPED (the tab shows paired head-to-heads only); a failed post: PUBLISH FAILED, exit 3
+  after the result was printed.
 
 Fuzz campaigns:
 
@@ -436,6 +441,65 @@ def find_worker(build_id, dists=None):
     return os.path.join(bd, man.get('entry') or 'mtgz-worker.exe'), man
 
 
+def publish_plan(o, st):
+    """Before collect (docs/ENGINE.md 225): the campaign's head-to-head is posted to delverai's Head-to-heads tab by
+    default (mtgz.az.site_h2h; experiment = --publish, default the campaign's farm run name, title = --title, default
+    'Farm campaign <name>') -> True when it will be; False said loudly: --no-publish (PUBLISH OFF), or a campaign with
+    no paired head-to-head to show (self-play / samples, or unpaired: PUBLISH SKIPPED). SystemExit (from
+    site_h2h.check) when the post could not work: no uploader, no key - before any waiting."""
+    from mtgz.az import farm_campaign as C
+    from mtgz.az import site_h2h as S
+    exp = o.publish or st['run'][:60].rstrip('-')
+    if o.no_publish:
+        log(f'PUBLISH OFF: campaign {st["name"]} (h2h.{exp}) will NOT appear on the Delver AI site\'s Head-to-heads tab '
+            f'(--no-publish; docs/ENGINE.md 225)')
+        return False
+    seats = st['seats']
+    if C.samples_job(st) or seats[0] == seats[1]:
+        log(f'PUBLISH SKIPPED: campaign {st["name"]} is self-play (no head-to-head to show on the Head-to-heads tab)')
+        return False
+    if not st['paired']:
+        log(f'PUBLISH SKIPPED: campaign {st["name"]} is unpaired (the Head-to-heads tab shows paired matches only)')
+        return False
+    o.publish = exp
+    a_label, b_label = side_labels(o, st)
+    S.check(o, default_title=f'Farm campaign {st["name"]}',
+            default_description=f'{a_label} against {b_label}: {st["games"]} paired games played on the farm (traced, '
+                                f'spot-checked), tools/farm_campaign.py.')
+    return True
+
+
+def side_labels(o, st):
+    """The sides' names on the site: --a-label / --b-label, else each checkpoint's run and generation; one checkpoint on
+    both sides with its own settings each (`--a-...` / `--b-...`): its move rule's tag after the name."""
+    from mtgz.az import site_h2h as S
+    a = o.a_label or S.checkpoint_label(st['a'])
+    b = o.b_label or S.checkpoint_label(st['b'] or st['a'])
+    if a == b:
+        from zero import farm_eval as FE
+        tags = FE.seat_tags(st['settings'], st['seats']) if st.get('settings') else [None, None]
+        if tags[0] == tags[1]:
+            raise SystemExit(f'both sides would be named {a!r}: give --a-label / --b-label (or --no-publish)')
+        a, b = f'{a} ({tags[0]})', f'{b} ({tags[1]})'
+    return a, b
+
+
+def publish_collected(o, st, res):
+    """The collected campaign's head-to-head (its readout, A = seats[0]) -> the experiment's match (key: --publish-key,
+    default the campaign's farm run name) -> exit code (3: PUBLISH FAILED, said with the retry command)."""
+    from mtgz.az import site_h2h as S
+    if not res.get('readout'):
+        log(f'PUBLISH FAILED: campaign {st["name"]} has no head-to-head readout to post (0 games?)')
+        return S.EXIT_PUBLISH_FAILED
+    o.a_label, o.b_label = side_labels(o, st)
+    h2h = dict(res['readout'], a=st['a'], b=st['b'] or st['a'])
+    if S.publish_result(h2h, o, name=o.publish_key or st['run'][:60].rstrip('-')) != 0:
+        log(f'PUBLISH FAILED: campaign {st["name"]}: its result stands (state.json); retry: python tools/farm_campaign.py '
+            f'collect {st["name"]} (a collected campaign returns its result at once, then posts)')
+        return S.EXIT_PUBLISH_FAILED
+    return 0
+
+
 def analysis_main(argv, client=None):
     from mtgz.az import farm_campaign as C
     ap = argparse.ArgumentParser(prog='farm_campaign.py ' + argv[0], description='analysis campaigns (ENGINE.md 165)')
@@ -485,6 +549,10 @@ def analysis_main(argv, client=None):
     ap.add_argument('--key', default=FD.data_key_path())
     ap.add_argument('--farm-release', default=FD.farm_release_path())
     ap.add_argument('--state-root')
+    from mtgz.az import site_h2h as S
+    S.add_args(ap)                             # (collect publishes by default: docs/ENGINE.md 225)
+    ap.add_argument('--no-publish', action='store_true', help="collect: do not post the head-to-head to delverai's "
+                    "Head-to-heads tab (said loudly: PUBLISH OFF)")
     from zero import seat_settings as SS
     SS.add_side_args(ap, local=False)          # (zero.h2h's per-side options: the seats' sets, zero-core docs/az.md 68)
     a = ap.parse_args(argv)
@@ -545,6 +613,7 @@ def analysis_main(argv, client=None):
         if a.action == 'status':
             print(json.dumps(C.status(d, client=cl, opts=opts), indent=1))
             return 0
+        posting = publish_plan(a, C.load_state(d))
         res = C.collect(d, client=cl, poll=a.poll, local=not a.no_local, threads=a.threads, wrap=a.wrap,
                         describe_games=not a.no_describe, allow_failed=a.allow_failed, wait=not a.once, opts=opts,
                         deadline_s=0 if a.deadline_now else None)
@@ -552,6 +621,8 @@ def analysis_main(argv, client=None):
             print(json.dumps(C.status(d, client=cl, opts=opts)['coverage']))
             return 3
         print(json.dumps(res))
+        if posting:
+            return publish_collected(a, C.load_state(d), res)
         return 0
     except C.CampaignError as e:
         die(str(e))
