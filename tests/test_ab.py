@@ -207,3 +207,49 @@ def test_farm_arms(tmp_path):
     assert body['state'] == 'paused' and body['build'] == 'b1'
     assert body['alternates'] == [{'build_id': 'b2', 'when': {'vendor': 'nvidia'}}]
     assert ab.farm_pause(s, 'ctrl', client=c) is None and len(c.calls) == 2
+
+
+def test_the_judge_plays_one_backend_per_experiment(tmp_path, monkeypatch):
+    """docs/ENGINE.md 217: a new experiment's first match decides (cells-match --backend auto), kept in
+    judge/backend.json and passed explicitly to every later match; an experiment judged before stays local; the spec's
+    judge.backend fixes it; judge.reuse_control is cells-match's --reuse-control."""
+    runs = tmp_path / 'runs'
+    s = ab.normalize(spec(arms={'ctrl': {}, 'a1': {'x': 1}}, out=str(tmp_path / 'x'), runs_dir=str(runs),
+                          judge={'vs_start': True, 'reuse_control': True}))
+    for arm in ('ctrl', 'a1'):
+        d = runs / f'meta3-x-{arm}' / 'models'
+        d.mkdir(parents=True)
+        for it in (207, 235):
+            (d / f'iter_{it:04d}.pt').write_bytes(b'x')
+    out = ab.judge_dir(s)
+    assert ab.judge_backend(s, out) == ('auto', 'a new experiment: its first match decides', False)
+    cmds = []
+
+    class P:
+        returncode, stderr = 0, ''
+
+    def run(cmd, **kw):
+        cmds.append(cmd)
+        p = P()
+        p.stdout = json.dumps({'summary': {'overall': {'elo': 1, 'se': 2}, 'decks': {}}, 'rows': [], 'backend': 'farm'})
+        return p
+    monkeypatch.setattr(ab.subprocess, 'run', run)
+    monkeypatch.setattr(ab, 'summarize', lambda s, a, k: None)
+    assert ab.judge(s, publish=False) == 0
+    backends = [c[c.index('--backend') + 1] for c in cmds]
+    assert backends == ['auto', 'farm', 'farm'] and all('--reuse-control' in c for c in cmds)
+    assert ab.jload(os.path.join(out, 'backend.json'))['backend'] == 'farm'
+    assert ab.judge_backend(s, out)[0] == 'farm' and ab.judge_backend(s, out)[2]
+    # an experiment judged before 217 (a result or a cached baseline, no backend.json): local
+    os.remove(os.path.join(out, 'backend.json'))
+    assert ab.judge_backend(s, out)[0] == 'local'
+    for k, _, _ in ab.judge_matches(s, 207):
+        os.remove(os.path.join(out, k + '.json'))
+    os.makedirs(os.path.join(out, 'cells_base'), exist_ok=True)
+    with open(os.path.join(out, 'cells_base', 'abc.json'), 'w') as f:
+        f.write('{}')
+    assert ab.judge_backend(s, out)[0] == 'local'
+    s2 = ab.normalize(dict(spec(out=str(tmp_path / 'x')), judge={'backend': 'farm'}))
+    assert ab.judge_backend(s2, out) == ('farm', 'judge.backend', True)
+    with pytest.raises(SystemExit, match='judge.backend'):
+        ab.normalize(spec(judge={'backend': 'mac'}))

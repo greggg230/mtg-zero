@@ -4,7 +4,7 @@ mtgz.az.farm_campaign).
 
 Analysis campaigns:
     python tools/farm_campaign.py submit NAME --a CKPT [--b CKPT] --games N --build ID [--worker EXE] [--sims 64]
-           [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
+           [--chance-k 2] [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
            [--games-per-lease auto|N] [--deadline-h 3] [--spot 0.05] [--ort-dll DLL] [--min-agent V] [--wait]
            [zero.h2h's per-side options: --a-infoset-merge 1 --b-infoset-merge 0, --a-sims N, --b-select visits, ...]
            [--alternates release|ID[,ID...] | --no-alternates] [--variants 'gpu=fp16,dml=matmul@amd']
@@ -14,7 +14,8 @@ Analysis campaigns:
            [--allow-failed] [--poll 60] [--once]
   submit: A against B (paired games 2k, 2k + 1 share their deal, seats swapped) or A against itself (no --b), as
   zero.h2h.match plays them (mtgz.az.farm_campaign.match_settings: A's run's evaluation settings, `--sims`, the spec,
-  the root belief tilts; the seats checked equal to the local match's): `--bo1` = the yardsticks' best-of-one (A's
+  the root belief tilts, `--chance-k` - zero.h2h's, default 2 as there; the seats checked equal to the local match's):
+  `--bo1` = the yardsticks' best-of-one (A's
   run's eval spec without its best-of-three keys, its tilts without 'deck': mtgz.az.yardsticks), else `--spec` (default
   A's run's evaluation spec) and `--tilts` (default the run's). zero.h2h's per-side options (zero-core
   zero.seat_settings.add_side_args without the local-only ones; zero-core docs/az.md 68, docs/ENGINE.md 214) give a
@@ -353,6 +354,8 @@ def analysis_main(argv, client=None):
     ap.add_argument('--worker')
     ap.add_argument('--dist', action='append')
     ap.add_argument('--sims', type=int, default=64)
+    ap.add_argument('--chance-k', type=int, default=2, help="chance nodes' sampled outcomes (zero.h2h's --chance-k, "
+                    "default 2 as there; docs/ENGINE.md 217)")
     ap.add_argument('--bo1', action='store_true', help="the yardsticks' best-of-one spec and tilts of A's run")
     ap.add_argument('--spec')
     ap.add_argument('--tilts', help="root belief tilts JSON ({} = none; default the run's)")
@@ -432,13 +435,15 @@ def analysis_main(argv, client=None):
                     spec = a.spec or h2h.run_eval_spec(a.a, C.GAME)
                     tilts = json.loads(a.tilts) if a.tilts is not None else None
                 if not a.samples:
-                    settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b, sides=a if sides else None)
+                    settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b, chance_k=a.chance_k,
+                                                   sides=a if sides else None)
                 seats = [{'net': 1}, {'net': 1}] if a.samples else                     C.campaign_seats(C.side_sets(settings, a if sides else None), bool(a.b))
                 gpl = a.games_per_lease if a.games_per_lease == 'auto' else int(a.games_per_lease)
                 C.submit(a.name, a.a, a.games, settings, seats, a.seed, a.build, exe, man.get('requires_runtime'),
                          b=a.b, paired=not (a.unpaired or a.samples), share=a.share, samples=a.samples, priority=a.priority, games_per_lease=gpl,
                          deadline_s=a.deadline_h * 3600, spot=a.spot, ort_dll=a.ort_dll, min_agent=a.min_agent,
-                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1, 'set': a.set, 'sides': sides}, client=cl, root=a.state_root, opts=opts,
+                         meta={'cmd': 'submit', 'sims': a.sims, 'chance_k': a.chance_k, 'bo1': a.bo1, 'set': a.set,
+                               'sides': sides}, client=cl, root=a.state_root, opts=opts,
                          alternates=None if a.no_alternates else a.alternates, variants=a.variants)
             print(d)
             if not a.wait:

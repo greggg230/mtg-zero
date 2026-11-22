@@ -277,7 +277,7 @@ def published_pool(argv, root=None, path=None):
     e = lookup(rev, root, path)
     if e is None:
         raise SystemExit(f'--pool-build {v}: no published farm build for {rev} ({index_path()}; '
-                         f'python tools/farm_release.py {rev})')
+                         f'python tools/farm_release.py release {rev})')
     out = list(argv)
     if out[i] == '--pool-build':
         out[i + 1] = e['build_id']
