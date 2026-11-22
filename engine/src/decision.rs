@@ -1141,6 +1141,16 @@ impl Game {
         ranges: &[PagedRange],
         extra: Vec<Opt>,
     ) {
+        // A decision of a mana ability activated in a cast's 601.2g step (its total cost locked) offers, as `ask`'s,
+        // only the options that leave the cast's payment completable (`completing`, ENGINE.md 222): a paged one too
+        // (Cascading Cataracts' 126 productions). (A payment's own paged decisions filter their items themselves.)
+        if !self.cast_lock.is_empty() && !matches!(task, Task::PayMana(_)) && ranges.iter().all(|r| r.linked.is_none()) && self.completing_floor(&task).is_some() {
+            let kept: Vec<Vec<(u32, Choice)>> = ranges.iter().map(|r| self.completing_items(&task, r.items.to_vec())).collect();
+            let extra = self.completing(&task, extra);
+            let rs: Vec<PagedRange> = ranges.iter().zip(kept.iter()).map(|(r, k)| PagedRange::new(r.base, r.n, k)).collect();
+            self.ask_ranges(task, page, player, kind, &rs, extra, false);
+            return;
+        }
         self.ask_ranges(task, page, player, kind, ranges, extra, false);
     }
 

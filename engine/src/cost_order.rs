@@ -1335,7 +1335,7 @@ impl Game {
     /// The payment search's floor for `task`, if it is a payment whose
     /// options must leave it completable: a cost whose parts the player
     /// orders, or the mana payment before one.
-    fn completing_floor(&self, task: &Task) -> Option<(usize, PlayerId)> {
+    pub(crate) fn completing_floor(&self, task: &Task) -> Option<(usize, PlayerId)> {
         if self.oracle {
             return None;
         }
