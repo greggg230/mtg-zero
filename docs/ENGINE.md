@@ -44513,7 +44513,7 @@ its rows carry the enclosing picks for both viewers, 2 and 2). The other four ga
 the hand in its step (hidden-decklist seed 100,017,685), one that came into it and left (default 100,037,121), one at a
 card that changed zones after the look (hidden-decklist 100,098,483), the exponential Ocelot Pride run (default
 100,061,919) - were steward finds of farm-scale runs: the scans (every check; 12,000 + 12,000 + 20,000 games, then
-100,000 of each look kind and 200,000 Ocelot games in 90 minutes on the Mac) found none. Their tests are
+ranges of 100,000 per look kind and 200,000 Ocelot games under a 90-minute cap on the Mac) found none. Their tests are
 `#[ignore = "seed lost ..."]` (`a_look_at_the_viewers_hand_at_a_card_that_leaves_it_in_the_same_step`,
 `the_looks_of_206_in_default_seed_100037121_and_hidden_seed_100098483` - split out of
 `a_look_at_the_viewers_hand_that_its_step_changes_around_the_look`, which keeps its delver_dealt2 match and passes -
