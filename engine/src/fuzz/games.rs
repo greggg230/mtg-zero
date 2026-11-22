@@ -3423,6 +3423,7 @@ pub fn play(seed: u64, checks: bool) -> Played {
             count_hogaak_c_choice(&g, a);
         }
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        count_dropped_loop_records(&g, false);
         g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}
 {}", g.log_lines().iter().rev().take(60).rev().cloned().collect::<Vec<_>>().join("
 ")));
@@ -3687,6 +3688,28 @@ fn check_options_complete(g: &Game, seed: u64, world: &str) {
 /// viewer). The games' run prints both and, with 200 games or more, needs compared states: a walk that
 /// ended at its first action every time would pass silently otherwise.
 static IS_WALKS: AtomicU64 = AtomicU64::new(0);
+/// The near-tie merge key's dropped loop records (ENGINE.md 233, `Game::check_dropped_loop_records`): records checked
+/// at every step of every game and match, and the times one's loop hash came back (none allowed).
+static LOOPDROP_CHECKED: AtomicU64 = AtomicU64::new(0);
+static LOOPDROP_RECUR: AtomicU64 = AtomicU64::new(0);
+static MATCH_LOOPDROP_CHECKED: AtomicU64 = AtomicU64::new(0);
+static MATCH_LOOPDROP_RECUR: AtomicU64 = AtomicU64::new(0);
+
+/// Count `g`'s dropped loop records (ENGINE.md 233) after a step.
+fn count_dropped_loop_records(g: &Game, matches: bool) {
+    let (n, bad) = g.check_dropped_loop_records();
+    if n > 0 {
+        let (c, r) = if matches { (&MATCH_LOOPDROP_CHECKED, &MATCH_LOOPDROP_RECUR) } else { (&LOOPDROP_CHECKED, &LOOPDROP_RECUR) };
+        c.fetch_add(n, Ordering::Relaxed);
+        r.fetch_add(bad, Ordering::Relaxed);
+    }
+}
+
+/// The end-of-run check of the dropped loop records (ENGINE.md 233): none came back.
+fn check_dropped_loops(kind: &str, checked: u64, recur: u64) {
+    println!("{kind}: loop records the merge key drops (their source sacrificed): {checked} checked after steps, {recur} recurrences");
+    assert_eq!(recur, 0, "{kind}: a dropped loop record's hash came back {recur} times in {checked} checks (ENGINE.md 233)");
+}
 static IS_STEPS: AtomicU64 = AtomicU64::new(0);
 /// ENGINE.md 160, 161: two worlds of `viewer`'s whose keys of one step differ only by the other player's forced answers
 /// (`KEY_AUTO`: that player had one option, which may read its hidden cards) while everything else zero-core's child
@@ -4230,6 +4253,8 @@ fn games_totals(companions_used: u64) -> Totals {
         ("belief_uniform", l(&BELIEF_UNIFORM)),
         ("gy_lists", l(&GY_LISTS)),
         ("is_walks", l(&IS_WALKS)),
+        ("loopdrop_checked", l(&LOOPDROP_CHECKED)),
+        ("loopdrop_recur", l(&LOOPDROP_RECUR)),
         ("is_steps", l(&IS_STEPS)),
         ("chance_walks", l(&CHANCE_WALKS)),
         ("chance_steps", l(&CHANCE_STEPS)),
@@ -4307,6 +4332,7 @@ pub const DELVER_TRIGGER_GAMES: u64 = 2000;
 /// The games' end-of-run checks over `n` seeds' counters `t` (one chunk's, or a sharded run's merged totals: ENGINE.md
 /// 165): what the mode must have exercised, each over its own least number of games (200 for most).
 pub fn check_games(n: u64, t: &Totals) {
+    check_dropped_loops("games", t.get("loopdrop_checked"), t.get("loopdrop_recur"));
     meta_check(t, "g", n, 200, false);
     // (`FUZZ_POOL=meta_wheel`, ENGINE.md 180: forced and missed resolutions seen, worlds and rows compared)
     if wheel_mode() && n >= 200 {
@@ -4460,6 +4486,7 @@ pub fn check_games(n: u64, t: &Totals) {
 
 /// The matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 167; each needs 20 matches).
 pub fn check_matches(n: u64, t: &Totals) {
+    check_dropped_loops("matches", t.get("match_loopdrop_checked"), t.get("match_loopdrop_recur"));
     meta_check(t, "m", n, 90, false);
     if n < 20 {
         return;
@@ -5412,6 +5439,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
         // (`FUZZ_POOL=hogaak`, ENGINE.md 220.4: a Massacre on top of the stack resolved by this pass, the game going on)
         let massacre_top = (hogaak_mode() && g.sideboarding().is_none()).then(|| hogaak_b_massacre_on_top(&g.g, a)).flatten().map(|id| (id, g.m.game_no));
         g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+        count_dropped_loop_records(&g.g, true);
         if let Some((id, game)) = massacre_top {
             if g.m.game_no == game && g.sideboarding().is_none() && !g.g.stack().iter().any(|s| s.id == id) {
                 HOGAAK_MASSACRE_MATCHES[usize::from(sp.start_game == 2)].fetch_add(1, Ordering::Relaxed);
@@ -5631,6 +5659,8 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         ("three", three),
         ("match_is_walks", w),
         ("match_is_steps", s),
+        ("match_loopdrop_checked", MATCH_LOOPDROP_CHECKED.load(Ordering::Relaxed)),
+        ("match_loopdrop_recur", MATCH_LOOPDROP_RECUR.load(Ordering::Relaxed)),
         ("worlds", stats.worlds),
         ("first_picks_changed", stats.first_picks_changed),
         ("decks_changed", stats.decks_changed),
@@ -6057,6 +6087,7 @@ pub fn play_hidden(seed: u64) -> Played {
             check_options_complete(&a.g, seed, "the game");
         }
         a.step(act, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        count_dropped_loop_records(&a.g, false);
         a.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
         a.g.check_knowledge().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
         rules_match_step(&mut mc, &a, &|| format!("seed {seed} step {steps} (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1)"));

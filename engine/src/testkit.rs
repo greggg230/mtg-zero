@@ -484,6 +484,13 @@ impl Game {
         panic!("drive_until: no progress");
     }
 
+    /// Reseed the engine's RNG (tests: two lines from one position whose later shuffles come out differently, as
+    /// a branch's and its game's do; ENGINE.md 233).
+    #[doc(hidden)]
+    pub fn reseed_rng(&mut self, seed: u64) {
+        self.rng = crate::rng::Rng::new(seed);
+    }
+
     /// Set the X of the top stack item (tests: an X past what a payment
     /// reaches today, the u8 generic mana of a cost).
     pub fn set_top_x(&mut self, x: u32) {

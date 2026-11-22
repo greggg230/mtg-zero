@@ -161,8 +161,9 @@ def main(argv=None):
     if os.path.exists(rep):
         with open(rep, encoding='utf-8') as f:
             r3 = json.load(f)
+    # (with branched games, zero-core records/2, each branch is a game record of its own: a setup each)
     ok3 = rc3 == 0 and bool(r3 and r3.get('identical')) and (r3 or {}).get('rows', 0) > 0 and \
-        (r3 or {}).get('setups') == a.games
+        (r3 or {}).get('setups') == a.games + int((r3 or {}).get('branches') or 0)
     summary['gate3'] = {'passed': ok3, 'seconds': s3, 'result': r3, **({} if ok3 else {'tail': tail3})}
     feats = worker_features(a.worker)
     okf = feats['passed']
