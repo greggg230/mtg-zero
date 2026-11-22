@@ -293,11 +293,12 @@ def cluster_share(pairs):
     return p, v ** 0.5 / n
 
 
-def series(con, since_iter=0, by_kind=False, kind=None):
+def series(con, since_iter=0, by_kind=False, kind=None, extra_where=''):
     """Rows of the Bauble series (docs/gamedb.md "Bauble targeting") from a gamedb connection: one per iteration and
     Bauble ('urza', 'mishra', and 'all': the two together), with the counts, the shares of the counted activations
-    and their standard errors (clustered by game)."""
-    where = 'AND kind = $kind' if kind else ''
+    and their standard errors (clustered by game). `extra_where`: a further condition (' AND ...'; gamedb's
+    `branch_filter`)."""
+    where = ('AND kind = $kind' if kind else '') + extra_where
     sql = SERIES.replace('{by}', 'kind' if by_kind else 'NULL::VARCHAR').replace('{where}', where)
     cur = con.execute(sql, {'since': int(since_iter), **({'kind': kind} if kind else {})})
     cols = [d[0] for d in cur.description]

@@ -128,6 +128,7 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 | over, aborted, resigned | ended by the rules or a resignation; aborted; ended by self-play resignation |
 | starting | the seat on the play |
 | turns, decisions, n_actions | the game's turn number at its end; decisions with two or more options; actions |
+| is_branch, branch_from, branch_alt, branch_merged, branch_tag, branch_gap | a branch game (below, "Branch games"): its branch point (its first own action's index), the near-tie rule's runner-up, its decisions to the merge (NULL: played to its end), the branch point's decision tag and Q gap; NULL / false for a game |
 | mull0, mull1 | each seat's mulligans |
 | life0, life1 | life at the end |
 | winner | the winning seat, NULL for a draw / unfinished game |
@@ -202,6 +203,26 @@ P<n>" line after it.
 Every view holds every kind: add `WHERE kind = 'selfplay'` (or another) for one kind's games - the ten queries below
 were written for self-play. Rates over the combo tables and `events` use detailed games only: with `--sample` below 1, count the denominators
 from `games WHERE detailed` (every query below does that implicitly by joining the detailed tables).
+
+## Branch games (zero-core records/2; ENGINE.md 227)
+
+A self-play run with `selfplay_branch` writes branch games beside their games (zero-core docs/az.md 72.7): a branch
+carries its game's gid and seed, every action from the game's start (its first `branch.from` are its game's), and a
+`branch` block. A **merged** near-tie branch (`branch.merged` set: it reached a state of its game's and ended there)
+ends at a position of a game in progress and says over with **its game's result**. The database:
+
+* **game_id** adds the branch point to the hashed key (a branch's gid, seed and even its number of actions may be its
+  game's); a game's id is as before.
+* **The end check**: a merged branch must replay to a game in progress, and its result must be its game's record's (the
+  same iteration, source, gid and seed, no branch; in the same unit), whose game is over; a wrong result or a missing
+  game fails the unit loudly.
+* **The games row**: the branch columns above; a merged branch's `winner` is its borrowed result's, `method` and
+  `reason` `merged` / `Merged`, `turns` the turn of the merge point.
+* **No prefix twice**: a branch's events and combo rows (`doomsday`, `shows`, `spells`, `sneak`, `entered`, `bauble`)
+  count from its action `from` on - its game's rows hold the shared start.
+* **The behaviour series** (`doomsday_series`, `bauble_blunder_series`; CLI `series`, `bauble`) leave branch games out:
+  their first own move is forced, an off-policy line. `include_branches=True` (`--include-branches`) counts them too.
+  Plain queries see every game: add `WHERE NOT is_branch` for the games alone.
 
 ## The Doomsday series (for a publisher)
 
