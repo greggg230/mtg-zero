@@ -45451,8 +45451,11 @@ zero.run writes its config back with `"game": "mtg_v7", "game_layout": null` (as
 as the same game), and what it writes from then on names `mtg_v7`. Checked on read-only copies in scratch: r1's
 config.json resolved by origin/main and by this branch differs in exactly `game` (`mtg` -> `mtg_v7`) and the new key
 `game_layout` (None); r1's iteration 1234 played by origin/main as `mtg` and by this branch as `mtg_v7` (zero-core's
-selfplay_digest: self-play records, samples and results for 'visits' and 'cq', and a match against the random bot) -
-DIGESTS_R1; the release worker of this commit's `check-config` of r1's own config.json: game `mtg_v7`, no failure. A
+selfplay_digest: self-play records, samples and results for 'visits' and 'cq', and a match against the random bot; 8
+games at 16 sims on r1's spec) - identical: 592 samples per target, records 9ee241f58002c4d3 ('visits') /
+f0ac0011ac060c97 ('cq'), results cc152b847861ae3c, every one of the 15 sample arrays, the random-bot match 4.0/4
+(results bd1308611b59da6c) on both sides; a shard of r1's iteration 1234 (its meta says `mtg`, no record) reads as
+`mtg_v7` (zero.heldout); the release worker of this commit's `check-config` of r1's own config.json: game `mtg_v7`, no failure. A
 mistake fails loudly: the run moved by `--game-layout 8` (the guard refuses its v7 checkpoints at the start), a v7
 checkpoint loaded as `mtg` (exit 78: "game 'mtg_v7' -> 'mtg'"), a v8 graph given to an `mtg_v7` job (the worker refuses
 it: a network of game "mtg" layout 8, the job plays "mtg_v7").
