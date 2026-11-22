@@ -44159,3 +44159,12 @@ the Python remote worker, every branch played on both sides) identical, 40 games
 worker's records/2 replayed by the trainer's path, each branch with its game's record) identical, 80 records (40 branches,
 1 merged: its merge key and its game's result re-checked by `replay_branch`), 15,777 rows. (With 12 games and p 0.5:
 gate 2 identical, gate 3 identical with 9 branches, none merged.)
+
+**The gates of 61a747bd** (this revision's head, in a warm worktree, `--no-mac`, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`,
+throttled beside the live runs): **GATE PASSED suite 61a747bdfaa8 in 567s** (the full engine suite 2,889 passed; the
+2,000-game fuzz of default with 100 matches, default with hidden decklists, delver_dealt with 100 matches + 100
+post-sideboard - the dropped-loop-record check in each); **GATE PASSED WITH SKIPS engine 61a747bdfaa8 in 752s** (skipped:
+7 live-run-hazard tests, fenced): the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (= expected), the
+formats constructed, EoE, driver, metagame and dealt (= the recorded files), `az` 57, `limits` 13, `hidden` 28, pytest 233 +
+153 + 173 + 229 passed, the desktop smoke config, farm compat identical on `delver-mirror-bo3-dealt` (gate 2: 6 games,
+2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows), the suite evidence. The next commit adds this paragraph only (docs).
