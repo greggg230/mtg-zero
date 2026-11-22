@@ -43602,7 +43602,8 @@ information**, in the real game too.
 * `check_match_information_set` reports where two rows differ (`Row::locate`: a head segment's slot and float, a tail
   token's segment, slot and float, or an override) and handles rows of different lengths.
 
-**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8).** Once finds are mixed with other cards, the rows
+**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8; built: layout v8's
+`find_groups` segment, ENGINE.md 232).** Once finds are mixed with other cards, the rows
 no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
 already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
 encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
@@ -43947,7 +43948,7 @@ effects (ENGINE.md 156), so a departed copy's copied identity, last known mana v
 while an ability about it waits on the stack (the public-state gate classes the LKI fields Derived). The fix doesn't
 widen it (before, the network was equally blind to the copied face; the rules now compute 0 instead of the front
 face's). The maintainer's decision: one additive layout v8 (a stale-object LKI block in `rf`, the LKI fields Public in
-the gate) built by a later encoding change, not here.
+the gate) built by a later encoding change, not here. (Built: layout v8's `lki` segments keyed by the stale reference's key, ENGINE.md 232.)
 
 ### 226.8 Shared-file functions changed
 
@@ -44158,6 +44159,8 @@ casting it satisfies, `Keep::allow`, as its payment does); `x_range`'s X-paid-wi
 random boards.
 
 ### 229.4 Bug 4: a payment's picks in progress - deferred to layout v8
+
+(Built: layout v8's `payment` and `pay_options` segments, the game `mtg_v8`, ENGINE.md 232.)
 
 `PayMana`'s picks in progress (`chosen`, `multi`, `actors`, `phyrexian_life`, `now` / `which` / `actor_for` and the
 productions offered, `spend`) are in neither `Game::view_of` nor layout v7's input; two payments that differ only in
@@ -44618,3 +44621,148 @@ digest as recorded, farm compat identical, pytest 698 passed on the Mac and 49 o
   `SCAN_KIND` left_look / entered_look / ocelot), then drop their `#[ignore]`.
 * The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
   counts): measured in 231.7.
+
+## 232. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg_v8`; branch `feat/layout-v8`, 2026-11-22)
+
+**Why.** Three public facts the input left out, each found by a Hogaak-era fix and deferred to one additive layout by
+the user's decision of 2026-11-21 (thread T4): P's bug 4 (229.4, `encoding_needs_fix_P.md` option B: a mana payment's
+picks in progress and the decisions' option meanings, with fix M's 601.2g step, 231), E's stale-reference LKI (226.7,
+`encoding_needs_fix_E.md` option 2: a departed copy's copied identity, its last known mana value, power, toughness,
+counters) and D's group fact (223's decision 4, `encoding_needs_fix_D.md` option 2: "k of these places hold search
+finds" once a scramble mixes finds with other cards). Layout v7's rows stay byte for byte; layout v8 = v7 + six tail-only
+gated segments.
+
+### 232.1 Two design decisions (the user's to confirm)
+
+1. **v8 is a new game, `mtg_v8`; `mtg` stays layout v7.** zero-core's tail segments are a constant of the game type
+   (`SearchGame::TAILS`) and its token layout is the game's (`GamePackage.tokens`), so the only way a v7 run's config
+   keeps working unchanged is that `mtg` keeps v7. `mtg_v8` (`engine/src/az/v8.rs`: `MtgV8Az`, every `SearchGame`
+   method forwarded to `MtgAz`; the same specs, rules, head, bots, auxiliary targets) is registered in the Python
+   module, the release worker and the game package (`layout_v8.json`, aux heads, readers, self-play specs, specs,
+   evaluation specs; a preset `mtg-v8-smoke`). A run moves by `python tools/fork_run.py <checkpoint> <new run> --game
+   mtg_v8` (zero-core's widen). The presets and the tools that load a checkpoint as `game='mtg'` stay on v7 (moving a
+   preset or a tool is a later, separate decision); no live run is forked here.
+2. **E's "widen `rf`" is a segment keyed by the stale key.** The orchestrator's requirement - a v7 network widens onto v8
+   computing what it did - rules out wider slots (a wider slot is one input product over more columns: equal to float32
+   rounding only, 125.7); appended gated tail-only segments are exact (zero-core docs/az.md 43.8). So the stale object's
+   last known information is a token of its own (`lki`) whose slot k is the stale key k that every holder of the
+   reference already shows (`rf::STALE_KEY`, 125.3: the key that pairs two references to one gone object): every holder
+   sees it through the key. The facts are E's option 2's, all of them.
+
+### 232.2 The segments (appended after `found`; `tail_v8.rs`)
+
+| # | segment | width | tokens |
+|---|---|---:|---|
+| 25 | `payment` | 535 | per `Task::PayMana` on the agenda (innermost depth 0): one per picked source (`chosen`, then `multi` with its production; its object - a permanent, or a hand card with its identity where the viewer knows it -, its source kind one-hot (own ability, hand ability, improvise / convoke / waterbend, `TAP_FOR`, `POL_FOR`, `SAC_FOR`, `SQ_FOR`, `LJ_FOR`, another trigger slot, a graveyard ability) with its slot's 8 bits and its pool's 16, its actor (`actors`), its rank), one per source activated first (`forced`, with its delve flag), one for the payment's state (payer; `vm` present and 32 bits; `pooled`, `convert`, `improvise`, `waterbend`, `convoke`, `oracle`; `spend`'s count; the Phyrexian life's 64 bits; `life_after`'s 32; `min_class`'s 32; `now`'s source and its productions' count, `now_taken`, `now_min`; `which`'s permanent and its sources' count; `actor_for`'s source; `delve_late`'s count), one per non-zero part of `cost` (which of the 22 parts, its 64 bits: exact where the context's cost floats sum the hybrid pairs); per `Task::CastMana` (231): the caster, the spell, the permanent whose ability `ChooseMode` asks, `again` |
+| 26 | `pay_options` (`columns: 1`) | 173 | the viewer's payment decision's items, slot k = item k: `ChooseMana`'s productions (6 amounts) or, one mana at a time, the colour; `ChooseMode`'s sources of `which`'s permanent (kind, slot, pool) or the abilities of the permanent a 601.2g step asks about (`Game::cast_mana_slots`); `PayPool`'s pools (6 amounts, haste, the restricted parts' count) with each restricted part (type, purposes' 32 bits, amount) a token of its own past the items. Every option naming item k (`Number(k)`, a page's `Item(k)`) points at token k (`tail_v8::pay_overrides`); at gate 0 its logit is exactly the generic one |
+| 27 | `lki` | 1,018 | per stale reference the row holds (slot = its key): its copiable values (an `effects` token's copy-effect fields: the copied identity where the viewer knew the object, the exceptions, double-faced) and mana value (64 bits), power and toughness (sign, squashed, 64 bits) with the controller, its qualities as a damage source (controller, deathtouch, lifelink, infect, spell, colours, card types, itself), what it was attached to (a reference), a recorded spell item and its mana value; one token per kind of counter it had (a `counters` token's fields, slots from 2^24) |
+| 28 | `lki_spells` | 520 | a gone spell's item (`Game::spell_lki`: "copy it") as a stack slot shows an item (`write_departed_item`: its definition as it last existed; none of its card's facts now), its key and mana value |
+| 29 | `lki_relations` | 194 | that item's targets, divisions, noted objects, spliced cards and ninjutsu planeswalker - every one - as `stack_relations` tokens (`item_relations`, shared with them), with the key |
+| 30 | `find_groups` | 146 | one per contiguous run of a group's places: owner, group key, zone (library: top depth and size with 16 bits each, the whole library; face-down exile and a hand: a count, they are bags), the group's finds and other cards (16 bits each), its runs |
+
+A v8 row = the v7 row (head, v7 tail tokens, v7 overrides, the stale keys in the same order) + these tokens + the
+overrides into `pay_options`, sorted by option. The `lki` pass runs last and first meets every gone object a reference
+of the public state names (`Game::for_each_public_ref`) that no token wrote, after every v7 token.
+
+**What is left out, and why.** `PayMana`'s `marked`, `extra`, `extra_restr`, `extra_made`, `made_by`,
+`extra_made_restr`, `extra_haste` and `keep` follow from the picks and the state; `pool_page` is the decision's page
+(the context floats); `Task::CastMana::after` and `Game::pool_wild` exist only in the payment search's copies (231.4).
+`W3State::lki_host` is `lki_attached`'s entry kept when a card reads it (now Derived). `lki_loss` is read only while its
+simultaneous move's leave triggers are gathered (Derived).
+
+### 232.3 Engine state added (no rule reads it; DIGEST_ENCODING=0 unchanged)
+
+* `Game::find_groups` (`hidden::FindGroup`: owner, members by card, finds). `scramble` (`group_scramble`, before 223's
+  strict rule drops the domain's told finds): a domain mixing told finds or a group's members with any other card
+  makes the domain and every group it touches one group, its finds the domain's told finds plus theirs; a domain inside
+  one group (Ponder over a pile's places) changes nothing. A member moving to another zone (`move_card_ctl`) or the other
+  player learning one (`learn`) ends its group - the count is then no longer one number, as a told find going into a hand
+  stops being one (223). Public moves shift the places; the rows read them live.
+* `Game::lki_qualities`: every battlefield departure's damage-source qualities, whatever the cards of the game. The
+  rules' `lki_damage` is kept only under `SEEN_LKI_DAMAGE`, a bit of every card in the game, hidden ones too: encoding
+  its presence leaked a hidden card (the fuzz's hidden-decklist information-set walk found it: worlds dealing the
+  opponent such a card recorded it, the others not).
+* Described positions (`build.rs`, `mtg-build/1`): a stale reference may carry `"lki"` (copy, dfc, mv, power,
+  toughness, qualities, attached, counters); a copy's exceptions, keyword or named counters and a gone spell's item are
+  refused (`unsupported`), never approximated. The round trips pass.
+
+### 232.4 The public-state gate (`tests/az.rs`; its rows are layout v8's now)
+
+Classification: `lki_copy`, `lki_power`, `lki_toughness`, `lki_counters`, `lki_attached`, `spell_lki`, the new
+`lki_qualities` and `find_groups` Public; `lki_damage`, `W3State::lki_host` Derived (above). `view_of` lists the payments
+and steps (`tail_v8::payment_view`), the gone objects' last known information of every public stale reference
+(`lki_view`, a multiset) and the find groups (`find_groups_view`); the loop hash (`view_state`) is untouched.
+
+Positions (`public_state_v8.rs`, added to both passes): payments in each decision - Sol Ring with {U}{B} floating
+(`PayPool`), Gitaxian Probe (`PayPhyrexian`), Kappa Cannoneer with Urza, Black Lotus, two Orcish Lumberjacks and Forests
+(`PayMana` picks, `ChooseMode` of `which`, `ChooseMana`, `ChoosePermanent`), Hogaak's and the 601.2g step's of 231; a
+Phyrexian Metamorph that left as a copy of Concealing Curtains with a trigger naming it waiting (by hand: Terminal
+Velocity is EoE's table), Jacked Rabbit with three counters attacking then gone (226's test), Thor's trigger about a
+Green Sun's Zenith that left the stack (`spell_lki`); a Doomsday pile of four library finds and Force of Will from the
+graveyard (a group of five places, four finds), then fetched and shuffled (the whole library).
+
+Perturbations (35 new, `v8_perturbations`): 21 of a payment or a step (picks added and undone, a production, the
+Phyrexian life, the cost, `vm`, the flags, the class, the life after, a forced source, `now`'s source and mana taken,
+`which`, an actor and `actor_for`, the pools, the search floor, `delve_late`, the step's permanent and `again`), 9 of
+last known information (mana value, copiable values, power, toughness, deathtouch, a +1/+1 counter, attached, a spell's
+X, a spell's item recorded), 4 of find groups (a group made, one more find, ended, one more place). Every one changes
+both views and both v8 rows; on layout v7 all but "a payment's cost has one more generic mana" (the context's cost floats
+show the innermost payment's) leave the row as it was - a new known gap scoped to layout v7, "layout v7 lacks layout
+v8's facts", checked alone by the single pass (layout v6's entry for v7's facts lists them too).
+
+Results: the single pass **266 perturbations encoded, 2 deliberate limits, 0 known gaps** on v8 (284 fields: 143 public,
+13 hidden, 128 derived; 280 perturbations; 530 positions); every v8 fact a v7 known gap; hidden decklists: 120
+perturbations reached only their owner. The pairwise pass: 151,118 states, no collision outside the known gaps. Its new
+perturbations draw their partners from a stream of their own, so every pair of the older ones is main's (with one shared
+stream, the reshuffled partners met four pre-existing collisions unrelated to v8 - a copy effect and a types effect alike
+in v6, a hand card past the 16th learned in a framed row, a control effect's end, two loyalty records cancelling - noted
+here, not changed).
+
+### 232.5 The widen (exact) and v7 kept
+
+* Rust: `layout_v8_is_checked_in_and_widens_layout_v7_exactly` - `mtgz/az/layout_v8.json` = `encode::layout_json_v8`, the
+  widen's map from v7 is the identity, v7's 25 segments unchanged, the six appended tail-only and gated, `pay_options`'s
+  pointer column, `TAILS_V8`. `az::v8::tests::mtg_v8_is_mtg_in_layout_v8`: one random game plays alike in both games, the
+  v8 rows' v7 part equal to the v7 rows.
+* The fuzz (`check_row`, every decision of every pool): the v8 row's head, v7 tail tokens and v7 overrides are the v7 row's
+  bit for bit; every option of a payment decision points at its `pay_options` token (`check_pointers_layout`); the
+  information-set and hidden-decklist walks compare v8 rows (a superset of v7's).
+* Python: `test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit` - a random v7 token network (64 x 2, its policy
+  heads random too) widened onto v8 (gates of the six new segments exactly 0, the old gates kept; saved, loaded as
+  `mtg_v8`), cube and Delver games in lockstep in both games, eager on the CPU: on every v7 row the widened network
+  answers bit for bit; on the v8 rows bit for bit wherever the row holds no v8 token (2,090 rows), and on rows holding v8
+  tokens (278) to float32 rounding, worst |diff| 2.1e-7 - the gated tokens weigh exactly 0, but the attention runs over
+  more keys (zero-core docs/az.md 43.8: "to float rounding otherwise"). Bit-identity there would need zero-core to drop
+  zero-weight tokens before the attention (not done: a zero-core change). The encoding guard takes the v7 network as `mtg`
+  and refuses it as `mtg_v8` until widened.
+
+### 232.6 Digests
+
+Behaviour unchanged: cube `DIGEST_ENCODING=0` **d3c144b6cc2977e5** (= main). Layout v7 unchanged: `DIGEST_ENCODING=v7`
+(new: v7's whole rows) **9473f7debc4bceb3** = main's recorded full digest; `digest_formats` with `DIGEST_ENCODING=v7`:
+constructed 4a03293608edeba2, metagame d72ae0c904a0ffbd, EoE 5ffb850dd963bad0, driver 6a03572828250b86 = main's files.
+Re-recorded on purpose (`DIGEST_WRITE=1`) because the full digests now hash layout v8's rows: cube
+**9473f7debc4bceb3 -> c2b04fed925eed67** (2,294 of 2,500 games: their hashed rows hold a payment or last-known-information
+token), constructed **4a03293608edeba2 -> 38ef93512e0a7259** (537 / 570), metagame **d72ae0c904a0ffbd ->
+ed86a2f5ed21c436** (256 / 288); EoE (layout v6), driver (`mtg`) and dealt (the dealt Delver preset, `mtg`) unchanged.
+
+### 232.7 Cost
+
+`layout_v8_cost` (`tests/az.rs`, ignored): 200 random games a pool, both viewers' rows at every decision, on the Mac.
+
+| pool | rows | rows with v8 tokens | tokens a row v7 -> v8 | floats a row v7 -> v8 | encode a row v7 -> v8 | v8 tokens (rows %) |
+|---|---:|---:|---|---|---|---|
+| cube | 162,502 | 14.86% | 33.63 -> 33.93 | 57,342 -> 57,543 (+0.35%) | 5.43 -> 5.33 us | payment 33,534 (8.10%), pay_options 2,004 (0.41%), lki 14,226 (7.37%) |
+| Delver | 150,128 | 12.61% | 21.72 -> 21.88 | 56,701 -> 56,833 (+0.23%) | 3.93 -> 3.73 us | payment 8,594 (3.54%), pay_options 139, lki 14,750 (9.32%), lki_spells 240, lki_relations 118 |
+| Doomsday | 131,000 | 5.94% | 21.49 -> 21.57 | 56,702 -> 56,761 (+0.11%) | 3.00 -> 2.86 us | payment 5,750 (2.47%), pay_options 98, lki 4,672 (3.52%) |
+| Hogaak | 101,122 | 5.82% | 25.76 -> 25.84 | 57,116 -> 57,176 (+0.10%) | 4.29 -> 4.24 us | payment 3,770 (2.02%), pay_options 100, lki 3,946 (3.82%) |
+
+(Floats a row: the head's 56,384 and every tail token's width. Encode: `encode_row_layout` into reused buffers, each
+layout timed first on every other row; the differences are within the timer's noise - v8 adds no measurable host
+cost.) Random play makes no Doomsday pile with a graveyard pick, so no `find_groups` token here; 223's count on the meta3
+digest spec was 132 of ~14,500 rows. The network's cost: the new tokens are 0.1-0.3 more a row on average (the
+attention's T), the six segments' input maps (d x width each) and one pointer column.
+
+### 232.8 Checks
+
+CHECKS
