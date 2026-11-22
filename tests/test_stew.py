@@ -315,8 +315,9 @@ def test_spec_extras_and_matchup_settings_come_from_the_recipe(tmp_path):
     cfgp = make_cfg(tmp_path, src, settings=mm, spec_extra={'dealt_decks': dealt},
                     deck_spec_extra={DD: {'table_key': 1}})
     ops = FakeOps(tmp_path)
-    # this build's engine refuses dealt decks in a metagame (lane 3 adds them): refused at init, not at the run's start
-    with pytest.raises(ValueError, match='dealt_decks'):
+    # the engine checks every specialist's spec at init, not at the run's start: dealt decks per seat in the
+    # best-of-three metagame parse (pb3's sideboarding for two 75s), a per-deck key the engine does not know is refused
+    with pytest.raises(ValueError, match='table_key'):
         Stew.init(os.path.join(str(tmp_path), 'stew'), cfgp, ops=ops, log=lambda m: None)
     ops.engine_specs = False
     s = Stew.init(os.path.join(str(tmp_path), 'stew'), cfgp, ops=ops, log=lambda m: None)
@@ -331,6 +332,9 @@ def test_spec_extras_and_matchup_settings_come_from_the_recipe(tmp_path):
                 {'deck_spec_extra': {'nope': {}}}):
         with pytest.raises(C.ConfigError):
             C.normalize({'name': 'x', 'decks': META3, 'candidates': [DEL], 'source': {'run': 'r'}, 'recipe': bad})
+    # (make_cfg rewrites the one config file: last) without the unknown key, the engine's check at init passes
+    ok = make_cfg(tmp_path, src, settings=mm, spec_extra={'dealt_decks': dealt})
+    Stew.init(os.path.join(str(tmp_path), 'stew-ok'), ok, ops=FakeOps(tmp_path), log=lambda m: None)
 
 
 def test_init_refuses_another_config(stew, tmp_path):
