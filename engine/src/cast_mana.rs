@@ -97,13 +97,20 @@ impl Game {
             }
             return;
         }
-        // (In the payment search only the feeding abilities are offered; an answer, or the question of a permanent's
-        // ability, reads them all: the option it searches from may be any.)
+        // (In the payment search only the feeding abilities castability doesn't count are offered, beside "the rest
+        // completes" (`YES`, `cast_mana_open_ok`); an answer, or the question of a permanent's ability, reads them all:
+        // the option it searches from may be any.)
         let sources = self.cast_mana_sources(id, p, spell, self.oracle && self.answer.is_none() && card.is_none());
         let slots_of = |c: CardIdx| sources.iter().find(|(x, _)| *x == c).map(|(_, v)| v.clone()).unwrap_or_default();
         match self.answer.take() {
             Some(Choice::Pass) => {
                 if self.oracle && !self.cast_mana_pass_ok(id) {
+                    self.oracle_dead = true;
+                }
+            }
+            // (The search's leaf: the step goes on with the abilities castability counts, then the payment.)
+            Some(Choice::Yes) if self.oracle => {
+                if !self.cast_mana_open_ok(id) {
                     self.oracle_dead = true;
                 }
             }
@@ -130,11 +137,27 @@ impl Game {
                 self.ask(Task::CastMana { id, card, again }, p, DecisionKind::ChooseMode, opts);
             }
             None => {
-                if sources.is_empty() {
-                    // (Nothing to activate: the cost is paid. In the search, whether it can be.)
-                    if self.oracle && !self.cast_mana_pass_ok(id) {
-                        self.oracle_dead = true;
+                if self.oracle {
+                    // The search (ENGINE.md 222.4): each feeding ability castability doesn't count, or the leaf.
+                    if sources.is_empty() {
+                        if !self.cast_mana_open_ok(id) {
+                            self.oracle_dead = true;
+                        }
+                        return;
                     }
+                    let mut opts: Vec<Opt> = sources
+                        .iter()
+                        .map(|(c, slots)| match slots[0] {
+                            AbilitySlot::Hand(_) => Opt { action: self.ability_action(p, *c, slots[0]), choice: Choice::Ability(*c, slots[0]) },
+                            _ => Opt { action: self.perm_action(p, *c), choice: Choice::Card(*c) },
+                        })
+                        .collect();
+                    opts.push(Opt { action: act::YES, choice: Choice::Yes });
+                    self.ask_completed(Task::CastMana { id, card: None, again }, p, DecisionKind::CastMana, opts);
+                    return;
+                }
+                if sources.is_empty() {
+                    // (Nothing to activate: the cost is paid.)
                     return;
                 }
                 let mut opts: Vec<Opt> = sources
@@ -183,16 +206,21 @@ impl Game {
     /// slots (its own abilities, those other permanents grant it, a granted "sacrifice this: add <mana>"); then each
     /// card in hand with one, one per definition (the card a hand slot takes, ENGINE.md 147.6). Not an "activate only
     /// as an instant" ability (Lion's Eye Diamond: no player has priority, ruling 2004-10-04), not one the collapse
-    /// leaves to the priority after the cast (`cast_mana_collapsed`). In the payment search only those that may put a
-    /// card into `p`'s graveyard, when the payment reads the graveyard (`cast_mana_feeder`).
+    /// leaves to the priority after the cast (`cast_mana_collapsed`). In the payment search (`feed_only`) only those
+    /// that may put a card into `p`'s graveyard which the payment reads and its castability doesn't count
+    /// (`gap_feeder`, ENGINE.md 222.4).
     fn cast_mana_sources(&self, id: u32, p: PlayerId, spell: CardIdx, feed_only: bool) -> Vec<(CardIdx, Vec<AbilitySlot>)> {
         let mut out: Vec<(CardIdx, Vec<AbilitySlot>)> = Vec::new();
+        let mut reads = (false, false, false);
         if feed_only {
             let Some(pos) = self.item_index(id) else { return out };
             if !self.payment_reads_graveyard(spell, &self.stack[pos]) {
                 return out;
             }
+            let exile = self.spell_rest(spell, &self.stack[pos]).is_some_and(|r| r.exile_graveyard > 0);
+            reads = (self.def_of(spell).delve, self.def_of(spell).casting.no_mana, exile);
         }
+        let gap = |ad: &ActivatedDef, slot: AbilitySlot, _own: bool| Self::gap_feeder(reads.0, reads.1, reads.2, ad, slot);
         let classes = self.mana_classes(p, None);
         let locks = self.activation_locks();
         let rain = self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_)));
@@ -207,7 +235,7 @@ impl Game {
                 if (d.latent > 0 && !self.has_activated(c, i)) || (ad.exhaust && self.exhausted(c, i as u8)) {
                     continue;
                 }
-                if feed_only && !Self::cast_mana_feeder(ad, AbilitySlot::Activated(i as u8)) {
+                if feed_only && !gap(ad, AbilitySlot::Activated(i as u8), true) {
                     continue;
                 }
                 if !self.mana_ability_now(p, c, ad, &classes, false, locks) {
@@ -221,14 +249,15 @@ impl Game {
             let own = self.own_ability_slots(c);
             for (j, g) in self.granted_activated(c).into_iter().enumerate() {
                 let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
-                if ad.mana().is_none() || ad.instant_only || (feed_only && !Self::cast_mana_feeder(ad, AbilitySlot::Activated(g.slot))) {
+                if ad.mana().is_none() || ad.instant_only || (feed_only && !gap(ad, AbilitySlot::Activated(g.slot), false)) {
                     continue;
                 }
                 if self.mana_ability_now(p, c, ad, &classes, false, locks) {
                     slots.push(AbilitySlot::Activated((own + j) as u8));
                 }
             }
-            if rain && self.sac_mana_of(c) != 0 && !(locks != 0 && self.types_of(c) & locks != 0) {
+            // (Castability counts it for delve, a sacrifice slot; not for an exile.)
+            if rain && self.sac_mana_of(c) != 0 && !(locks != 0 && self.types_of(c) & locks != 0) && (!feed_only || reads.2) {
                 slots.push(crate::pay::SAC_FOR);
             }
             if !slots.is_empty() {
@@ -250,7 +279,7 @@ impl Game {
                     .filter(|(i, ad)| {
                         ad.mana().is_some()
                             && !ad.instant_only
-                            && (!feed_only || Self::cast_mana_feeder(ad, AbilitySlot::Hand(*i as u8)))
+                            && (!feed_only || gap(ad, AbilitySlot::Hand(*i as u8), true))
                             && self.mana_ability_now(p, c, ad, &classes, false, locks)
                     })
                     .map(|(i, _)| AbilitySlot::Hand(i as u8))
@@ -278,6 +307,27 @@ impl Game {
             || k.discard_hand
             || k.discard_self
             || ad.mana().is_some_and(|m| m.sac_if_no.is_some())
+    }
+
+    /// Is mana ability `ad` (at `slot`) one that may put a card into its
+    /// controller's graveyard (`cast_mana_feeder`) for a payment that reads it - `delve`, `exile` ("exile n cards from
+    /// your graveyard"), of a spell of no mana (`no_mana`) or not - which that payment's castability does not count
+    /// (ENGINE.md 222.4)? Castability counts (`delve_classes`, `no_mana_feeders`, `cost_payable_with`'s
+    /// `delve_sources`): of a spell that spends mana, for delve an ability that sacrifices (its source or another
+    /// permanent), for an exile one that sacrifices its source with no mana cost ("{X}" as 0); of a spell of no
+    /// mana, for delve one that sacrifices with no mana cost, for an exile none. A feeder counted for neither part
+    /// the payment reads is a gap.
+    fn gap_feeder(delve: bool, no_mana: bool, exile: bool, ad: &ActivatedDef, slot: AbilitySlot) -> bool {
+        if !Self::cast_mana_feeder(ad, slot) {
+            return false;
+        }
+        let k = &ad.cost;
+        let sacs = k.sac_self || k.sacrifice.is_some() || crate::pay::is_sac_slot(slot);
+        let free = k.mana.is_zero();
+        let for_delve = delve && if no_mana { sacs && free } else { sacs };
+        let for_exile = exile && !no_mana && k.sac_self && free && !crate::pay::is_sac_slot(slot);
+        // (Counted for every part the payment reads: no gap.)
+        !((!delve || for_delve) && (!exile || for_exile))
     }
 
     /// Does spell `card`'s payment read its caster's graveyard: delve's cards (CR 702.66a), the cost's "exile n cards
@@ -320,6 +370,15 @@ impl Game {
             });
         }
         out
+    }
+
+    /// The search's leaf (ENGINE.md 222.4): can the payment of spell `id` be completed from here, the 601.2g step going
+    /// on - its other mana abilities activated as the payment's castability counts them (`delve_classes` while the step
+    /// is open, `before_cast_mana`), then the cost paid? (On a copy with the step's task waiting.)
+    fn cast_mana_open_ok(&self, id: u32) -> bool {
+        let mut g = self.clone();
+        g.agenda.push(Task::CastMana { id, card: None, again: true });
+        g.cast_mana_pass_ok(id)
     }
 
     /// The search's question at the end of the 601.2g step: can the payment of spell `id` from here (delve's cards,
@@ -397,6 +456,12 @@ impl Game {
         }
         // (EoE W3's granted triggered abilities: not looked at, so not collapsed.)
         if self.w3.granted {
+            return false;
+        }
+        // Only the caster decides until that priority: the rest of the cast's decisions are its own but the order of
+        // replacement effects for a permanent another player owns that it sacrifices (CR 616.1, the payment search's
+        // other player). With such a permanent, no collapse (the other player could see the tap before deciding).
+        if self.permanents_of(p).any(|c| self.objs[c.i()].owner != p) {
             return false;
         }
         // The objects whose triggered abilities may trigger before that priority: the permanents and emblems (also
@@ -577,20 +642,7 @@ impl Game {
             return false;
         }
         let no_mana = def.casting.no_mana;
-        // What castability counts (`delve_classes`, `no_mana_feeders`, `cost_payable_with`'s `delve_sources`): of a
-        // spell that spends mana, delve: an ability that sacrifices (its source or another permanent), exile: one that
-        // sacrifices its own source with no mana cost; of a spell of no mana, delve: one that sacrifices with no mana
-        // cost, exile: none.
-        let counted = |ad: &ActivatedDef, own: bool| {
-            let k = &ad.cost;
-            let sacs = k.sac_self || k.sacrifice.is_some();
-            let free = k.mana.is_zero() && !ad.x;
-            if exile && (no_mana || !(own && k.sac_self && free)) {
-                return false;
-            }
-            !def.delve || if no_mana { sacs && free } else { sacs }
-        };
-        let gap = |ad: &ActivatedDef, slot: AbilitySlot, own: bool| ad.mana().is_some() && !ad.instant_only && Self::cast_mana_feeder(ad, slot) && !counted(ad, own);
+        let gap = |ad: &ActivatedDef, slot: AbilitySlot, _own: bool| ad.mana().is_some() && !ad.instant_only && Self::gap_feeder(def.delve, no_mana, exile, ad, slot);
         let rain = self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_)));
         for c in self.permanents_of(p) {
             let d = self.abilities(c);
