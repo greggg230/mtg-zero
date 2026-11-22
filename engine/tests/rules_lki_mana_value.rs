@@ -248,6 +248,7 @@ fn cr_202_3b_707_9b_a_departed_mockingbird_copying_a_copy_of_a_back_face_deals_0
         .battlefield(0, &["Island"; 4])
         .battlefield(1, &[ODDITY, RABBIT])
         .transformed(1, ODDITY)
+        .counters(1, RABBIT, Counter::P1P1, 5)
         .hand(0, &[TV, METAMORPH, MB])
         .at(Step::Main1, 0)
         .turn_number(3)
@@ -272,6 +273,8 @@ fn cr_202_3b_707_9b_a_departed_mockingbird_copying_a_copy_of_a_back_face_deals_0
     end_step(&mut g);
     assert_eq!(g.obj(b).zone, Zone::Graveyard, "{}", log(&g));
     assert!(leave_trigger_resolved(&g), "{}", log(&g));
+    // A 6/7: it would survive the front face's 4, so its 0 is the damage dealt.
+    assert_eq!(g.obj(rabbit).zone, Zone::Battlefield, "{}", log(&g));
     assert_eq!(g.obj(rabbit).damage, 0, "{}", log(&g));
     assert_eq!(g.obj(beh).damage, 0);
     assert_eq!(g.obj(m).damage, 0);

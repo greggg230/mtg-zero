@@ -921,6 +921,7 @@ mod lki_mana_value_tests {
             assert_eq!(v, vals);
             let want = if token { 0 } else { 4 };
             assert_eq!(mv, want);
+            assert_eq!(g.obj(rabbit).zone, Zone::Battlefield, "a 6/7 survives\n{}", log(&g));
             assert_eq!(g.obj(rabbit).damage, want, "token {token}\n{}", log(&g));
         }
     }
@@ -934,6 +935,7 @@ mod lki_mana_value_tests {
         let mut g = scen()
             .battlefield(0, &[CURTAINS])
             .battlefield(1, &[RABBIT])
+            .counters(1, RABBIT, crate::db::Counter::P1P1, 5)
             .hand(0, &[TV])
             .at(Step::Main1, 0)
             .turn_number(3)
@@ -950,6 +952,9 @@ mod lki_mana_value_tests {
         end_step(&mut g);
         assert!(!g.live(r), "{}", log(&g));
         assert_eq!(lki(&g, r).1, 0);
+        // A 6/7: it would survive the 4 damage the old reading dealt, so a
+        // 0 here is the damage dealt, not a dead creature's.
+        assert_eq!(g.obj(rabbit).zone, Zone::Battlefield, "{}", log(&g));
         assert_eq!(g.obj(rabbit).damage, 0, "{}", log(&g));
     }
 
@@ -1003,5 +1008,53 @@ mod lki_mana_value_tests {
             assert_eq!(g.spell_mana_value_lki(r), if copy { 0 } else { 2 });
             assert_eq!(g.life(1), if copy { 20 } else { 18 }, "copy {copy}\n{}", log(&g));
         }
+    }
+
+    #[test]
+    fn cr_608_2h_400_7_last_known_power_of_a_slot_that_left_twice_is_the_first_objects() {
+        // Jacked Rabbit with three +1/+1 counters (a 4/5) attacks; with its
+        // trigger ("create a number of 1/1 Rabbit tokens equal to Jacked
+        // Rabbit's power") waiting, the card is exiled, returned (a new
+        // object, CR 400.7: a 1/2 without counters) and put into the
+        // graveyard. The trigger reads the power of the object that attacked
+        // as it last existed (608.2h): 4 tokens, not the second object's 1
+        // (the old record kept one departure per slot and fell back to the
+        // printed power).
+        let mut g = scen()
+            .battlefield(0, &[RABBIT])
+            .counters(0, RABBIT, crate::db::Counter::P1P1, 3)
+            .at(Step::DeclareAttackers, 0)
+            .turn_number(3)
+            .start();
+        let c = g.card(0, RABBIT, Zone::Battlefield);
+        assert_eq!(g.power(c), 4);
+        let attacked = g.obj_ref(c);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+        g.choose(Choice::Card(c));
+        if g.kind() == Some(DecisionKind::AttackTarget) {
+            g.choose(Choice::Target(Target::Player(1)));
+        }
+        g.choose(Choice::Pass);
+        g.drive_until(|g| at_priority(g) && !g.stack().is_empty());
+        assert_eq!(g.stack().len(), 1, "the attack trigger waits\n{}", log(&g));
+        g.move_card(c, Zone::Exile, crate::game::Pos::Top);
+        let second = g.put_onto_battlefield(c, 0);
+        assert_eq!(g.power(c), 1, "a new object: no counters");
+        g.move_card(c, Zone::Graveyard, crate::game::Pos::Top);
+        g.refresh_decision();
+        assert_eq!((g.lki_power_of(attacked), g.lki_power_of(second)), (Some(4), Some(1)));
+        // A turn's pruning keeps the first object's while the trigger (a
+        // public reference) names it.
+        g.prune_lki_power();
+        assert_eq!((g.lki_power_of(attacked), g.lki_power_of(second)), (Some(4), Some(1)));
+        settle(&mut g);
+        let tokens = g.permanents_of(0).filter(|&t| g.def_of(t).token && g.name(t) == "Rabbit").count();
+        assert_eq!(tokens, 4, "the attacking Rabbit's power as it left\n{}", log(&g));
+        // Nothing names it now: the pruning keeps only the slot's latest.
+        g.prune_lki_power();
+        assert_eq!((g.lki_power_of(attacked), g.lki_power_of(second)), (None, Some(1)));
+        let t = g.turn().number;
+        quiet_until(&mut g, |g| g.turn().number == t + 1 && at_priority(g));
+        assert_eq!((g.lki_power_of(attacked), g.lki_power_of(second)), (None, Some(1)));
     }
 }

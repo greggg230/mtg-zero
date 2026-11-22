@@ -913,7 +913,8 @@ pub struct Game {
     /// the game aborts past `num::AMOUNT_MAX`). Every departure of this turn
     /// (a slot that leaves, returns and leaves again keeps the first object's
     /// power for an ability about it, ENGINE.md 223), and of each earlier turn
-    /// the latest of each slot (`prune_lki_power` as a turn begins). Read
+    /// the latest of each slot plus any a public reference still names
+    /// (`prune_lki_power` as a turn begins). Read
     /// through `Game::lki_power_of`; out of `Obj` (rare and wide: objects stay
     /// small to copy, ENGINE.md 17).
     pub(crate) lki_power: Vec<(CardIdx, u32, i64)>,
@@ -1560,8 +1561,8 @@ impl Game {
         &self.objs
     }
     /// Object `r`'s power as it last existed on the battlefield (CR
-    /// 608.2h), if it left this turn, or was its slot's latest incarnation
-    /// there to leave (`lki_power`).
+    /// 608.2h), if it left this turn, was its slot's latest incarnation there
+    /// to leave, or a public reference still names it (`lki_power`).
     pub fn lki_power_of(&self, r: ObjRef) -> Option<i64> {
         self.lki_power.iter().find(|x| x.0 == r.idx && x.1 == r.inc).map(|x| x.2)
     }
@@ -1575,14 +1576,28 @@ impl Game {
         }
     }
     /// As a turn begins (with the other last known information, `flow.rs`):
-    /// each slot keeps only its latest departure's power, as before a turn's
-    /// several departures were kept (`lki_power`).
+    /// each slot keeps its latest departure's power, and an earlier
+    /// departure's stays only while a reference of the public state still
+    /// names that object (`for_each_public_ref`: a delayed trigger about it
+    /// reads it in a later turn; ENGINE.md 223).
     pub(crate) fn prune_lki_power(&mut self) {
-        if self.lki_power.len() < 2 {
+        let older = |all: &[(CardIdx, u32, i64)], c: CardIdx, inc: u32| all.iter().any(|&(c2, inc2, _)| c2 == c && inc2 > inc);
+        if !self.lki_power.iter().any(|&(c, inc, _)| older(&self.lki_power, c, inc)) {
             return;
         }
+        let mut named: Vec<ObjRef> = Vec::new();
+        self.for_each_public_ref(|r| {
+            if !self.live(r) {
+                named.push(r);
+            }
+            false
+        });
         let all = std::mem::take(&mut self.lki_power);
-        self.lki_power = all.iter().copied().filter(|&(c, inc, _)| !all.iter().any(|&(c2, inc2, _)| c2 == c && inc2 > inc)).collect();
+        self.lki_power = all
+            .iter()
+            .copied()
+            .filter(|&(c, inc, _)| !older(&all, c, inc) || named.iter().any(|r| r.idx == c && r.inc == inc))
+            .collect();
     }
     /// Permanent `c`'s loyalty activations (CR 606.3); none: all 0.
     pub fn loyalty_of(&self, c: CardIdx) -> Loyalty {
