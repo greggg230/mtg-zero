@@ -43603,7 +43603,7 @@ information**, in the real game too.
   token's segment, slot and float, or an override) and handles rows of different lengths.
 
 **What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8; built: layout v8's
-`find_groups` segment, ENGINE.md 235).** Once finds are mixed with other cards, the rows
+`find_groups` segment, ENGINE.md 236).** Once finds are mixed with other cards, the rows
 no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
 already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
 encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
@@ -43948,7 +43948,7 @@ effects (ENGINE.md 156), so a departed copy's copied identity, last known mana v
 while an ability about it waits on the stack (the public-state gate classes the LKI fields Derived). The fix doesn't
 widen it (before, the network was equally blind to the copied face; the rules now compute 0 instead of the front
 face's). The maintainer's decision: one additive layout v8 (a stale-object LKI block in `rf`, the LKI fields Public in
-the gate) built by a later encoding change, not here. (Built: layout v8's `lki` segments keyed by the stale reference's key, ENGINE.md 235.)
+the gate) built by a later encoding change, not here. (Built: layout v8's `lki` segments keyed by the stale reference's key, ENGINE.md 236.)
 
 ### 226.8 Shared-file functions changed
 
@@ -44160,7 +44160,7 @@ random boards.
 
 ### 229.4 Bug 4: a payment's picks in progress - deferred to layout v8
 
-(Built: layout v8's `payment` and `pay_options` segments, the game `mtg_v8`, ENGINE.md 235.)
+(Built: layout v8's `payment` and `pay_options` segments, the game `mtg_v8`, ENGINE.md 236.)
 
 `PayMana`'s picks in progress (`chosen`, `multi`, `actors`, `phyrexian_life`, `now` / `which` / `actor_for` and the
 productions offered, `spend`) are in neither `Game::view_of` nor layout v7's input; two payments that differ only in
@@ -44958,7 +44958,7 @@ tests then passed.
   of "cast or play from the graveyard" (Kaldra Compleat and Minsc & Boo in P0's hand) - for the payment-search lanes
   (231's step, 100.4.9).
 
-## 235. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg_v8`; branch `feat/layout-v8`, 2026-11-22)
+## 236. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg_v8`; branch `feat/layout-v8`, 2026-11-22)
 
 **Why.** Three public facts the input left out, each found by a Hogaak-era fix and deferred to one additive layout by
 the user's decision of 2026-11-21 (thread T4): P's bug 4 (229.4, `encoding_needs_fix_P.md` option B: a mana payment's
@@ -44968,7 +44968,7 @@ counters) and D's group fact (223's decision 4, `encoding_needs_fix_D.md` option
 finds" once a scramble mixes finds with other cards). Layout v7's rows stay byte for byte; layout v8 = v7 + six tail-only
 gated segments.
 
-### 235.1 Design decisions (the user's answers of 2026-11-22: float32-close widening on rows with v8 tokens accepted, the keyed `lki` segment OK, layout v8 the default for new runs)
+### 236.1 Design decisions (the user's answers of 2026-11-22: float32-close widening on rows with v8 tokens accepted, the keyed `lki` segment OK, layout v8 the default for new runs)
 
 1. **Layout v8 is the default: the game `mtg_v8`. The game name `mtg` stays layout v7, the compatibility layout of what
    was made before.** zero-core chooses a token layout and an engine game by the game's NAME (`GamePackage.tokens`,
@@ -44980,9 +44980,9 @@ gated segments.
    auxiliary targets) is every MTG preset's game, the game package's default game (`GamePackage(game='mtg_v8')`), every
    co-training preset's resolver and what every tool that starts fresh plays (`mtgz.az.layouts.GAME`); `mtg` is what an
    old run, an old checkpoint and an old record keep. A run moves by `python tools/fork_run.py <checkpoint> <new run>
-   --game mtg_v8` (zero-core's widen, 235.5). Making the name `mtg` itself layout v8 needs a zero-core change (an alias
+   --game mtg_v8` (zero-core's widen, 236.5). Making the name `mtg` itself layout v8 needs a zero-core change (an alias
    in the encoding guard and the farm's graph check, so that a checkpoint recorded as `mtg` with layout v7 loads as a
-   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (235.9), not taken here.
+   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (236.9), not taken here.
 2. **E's "widen `rf`" is a segment keyed by the stale key.** The orchestrator's requirement - a v7 network widens onto v8
    computing what it did - rules out wider slots (a wider slot is one input product over more columns: equal to float32
    rounding only, 125.7); appended gated tail-only segments are exact (zero-core docs/az.md 43.8). So the stale object's
@@ -44990,7 +44990,7 @@ gated segments.
    reference already shows (`rf::STALE_KEY`, 125.3: the key that pairs two references to one gone object): every holder
    sees it through the key. The facts are E's option 2's, all of them.
 
-### 235.2 The segments (appended after `found`; `tail_v8.rs`)
+### 236.2 The segments (appended after `found`; `tail_v8.rs`)
 
 | # | segment | width | tokens |
 |---|---|---:|---|
@@ -45011,7 +45011,7 @@ of the public state names (`Game::for_each_public_ref`) that no token wrote, aft
 `W3State::lki_host` is `lki_attached`'s entry kept when a card reads it (now Derived). `lki_loss` is read only while its
 simultaneous move's leave triggers are gathered (Derived).
 
-### 235.3 Engine state added (no rule reads it; DIGEST_ENCODING=0 unchanged)
+### 236.3 Engine state added (no rule reads it; DIGEST_ENCODING=0 unchanged)
 
 * `Game::find_groups` (`hidden::FindGroup`: owner, members by card, finds). `scramble` (`group_scramble`, before 223's
   strict rule drops the domain's told finds): a domain mixing told finds or a group's members with any other card
@@ -45027,7 +45027,7 @@ simultaneous move's leave triggers are gathered (Derived).
   toughness, qualities, attached, counters); a copy's exceptions, keyword or named counters and a gone spell's item are
   refused (`unsupported`), never approximated. The round trips pass.
 
-### 235.4 The public-state gate (`tests/az.rs`; its rows are layout v8's now)
+### 236.4 The public-state gate (`tests/az.rs`; its rows are layout v8's now)
 
 Classification: `lki_copy`, `lki_power`, `lki_toughness`, `lki_counters`, `lki_attached`, `spell_lki`, the new
 `lki_qualities` and `find_groups` Public; `lki_damage`, `W3State::lki_host` Derived (above). `view_of` lists the payments
@@ -45059,7 +45059,7 @@ stream, the reshuffled partners met four pre-existing collisions unrelated to v8
 in v6, a hand card past the 16th learned in a framed row, a control effect's end, two loyalty records cancelling - noted
 here, not changed).
 
-### 235.5 The widen (exact) and v7 kept
+### 236.5 The widen (exact) and v7 kept
 
 * Rust: `layout_v8_is_checked_in_and_widens_layout_v7_exactly` - `mtgz/az/layout_v8.json` = `encode::layout_json_v8`, the
   widen's map from v7 is the identity, v7's 25 segments unchanged, the six appended tail-only and gated, `pay_options`'s
@@ -45077,7 +45077,7 @@ here, not changed).
   zero-weight tokens before the attention (not done: a zero-core change). The encoding guard takes the v7 network as `mtg`
   and refuses it as `mtg_v8` until widened.
 
-### 235.6 Digests
+### 236.6 Digests
 
 Behaviour unchanged: cube `DIGEST_ENCODING=0` **d3c144b6cc2977e5** (= main). Layout v7 unchanged: `DIGEST_ENCODING=v7`
 (new: v7's whole rows) **9473f7debc4bceb3** = main's recorded full digest; `digest_formats` with `DIGEST_ENCODING=v7`:
@@ -45091,7 +45091,7 @@ driver's (zero-core's driver on `mtg_v8`) **6a03572828250b86 -> cab97c01912f7e3f
 `DIGEST_ENCODING=v7` each gives main's value again (6a03572828250b86, f858b1880091d94f, 2719fdd478d14fa3). EoE (layout v6)
 unchanged.
 
-### 235.7 Cost
+### 236.7 Cost
 
 `layout_v8_cost` (`tests/az.rs`, ignored): 200 random games a pool, both viewers' rows at every decision, on the Mac.
 
@@ -45108,15 +45108,15 @@ cost.) Random play makes no Doomsday pile with a graveyard pick, so no `find_gro
 digest spec was 132 of ~14,500 rows. The network's cost: the new tokens are 0.1-0.3 more a row on average (the
 attention's T), the six segments' input maps (d x width each) and one pointer column.
 
-### 235.8 Checks
+### 236.8 Checks
 
 * The engine suite on the Mac (`cargo test --release -p engine -p card_ir --no-fail-fast`): passed but the two build
-  round trips, whose described positions lost the new public last known information (fixed: 235.3's `"lki"`; both pass).
+  round trips, whose described positions lost the new public last known information (fixed: 236.3's `"lki"`; both pass).
   `az` 58 passed (+ `layout_v8_cost` ignored), `hidden` 28, the engine's unit tests with `mtg_v8_is_mtg_in_layout_v8`.
 * Fuzz on the Mac (`tools/fuzz_shards.py`, 2,000 games each, every decision's v8 row checked against its v7 row and its
   payment pointers): default (+100 matches), delver (+100 matches, +100 post-sideboard), doomsday, hogaak (+100, +100),
   cross (+100, +100): **all PASSED**. Found on the way and fixed: the hidden-decklist information-set walk's leak of
-  `lki_damage`'s presence (235.3).
+  `lki_damage`'s presence (236.3).
 * pytest on the Mac (`bash tools/build_py.sh && python -m pytest -q tests`): 3,453 passed, 32 skipped; failed only the
   three tests gate.py runs on the desktop (`PYTEST_DESKTOP_ONLY`: the artifact cache's Windows paths, the deck scorer's
   bit-for-bit fixtures, the run publisher's supervisor) and `test_presets_leave_shard_sparse_off`, which now names
@@ -45125,7 +45125,7 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
   only) forked by `python tools/fork_run.py <copy> <scratch run> --game mtg_v8` (the six segments "gate 0"; the run not
   started) and compared with the original on Delver, Doomsday, Sneak and Show and Hogaak mirror games played in lockstep
   in both games (CPU, eager): 1,640 of 1,640 rows without a v8 token bit for bit; 136 rows with v8 tokens, 58 bit for bit,
-  the others within 2.7e-6 (235.5: the attention over more keys).
+  the others within 2.7e-6 (236.5: the attention over more keys).
 * **Farm parity of layout v8**: `tools/farm_compat.py --set game="mtg_v8"` (the release worker of this commit, the Delver
   best-of-three dealt preset as the game `mtg_v8`): gate 2 identical (6 games, 2,468 rows, 150 batches: dense features,
   tails, overrides) and gate 3 identical (6 games, 2,598 rows): **farm compat: PASSED**. The gates' own farm compat
@@ -45145,7 +45145,7 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
   (A first engine run on 191aa9dc failed one timing test of pytest, `test_cells_local_parallel`'s 300 s bound, on a Mac
   under another job's load; it passed on the rerun and in the full Mac pytest.) The next commit adds this paragraph only.
 
-### 235.9 The default and the compatibility layout: who plays which (the orchestrator's rework, 2026-11-22)
+### 236.9 The default and the compatibility layout: who plays which (the orchestrator's rework, 2026-11-22)
 
 **`mtgz.az.layouts`**: `GAME` = `mtg_v8` (the default), `GAME_V7` = `mtg`; `checkpoint_game` / `model_game` (the game a
 checkpoint or a network records), `load` (zero.net.load as that game), `use` / `current` / `load_used` (a tool plays the
@@ -45209,7 +45209,7 @@ farm compat (the Delver dealt preset, now `mtg_v8`) identical; `tools/farm_compa
 `--set game="mtg_v8"` both identical (6 games, 2,468 rows, 150 batches; records 2,598 rows; 0 and 698 v8 tokens in their
 shards). The next commit adds this paragraph only.
 
-**After merging origin/main b11fa163** (main's 232-234 and zero-core pin 52134c3; this section renumbered 232 -> 235;
+**After merging origin/main b11fa163** (main's 232-234 and zero-core pin 52134c3; this section renumbered 232 -> 235, later 236;
 `MtgV8Az` forwards the pin's new `merge_key` / `branch_alt_ok`): every digest as before (cube full c2b04fed925eed67,
 encoding-free d3c144b6cc2977e5, formats and dealt as recorded). On 94b768b6: **GATE PASSED suite 94b768b68163 in 666s**;
 **GATE PASSED WITH SKIPS engine 94b768b68163 in 1838s**; **GATE PASSED WITH SKIPS encoding 94b768b68163 in 833s** (the

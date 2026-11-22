@@ -25,7 +25,7 @@ def nf():
 def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft', 'mtg_eoe', 'mtg_v8']
-    assert G.info('mtg_v8')['num_features'] == 56384 and G.info('mtg_v8')['num_actions'] == 1024   # layout v8: v7's head (ENGINE.md 235)
+    assert G.info('mtg_v8')['num_features'] == 56384 and G.info('mtg_v8')['num_actions'] == 1024   # layout v8: v7's head (ENGINE.md 236)
     info = G.info('mtg')
     assert info['num_actions'] == 1024 and info['num_features'] == 56384      # layout v7 (ENGINE.md 125)
     assert G.info('mtg_eoe')['num_features'] == 44212                        # mtg_eoe: layout v6 (ENGINE.md 100.5)
@@ -125,7 +125,7 @@ def test_presets_and_defaults():
         json.loads(c4['spec']), decks='eval')                           # evaluation and Elo: matches
     assert {k for k in c3 if c3[k] != c4[k]} == {'spec', 'eval_spec', 'max_steps', 'preset'}
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {})
-    assert cfg['game'] == 'mtg_v8' and cfg['yardstick'] == 'heuristic'      # (layout v8: new runs, ENGINE.md 235)
+    assert cfg['game'] == 'mtg_v8' and cfg['yardstick'] == 'heuristic'      # (layout v8: new runs, ENGINE.md 236)
     assert json.loads(cfg['spec'])['max_turns'] == 60
     assert cfg['eval_spec'] == ''                                      # the package's evaluation spec
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-1']), {})
@@ -382,7 +382,7 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
 
 
 def _eval_one(ev, row, legal, to_move, v, tail_widths):
-    """`ev`'s priors, value and margin on one row (eager, a batch of one; ENGINE.md 235)."""
+    """`ev`'s priors, value and margin on one row (eager, a batch of one; ENGINE.md 236)."""
     from zero import rows as R
     x, t, o, tok = row
     acts = legal if v == to_move else np.zeros(0, np.int64)
@@ -394,7 +394,7 @@ def _eval_one(ev, row, legal, to_move, v, tail_widths):
 
 
 def test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit(tmp_path):
-    """ENGINE.md 235: a layout v7 token network (the game `mtg`; random weights, its policy heads too) widened
+    """ENGINE.md 236: a layout v7 token network (the game `mtg`; random weights, its policy heads too) widened
     onto layout v8 (the game `mtg_v8`: `zero.net.widen`, tools/fork_run.py's route) computes exactly what it
     computed. On the same states, played in lockstep in both games (the cube's random decks and the Delver
     mirror), eager on the CPU:
@@ -651,7 +651,7 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
 
 
 def test_old_runs_stay_layout_v7_and_new_runs_are_layout_v8(tmp_path):
-    """ENGINE.md 235: layout v8 (the game `mtg_v8`) is every preset's and the package's default; the game name `mtg` stays
+    """ENGINE.md 236: layout v8 (the game `mtg_v8`) is every preset's and the package's default; the game name `mtg` stays
     layout v7, the compatibility layout every run, checkpoint, farm run and record made before layout v8 records. A run
     directory saved as `mtg` with a v7 checkpoint - an old run re-pinned onto this main, no fork - resolves its config as
     `mtg` (its saved settings win over the preset's game), its game's layout is v7 and its checkpoint loads; loading that

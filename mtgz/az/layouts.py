@@ -1,4 +1,4 @@
-"""Which MTG layout a run, a checkpoint, a record or a farm job is (docs/ENGINE.md 235).
+"""Which MTG layout a run, a checkpoint, a record or a farm job is (docs/ENGINE.md 236).
 
 Layout v8 (`layout_v8.json`, the game `mtg_v8`) is the default from now on: every preset, every new run, the game
 package's default game, every tool that starts fresh. Layout v7 (`layout_v7.json`) keeps the game name every run,
@@ -28,7 +28,7 @@ def checkpoint_game(path):
     blob = torch.load(path, map_location='cpu', weights_only=False)
     cfg = blob.get('config') if isinstance(blob, dict) else None
     if not isinstance(cfg, dict) or not cfg.get('game'):
-        raise ValueError(f'{path}: a checkpoint that records no game (docs/ENGINE.md 235: a layout is never guessed)')
+        raise ValueError(f'{path}: a checkpoint that records no game (docs/ENGINE.md 236: a layout is never guessed)')
     return cfg['game']
 
 
@@ -36,7 +36,7 @@ def model_game(model):
     """The game a loaded network records (its config's): the layout its games are played and encoded in."""
     g = (getattr(model, 'config', None) or {}).get('game')
     if not g:
-        raise ValueError('a network that records no game (docs/ENGINE.md 235: a layout is never guessed)')
+        raise ValueError('a network that records no game (docs/ENGINE.md 236: a layout is never guessed)')
     return g
 
 
@@ -65,7 +65,7 @@ def use(game):
     if game in GAMES:
         if _USED not in (None, game):
             raise ValueError(f'this process plays game {_USED!r} (a checkpoint loaded before), and now {game!r}: layouts v7 '
-                             f'and v8 cannot share its games (docs/ENGINE.md 235)')
+                             f'and v8 cannot share its games (docs/ENGINE.md 236)')
         _USED = game
     return game
 

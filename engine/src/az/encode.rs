@@ -201,7 +201,7 @@ const _: () = assert!(NUM_FEATURES == 56_384 && O_MY_PERM == 24_260 && O_STACK =
 /// Layout v7's semantic revision (`layout_json`'s `revision`; ENGINE.md 142.7).
 pub const LAYOUT_V7_REVISION: u32 = 1;
 
-/// Layout v8's semantic revision (ENGINE.md 235; the rule of 142.7's `LAYOUT_V7_REVISION`).
+/// Layout v8's semantic revision (ENGINE.md 236; the rule of 142.7's `LAYOUT_V7_REVISION`).
 pub const LAYOUT_V8_REVISION: u32 = 1;
 
 /// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
@@ -238,7 +238,7 @@ pub mod v6 {
 /// `mtg_eoe`: no tail, the v7 floats left out, pages shown as v6 showed them).
 pub struct Lay {
     pub v7: bool,
-    /// Layout v8 (ENGINE.md 235, the game `mtg_v8`): v7's head and tail plus `tail_v8`'s segments.
+    /// Layout v8 (ENGINE.md 236, the game `mtg_v8`): v7's head and tail plus `tail_v8`'s segments.
     pub v8: bool,
     pub features: usize,
     /// Each object segment's offset and slot width (tail-only segments: 0).
@@ -271,7 +271,7 @@ pub const LAY6: Lay = Lay {
     o_globals_v6: v6::O_GLOBALS_V6,
 };
 
-/// Layout v8 (ENGINE.md 235): layout v7's head (the same features, offsets and widths) and tail,
+/// Layout v8 (ENGINE.md 236): layout v7's head (the same features, offsets and widths) and tail,
 /// plus the tail-only gated segments of `tail_v8`.
 pub const LAY8: Lay = Lay { v8: true, ..LAY7 };
 
@@ -1614,7 +1614,7 @@ impl Game {
         self.encode_lay(viewer, head, &LAY7, Some(tail));
     }
 
-    /// Layout v8's whole row for `viewer` (ENGINE.md 235): layout v7's row (head and tail, the
+    /// Layout v8's whole row for `viewer` (ENGINE.md 236): layout v7's row (head and tail, the
     /// same floats) and the tokens of v8's own segments, into a buffer of `tail_encode::TAILS_V8`.
     pub fn encode_features_row_v8(&self, viewer: PlayerId, head: &mut [f32], tail: &mut TailBuf) {
         assert_eq!(head.len(), NUM_FEATURES, "layout v8's row");
@@ -1757,7 +1757,7 @@ impl Game {
         if let Some(t) = tail {
             let objs: Vec<Option<CardIdx>> = list.entries.iter().map(|e| e.and_then(|e| e.card)).collect();
             super::tail_encode::write_tail_segments(&cx, &objs, t);
-            // Layout v8's segments (ENGINE.md 235), after every v7 token: the stale references'
+            // Layout v8's segments (ENGINE.md 236), after every v7 token: the stale references'
             // keys of v7's tokens are as before, and the last known information is written last.
             if lay.v8 {
                 super::tail_v8::write_v8_segments(&cx, t);
@@ -2131,7 +2131,7 @@ impl Game {
     }
 
     /// A gone spell's item (`Game::spell_lki`: CR 608.2h, "copy it") as a stack slot shows an item
-    /// (layout v8's `lki_spells` tokens, ENGINE.md 235): its definition as it last existed there,
+    /// (layout v8's `lki_spells` tokens, ENGINE.md 236): its definition as it last existed there,
     /// and none of the facts its card now has (marks, "exile it instead", flashback, can't be
     /// countered, targeted: the card is a new object, CR 400.7).
     pub(crate) fn write_departed_item(&self, cx: &Cx, def: DefId, item: &crate::game::StackItem, x: &mut [f32]) {
@@ -3448,7 +3448,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
     layout_json_lay(db, false)
 }
 
-/// Layout v8 (ENGINE.md 235, the game `mtg_v8`): layout v7's JSON with `tail_v8`'s six tail-only
+/// Layout v8 (ENGINE.md 236, the game `mtg_v8`): layout v7's JSON with `tail_v8`'s six tail-only
 /// gated segments appended (`pay_options` with a pointer column), version 8. Checked in as
 /// `mtgz/az/layout_v8.json`.
 pub fn layout_json_v8(db: &'static CardDb) -> String {
@@ -3532,7 +3532,7 @@ fn layout_json_lay(db: &'static CardDb, v8: bool) -> String {
         // ENGINE.md 142.12: the cards found by a library search the other player tells apart.
         segments.push(tail_only(sg::FOUND, "found", CODE + te::fs::PRESENT));
         if v8 {
-            // Layout v8 (ENGINE.md 235): a payment's state, its decisions' option meanings (pointed at),
+            // Layout v8 (ENGINE.md 236): a payment's state, its decisions' option meanings (pointed at),
             // a gone object's last known information, a gone spell's item and relations, the find groups.
             use super::tail_v8 as t8;
             let seg8 = |k: u16, name: &str, present: usize| {

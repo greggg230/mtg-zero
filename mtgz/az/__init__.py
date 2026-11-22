@@ -5,7 +5,7 @@ supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match w
 between games, decks built from random card pools), its object layout for zero-core's token
 network (arch 'tokens': `layout_v7.json`, written by the engine's `encode::layout_json`), the game `mtg_v8`
 (the same game in layout v8, `layout_v8.json`: v7's rows plus a payment's state, a gone object's last known
-information and the find groups, docs/ENGINE.md 235; a v7 network widens onto it with fork_run), the game
+information and the find groups, docs/ENGINE.md 236; a v7 network widens onto it with fork_run), the game
 `team_draft` (docs/ENGINE.md 41, 43, 45, DESIGN.md 2.3: a team cube draft and deckbuilding up to
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
@@ -72,7 +72,7 @@ EVAL_SPEC = eval_spec(SPEC)
 # (`layout_eoe.json`, below).
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v7.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
-# Layout v8 (ENGINE.md 235), the game `mtg_v8` - the DEFAULT from now on (every preset, the package's default game, every
+# Layout v8 (ENGINE.md 236), the game `mtg_v8` - the DEFAULT from now on (every preset, the package's default game, every
 # tool that starts fresh): the `mtg` game (the same specs, rules and head) whose rows add six tail-only gated segments - a
 # payment's state and picks in progress with its decisions' option meanings, a gone object's last known information (and
 # a gone spell's item), the groups of places holding search finds mixed with other cards. The game name `mtg` stays
@@ -412,7 +412,7 @@ PRESETS['eoe-2e-smoke'] = dict(PRESETS['eoe-smoke'], spec=json.dumps(dict(json.l
 # Layout v7 (ENGINE.md 125.12): the `mtg` game's rows have tail tokens and pointer overrides, whose shards are sparse
 # only (format v2, zero-core R8: a dense shard would drop them), so every `mtg` preset writes sparse shards. (Its MLP
 # presets, mtg-1 and mtg-2-mlp, layout v6's, are refused on v7 at the start: an MLP takes no tail tokens, R4.)
-# Layout v8 (ENGINE.md 235) is every MTG preset's: a new run is the game `mtg_v8` (a run made before keeps the `mtg` its
+# Layout v8 (ENGINE.md 236) is every MTG preset's: a new run is the game `mtg_v8` (a run made before keeps the `mtg` its
 # config saved: presets fill only settings a run has not saved).
 for _p in PRESETS.values():
     if _p.get('game') == 'mtg':

@@ -189,7 +189,7 @@ def test_cotraining_presets():
     for name in ('team_draft-4v4', 'team_draft-gpu-smoke', 'team_draft-smoke'):
         cfg = dict(DEFAULTS, **PRESETS[name])
         rc = resolver_config(cfg)
-        # (layout v8's game, the default for new runs: ENGINE.md 235)
+        # (layout v8's game, the default for new runs: ENGINE.md 236)
         assert cfg['game'] == 'team_draft' and cfg['resolver'] == 'mtg_v8' and rc['game'] == 'mtg_v8'
         assert cfg['yardstick'] == 'consensus' and rc['yardstick'] == 'heuristic'
         assert json.loads(rc['spec'])['format'] == 'bo3' and json.loads(cfg['spec'])['build_sims_div'] == 2

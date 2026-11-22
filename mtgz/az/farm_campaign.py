@@ -93,7 +93,7 @@ DEFAULT_SPOT = 0.05
 DEFAULT_DEADLINE_S = 3 * 3600
 EXPIRES_DAYS = 30
 SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,62}$')
-# (A campaign plays the game its checkpoints record - layout v7 `mtg` or v8 `mtg_v8`, docs/ENGINE.md 235 - never a
+# (A campaign plays the game its checkpoints record - layout v7 `mtg` or v8 `mtg_v8`, docs/ENGINE.md 236 - never a
 # default: `ckpt_game`; a campaign made before layout v8 saved `mtg` in its state.)
 
 

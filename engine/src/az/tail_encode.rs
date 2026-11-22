@@ -60,7 +60,7 @@ pub mod seg {
     pub const FOUND: u16 = 24;
     /// The number of segments (layout v7).
     pub const N: usize = 25;
-    /// Layout v8 (ENGINE.md 235, the game `mtg_v8`): tail-only gated segments appended after v7's
+    /// Layout v8 (ENGINE.md 236, the game `mtg_v8`): tail-only gated segments appended after v7's
     /// (`tail_v8`): a payment's state and picks in progress, the payment decisions' option
     /// meanings, a gone object's last known information (by its stale key), a gone spell's item
     /// and its relations, and the groups of places holding search finds mixed with other cards.
@@ -543,7 +543,7 @@ pub const TAILS: [TailSeg; 21] = [
     ts(seg::FOUND, "found"),
 ];
 
-/// Every segment's slot width in layout v8 (ENGINE.md 235): v7's, then the six tail-only
+/// Every segment's slot width in layout v8 (ENGINE.md 236): v7's, then the six tail-only
 /// segments of `tail_v8`.
 pub const SEG_W_V8: [usize; seg::N_V8] = {
     let mut w = [0usize; seg::N_V8];
@@ -575,7 +575,7 @@ const fn ts8(seg: u16, name: &'static str) -> TailSeg {
     TailSeg { seg, name, width: SEG_W_V8[seg as usize], head: 0 }
 }
 
-/// The tail segments of layout v8 (the game `mtg_v8`, ENGINE.md 235): v7's, then its own.
+/// The tail segments of layout v8 (the game `mtg_v8`, ENGINE.md 236): v7's, then its own.
 pub const TAILS_V8: [TailSeg; 27] = {
     let mut t = [ts8(seg::PAYMENT, "payment"); 27];
     let mut i = 0;
@@ -806,13 +806,13 @@ impl<'g> Cx<'g> {
     }
 
     /// The stale references met so far, in key order (`rf::STALE_KEY` k is entry k; layout v8's
-    /// `lki` tokens, ENGINE.md 235).
+    /// `lki` tokens, ENGINE.md 236).
     pub(crate) fn stale_refs(&self) -> Vec<ObjRef> {
         self.stale.borrow().clone()
     }
 
     /// The key of stale reference `r` (`rf::STALE_KEY`), met now if it wasn't (layout v8's `lki` tokens of
-    /// the gone objects the public state names that no token of the row wrote: ENGINE.md 235).
+    /// the gone objects the public state names that no token of the row wrote: ENGINE.md 236).
     pub(crate) fn stale_key_of(&self, r: ObjRef) -> usize {
         self.stale_key(r)
     }
@@ -1317,7 +1317,7 @@ fn write_effects(cx: &Cx, tail: &mut TailBuf) {
 
 /// Copiable values (CR 707.2) in an `effects` token's copy-effect fields (`ef::COPY` ...
 /// `ef::COPY_DFC`): a copy effect's, and a gone object's last known ones (layout v8's `lki`
-/// tokens, ENGINE.md 235).
+/// tokens, ENGINE.md 236).
 pub(crate) fn copy_vals(g: &Game, ids: &[u16], s: &mut [f32], vals: &crate::copies::CopyVals) {
     s[ef::COPY] = 1.0;
     digits(&mut s[ef::COPY_DEF..ef::COPY_DEF + 32], ids, vals.def);
@@ -1369,7 +1369,7 @@ fn write_counters(cx: &Cx, tail: &mut TailBuf) {
 }
 
 /// A kind of counter and its number in a `counters` token's fields (`ct::KIND` ... `ct::COUNT_BITS`):
-/// an object's, and a gone object's last known ones (layout v8's `lki` tokens, ENGINE.md 235).
+/// an object's, and a gone object's last known ones (layout v8's `lki` tokens, ENGINE.md 236).
 pub(crate) fn counter_floats(g: &Game, s: &mut [f32], kind: crate::db::Counter, n: crate::num::Count) {
     use crate::db::Counter as K;
     let i = match kind {
@@ -1784,7 +1784,7 @@ fn write_stack_relations(cx: &Cx, tail: &mut TailBuf) {
 /// at `pos` (`stack_relations`: what its stack slot doesn't hold - targets past the first two or
 /// that the head's target block can't name, divisions past two, noted objects past the first and
 /// a first one off the battlefield, the spliced cards, a ninjutsu creature's planeswalker), or a
-/// gone spell's (`pos` None, layout v8's `lki_relations`, ENGINE.md 235: every one, with `key`).
+/// gone spell's (`pos` None, layout v8's `lki_relations`, ENGINE.md 236: every one, with `key`).
 pub(crate) fn item_relations(cx: &Cx, item: &crate::game::StackItem, pos: Option<usize>, tail: &mut TailBuf, sg: u16, k: &mut u32, key: Option<(usize, usize)>) {
     let g = cx.g;
     let all = pos.is_none();
@@ -1882,7 +1882,7 @@ fn write_graveyard_order(cx: &Cx, tail: &mut TailBuf) {
 /// the pile's 64th card). A row whose objects all fit their head slots, unpaged and without exile
 /// offers, gets none: every option keeps the logit of before (a widened network's, exactly).
 /// The pointer overrides of `viewer`'s row in layout v8 (`v8`: v7's, then those into the
-/// `pay_options` tokens, `tail_v8::pay_overrides`; ENGINE.md 235) or v7, by option index.
+/// `pay_options` tokens, `tail_v8::pay_overrides`; ENGINE.md 236) or v7, by option index.
 pub(crate) fn option_overrides_layout(g: &Game, viewer: PlayerId, legal: &[u16], out: &mut Vec<(u32, i64)>, v8: bool) {
     let n0 = out.len();
     option_overrides(g, viewer, legal, out);
@@ -2020,7 +2020,7 @@ impl Row {
         Row::of_layout(g, viewer, false)
     }
 
-    /// `viewer`'s layout v8 row of game `g` (ENGINE.md 235: v7's row and the tokens of v8's
+    /// `viewer`'s layout v8 row of game `g` (ENGINE.md 236: v7's row and the tokens of v8's
     /// segments, with the overrides into them).
     pub fn of_v8(g: &Game, viewer: PlayerId) -> Row {
         Row::of_layout(g, viewer, true)
@@ -2217,7 +2217,7 @@ pub fn check_pointers(g: &Game, viewer: PlayerId, row: &Row) -> Result<usize, St
     check_pointers_layout(g, viewer, row, false)
 }
 
-/// `check_pointers` of a layout v8 row (`v8`, ENGINE.md 235) or v7: in v8 an option of the viewer's payment
+/// `check_pointers` of a layout v8 row (`v8`, ENGINE.md 236) or v7: in v8 an option of the viewer's payment
 /// decision naming item k (`ChooseMana`, `ChooseMode`, `PayPool`: `tail_v8::pay_overrides`) points at
 /// `pay_options` token k, whose item is k.
 pub fn check_pointers_layout(g: &Game, viewer: PlayerId, row: &Row, v8: bool) -> Result<usize, String> {
@@ -2344,7 +2344,7 @@ impl Row {
     }
 
     /// `viewer`'s layout v8 row of match `a` (the game `mtg_v8`'s `encode_row` and
-    /// `option_overrides`, ENGINE.md 235).
+    /// `option_overrides`, ENGINE.md 236).
     pub fn of_az_v8(a: &super::MtgAz, viewer: usize) -> Row {
         Row::of_az_layout(a, viewer, true)
     }

@@ -2943,7 +2943,7 @@ fn check_row(g: &Game, viewer: u8, row: &crate::az::tail_encode::Row, what: &dyn
     use crate::az::tail_encode::seg;
     let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
     check_bounded(&vals, &|| format!("{} (viewer P{viewer})", what()));
-    // Layout v8's row (ENGINE.md 235) is layout v7's plus its own segments' tokens and the overrides into
+    // Layout v8's row (ENGINE.md 236) is layout v7's plus its own segments' tokens and the overrides into
     // `pay_options`: its v7 part is the v7 row exactly (a v7 network widened onto v8 reads it alike).
     let r7 = crate::az::tail_encode::Row::of(g, viewer);
     let tail7: Vec<_> = row.tail.iter().filter(|t| (t.0 as usize) < seg::N).cloned().collect();
@@ -2984,7 +2984,7 @@ fn check_encoding(g: &Game, viewer: u8, buf: &mut Vec<f32>, what: &dyn Fn() -> S
     *buf = row.flat();
 }
 
-/// Layout v8's own tokens in the rows checked (ENGINE.md 235).
+/// Layout v8's own tokens in the rows checked (ENGINE.md 236).
 static V8_TOKENS: AtomicU64 = AtomicU64::new(0);
 
 /// The rows' report: pointers checked, v6 projections, the limit.

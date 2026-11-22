@@ -17,7 +17,7 @@ static GAMES: &[zero_py::GameEntry] = &[
     zero_py::GameEntry::of::<engine::az::draft::TeamDraftAz>("team_draft"),
     // Edge of Eternities sealed: `mtg` on the EoE table, its own identity space (ENGINE.md 105)
     zero_py::GameEntry::of::<engine::az::eoe::MtgEoeAz>("mtg_eoe"),
-    // `mtg` in layout v8 (ENGINE.md 235): v7's rows plus the payment, last-known-information and find-group segments
+    // `mtg` in layout v8 (ENGINE.md 236): v7's rows plus the payment, last-known-information and find-group segments
     zero_py::GameEntry::of::<engine::az::v8::MtgV8Az>("mtg_v8"),
 ];
 

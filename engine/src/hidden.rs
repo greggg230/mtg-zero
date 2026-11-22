@@ -130,7 +130,7 @@ pub struct Cloud {
 /// every cloud); b = 0: a chance the deck does not change. `x`: R_def before it less the sightings that had grown R (a payment's pinned cards; ENGINE.md 140.9).
 /// Kept only where whole-deck clouds are (`hidden_decklists`, `deck_clouds`: R never loses a card there), and only
 /// in a game no `determinize` dealt (`Game::observer`: a world's are dropped, `sightings_lost`).
-/// A group of places that hold search finds mixed with other cards (ENGINE.md 235; 223's decision 4,
+/// A group of places that hold search finds mixed with other cards (ENGINE.md 236; 223's decision 4,
 /// `Game::find_groups`): its owner, its members (the cards at its places, by card index, sorted) and how
 /// many of them are their owner's search's finds. Public: everyone saw the finds made and the private
 /// rearrangement that mixed them; not which places hold them.
@@ -670,14 +670,14 @@ impl Game {
         self.sighted(q, owner, c, d, !merged, terms);
         if q != owner {
             self.untrack_found(c);
-            // (ENGINE.md 235: the other player knows a member now, so the group's count is no longer "k of
+            // (ENGINE.md 236: the other player knows a member now, so the group's count is no longer "k of
             // these places" for it.)
             self.end_find_group(c);
         }
         self.tidy_clouds();
     }
 
-    /// The find group card `c` is a member of, if any, ends (ENGINE.md 235): the member left the group's
+    /// The find group card `c` is a member of, if any, ends (ENGINE.md 236): the member left the group's
     /// zone or the other player learned it, so "k of these places hold finds" no longer holds as one count.
     pub(crate) fn end_find_group(&mut self, c: CardIdx) {
         if !self.find_groups.is_empty() {
@@ -686,7 +686,7 @@ impl Game {
     }
 
     /// A private rearrangement of `owner`'s `domain` (`scramble`; `told` its told-apart hand cards) and the
-    /// find groups (ENGINE.md 235): when the domain mixes told finds or a group's members with any other card,
+    /// find groups (ENGINE.md 236): when the domain mixes told finds or a group's members with any other card,
     /// the domain's cards and every group they touch become one group, its finds the domain's told finds and
     /// those groups' finds - the public fact `finds_told` stops telling (223's strict rule). A domain inside one
     /// group (Ponder over a pile's places) changes nothing.
@@ -1043,7 +1043,7 @@ impl Game {
             // (ENGINE.md 223: the public fact. After the rearrangement the viewer knows none of the domain's cards
             // apart - those it knew are a cloud's now -, so finds mixed with any card that is not one are no longer
             // told apart, and among finds only it knows that the domain's places hold them, not which holds which.)
-            // (ENGINE.md 235: the group fact, counted before the strict rule drops the domain's told finds.)
+            // (ENGINE.md 236: the group fact, counted before the strict rule drops the domain's told finds.)
             self.group_scramble(owner, &domain, &told);
             if !self.finds_told.is_empty() && domain.iter().any(|&c| !told.contains(&c) && !self.finds_told.contains(&c)) {
                 self.finds_told.retain(|c| !domain.contains(c));

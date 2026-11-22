@@ -31,7 +31,7 @@
 //! `{"ref": "g0.3", "stale": true}`; a token that ceased to exist is `{"gone": "Clue", "owner": 0}`.
 //! Either may carry what it shows (`Game::ref_lki`, ENGINE.md 95.11): `known_by` (who knew the object as
 //! it left; default both) and `was` (its identity then, where the viewer knew it; default the card's now);
-//! and its last known information (ENGINE.md 235, layout v8's `lki` tokens): `"lki": {"copy": <name>, "dfc":
+//! and its last known information (ENGINE.md 236, layout v8's `lki` tokens): `"lki": {"copy": <name>, "dfc":
 //! <bool>, "mv": n, "power": n, "toughness": [n, <controller>], "qualities": {"controller", "deathtouch",
 //! "lifelink", "infect", "spell", "colors", "types"}, "attached": <reference>, "counters": [[<kind>, n]]}`, each
 //! key present where the game keeps that record (a copy's exceptions, keyword and named counters and a gone
@@ -484,7 +484,7 @@ impl Describer<'_> {
                 }
             }
         }
-        // Its last known information (ENGINE.md 235: layout v8's `lki` tokens show it).
+        // Its last known information (ENGINE.md 236: layout v8's `lki` tokens show it).
         let l = super::tail_v8::lki_of(g, r);
         if !l.is_empty() {
             let mut x = serde_json::Map::new();
@@ -1506,7 +1506,7 @@ impl Builder<'_> {
         }
     }
 
-    /// A stale reference's last known information (module docs; ENGINE.md 235), into the game's records.
+    /// A stale reference's last known information (module docs; ENGINE.md 236), into the game's records.
     fn last_known(&mut self, r: ObjRef, v: &Value) -> Result<(), String> {
         let o = v.as_object().ok_or("build: lki must be an object")?;
         keys(o, &["copy", "dfc", "mv", "power", "toughness", "qualities", "attached", "counters"], "a gone object's last known information")?;

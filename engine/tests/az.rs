@@ -26,7 +26,7 @@ fn spec() -> MtgSpec {
     MtgSpec { max_turns: 60, ..MtgSpec::default() }
 }
 
-/// `viewer`'s whole row (layout v8, ENGINE.md 235: v7's, ENGINE.md 125, and v8's segments): the head
+/// `viewer`'s whole row (layout v8, ENGINE.md 236: v7's, ENGINE.md 125, and v8's segments): the head
 /// ([`NUM_FEATURES`] floats first), then the tail tokens and the pointer overrides (`tail_encode::Row::flat`).
 fn enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
     engine::az::tail_encode::Row::of_az_v8(g, viewer).flat()
@@ -37,7 +37,7 @@ fn enc7(g: &MtgAz, viewer: usize) -> Vec<f32> {
     engine::az::tail_encode::Row::of_az(g, viewer).flat()
 }
 
-/// The gate's positions of layout v8's facts (ENGINE.md 235; `public_state_v8`): payments in progress in each of
+/// The gate's positions of layout v8's facts (ENGINE.md 236; `public_state_v8`): payments in progress in each of
 /// their decisions, gone objects whose last known information an ability reads, a find group.
 fn v8_positions() -> Vec<(&'static str, MtgAz)> {
     let mut v = engine::public_state_v8::payment_positions();
@@ -441,7 +441,7 @@ fn layout_json_is_checked_in() {
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
 }
 
-/// Layout v8 (ENGINE.md 235, the game `mtg_v8`): `mtgz/az/layout_v8.json` = `encode::layout_json_v8`
+/// Layout v8 (ENGINE.md 236, the game `mtg_v8`): `mtgz/az/layout_v8.json` = `encode::layout_json_v8`
 /// (MTGZ_WRITE_LAYOUT=1 rewrites it), and it widens layout v7 additively and exactly: the same
 /// features and head (the widen's map is the identity), v7's 25 segments unchanged (names, slots,
 /// widths, gates, columns), then the six tail-only gated segments of `tail_v8` (zero-core's widen
@@ -1609,7 +1609,7 @@ fn public_state_reaches_the_encoding() {
         applied6: usize,
         enc6_same: [usize; 2],
         example6: Option<String>,
-        // layout v7 (the game `mtg`, ENGINE.md 235): a public change its row leaves out
+        // layout v7 (the game `mtg`, ENGINE.md 236): a public change its row leaves out
         enc7_same: [usize; 2],
         example7: Option<String>,
     }
@@ -1740,7 +1740,7 @@ fn public_state_reaches_the_encoding() {
         if !matches!(state, "ok" | "limit (design)" | "gap (next layout)" | "rare, not applied" | "rare limit" | "known gap") {
             findings.push(format!("{state}: {} ({})", p.name, p.field));
         }
-        // Layout v7 (the game `mtg`): a public change its row leaves out is one of layout v8's facts (ENGINE.md 235).
+        // Layout v7 (the game `mtg`): a public change its row leaves out is one of layout v8's facts (ENGINE.md 236).
         if x.enc7_same.iter().any(|&n| n > 0) && limited != Some(LimitKind::Design) {
             match known_alone(V7, p.name) {
                 Some(k) => {
@@ -1835,7 +1835,7 @@ fn public_states_encode_apart() {
     let seed: u64 = std::env::var("GATE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(4242);
     let live: Vec<usize> = (0..ps.len()).filter(|&k| !lim.contains(&ps[k].name)).collect();
     let combinable: Vec<usize> = live.iter().copied().filter(|&k| !COMBO_EXCLUDED.contains(&ps[k].name)).collect();
-    // (Layout v8's perturbations, ENGINE.md 235, draw their partners from a stream of their own, among every
+    // (Layout v8's perturbations, ENGINE.md 236, draw their partners from a stream of their own, among every
     // combinable one; the others draw from the others as before, so their pairs are main's.)
     let v8p = engine::public_state::v8_perturbation_names();
     let combinable_old: Vec<usize> = combinable.iter().copied().filter(|&k| !v8p.contains(&ps[k].name)).collect();
@@ -4090,7 +4090,7 @@ fn constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s() {
     assert!(worlds >= 150 && other * 2 > worlds, "{worlds} {other}");
 }
 
-/// ENGINE.md 235's cost measurement (not a gate: `--ignored --nocapture`): in random games of the cube, the Delver
+/// ENGINE.md 236's cost measurement (not a gate: `--ignored --nocapture`): in random games of the cube, the Delver
 /// mirror and the three-deck Legacy metagame's Doomsday mirror (`COST_GAMES` a pool, default 200), at every decision
 /// both viewers' rows in layout v7 (`Row::of`) and v8 (`Row::of_v8`): the rows holding v8 tokens, v8's tokens by
 /// segment, tokens and floats a row (head features + every tail token's width) and the encode time a row of each.

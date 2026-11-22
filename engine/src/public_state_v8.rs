@@ -1,4 +1,4 @@
-//! The public-state gate's positions of layout v8's facts (ENGINE.md 235; `tests/az.rs` adds them to
+//! The public-state gate's positions of layout v8's facts (ENGINE.md 236; `tests/az.rs` adds them to
 //! the gate's positions in all its passes): payments in progress in each of their decisions (the
 //! picks, a several-mana source's production, the source a permanent picked by its own id stands
 //! for, a shared source's actor, the Phyrexian split, the pool left) and a 601.2g step's; gone objects

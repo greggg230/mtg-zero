@@ -1,4 +1,4 @@
-//! Layout v8's own segments (ENGINE.md 235; the game `mtg_v8`): six tail-only gated segments
+//! Layout v8's own segments (ENGINE.md 236; the game `mtg_v8`): six tail-only gated segments
 //! appended after layout v7's, so a v7 network widens onto v8 bit for bit (zero-core docs/az.md
 //! 43.8: a new gated segment's tokens weigh exactly 0 at the widen) and a v8 row is the v7 row plus
 //! these tokens (and the overrides into `pay_options`).
@@ -292,7 +292,7 @@ pub mod fg {
 }
 pub const FG_W: usize = CODE + fg::W;
 
-/// Layout v8's segments (ENGINE.md 235), after layout v7's tokens: the payments, the option
+/// Layout v8's segments (ENGINE.md 236), after layout v7's tokens: the payments, the option
 /// meanings, the find groups, then the last known information of every stale reference met (its
 /// own references may meet more, written in turn).
 pub(crate) fn write_v8_segments(cx: &Cx, tail: &mut TailBuf) {
@@ -827,7 +827,7 @@ fn h64<T: std::hash::Hash>(t: &T) -> u64 {
     crate::testkit::h64(t)
 }
 
-/// The payments in progress as `viewer` observes them (`Game::view_of`, ENGINE.md 235): every
+/// The payments in progress as `viewer` observes them (`Game::view_of`, ENGINE.md 236): every
 /// field `payment` and `pay_options` show, objects by their public place.
 pub(crate) fn payment_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
     let place = |c: CardIdx| -> u64 {
@@ -896,7 +896,7 @@ pub(crate) fn payment_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
 }
 
 /// The last known information of every gone object a reference of the public state names (and
-/// those the information itself names), as `viewer` observes it (`Game::view_of`, ENGINE.md 235).
+/// those the information itself names), as `viewer` observes it (`Game::view_of`, ENGINE.md 236).
 pub(crate) fn lki_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
     let mut refs: Vec<ObjRef> = Vec::new();
     g.for_each_public_ref(|r| {
@@ -959,7 +959,7 @@ pub(crate) fn lki_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
     }
 }
 
-/// The find groups as everyone observes them (`Game::view_of`, ENGINE.md 235): per group its
+/// The find groups as everyone observes them (`Game::view_of`, ENGINE.md 236): per group its
 /// owner, runs of places, finds and other cards.
 pub(crate) fn find_groups_view(g: &Game, v: &mut Vec<u64>) {
     let mut out: Vec<Vec<u64>> = g

@@ -890,7 +890,7 @@ impl MtgSpec {
     /// never fed another's encodings through the wrong game's name.
     pub fn check_game(&self, game: &str) -> Result<(), String> {
         let mine = self.game();
-        // (`mtg_v8` is `mtg` in layout v8, ENGINE.md 235: the same specs.)
+        // (`mtg_v8` is `mtg` in layout v8, ENGINE.md 236: the same specs.)
         if mine == game || (mine == "mtg" && game == v8::NAME) {
             return Ok(());
         }
@@ -1304,7 +1304,7 @@ impl Bot<MtgAz> for HeuristicBot {
 }
 
 impl MtgAz {
-    /// The row of `viewer` in layout v8 (`v8`: the game `mtg_v8`, ENGINE.md 235) or v7 (the game
+    /// The row of `viewer` in layout v8 (`v8`: the game `mtg_v8`, ENGINE.md 236) or v7 (the game
     /// `mtg`): the deck choice's and sideboarding's encodings have no tail (their lists fit the
     /// head) and are the same in both.
     pub fn encode_row_layout(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf, v8: bool) {
