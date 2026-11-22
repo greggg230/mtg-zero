@@ -42248,7 +42248,14 @@ touches it).
   `yield_runs`) recorded "was stopped" and neither paused nor resumed. Self-play rows a match: 397 (mirror, 2.1-2.75
   games a match) and 312 (Delver-Doomsday), against 111 rows a best-of-one game of the source - the tiny network's games
   run long and draw at the turn limit, so the first stew's games an iteration come from the real network (222.2).
-  The rest of the smoke (a 50-step distillation per net, 8-match judging) needs 222.1's `tools/distill.py --sources`
-  and the MTG row selector: pending their branch.
+* *The CPU smoke, part 2* (a local merge of this branch with `feat/stew-distill`, never pushed): `run` went on from the
+  train phase - `distil_decks@0` (50-step `tools/distill.py --sources` distillations: deck stew Delver from both
+  specialists, its Delver-Doomsday source selecting 1,927 of 3,886 rows by `actor`, the mirror's all 6,400; deck stew
+  Doomsday 1,959 rows; per-source held-out agreement read into the report), `judge_deck_gap@0` (18 jobs, 40
+  best-of-three matches, 4 processes at once, 2.475 games a match; gen over gen, arm B, arms A, the field rate), then
+  HOLD (the stew's PAUSE, `reports/gen_000.md`); after the PAUSE was removed `step distil_main` (4 sources: three routed
+  to the acting deck's stew, retention 1/4 = the Doomsday mirror's rows of the best-of-one archive by `not_pairing`)
+  was REFUSED once more - another live run had started - and ran with it in `beside_runs`; `step judge` (arm M, 24
+  matches) was under way when this was written. Under CPU load the tiny network's best-of-three match took ~40 s.
 * *Tests*: `tests/test_stew.py` 18, `tests/test_stew_judge.py` 6, `tests/test_stew_control.py` 4 (2 of them start
   processes: `live_run_hazard`).
