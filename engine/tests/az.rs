@@ -1363,6 +1363,62 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The 601.2g step's positions (ENGINE.md 222): Hogaak castable only through a Chromatic Star activated while it is
+/// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
+/// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
+fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    const HOGAAK: &str = "Hogaak, Arisen Necropolis";
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [(HOGAAK, 4), ("Chromatic Star", 4), ("Lotus Petal", 4), ("Elvish Spirit Guide", 4), ("Island", 22), ("Swamp", 22)] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 8])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Chromatic Star", "Elvish Spirit Guide", "Elvish Spirit Guide", "Swamp"])
+        .graveyard(0, &["Island", "Swamp", "Island"])
+        .hand(0, &[HOGAAK])
+        .battlefield(0, &["Lotus Petal"])
+        .battlefield(1, &["Island", "Elvish Spirit Guide"])
+        .at(Step::Main1, 0)
+        .start();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 222).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let mut out = vec![("cast_mana", wrap(&g))];
+    let h = g.card(0, HOGAAK, Zone::Hand);
+    assert!(g.has_option(Choice::Cast(h)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(h));
+    let mut steps = 0;
+    for _ in 0..40 {
+        let Some(d) = g.pending_decision() else { break };
+        if d.kind == DecisionKind::Priority {
+            break;
+        }
+        steps += (d.kind == DecisionKind::CastMana) as usize;
+        out.push(("cast_mana", wrap(&g)));
+        // The Star first (then the Petal, then PASS); the fewest graveyard cards; the first creature.
+        let star = d.options.iter().find(|o| matches!(o.choice, Choice::Card(c) if g.name(c) == "Chromatic Star")).map(|o| o.choice);
+        let c = match d.kind {
+            DecisionKind::CastMana => star.unwrap_or(d.options.iter().find(|o| o.choice != Choice::Pass).unwrap_or(&d.options[0]).choice),
+            DecisionKind::ChooseGraveyardCard if d.options.iter().any(|o| o.choice == Choice::Pass) => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert!(steps >= 2 && out.len() >= 8, "the step's positions: {steps} steps, {} positions
+{}", out.len(), g.log_lines().join("
+"));
+    out
+}
+
 fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     let mut x = g.g.view_of(v);
     x.push(u64::MAX - 77);
@@ -1451,6 +1507,7 @@ fn public_state_reaches_the_encoding() {
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(cast_mana_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1666,6 +1723,7 @@ fn public_states_encode_apart() {
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(cast_mana_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
@@ -2775,7 +2833,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
     // prediction at tilt 1, from a stream of its own)
     let (mut trng, mut tilted) = (Rng::new(106), 0);
-    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()) {
+    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()).chain(cast_mana_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };

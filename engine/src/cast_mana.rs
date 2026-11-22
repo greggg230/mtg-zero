@@ -92,7 +92,9 @@ impl Game {
         if !again && self.answer.is_none() && self.total_mana(spell, &self.stack[pos]).is_zero() {
             return;
         }
-        let sources = self.cast_mana_sources(id, p, spell);
+        // (In the payment search only the feeding abilities are offered; an answer, or the question of a permanent's
+        // ability, reads them all: the option it searches from may be any.)
+        let sources = self.cast_mana_sources(id, p, spell, self.oracle && self.answer.is_none() && card.is_none());
         let slots_of = |c: CardIdx| sources.iter().find(|(x, _)| *x == c).map(|(_, v)| v.clone()).unwrap_or_default();
         match self.answer.take() {
             Some(Choice::Pass) => {
@@ -177,9 +179,8 @@ impl Game {
     /// as an instant" ability (Lion's Eye Diamond: no player has priority, ruling 2004-10-04), not one the collapse
     /// leaves to the priority after the cast (`cast_mana_collapsed`). In the payment search only those that may put a
     /// card into `p`'s graveyard, when the payment reads the graveyard (`cast_mana_feeder`).
-    fn cast_mana_sources(&self, id: u32, p: PlayerId, spell: CardIdx) -> Vec<(CardIdx, Vec<AbilitySlot>)> {
+    fn cast_mana_sources(&self, id: u32, p: PlayerId, spell: CardIdx, feed_only: bool) -> Vec<(CardIdx, Vec<AbilitySlot>)> {
         let mut out: Vec<(CardIdx, Vec<AbilitySlot>)> = Vec::new();
-        let feed_only = self.oracle;
         if feed_only {
             let Some(pos) = self.item_index(id) else { return out };
             if !self.payment_reads_graveyard(spell, &self.stack[pos]) {
@@ -631,5 +632,142 @@ impl Game {
         let floor = g.agenda.len();
         g.agenda.push(Task::CastMana { id, card: None, again: false });
         g.payment_completes(floor, p)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::db::{AbilitySlot, CardDb};
+    use crate::decision::{Choice, DecisionKind};
+    use crate::flow::Task;
+    use crate::game::{Game, Step};
+    use crate::ids::{CardIdx, Target, Zone};
+    use crate::testkit::Scenario;
+
+    /// Every state at the next priority from `g`, every decision answered every way but `skip`'s options; with
+    /// `then`, each such state after `then` (a state it returns `None` for is left out).
+    fn ends(g: &Game, skip: &dyn Fn(&Game, Choice) -> bool, out: &mut Vec<Game>) {
+        if g.kind() == Some(DecisionKind::Priority) || g.is_over() {
+            out.push(g.clone());
+            return;
+        }
+        let d = g.pending_decision().expect("a decision");
+        for o in d.options.iter().filter(|o| !skip(g, o.choice)) {
+            let mut h = g.clone();
+            h.choose(o.choice);
+            ends(&h, skip, out);
+        }
+    }
+
+    /// Both players' loop hashes of each state (ENGINE.md 222.3: the states compared as the game tells them apart),
+    /// sorted, each once.
+    fn hashes(states: &[Game]) -> Vec<(u64, u64)> {
+        let mut v: Vec<(u64, u64)> = states.iter().map(|g| (g.loop_hash(0, None), g.loop_hash(1, None))).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// ENGINE.md 222.3 (the collapse): a Mountain's "{T}: add {R}" activated in Lightning Bolt's 601.2g step reaches
+    /// exactly the states the cast without it, then the Mountain activated with the priority right after (when it is
+    /// still untapped; tapped by the payment it is the same), reach. Chromatic Star makes the step ask (never chosen).
+    #[test]
+    fn a_collapsed_land_activated_while_casting_reaches_the_states_of_activating_it_after() {
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 8])
+            .library(1, &["Island"; 8])
+            .battlefield(0, &["Chromatic Star", "Mountain", "Mountain"])
+            .hand(0, &["Lightning Bolt"])
+            .at(Step::Main1, 0)
+            .start();
+        let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+        let star = g.card(0, "Chromatic Star", Zone::Battlefield);
+        let lands: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Mountain").collect();
+        g.choose(Choice::Cast(bolt));
+        g.choose(Choice::Target(Target::Player(1)));
+        assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{:?}", g.options_desc());
+        assert!(!g.offered().contains(&Choice::Card(lands[0])), "the Mountain is collapsed: {:?}", g.options_desc());
+        let id = g.stack().last().expect("the Bolt").id;
+        let no_star = |_: &Game, c: Choice| c == Choice::Card(star);
+        for &m in &lands {
+            // Path 1: the Mountain in the step, then everything else.
+            let mut a = g.clone();
+            a.pending = None;
+            a.cast_mana_run(id, 0, m, AbilitySlot::Activated(0));
+            a.advance();
+            let mut one = Vec::new();
+            ends(&a, &no_star, &mut one);
+            // Path 2: the step passed, the cast completed every way, then the Mountain at that priority if untapped.
+            let mut b = g.clone();
+            b.choose(Choice::Pass);
+            let mut cast = Vec::new();
+            ends(&b, &no_star, &mut cast);
+            let mut two = Vec::new();
+            for e in cast {
+                if e.objs[m.i()].tapped {
+                    two.push(e);
+                    continue;
+                }
+                let mut f = e.clone();
+                f.pending = None;
+                f.agenda.push(Task::Priority);
+                f.begin_activate(0, m, AbilitySlot::Activated(0));
+                f.advance();
+                assert_eq!(f.kind(), Some(DecisionKind::Priority), "{}", f.log_lines().join("\n"));
+                two.push(f);
+            }
+            assert!(!one.is_empty());
+            assert_eq!(hashes(&one), hashes(&two), "the Mountain {m:?}: the states differ");
+        }
+    }
+
+    /// CR 601.2f-g (ENGINE.md 222): the total cost is locked as the step's first mana ability is activated, so a cost
+    /// reducer the ability sacrifices (Emry's "costs {1} less for each artifact you control": Chromatic Star) doesn't
+    /// raise it; the lock is gone once the spell is cast.
+    #[test]
+    fn the_total_cost_is_locked_at_the_steps_first_activation() {
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 8])
+            .library(1, &["Island"; 8])
+            .battlefield(0, &["Chromatic Star", "Lotus Petal", "Island"])
+            .hand(0, &["Emry, Lurker of the Loch"])
+            .at(Step::Main1, 0)
+            .start();
+        let emry = g.card(0, "Emry, Lurker of the Loch", Zone::Hand);
+        let star = g.card(0, "Chromatic Star", Zone::Battlefield);
+        g.choose(Choice::Cast(emry));
+        assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{:?}", g.options_desc());
+        let id = g.stack().last().expect("Emry").id;
+        let before = g.total_mana(emry, g.stack().last().unwrap());
+        assert_eq!(before.total(), 1, "{{2}}{{U}} less two artifacts");
+        g.choose(Choice::Card(star));
+        // (The Star's {1}: the Island; its mana: blue.)
+        for _ in 0..20 {
+            if g.kind() == Some(DecisionKind::CastMana) {
+                break;
+            }
+            let c = match g.kind() {
+                Some(DecisionKind::ChooseMana) => g.offered().into_iter().find(|c| matches!(c, Choice::Number(1))).unwrap_or(g.offered()[0]),
+                _ => g.offered().into_iter().find(|c| *c == Choice::Card(g.card(0, "Island", Zone::Battlefield))).unwrap_or(g.offered()[0]),
+            };
+            g.choose(c);
+        }
+        assert_eq!(g.objs[star.i()].zone, Zone::Graveyard, "{}", g.log_lines().join("\n"));
+        assert_eq!(g.locked_cost(id), Some(before), "locked as the Star was activated");
+        assert_eq!(g.total_mana(emry, g.stack().last().unwrap()), before, "one artifact left, the cost unchanged");
+        let mut h = g.clone();
+        h.cast_lock.clear();
+        assert_eq!(h.total_mana(emry, h.stack().last().unwrap()).total(), 2, "unlocked it would be {{1}}{{U}}");
+        for _ in 0..20 {
+            if g.kind() == Some(DecisionKind::Priority) {
+                break;
+            }
+            let c = g.offered().into_iter().find(|c| *c == Choice::Pass).unwrap_or(g.offered()[0]);
+            g.choose(c);
+        }
+        assert_eq!(g.objs[emry.i()].zone, Zone::Stack, "{}", g.log_lines().join("\n"));
+        assert!(g.cast_lock.is_empty(), "cleared at 601.2i");
     }
 }

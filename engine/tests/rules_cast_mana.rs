@@ -88,6 +88,25 @@ fn delve_from(g: &Game, cards: &[CardIdx]) -> Option<Choice> {
     Some(cards.iter().copied().find(|c| offered.contains(c)).map_or(Choice::Pass, Choice::Card))
 }
 
+/// Delve's answer: the first graveyard card offered but `keep`, else `PASS`.
+fn delve_any(g: &Game, keep: &[CardIdx]) -> Option<Choice> {
+    if g.kind() != Some(DecisionKind::ChooseGraveyardCard) {
+        return None;
+    }
+    Some(cards_offered(g).into_iter().find(|c| !keep.contains(c)).map_or(Choice::Pass, Choice::Card))
+}
+
+/// The permanents and hand cards the pending decision offers (`Choice::Card`, `Choice::Ability`).
+fn sources_offered(g: &Game) -> Vec<CardIdx> {
+    g.offered()
+        .into_iter()
+        .filter_map(|o| match o {
+            Choice::Card(c) | Choice::Ability(c, _) => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn cr_601_2g_a_lotus_petal_sacrificed_while_hogaak_is_cast_is_delved_for_it() {
     // Four graveyard cards and two green creatures are one short of Hogaak's {5}{B/G}{B/G}; a Lotus Petal sacrificed
@@ -158,8 +177,7 @@ fn cr_601_2g_chromatic_star_activated_while_treasure_cruise_is_cast_makes_it_cas
     assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{}", opts(&g));
     assert_eq!(g.offered(), vec![Choice::Card(star)], "only the Star's activation leaves the cost payable: {}", opts(&g));
     g.choose(Choice::Card(star));
-    let gy: Vec<CardIdx> = g.player(0).graveyard.clone();
-    until_priority(&mut g, &|g| delve_from(g, &gy));
+    until_priority(&mut g, &|g| delve_any(g, &[]));
     assert_eq!(g.obj(tc).zone, Zone::Stack, "{}", log(&g));
     assert_eq!(g.obj(star).zone, Zone::Exile, "{}", log(&g));
     assert_eq!(g.stack().last().map(|s| matches!(s.kind, StackKind::Ability { .. })), Some(true), "{:?}", stack_names(&g));
@@ -178,18 +196,17 @@ fn cr_601_2g_a_lotus_petal_activated_while_treasure_cruise_is_cast_is_delved_its
         .start();
     let tc = g.card(0, "Treasure Cruise", Zone::Hand);
     let petal = bf(&g, 0, "Lotus Petal");
+    let plains = g.card(0, "Plains", Zone::Graveyard);
     g.choose(Choice::Cast(tc));
     assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{}", opts(&g));
     assert!(g.has_option(Choice::Pass), "{}", opts(&g));
     g.choose(Choice::Card(petal));
-    // (The Petal's colour: green, not the Cruise's blue.)
+    // (The Petal's colour: green, not the Cruise's blue; every graveyard card but the Plains delved.)
     until_priority(&mut g, &|g| {
         if g.kind() == Some(DecisionKind::ChooseMana) {
             return g.offered().into_iter().last();
         }
-        let mut picks = vec![petal];
-        picks.extend(g.player(0).graveyard.iter().copied().filter(|&c| c != petal).take(6));
-        delve_from(g, &picks)
+        delve_any(g, &[plains])
     });
     assert_eq!(g.obj(tc).zone, Zone::Stack, "{}", log(&g));
     assert_eq!(g.obj(petal).zone, Zone::Exile, "{}", log(&g));
@@ -342,27 +359,280 @@ fn cr_601_2g_a_mana_ability_with_life_or_damage_is_offered_while_casting() {
 }
 
 #[test]
-fn cr_602_5_timing_restricted_mana_abilities_are_never_offered_while_casting() {
-    // Every mana ability of the tables' cards with a timing restriction (CR 602.5b, 602.5d: "activate only as a
-    // sorcery", "as an instant", "only during your turn", "only if ...", exhaust): the 601.2g step honours each as
-    // activation with priority does, with a spell on the stack (no sorcery timing) and no priority.
-    let mut found = Vec::new();
-    for t in [CardDb::cube(), CardDb::constructed(), CardDb::eoe()] {
+fn cr_602_5_601_2g_timing_restricted_mana_abilities_while_casting_as_while_paying() {
+    // Every card of the tables with a timing-restricted mana ability (CR 602.5b, 602.5d: "activate only as an instant",
+    // "only if ...", "only during your turn", "only as a sorcery", exhaust): the 601.2g step honours each restriction
+    // as the payment that follows it does (no player has priority, a spell is on the stack): an "only as an instant" or
+    // "only as a sorcery" one is never offered (Lion's Eye Diamond, ruling 2004-10-04); an "only if" or "only during
+    // your turn" one exactly when the payment may activate it; any other only when the payment may. On a poor board
+    // and a rich one (every basic land type, more artifacts and a 4-power creature: the conditions both ways), casting
+    // an artifact of generic mana (any mana pays it) of the card's own table.
+    let mut found: Vec<(&'static CardDb, String, bool, bool)> = Vec::new();
+    for t in [CardDb::constructed(), CardDb::eoe()] {
         for d in 0..t.len() as u16 {
             let def = t.def(d);
-            for ad in def.activated.iter().chain(def.hand_abilities.iter()) {
-                if ad.mana().is_some() && (ad.sorcery || ad.instant_only || ad.your_turn || ad.only_if.is_some() || ad.exhaust) {
-                    found.push((def.name.clone(), ad.sorcery, ad.instant_only, ad.your_turn, ad.only_if.is_some(), ad.exhaust));
+            for ad in def.activated.iter() {
+                if ad.mana().is_some() && (ad.sorcery || ad.instant_only || ad.your_turn || ad.only_if.is_some() || ad.exhaust) && !found.iter().any(|f| f.1 == def.name) {
+                    found.push((t, def.name.clone(), ad.instant_only || ad.sorcery, ad.only_if.is_some() || ad.your_turn));
                 }
+            }
+            assert!(def.hand_abilities.iter().all(|ad| !(ad.mana().is_some() && (ad.sorcery || ad.instant_only || ad.your_turn || ad.only_if.is_some() || ad.exhaust))), "{}: a restricted hand mana ability (add it here)", def.name);
+        }
+    }
+    assert!(found.iter().any(|f| f.1 == "Lion's Eye Diamond"), "{:?}", found.iter().map(|f| &f.1).collect::<Vec<_>>());
+    let mut seen = Vec::new();
+    for (t, name, never, exact) in &found {
+        // An artifact spell of generic mana, no X, no target, of the card's table.
+        let spell = (0..t.len() as u16)
+            .map(|d| t.def(d))
+            .find(|d| d.is(engine::db::types::ARTIFACT) && !d.is(engine::db::types::CREATURE) && d.cost.generic == 1 && d.cost.total() == 1 && d.x_pips == 0 && d.spell.is_none() && d.additional.is_empty() && d.alt_costs.is_empty())
+            .expect("a {1} artifact")
+            .name
+            .clone();
+        let land = if t.id("Mountain").is_some() { "Mountain" } else { "Wastes" };
+        for rich in [false, true] {
+            let mut board: Vec<&str> = vec![name.as_str(), land];
+            if rich {
+                board.extend(["Plains", "Island", "Swamp", "Forest", spell.as_str(), spell.as_str(), spell.as_str()]);
+                if let Some(big) = (0..t.len() as u16).map(|d| t.def(d)).find(|d| d.is(engine::db::types::CREATURE) && d.power.unwrap_or(0) >= 4 && d.statics.is_empty() && d.triggers.is_empty()) {
+                    board.push(big.name.as_str());
+                }
+            }
+            let mut g = Scenario::new(t).spec(|s| s.auto_single = false).library(0, &[land; 12]).library(1, &[land; 12]).battlefield(0, &board).hand(0, &[spell.as_str()]).at(Step::Main1, 0).start();
+            let c = bf(&g, 0, name);
+            let s = g.card(0, &spell, Zone::Hand);
+            if !g.has_option(Choice::Cast(s)) {
+                continue;
+            }
+            g.choose(Choice::Cast(s));
+            let in_step = g.kind() == Some(DecisionKind::CastMana) && sources_offered(&g).contains(&c);
+            if g.kind() == Some(DecisionKind::CastMana) {
+                if !g.has_option(Choice::Pass) {
+                    continue;
+                }
+                g.choose(Choice::Pass);
+            }
+            let Some(DecisionKind::PayMana) = g.kind() else { continue };
+            let in_payment = sources_offered(&g).contains(&c);
+            seen.push(format!("{name} rich {rich}: step {in_step} payment {in_payment}"));
+            assert!(!in_step || in_payment, "{name} (rich {rich}): offered while casting, not while paying\n{}", log(&g));
+            if *never {
+                assert!(!in_step, "{name}: an instant- or sorcery-speed mana ability offered while casting");
+            }
+            if *exact {
+                assert_eq!(in_step, in_payment, "{name} (rich {rich}): its condition read alike while casting and paying\n{}", log(&g));
             }
         }
     }
-    found.sort();
-    found.dedup();
-    println!("timing-restricted mana abilities: {found:?}");
-    // The instant-only ones (Lion's Eye Diamond): `cr_601_2g_lions_eye_diamond_is_never_activated_while_a_spell_is_cast`.
-    for (name, sorcery, instant, your_turn, only_if, exhaust) in &found {
-        assert!(*instant || *sorcery || *your_turn || *only_if || *exhaust, "{name}");
+    println!("{}", seen.join("\n"));
+    assert!(seen.len() >= found.len(), "boards checked {}: {seen:?}", seen.len());
+}
+
+#[test]
+fn cr_601_2g_hogaak_is_castable_only_through_a_chromatic_star_its_cost_paid_by_a_land() {
+    // Four graveyard cards and two green creatures: Hogaak's {5} is one card short. Chromatic Star ({1}, {T},
+    // sacrifice: one mana) activated while Hogaak is cast, its {1} paid by the Swamp (no mana pays Hogaak, CR 113.6e,
+    // but a mana ability's cost is another payment: 605.3a), is the fifth card delve exiles. Castability counts it
+    // (`feed_castable`, ENGINE.md 222.4); without a mana source for the Star's {1} Hogaak isn't castable.
+    let board = |swamp: bool| {
+        let mut b = vec!["Chromatic Star", GREEN, GREEN];
+        if swamp {
+            b.push("Swamp");
+        }
+        scen().battlefield(0, &b).graveyard(0, &["Ponder", "Brainstorm", "Daze", "Island"]).hand(0, &[HOGAAK]).at(Step::Main1, 0).start()
+    };
+    let none = board(false);
+    assert!(!none.has_option(Choice::Cast(none.card(0, HOGAAK, Zone::Hand))), "nothing pays the Star's {{1}}: {}", opts(&none));
+    let mut g = board(true);
+    let h = g.card(0, HOGAAK, Zone::Hand);
+    let star = bf(&g, 0, "Chromatic Star");
+    assert!(g.has_option(Choice::Cast(h)), "castable through the Star: {}", opts(&g));
+    g.choose(Choice::Cast(h));
+    assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{}", opts(&g));
+    assert_eq!(g.offered(), vec![Choice::Card(star)], "only the Star leaves the cost payable: {}", opts(&g));
+    g.choose(Choice::Card(star));
+    until_priority(&mut g, &|g| delve_any(g, &[]));
+    assert_eq!(g.obj(h).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(star).zone, Zone::Exile, "the Star delved: {}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Swamp")).tapped, "the Swamp paid the Star: {}", log(&g));
+    assert_eq!(stack_names(&g), vec![HOGAAK.to_string(), "Chromatic Star (ability)".to_string()], "{}", log(&g));
+}
+
+#[test]
+fn cr_601_2g_702_51a_a_creature_that_pays_a_chromatic_stars_cost_doesnt_convoke() {
+    // Llanowar Elves ({T}: add {G}) may pay the Star's {1} or convoke for Hogaak, not both (tapped for mana it can't
+    // be tapped for convoke): with one other green creature Hogaak's two hybrid pips and the Star's {1} are one source
+    // short; with two others it is castable, the Elves paying the Star.
+    let board = |greens: usize| {
+        let mut b = vec!["Chromatic Star", "Llanowar Elves"];
+        b.extend(std::iter::repeat_n(GREEN, greens));
+        scen().battlefield(0, &b).graveyard(0, &["Ponder", "Brainstorm", "Daze", "Island"]).hand(0, &[HOGAAK]).at(Step::Main1, 0).start()
+    };
+    let one = board(1);
+    assert!(!one.has_option(Choice::Cast(one.card(0, HOGAAK, Zone::Hand))), "{}", opts(&one));
+    let mut g = board(2);
+    let h = g.card(0, HOGAAK, Zone::Hand);
+    let elves = bf(&g, 0, "Llanowar Elves");
+    assert!(g.has_option(Choice::Cast(h)), "{}", opts(&g));
+    g.choose(Choice::Cast(h));
+    until_priority(&mut g, &|g| delve_any(g, &[]));
+    assert_eq!(g.obj(h).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.log_lines().iter().any(|l| l.contains("activates a mana ability of Llanowar Elves")), "the Elves paid the Star: {}", log(&g));
+    assert!(g.obj(elves).tapped);
+}
+
+#[test]
+fn cr_601_2g_702_138a_a_chromatic_star_activated_while_a_spell_is_cast_feeds_escapes_exile() {
+    // Underworld Breach's escape: Lightning Bolt's {R} and three other graveyard cards exiled; two are there. The
+    // Mountain pays the Star's {1} while the Bolt is cast, the Star's {R} pays the Bolt, and the Star's card is the
+    // third (CR 601.2g before 601.2h). Castability counts it (`feed_castable`); the Mountain alone can't.
+    let board = |star: bool| {
+        let mut b = vec!["Underworld Breach", "Mountain"];
+        if star {
+            b.push("Chromatic Star");
+        }
+        scen().battlefield(0, &b).graveyard(0, &["Lightning Bolt", "Ponder", "Brainstorm"]).at(Step::Main1, 0).start()
+    };
+    let none = board(false);
+    assert!(!none.has_option(Choice::Cast(none.card(0, "Lightning Bolt", Zone::Graveyard))), "{}", opts(&none));
+    let mut g = board(true);
+    let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+    let star = bf(&g, 0, "Chromatic Star");
+    assert!(g.has_option(Choice::Cast(bolt)), "escape through the Star: {}", opts(&g));
+    g.choose(Choice::Cast(bolt));
+    let mut step = Vec::new();
+    until_priority(&mut g, &|g| match g.kind() {
+        Some(DecisionKind::Target) => Some(Choice::Target(Target::Player(1))),
+        _ => None,
+    });
+    let _ = &mut step;
+    assert_eq!(g.obj(bolt).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.stack()[0].from, engine::game::CastFrom::Escape, "{}", log(&g));
+    assert_eq!(g.obj(star).zone, Zone::Exile, "the Star exiled by escape: {}", log(&g));
+}
+
+#[test]
+fn cr_601_2g_castability_and_the_cast_agree_with_mana_abilities_that_feed_the_graveyard_on_random_boards() {
+    // Random boards around Hogaak (its mana can't be spent, CR 113.6e) and the 601.2g step: green, red and colourless
+    // creatures, Llanowar Elves (it pays a Chromatic Star's {1} or convokes, not both), 0-2 Chromatic Stars ({1}, {T},
+    // sacrifice: one mana of any colour; a Star's {1} paid by a land, the Elves, a Lotus Petal, the pool or another
+    // Star's mana), 0-1 Lotus Petal, 0-2 lands, sometimes floating mana, graveyard cards, Hogaak in the hand or the
+    // graveyard, sometimes Underworld Breach (escape: three other graveyard cards exiled). Castability must agree with
+    // a brute force over the Stars and the Petal sacrificed while it is cast, the Elves tapped for a Star, delve's
+    // count and convoke's matching; and from a castable board every option of every decision of the cast must lead
+    // to Hogaak cast.
+    use engine::rng::Rng;
+    let kinds = [GREEN, GREEN, "Simian Spirit Guide", "Cogwork Librarian", "Llanowar Elves", "Dark Confidant"];
+    let fillers = ["Ponder", "Brainstorm", "Daze", "Island", "Swamp", "Wasteland"];
+    let mut rng = Rng::new(222);
+    let (mut castable_n, mut through_star, mut paths_n) = (0, 0, 0usize);
+    for case in 0..500 {
+        let cre: Vec<&str> = (0..rng.below(5)).map(|_| kinds[rng.below(kinds.len() as u32) as usize]).collect();
+        let gyv0: Vec<&str> = (0..rng.below(7)).map(|_| fillers[rng.below(fillers.len() as u32) as usize]).collect();
+        let stars = rng.below(3) as usize;
+        let petals = rng.below(3) as usize / 2;
+        let lands = rng.below(3) as usize;
+        let pool = rng.below(4) == 0;
+        let breach = rng.below(3) == 0;
+        let from_gy = rng.below(2) == 0;
+        let mut gyv = gyv0.clone();
+        if from_gy {
+            let at = rng.below(gyv.len() as u32 + 1) as usize;
+            gyv.insert(at, HOGAAK);
+        }
+        let mut b: Vec<&str> = cre.clone();
+        b.extend(std::iter::repeat_n("Chromatic Star", stars));
+        b.extend(std::iter::repeat_n("Lotus Petal", petals));
+        b.extend(["Swamp", "Forest"].iter().take(lands));
+        if breach {
+            b.push("Underworld Breach");
+        }
+        let mut s = scen().battlefield(0, &b).graveyard(0, &gyv).at(Step::Main1, 0);
+        if pool {
+            s = s.pool(0, [0, 0, 1, 0, 0, 0], 0);
+        }
+        if !from_gy {
+            s = s.hand(0, &[HOGAAK]);
+        }
+        let g = s.start();
+        let zone = if from_gy { Zone::Graveyard } else { Zone::Hand };
+        let h = g.card(0, HOGAAK, zone);
+        let offered = g.has_option(Choice::Cast(h));
+        // Brute force.
+        let colours: Vec<u8> = g.permanents_of(0).filter(|&c| g.is_creature(c)).map(|c| g.colors_of(c) & 0x1f).collect();
+        let elves = cre.iter().filter(|&&n| n == "Llanowar Elves").count();
+        let others = gyv0.len();
+        let ext = lands + pool as usize;
+        let matching = |cs: &[u8], generic: usize| -> bool {
+            let mut needs = vec![0u8; generic];
+            needs.extend([(1u8 << 2) | (1 << 4); 2]);
+            fn place(i: usize, needs: &[u8], cs: &[u8], used: &mut [bool]) -> bool {
+                if i == needs.len() {
+                    return true;
+                }
+                (0..cs.len()).any(|j| {
+                    if used[j] || (needs[i] != 0 && cs[j] & needs[i] == 0) {
+                        return false;
+                    }
+                    used[j] = true;
+                    let ok = place(i + 1, needs, cs, used);
+                    used[j] = false;
+                    ok
+                })
+            }
+            needs.len() <= cs.len() && place(0, &needs, cs, &mut vec![false; cs.len()])
+        };
+        let brute_with = |max_stars: usize| -> bool {
+            (0..=max_stars).any(|st| {
+                (0..=petals).any(|pe| {
+                    (0..=elves.min(1)).any(|el| {
+                        // (One mana pays the first Star's {1}; each Star's mana pays the next one's.)
+                        if st > 0 && ext + pe + el == 0 || st == 0 && el > 0 {
+                            return false;
+                        }
+                        // (The Elves tapped for a Star: one green creature fewer for convoke.)
+                        let mut cs = colours.clone();
+                        if el > 0 {
+                            let i = cs.iter().position(|&c| c == 1 << 4).expect("the Elves' green");
+                            cs.remove(i);
+                        }
+                        let fuel = others + st + pe;
+                        let pays = |fuel: usize| (0..=5usize.min(fuel)).any(|d| matching(&cs, 5 - d));
+                        pays(fuel) || (breach && from_gy && fuel >= 3 && pays(fuel - 3))
+                    })
+                })
+            })
+        };
+        let brute = brute_with(stars);
+        assert_eq!(offered, brute, "case {case}: offered {offered}, brute force {brute}: {b:?} gy {gyv:?} pool {pool}\n{}", opts(&g));
+        if !offered {
+            continue;
+        }
+        castable_n += 1;
+        through_star += !brute_with(0) as usize;
+        let mut g0 = g.clone();
+        g0.choose(Choice::Cast(h));
+        let mut stack = vec![g0];
+        let mut leaves = 0;
+        while let Some(w) = stack.pop() {
+            if leaves >= 300 {
+                break;
+            }
+            if at_priority(&w) {
+                leaves += 1;
+                assert_eq!(w.obj(h).zone, Zone::Stack, "case {case}: cast\n{}", log(&w));
+                continue;
+            }
+            let d = w.pending_decision().unwrap_or_else(|| panic!("case {case}: no decision\n{}", log(&w)));
+            assert!(!d.options.is_empty(), "case {case}: a decision without options\n{}", log(&w));
+            for o in &d.options {
+                let mut x = w.clone();
+                x.choose(o.choice);
+                stack.push(x);
+            }
+        }
+        paths_n += leaves;
     }
-    let _ = AbilitySlot::Spell;
+    println!("castable boards {castable_n}, castable only through a Star {through_star}, cast paths {paths_n}");
+    assert!(castable_n >= 100 && through_star >= 10 && paths_n >= 1000, "castable boards {castable_n}, through a Star {through_star}, paths {paths_n}");
 }
