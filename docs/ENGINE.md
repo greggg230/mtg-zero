@@ -43957,6 +43957,64 @@ the gate) built by a later encoding change, not here.
 `resolve.rs`: `Amount::EventSpellMv`. `loops.rs`: `loop_lki`. `flow.rs`: `start_turn` (one line). No payment code
 (`pay.rs`, `cost_order.rs`, `hogaak_a.rs`) is touched.
 
+## 227. zero-core pin 84bb5e1 -> 899e0eb: a failed resume ends the worker (fatal error, exit 1) instead of a job yielded for good; an NVIDIA card's CUDA ordinal by its LUID, a second DXGI listing of a card left out (zero-core `fix/resume-fatal` f8a6211, `fix/cuda-luid-ordinal` 899e0eb; 2026-11-21)
+
+**Why.** On 2026-11-21 a farm GPU lease went dead for 86 minutes after an owner-activity pause: at the `resume` the
+worker could not rebuild its GPU session (CUBLAS_STATUS_ALLOC_FAILED). The resume arm of the worker's control loop
+sent a NON-fatal `error` and stayed alive, and the job stayed yielded forever (`job::do_resume` returns at
+`EvalLink::restore()?`, before `set_yielded(false)`): a live process answering pings and playing nothing. Agent 0.3.15's
+watchdog already treats a non-fatal error while resuming plus no progress as a failed worker (after its wait); this is
+the worker's half.
+
+**What.** zero-core `crates/worker/src/proto.rs`: `control()` returns the fatal message of a failed resume (nothing
+emitted there); `with_control` stops reading control lines, quits the job, joins it and returns that error, which the
+serve loops already emit as `{"ev": "error", "fatal": true}` and exit 1 with - the path of a job's own error. A resume
+that works is unchanged (`resumed`). The agent takes a fatal error straight to `worker_failed` (zero-farm
+agent/src/lease.rs), so the lease fails over at once instead of after the watchdog's wait. No engine, encoding, search
+or row change: the worker crate's control path only.
+
+**Tests.** zero-core `proto::tests::a_failed_resume_is_fatal` (the resume arm: a link whose evaluator threads are gone
+-> the message, no `resumed`, still yielded until the caller quits; no link -> `resumed`) and
+`with_control_quits_the_job_on_a_failed_resume_and_returns_its_error` (end to end: yield, a failing resume, the job
+quit and joined, the error returned); `cargo test -p zero_worker --lib` 43 passed; clippy: nothing new.
+
+### 227.1 The CUDA ordinal by LUID (zero-core 899e0eb)
+
+**Why.** The farm releases of main 76973535 and 52d0bf9b FAILED at `cuda-selftest`: "Invalid device ID: 1, must be
+between 0 (inclusive) and 1 (exclusive)". The desktop has one NVIDIA card, but its user was on a remote desktop
+session, whose indirect display renders on the GPU - and DXGI then lists the card a second time under a new LUID
+(..f58f at DXGI 0, ..0b3978b9df at DXGI 2, the iGPU between). `gpu::dedup` keeps one adapter per LUID, so both stayed,
+and a CUDA-family provider's ordinal was the adapter's index among NVIDIA adapters: the probe tried the second listing
+as CUDA device 1. The probe code had not changed (the 16:37 release of 45dbf2e1 passed its self-test without the
+session). Any farm PC used over a remote desktop meets the same.
+
+**What.** zero-core `crates/worker/src/gpu.rs`: when DXGI lists two or more NVIDIA adapters, the CUDA driver
+(nvcuda.dll, loaded when asked: cuInit, cuDeviceGetCount, cuDeviceGet, cuDeviceGetLuid) gives each CUDA device's LUID;
+an NVIDIA adapter no CUDA device has the LUID of is left out of `gpu::adapters()` (`cuda_filter`), and
+`session::bind` gives CUDA / TensorRT-RTX the CUDA ordinal of the adapter's LUID (`device_ordinal`) - also right when
+CUDA's device order is not DXGI's (several cards, CUDA_DEVICE_ORDER). One NVIDIA adapter (most PCs): the driver is
+never asked, ordinal 0, as before; a driver that fails, or LUIDs none of which DXGI lists: nothing left out, the rule
+of before. AMD (MIGraphX) and DirectML unchanged.
+
+**Checked.** On the desktop under the remote desktop session, `gpu::adapters()` lists the RTX 5090 once (..f58f) and
+the iGPU; before, three adapters. Test `gpu::tests::a_second_listing_of_an_nvidia_card_goes_and_cuda_names_the_ordinal`
+(that desktop's listing; the second listing's old ordinal 1; no driver answer = before; two cards in CUDA's order; one
+card; AMD). `cargo test -p zero_worker --lib` 44 passed; clippy: nothing new.
+
+**Left (zero-farm agent, not here):** the agent's own DXGI list (agent/src/profile.rs `adapters`) still shows the
+second listing in its profile; a lease or probe sent to that LUID now fails with "no adapter with LUID ... on this PC"
+(before: the CUDA device-id error). The agent could drop it the same way (NVML's device LUIDs).
+**Gate** of c4057736 (this section's code merged with main 50205980; the warm worktree warm-2, `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`,
+the system Python, `--baseline-root` warm-1 at main 50205980 with its engine module from the artifact cache): **GATE
+PASSED WITH SKIPS optin-core c40577368190 in 1784s** - privacy 0 findings; core tests 215 passed; checkpoint_compat
+byte identity (visits and cq, 3,185 samples each); the digests as recorded (constructed 91b6cf60576961a7, EoE
+c3a9c786030f42eb, driver 6a03572828250b86, metagame 4039d04b7971975e, dealt f0bfffd26a70a753 over 80 matches); farm
+compat identical (gate 2: 6 games, 2,773 rows, 150 batches; gate 3 identical); cargo test --test az 57 and --test
+hidden 28 passed; the other three games built against this core; core pytest 755 passed, 71 skipped - skipped: 17
+live-run-hazard tests (fenced: live runs on this machine). Earlier gates of this branch: 699d413f (the resume fix
+alone, PASSED WITH SKIPS AND FLAKY RETRIES - test_remoteplay::test_a_dying_worker_gives_its_accepted_games_back passed
+on retry) and a412d697 (both fixes on main a99e9ca7, PASSED WITH SKIPS). The next commit adds this paragraph only (docs).
+
 ## 228. Payment fixes found by the Hogaak lanes: a payment's twins, castability and delve's need with convoke and improvise; the picks in progress deferred to layout v8 (branch `fix/hogaak-payment`, 2026-11-21)
 
 **Why.** Lane A's Hogaak write-up (220.1.5) found payment defects outside its card; the user asked for them to be fixed
