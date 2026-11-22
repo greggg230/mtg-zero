@@ -42914,5 +42914,15 @@ ENGINE.md 44), the desktop throttled beside the live run.
 
 #### 220.4.10 The engine gate
 
-The engine tier on this section's commit, `--tested-sha 1052673bd712` with its suite report and the cube's digests
-(`--expect-digest 44372545881ef768 --expect-digest0 a965c3fc8d3bba8a`): its result follows in the next commit (docs only).
+On 93513ea8 (220.4's commit; docs after the tested code), in this worktree, its steps on the Mac and the desktop's
+throttled beside the live legacy-meta3-r1: `python tools/gate.py engine --tested-sha 1052673bd712 --expect-digest
+44372545881ef768 --expect-digest0 a965c3fc8d3bba8a` - **GATE PASSED WITH SKIPS engine 93513ea86b60 in 1893s** (skipped:
+one live-run-hazard test of the desktop's pytest, fenced by the live run here): privacy (0 findings); the build and the
+release worker; the digests full 44372545881ef768 and encoding-free a965c3fc8d3bba8a (= expected); the digest formats
+constructed 91b6cf60576961a7, EoE c3a9c786030f42eb, driver 6a03572828250b86, metagame be3766d1f943c95c and dealt
+f0bfffd26a70a753 (each = the checkout's recorded file); `az` 57, `limits` 13, `hidden` 28 passed; pytest on the Mac 1,260
++ 721 + 651 + 738 passed and its desktop part 48 passed (5 skipped); the desktop smoke config; **farm compat identical**
+on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,773 rows, 150 batches; gate 3: 6 games, 2,609 rows, 6 decks
+compared); the suite evidence of 1052673bd712 (`gates/1052673bd712-suite.json`); the Mac's full-suite recheck not
+needed (the tested sha differs in docs only); the checkout unchanged (`gates/93513ea86b60-engine.json`). The next
+commit adds this paragraph only (docs).
