@@ -1772,11 +1772,31 @@ impl Game {
         if !prods.is_empty() {
             // X mana in any combination: one mana, one choice, X times.
             let picks = if matches!(prod, crate::db::ManaProd::ComboX { .. }) { x } else { 1 };
-            for _ in 0..picks {
-                // (Its restriction and its rider go with the mana, CR 106.6.)
-                // (Of its source's chosen creature type: ENGINE.md 124.2.)
-                let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
-                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only, page: crate::decision::Page::FIRST });
+            // (Its restriction and its rider go with the mana, CR 106.6.)
+            // (Of its source's chosen creature type: ENGINE.md 124.2.)
+            let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
+            if self.oracle && picks > 1 {
+                // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order
+                // the mana was chosen in, so every order of one combination reaches one state - each combination once,
+                // not each sequence; ENGINE.md 222.4.)
+                let mut combos: Vec<[u8; 6]> = vec![[0; 6]];
+                for _ in 0..picks {
+                    let mut next: Vec<[u8; 6]> = Vec::new();
+                    for c in &combos {
+                        for v in &prods {
+                            let s: [u8; 6] = std::array::from_fn(|t| c[t].saturating_add(v[t]));
+                            if !next.contains(&s) {
+                                next.push(s);
+                            }
+                        }
+                    }
+                    combos = next;
+                }
+                self.agenda.push(Task::ManaNowPick { p, prods: combos, only, page: crate::decision::Page::FIRST });
+            } else {
+                for _ in 0..picks {
+                    self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only, page: crate::decision::Page::FIRST });
+                }
             }
         }
     }
