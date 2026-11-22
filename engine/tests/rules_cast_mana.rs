@@ -6,7 +6,7 @@
 //! collapse: a permanent's own "{T}: add <fixed mana>" with nothing else is left to the priority after the cast when
 //! nothing between can tell (`cast_mana.rs`).
 
-use engine::db::{AbilitySlot, CardDb};
+use engine::db::CardDb;
 use engine::game::StackKind;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Target, Zone};
@@ -500,12 +500,10 @@ fn cr_601_2g_702_138a_a_chromatic_star_activated_while_a_spell_is_cast_feeds_esc
     let star = bf(&g, 0, "Chromatic Star");
     assert!(g.has_option(Choice::Cast(bolt)), "escape through the Star: {}", opts(&g));
     g.choose(Choice::Cast(bolt));
-    let mut step = Vec::new();
     until_priority(&mut g, &|g| match g.kind() {
         Some(DecisionKind::Target) => Some(Choice::Target(Target::Player(1))),
         _ => None,
     });
-    let _ = &mut step;
     assert_eq!(g.obj(bolt).zone, Zone::Stack, "{}", log(&g));
     assert_eq!(g.stack()[0].from, engine::game::CastFrom::Escape, "{}", log(&g));
     assert_eq!(g.obj(star).zone, Zone::Exile, "the Star exiled by escape: {}", log(&g));

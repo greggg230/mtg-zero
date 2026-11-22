@@ -718,7 +718,12 @@ mod tests {
                 two.push(f);
             }
             assert!(!one.is_empty());
-            assert_eq!(hashes(&one), hashes(&two), "the Mountain {m:?}: the states differ");
+            let desc = |v: &[Game]| -> Vec<String> {
+                v.iter().map(|g| format!("{:?} tapped {:?} pool {:?} {}", (g.loop_hash(0, None), g.loop_hash(1, None)), lands.iter().map(|&l| g.objs[l.i()].tapped).collect::<Vec<_>>(), g.players[0].pool.amt, g.log_lines().join(" / "))).collect()
+            };
+            assert_eq!(hashes(&one), hashes(&two), "the Mountain {m:?}: the states differ
+{:#?}
+{:#?}", desc(&one), desc(&two));
         }
     }
 
@@ -745,7 +750,7 @@ mod tests {
         g.choose(Choice::Card(star));
         // (The Star's {1}: the Island; its mana: blue.)
         for _ in 0..20 {
-            if g.kind() == Some(DecisionKind::CastMana) {
+            if g.objs[star.i()].zone == Zone::Graveyard && g.players[0].pool.total() > 0 {
                 break;
             }
             let c = match g.kind() {
