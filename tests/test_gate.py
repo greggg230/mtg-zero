@@ -1503,6 +1503,7 @@ def test_a_mac_shard_has_its_own_basetemp_removed_after(monkeypatch):
     bases = [m.split('--basetemp=')[1].split(';')[0] for m in macs]
     assert len(set(bases)) == 3 and all(b.startswith(f'gates/tmp/pytest-{SHA[:12]}-') for b in bases)
     assert all(m.endswith(f'; rc=$?; rm -rf {b}; exit $rc; }}') for m, b in zip(macs, bases))
+    assert all('{ mkdir -p gates/tmp && python -m pytest ' in m for m in macs)      # (pytest makes no parents)
 
 
 def test_the_jobs_default_is_the_machines_setting(tmp_path, monkeypatch):

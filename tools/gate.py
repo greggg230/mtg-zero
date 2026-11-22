@@ -1747,7 +1747,8 @@ def pytest_step(name='pytest', step_id='pytest', ctx=None):
         mac_base = f'gates/tmp/pytest-{ctx.sha_short}-{tag}-{uuid.uuid4().hex[:8]}'
         mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={d}' for d in mac_desel],
                           f'--basetemp={mac_base}'])
-        mac = f'{{ {mac}; rc=$?; rm -rf {mac_base}; exit $rc; }}'
+        # (pytest makes the basetemp itself, not its parents: a new Mac checkout has no gates/tmp yet)
+        mac = f'{{ mkdir -p gates/tmp && {mac}; rc=$?; rm -rf {mac_base}; exit $rc; }}'
         nfiles = len({e.split('::')[0] for e in entries})
         s = Step(f'{name} {tag} ({nfiles} files)',
                  [python_exe(), '-m', 'pytest', *entries, *PYTEST_ARGS, *[f'--deselect={d}' for d in desel],
