@@ -275,7 +275,7 @@ fn cr_400_3_an_opponents_lotus_petal_does_not_feed_your_graveyard_costs() {
     let g = start(false, &[]);
     let frog = bf(&g, 0, "Psychic Frog");
     assert!(!g.has_option(act(frog, 1)), "two cards in P0's graveyard and P1's Petal: no exile of three\n{}", log(&g));
-    // P0's own Petal: not while the ability is activated - its cost has no mana payment (CR 605.3a; ENGINE.md 228) -
+    // P0's own Petal: not while the ability is activated - its cost has no mana payment (CR 605.3a; ENGINE.md 229) -
     // but floated first with priority, its card is P0's third.
     let mut g = start(true, &[]);
     assert!(!g.has_option(act(frog, 1)), "no mana ability while paying a cost of no mana\n{}", log(&g));

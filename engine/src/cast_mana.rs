@@ -1,4 +1,4 @@
-//! Mana abilities while a spell is cast (CR 601.2g; ENGINE.md 228).
+//! Mana abilities while a spell is cast (CR 601.2g; ENGINE.md 229).
 //!
 //! "If the total cost includes a mana payment, the player then has a chance to activate mana abilities. Mana
 //! abilities must be activated before costs are paid" (601.2g), and then "the player pays the total cost" in any
@@ -17,8 +17,8 @@
 //!   step's options and every decision of an ability it activates are searched (`Game::payment_completes`) down to
 //!   the step, where the search asks the payment's castability (`Game::can_pay_spell`) after any further abilities
 //!   that may put cards into the caster's graveyard (the only ones that can make a payment completable that wasn't:
-//!   delve's and the exile's cards; any other ability's mana the payment's own sources make, ENGINE.md 228.4).
-//! * **One collapse** (ENGINE.md 228.3, the proof): a permanent's own "{T}: add <fixed mana>" ability, nothing else in
+//!   delve's and the exile's cards; any other ability's mana the payment's own sources make, ENGINE.md 229.4).
+//! * **One collapse** (ENGINE.md 229.3, the proof): a permanent's own "{T}: add <fixed mana>" ability, nothing else in
 //!   its cost or effect, is not offered when activating it now and activating it with the priority the caster
 //!   receives right after the cast reach the same states (`Game::cast_mana_collapsed`): nothing between reads or
 //!   changes what it does.
@@ -83,7 +83,7 @@ impl Game {
     /// Is spell `card` (cast or about to be) still before its 601.2g step's end: not on the stack (castability, CR
     /// 601.2: the step comes), or on it with the step's task waiting (the announcements, the step's decisions)?
     /// Castability's delve then counts the cards abilities activated in the step may put into the graveyard
-    /// (`Game::delve_classes`); after it, delve's own sources only (ENGINE.md 228.4).
+    /// (`Game::delve_classes`); after it, delve's own sources only (ENGINE.md 229.4).
     pub(crate) fn before_cast_mana(&self, card: CardIdx) -> bool {
         if self.objs[card.i()].zone != Zone::Stack {
             return true;
@@ -153,7 +153,7 @@ impl Game {
             }
             None => {
                 if self.oracle {
-                    // The search (ENGINE.md 228.4): each feeding ability castability doesn't count, or the leaf.
+                    // The search (ENGINE.md 229.4): each feeding ability castability doesn't count, or the leaf.
                     if sources.is_empty() {
                         if !self.wild_any(p, id, &|g: &Game| g.cast_mana_open_ok(id)) {
                             self.oracle_dead = true;
@@ -232,7 +232,7 @@ impl Game {
     /// as an instant" ability (Lion's Eye Diamond: no player has priority, ruling 2004-10-04), not one the collapse
     /// leaves to the priority after the cast (`cast_mana_collapsed`). In the payment search (`feed_only`) only those
     /// that may put a card into `p`'s graveyard which the payment reads and its castability doesn't count
-    /// (`gap_feeder`, ENGINE.md 228.4).
+    /// (`gap_feeder`, ENGINE.md 229.4).
     fn cast_mana_sources(&self, id: u32, p: PlayerId, spell: CardIdx, feed_only: bool) -> Vec<(CardIdx, Vec<AbilitySlot>)> {
         let mut out: Vec<(CardIdx, Vec<AbilitySlot>)> = Vec::new();
         let mut reads = (false, false, false);
@@ -320,7 +320,7 @@ impl Game {
     /// May activating mana ability `ad` (at `slot`) put a card into its controller's graveyard (a sacrifice: of its
     /// source, of another permanent, Gemstone Mine's at its last counter, Rain of Filth's granted one; a discard)?
     /// Only such abilities can make a payment that reads the graveyard (delve, an exile from the graveyard)
-    /// completable that wasn't (ENGINE.md 228.4).
+    /// completable that wasn't (ENGINE.md 229.4).
     fn cast_mana_feeder(ad: &ActivatedDef, slot: AbilitySlot) -> bool {
         let k = &ad.cost;
         slot == crate::pay::SAC_FOR
@@ -336,7 +336,7 @@ impl Game {
     /// Is mana ability `ad` (at `slot`) one that may put a card into its
     /// controller's graveyard (`cast_mana_feeder`) for a payment that reads it - `delve`, `exile` ("exile n cards from
     /// your graveyard"), of a spell of no mana (`no_mana`) or not - which that payment's castability does not count
-    /// (ENGINE.md 228.4)? Castability counts (`delve_classes`, `no_mana_feeders`, `cost_payable_with`'s
+    /// (ENGINE.md 229.4)? Castability counts (`delve_classes`, `no_mana_feeders`, `cost_payable_with`'s
     /// `delve_sources`): of a spell that spends mana, for delve an ability that sacrifices (its source or another
     /// permanent), for an exile one that sacrifices its source with no mana cost ("{X}" as 0); of a spell of no
     /// mana, for delve one that sacrifices with no mana cost, for an exile none. A feeder counted for neither part
@@ -361,7 +361,7 @@ impl Game {
     }
 
     /// The delve fuel of a spell whose mana can't be spent (CR 113.6e) from the mana abilities its 601.2g step may
-    /// activate (castability, `Game::delve_classes`; ENGINE.md 228.4): each `p`'s mana source that sacrifices its card
+    /// activate (castability, `Game::delve_classes`; ENGINE.md 229.4): each `p`'s mana source that sacrifices its card
     /// (itself; a land for another's ability, Squandered Resources', Rain of Filth's) with no mana cost to pay (no
     /// mana is paid for such a spell's cost; "{X}" as 0), a class of the delve unit alone (`Class::delve`: no mana, the
     /// spell's cost takes none), its card's use whole (it can't then be tapped for convoke: sacrificed first, 601.2g
@@ -402,7 +402,7 @@ impl Game {
     /// permanent's ability tapping or sacrificing it (Urza, Lord High Artificer's "tap an untapped artifact you
     /// control"). The payment's sources (`mana_classes`, as `can_pay_for` reads them) less those other uses: its own
     /// ability stays a source (activated anyway, its mana is the payment's, used or floating). Before, the rest was
-    /// asked with the other uses counted - castability and the payment disagreed (ENGINE.md 228: cube board 2213, Dig
+    /// asked with the other uses counted - castability and the payment disagreed (ENGINE.md 229: cube board 2213, Dig
     /// Through Time with Urza and Wizard's Rockets).
     pub(crate) fn delve_rest_payable_using(&self, p: PlayerId, card: CardIdx, cost: &ManaCost, allow: crate::doomsday_b::Allow, used: &[CardIdx]) -> bool {
         if used.is_empty() {
@@ -464,7 +464,7 @@ impl Game {
         })
     }
 
-    /// The search's leaf (ENGINE.md 228.4): can the payment of spell `id` be completed from here, the 601.2g step going
+    /// The search's leaf (ENGINE.md 229.4): can the payment of spell `id` be completed from here, the 601.2g step going
     /// on - its other mana abilities activated as the payment's castability counts them (`delve_classes` while the step
     /// is open, `before_cast_mana`), then the cost paid? (On a copy with the step's task waiting.)
     fn cast_mana_open_ok(&self, id: u32) -> bool {
@@ -488,7 +488,7 @@ impl Game {
         self.can_pay_spell(card, item, &cost)
     }
 
-    /// The collapse (ENGINE.md 228.3): is permanent `c`'s own mana ability `ad` left out of spell `id`'s 601.2g step,
+    /// The collapse (ENGINE.md 229.3): is permanent `c`'s own mana ability `ad` left out of spell `id`'s 601.2g step,
     /// activating it now and activating it with the priority `p` receives right after the cast reaching the same
     /// states? When:
     /// 1. its cost is {T} alone and it only adds mana of a fixed production (one of its types, fixed amounts: what it
@@ -655,7 +655,7 @@ impl Game {
         ab.targets.iter().any(|t| crate::cost_order::filter_reads_tapped(&t.filter)) || ab.modes.as_ref().is_some_and(|m| m.list.iter().any(Self::ability_reads_tapped))
     }
 
-    /// Castability through the 601.2g step (ENGINE.md 228.4): can `p` cast spell `card` the way `from` says, for its
+    /// Castability through the 601.2g step (ENGINE.md 229.4): can `p` cast spell `card` the way `from` says, for its
     /// mana cost (`alt` 0) or alternative cost `alt` - 1, with the help of mana abilities activated while it is cast
     /// that put cards into `p`'s graveyard for its delve or its cost's "exile n cards from your graveyard" and that the
     /// payment's own castability does not count: one with a mana cost of its own for a spell whose mana can't be spent
@@ -834,7 +834,7 @@ mod tests {
         }
     }
 
-    /// Both players' loop hashes of each state (ENGINE.md 228.3: the states compared as the game tells them apart),
+    /// Both players' loop hashes of each state (ENGINE.md 229.3: the states compared as the game tells them apart),
     /// sorted, each once; the twin permanents `twins` (alike in every respect but which of them is tapped, one payment
     /// class: the payment taps the first free one) told apart only by how many are tapped.
     fn hashes(states: &[Game], twins: &[CardIdx]) -> Vec<(u64, u64)> {
@@ -852,7 +852,7 @@ mod tests {
         v
     }
 
-    /// ENGINE.md 228.3 (the collapse): a Mountain's "{T}: add {R}" activated in Lightning Bolt's 601.2g step reaches
+    /// ENGINE.md 229.3 (the collapse): a Mountain's "{T}: add {R}" activated in Lightning Bolt's 601.2g step reaches
     /// exactly the states the cast without it reaches with a Mountain's ability activated by its payment or, with the
     /// priority right after it, by the player (the two Mountains are twins: which one is the payment's canonical
     /// choice). Chromatic Star makes the step ask (never chosen in the step).
@@ -913,7 +913,7 @@ mod tests {
         }
     }
 
-    /// CR 601.2f-g (ENGINE.md 228): the total cost is locked as the step's first mana ability is activated, so a cost
+    /// CR 601.2f-g (ENGINE.md 229): the total cost is locked as the step's first mana ability is activated, so a cost
     /// reducer the ability sacrifices (Emry's "costs {1} less for each artifact you control": Chromatic Star) doesn't
     /// raise it; the lock is gone once the spell is cast.
     #[test]

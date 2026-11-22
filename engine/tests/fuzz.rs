@@ -495,7 +495,7 @@ fn same_seed_and_actions_replay_matches_identically() {
     }
 }
 
-/// ENGINE.md 228: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
+/// ENGINE.md 229: the seed scan that re-pinned the four seed-pinned tests above after the 601.2g step changed their
 /// games (a new decision draws from each game's random stream). Ignored; `SCAN_KIND` = `left_look` (hidden-decklist
 /// default games with a look at a card that left the viewer's hand in its step), `entered_look` (default games with a
 /// look at a card that came into the hand and left it in its step), `etali` (interactions games whose rows carry an

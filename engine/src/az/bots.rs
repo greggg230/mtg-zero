@@ -831,7 +831,7 @@ impl Heuristic {
                 })
             }
             // A cast's mana abilities before its cost is paid (CR 601.2g,
-            // ENGINE.md 228): none (the payment activates what it spends),
+            // ENGINE.md 229): none (the payment activates what it spends),
             // unless the cost needs one (`PASS` not offered: the first).
             K::CastMana => Some(act::PASS),
             // Not the ability's own source while paying for it (a manland
@@ -1986,7 +1986,7 @@ pub mod v1 {
                     let keep = g.player(p).mulligans >= 1 || (2..=5).contains(&lands) || n < 7;
                     Some(if keep { act::PASS } else { act::YES })
                 }
-                // (CR 601.2g, as `Heuristic`'s: ENGINE.md 228.)
+                // (CR 601.2g, as `Heuristic`'s: ENGINE.md 229.)
                 K::CastMana => Some(act::PASS),
                 K::MulliganBottom | K::Discard | K::DiscardCost => Some(Self::worst_hand_card(g, d, p)),
                 K::ChooseHandCard => {

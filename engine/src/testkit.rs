@@ -384,7 +384,7 @@ impl Game {
             return keys;
         }
         // (A cast's 601.2g step asked where a test written before it answers the payment: `PASS` first, the step's
-        // "pay the cost" - no mana ability activated while casting; ENGINE.md 228.)
+        // "pay the cost" - no mana ability activated while casting; ENGINE.md 229.)
         if self.pending.as_ref().is_some_and(|d| d.kind == crate::decision::DecisionKind::CastMana && d.action_of(c).is_none() && d.action_of(Choice::Pass).is_some()) {
             let mut keys = self.choose(Choice::Pass);
             keys.extend(self.choose(c));
@@ -432,7 +432,7 @@ impl Game {
     /// holds or a real decision other than priority is pending. Meant for
     /// games with `auto_single = false`, where it stops exactly at `stop`.
     /// Returns the chance keys.
-    /// A cast's 601.2g step pending (ENGINE.md 228): `PASS` - the cost paid with no mana ability activated while
+    /// A cast's 601.2g step pending (ENGINE.md 229): `PASS` - the cost paid with no mana ability activated while
     /// casting (tests of the payment that follows).
     pub fn pass_cast_mana(&mut self) {
         while self.pending.as_ref().is_some_and(|d| d.kind == DecisionKind::CastMana && d.action_of(Choice::Pass).is_some()) {
@@ -448,7 +448,7 @@ impl Game {
             }
             let Some(d) = &self.pending else { return keys };
             // (A cast's 601.2g step: `PASS`, the cost paid with no mana ability activated while casting - the default,
-            // as passing priority is; ENGINE.md 228.)
+            // as passing priority is; ENGINE.md 229.)
             let c = if d.options.len() == 1 {
                 d.options[0].choice
             } else if d.kind == DecisionKind::Priority || (d.kind == DecisionKind::CastMana && d.action_of(Choice::Pass).is_some()) {
@@ -670,7 +670,7 @@ impl Game {
             // division, splices, a ninjutsu attack, a trigger's event and
             // noted permanents (objects by place, a stack item by position).
             v.extend([s.cost_option as u64, s.alt as u64, h64(&s.from), s.delved as u64, s.x as u64, s.origin as u64]);
-            // (Its total cost locked by a mana ability activated while it is cast, CR 601.2f-g: ENGINE.md 228.)
+            // (Its total cost locked by a mana ability activated while it is cast, CR 601.2f-g: ENGINE.md 229.)
             v.push(self.locked_cost(s.id).map_or(u64::MAX, |c| h64(&c)));
             v.extend(s.division.iter().map(|&n| n as u64));
             v.extend(s.spliced.iter().map(|&d| d as u64));

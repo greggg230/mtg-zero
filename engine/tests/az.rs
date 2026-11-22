@@ -1363,7 +1363,7 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
-/// The 601.2g step's positions (ENGINE.md 228): Hogaak castable only through a Chromatic Star activated while it is
+/// The 601.2g step's positions (ENGINE.md 229): Hogaak castable only through a Chromatic Star activated while it is
 /// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
 /// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
 fn cast_mana_positions() -> Vec<(&'static str, MtgAz)> {

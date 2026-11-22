@@ -593,7 +593,7 @@ impl Game {
         };
         // (The mana, and what it may change, come first: ENGINE.md 100.4.10.)
         // (A delve spell's `mana` is less the graveyard's cards: its total cost
-        // has a mana payment whenever delve may pay some of it, ENGINE.md 228.)
+        // has a mana payment whenever delve may pay some of it, ENGINE.md 229.)
         let paid = if cast && self.def_of(card).delve { crate::mana::ManaCost { generic: 1, ..Default::default() } } else { *mana };
         let forced = self.exile_sources(p, card, cost, exclude, &paid);
         let paying = !(mana.is_zero() && forced.is_empty());
@@ -708,7 +708,7 @@ impl Game {
             // (Not for a spell whose mana can't be spent: its payment activates
             // no mana source, ENGINE.md 220.1.)
             // (Nor for a cost of no mana: no mana ability is activated while
-            // paying it, CR 601.2g, 605.3a; ENGINE.md 228.)
+            // paying it, CR 601.2g, 605.3a; ENGINE.md 229.)
             let spell_delve = self.objs[card.i()].zone != Zone::Battlefield && self.def_of(card).delve;
             let d: Vec<CardIdx> = if allow.no_mana || (mana.is_zero() && !spell_delve) {
                 Vec::new()
@@ -1064,7 +1064,7 @@ impl Game {
     /// 601.2g-h; the first in canonical order: Lotus Petals alike). None for
     /// a cost whose mana, `mana`, is nothing: mana abilities are activated
     /// while paying a cost only if it includes a mana payment (CR 601.2g,
-    /// 602.2b, 605.3a; ENGINE.md 228: an escape of X = 0).
+    /// 602.2b, 605.3a; ENGINE.md 229: an escape of X = 0).
     pub(crate) fn exile_sources(&self, p: PlayerId, card: CardIdx, cost: &Cost, exclude: Option<CardIdx>, mana: &crate::mana::ManaCost) -> Vec<(crate::pay::Src, bool)> {
         if mana.is_zero() {
             return Vec::new();
@@ -1796,12 +1796,12 @@ impl Game {
             if self.oracle && step_next && picks > 0 && only == 0 && units && (wn == 0 || wm == unit_mask) && wn as u32 + picks <= u8::MAX as u32 {
                 // (In the payment search, the mana's types not chosen yet: each one mana of a type of the mask, as the
                 // payment's castability counts it, `Game::pool_wild` - the search asks whether some combination
-                // completes the payment; ENGINE.md 228.4.)
+                // completes the payment; ENGINE.md 229.4.)
                 self.pool_wild[p as usize] = (wn + picks as u8, unit_mask);
             } else if self.oracle && picks > 1 {
                 // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order
                 // the mana was chosen in, so every order of one combination reaches one state - each combination once,
-                // not each sequence; ENGINE.md 228.4.)
+                // not each sequence; ENGINE.md 229.4.)
                 let mut combos: Vec<[u8; 6]> = vec![[0; 6]];
                 for _ in 0..picks {
                     let mut next: Vec<[u8; 6]> = Vec::new();

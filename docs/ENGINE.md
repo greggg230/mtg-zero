@@ -42927,7 +42927,7 @@ compared); the suite evidence of 1052673bd712 (`gates/1052673bd712-suite.json`);
 needed (the tested sha differs in docs only); the checkout unchanged (`gates/93513ea86b60-engine.json`). The next
 commit adds this paragraph only (docs).
 
-## 228. Mana abilities while a spell is cast: the 601.2g step (fix agent M, bug 1 of the Hogaak lanes' findings; branch `fix/hogaak-midcast-mana`, 2026-11-21)
+## 229. Mana abilities while a spell is cast: the 601.2g step (fix agent M, bug 1 of the Hogaak lanes' findings; branch `fix/hogaak-midcast-mana`, 2026-11-21)
 
 **Why.** Lane A found it (220.1.5, 220.1.9) and the user asked for the fix: CR 601.2g - "If the total cost includes a
 mana payment, the player then has a chance to activate mana abilities. Mana abilities must be activated before costs
@@ -42941,7 +42941,7 @@ activated while casting, its draw trigger put on the stack above the spell (601.
 did not reach. **Not** Lion's Eye Diamond: "activate only as an instant" means it can't be activated while a spell is
 cast (its 2004-10-04 ruling; the user's correction) - the step honours that and every other timing restriction.
 
-### 228.1 The step
+### 229.1 The step
 
 * **`Task::CastMana { id, card, again }`, `DecisionKind::CastMana`** (`cast_mana.rs`): pushed by `begin_cast_face`
   after `Task::Delve`, so it runs once the total cost is determined (601.2b-f's announcements run first) and before
@@ -42961,7 +42961,7 @@ cast (its 2004-10-04 ruling; the user's correction) - the step honours that and 
   (601.2f fixed it already). `cast_lock` is Public (the public-state gate perturbs it; `view_of` shows it).
 * **Bots** answer the step `PASS` (it is action 0, the options are sorted; both heuristic bots say so explicitly).
 
-### 228.2 What castability counts
+### 229.2 What castability counts
 
 The payment's castability (`delve_classes` while the step may still come, `before_cast_mana`) counts the cards mana
 abilities activated in the step may put into the graveyard: every source that sacrifices its card (incl. one with a
@@ -42976,7 +42976,7 @@ additional option castability considers, escalate's discards, one spree mode, ea
 searches the cast's own 601.2g step (`payment_completes`) - the same search the step makes when the spell is cast, so
 castability and the cast agree by construction.
 
-### 228.3 The collapse (a proof)
+### 229.3 The collapse (a proof)
 
 The step does not offer permanent c's own mana ability A when activating A in the step and activating it with the
 priority the caster receives right after the cast reach the same states (`cast_mana_collapsed`). Conditions:
@@ -43027,7 +43027,7 @@ reads nothing the rest may change but types, abilities or power/toughness (if th
 anyway, so the set is exact whenever it is read); counters removed are unsettling only on a creature, planeswalker or
 battle (704.5f-g, i, v) - elsewhere only a continuous effect reads them, which `chars_may_change` counts.
 
-### 228.4 Completability: the step's search (an exactness argument)
+### 229.4 Completability: the step's search (an exactness argument)
 
 Every option of the step, and every decision of an ability it activates, must leave the cast's payment completable
 (601.2h: a cost is paid whole; `cost_order::completing`, floor `cast_mana_floor`). In the search (`Game::oracle`
@@ -43057,7 +43057,7 @@ the mask is exactly "some type of the mask"; (2) a paged decision of a step acti
 `completing` (`ask_paged_ranges`: Cascading Cataracts' 126 productions); (3) one `completing` pass per step decision
 (`ask_completed`). A spell whose total cost has no mana has no step: the search asks its payment as it is.
 
-### 228.5 Found and fixed on the way
+### 229.5 Found and fixed on the way
 
 * **Delve counted another use of a source it delves** (cube board 2213 of `rules_castpay`, reachable after step
   activations): a Lotus Petal or Wizard's Rockets chosen in delve (`Mark::DelveLate`) is activated by its own ability as
@@ -43073,7 +43073,7 @@ the mask is exactly "some type of the mask"; (2) a paged decision of a step acti
   triggered ability (a state the engine can't reach, which the step's searches now resolve events through): it picks a
   permanent whose definition has one.
 
-### 228.6 Tests
+### 229.6 Tests
 
 `tests/rules_cast_mana.rs` (16; rules_suite): Petal / Star delved for Hogaak and Treasure Cruise, a Petal activated
 with its mana unspent, an unneeded Star's trigger above the spell vs below when floated first, Lion's Eye Diamond never
@@ -43086,19 +43086,19 @@ paths), the delve fix, the zero-mana rule. `cast_mana.rs` unit tests: the collap
 `cr_601_2g_a_lotus_petal_sacrificed_while_hogaak_is_cast_feeds_escapes_exile` (was "never fed": 220.1.4's reading,
 which this section replaces). `tests/az.rs` `cast_mana_positions` in the public-state gate. Tests of the payment pass
 the step (`Game::pass_cast_mana`; testkit `choose` and `drive_until` pass a step a test answers past). The four
-seed-pinned fuzz tests re-pinned by the scan `scan_seeds_for_the_seed_pinned_tests` (228.7).
+seed-pinned fuzz tests re-pinned by the scan `scan_seeds_for_the_seed_pinned_tests` (229.7).
 
-### 228.7 Results
+### 229.7 Results
 
 RESULTS_PLACEHOLDER
 
-### 228.8 Known follow-ups
+### 229.8 Known follow-ups
 
 * **Activating an ability has the same step** (CR 602.2b: 601.2b-i apply to activating an ability): not on this branch
   (the orchestrator's follow-up todo: reuse `Task::CastMana`'s machinery for `ActPay`). Until then a mana ability is
   activated during an activation only by its payment (and `exile_sources`' forced need-free sacrifices).
-* Castability treats a delve spell's delve-reduced mana as a mana payment (228.5): exact unless its total cost is zero,
+* Castability treats a delve spell's delve-reduced mana as a mana payment (229.5): exact unless its total cost is zero,
   which no delve card's cost reaches without an alternative cost of no mana, and such a cost and an exile cost are never
   combined (escape is itself the alternative cost).
 * The collapse stays conservative where `chars_may_change` can't tell (a permanent leaving with statics reading
-  counts): measured in 228.7.
+  counts): measured in 229.7.
