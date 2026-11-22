@@ -220,6 +220,7 @@ fn cr_601_2h_natural_order_may_sacrifice_the_elf_that_paid_for_it() {
     let no = g.card(0, "Natural Order", Zone::Hand);
     assert!(g.has_option(Choice::Cast(no)), "Elvish Mystic pays {{G}} and is then sacrificed");
     g.choose(Choice::Cast(no));
+    g.pass_cast_mana();
     pay(&mut g);
     g.drive_until(|g| {
         !matches!(g.kind(), Some(DecisionKind::Sacrifice)) || g.has_option(Choice::Card(bf(g, 0, "Elvish Mystic")))
@@ -279,6 +280,7 @@ fn cr_601_2h_crop_rotation_may_sacrifice_the_land_that_paid_for_it() {
     let cr = g.card(0, "Crop Rotation", Zone::Hand);
     assert!(g.has_option(Choice::Cast(cr)), "the Forest pays {{G}} and is then sacrificed");
     g.choose(Choice::Cast(cr));
+    g.pass_cast_mana();
     pay(&mut g);
     if g.kind() == Some(DecisionKind::Sacrifice) {
         g.choose(Choice::Card(bf(&g, 0, "Forest")));
