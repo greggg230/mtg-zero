@@ -880,9 +880,12 @@ pub struct Game {
     /// Slots made as copies, not cards (token copies, copies of spells and
     /// of cards), in increasing order.
     pub(crate) copy_objs: Vec<CardIdx>,
-    /// Copiable values of permanents that left the battlefield this turn,
-    /// as they last existed there (CR 608.2h).
-    pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals)>,
+    /// Copiable values and mana value of permanents that left the
+    /// battlefield this turn, as they last existed there (CR 608.2h): the
+    /// mana value `mana_value_of` gave it then, copy effects included (a
+    /// copy of a back face 0, CR 202.3b; ENGINE.md 223), which its copiable
+    /// values alone don't tell (copy-ness isn't copiable, 707.2).
+    pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals, u64)>,
     /// The permanents that permanents leaving the battlefield this turn were
     /// attached to, as they last existed there ("enchanted creature" of an
     /// Aura that left, CR 608.2h; ENGINE.md 99.11).
@@ -929,8 +932,10 @@ pub struct Game {
     /// (`Game::moon_on`; ENGINE.md 99.12).
     pub(crate) moon_game: bool,
     /// Spells that left the stack while a triggered ability about them
-    /// waited: their definition and item (CR 608.2h: "copy it").
-    pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
+    /// waited: their definition and item (CR 608.2h: "copy it"), and their
+    /// mana value as they last existed there ("that spell's mana value":
+    /// `mana_value_with_x`, its X and a copy's 202.3b; ENGINE.md 223).
+    pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem, u64)>,
     /// The token being created is a copy with these values (consumed as it
     /// enters).
     pub(crate) entering_copy: Option<crate::copies::CopyVals>,
@@ -2553,10 +2558,13 @@ impl Game {
         }
         let lost_granted = from == Zone::Battlefield && !self.marks.is_empty() && self.lost_abilities(idx);
         // Its copiable values as it last existed on the battlefield (CR
-        // 608.2h: "create a token that's a copy of it").
+        // 608.2h: "create a token that's a copy of it"), and its mana value
+        // then, with the copy effects still on it ("damage equal to its mana
+        // value", ENGINE.md 223).
         if from == Zone::Battlefield {
             let v = self.copiable(idx);
-            self.lki_copy.push((old, v));
+            let mv = self.mana_value_of(idx);
+            self.lki_copy.push((old, v, mv));
             if let Some(h) = self.objs[idx.i()].attached {
                 self.lki_attached.push((old, h));
             }

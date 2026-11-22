@@ -208,6 +208,20 @@ impl Game {
         self.lki_copy.iter().rev().find(|x| x.0 == r).map(|x| x.1)
     }
 
+    /// The mana value of permanent `r`: now, or as it last existed on the
+    /// battlefield (CR 608.2h, 113.7a), recorded as it left by the rule that
+    /// reads it now (`mana_value_of`: a copy of a back face 0, CR 202.3b; a
+    /// copy with no mana cost 0, 202.3a); not its card's in the zone it went
+    /// to, nor what its copiable values alone give (being a copy isn't a
+    /// copiable value, 707.2; ENGINE.md 223). `None`: it never left the
+    /// battlefield this turn.
+    pub(crate) fn mana_value_lki(&self, r: ObjRef) -> Option<u64> {
+        if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
+            return Some(self.mana_value_of(r.idx));
+        }
+        self.lki_copy.iter().rev().find(|x| x.0 == r).map(|x| x.2)
+    }
+
     /// `c` becomes a copy with these copiable values until `until` (CR
     /// 707.2, 613.2a). It stays the same object (707.4: no enter or leave
     /// triggers); noncopy effects, counters and status stay.
@@ -338,14 +352,27 @@ impl Game {
 
     /// A spell leaving the stack whose last known information a waiting or
     /// stacked triggered ability may need ("copy it", CR 608.2h): remember
-    /// its item (`Game::spell_lki`).
+    /// its item (`Game::spell_lki`), and its mana value as a spell (its X,
+    /// 202.3e; a copy of a back face 0, 202.3b: `mana_value_with_x`, as the
+    /// item has just left `Game::stack`; ENGINE.md 223).
     pub(crate) fn note_spell_lki(&mut self, card: CardIdx, item: &StackItem) {
         let r = self.obj_ref(card);
         let wanted = self.waiting.iter().any(|w| w.ev.obj == Some(r))
             || self.stack.iter().any(|s| matches!(s.kind, StackKind::Ability { .. }) && s.ev.obj == Some(r));
         if wanted {
-            self.spell_lki.push((r, self.objs[card.i()].def, item.clone()));
+            let mv = self.mana_value_with_x(card, item.x);
+            self.spell_lki.push((r, self.objs[card.i()].def, item.clone(), mv));
         }
+    }
+
+    /// The mana value of spell `r`: on the stack now, or as it last existed
+    /// there (CR 608.2h; "that spell's mana value"); 0 if neither (it left
+    /// before an ability about it waited: nothing recorded it).
+    pub(crate) fn spell_mana_value_lki(&self, r: ObjRef) -> u64 {
+        if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack {
+            return self.mana_value_of(r.idx);
+        }
+        self.spell_lki.iter().rev().find(|x| x.0 == r).map_or(0, |x| x.3)
     }
 
     /// A spell (its definition and item): on the stack now, or as it last
@@ -728,5 +755,253 @@ impl Game {
         // (Matched with the others of its entry, CR 603.6a: this task runs
         // while its entry waits, `Task::EntersTogether` under it.)
         self.entered_event(r, note);
+    }
+}
+
+/// Last-known mana value of a departed copy (ENGINE.md 223), in the states
+/// no card of the tables makes together with an ability that reads it: built
+/// by hand (the card tests are `tests/rules_lki_mana_value.rs`). A token copy
+/// back face up (707.8a) and a copy with no mana cost (eternalize's
+/// exception) given Terminal Velocity's granted abilities; a spell that is a
+/// copy of a back face, countered under Thor's trigger about it.
+#[cfg(test)]
+mod lki_mana_value_tests {
+    use super::{CopyVals, Except};
+    use crate::db::CardDb;
+    use crate::decision::{Choice, DecisionKind};
+    use crate::game::{Game, Mark, Step};
+    use crate::ids::{CardIdx, PlayerId, Target, Zone};
+    use crate::layers::Until;
+    use crate::testkit::Scenario;
+    use std::sync::OnceLock;
+
+    const TV: &str = "Terminal Velocity";
+    const ODDITY: &str = "Ulvenwald Oddity // Ulvenwald Behemoth";
+    const BEHEMOTH: &str = "Ulvenwald Behemoth";
+    const CURTAINS: &str = "Concealing Curtains // Revealing Eye";
+    const RABBIT: &str = "Jacked Rabbit";
+    const THOR: &str = "Thor, God of Thunder";
+    const BOLT: &str = "Lightning Bolt";
+    const JACE: &str = "Jace, Vryn's Prodigy // Jace, Telepath Unbound";
+    const COUNTERSPELL: &str = "Counterspell";
+
+    /// The cube's cards and Edge of Eternities' Terminal Velocity.
+    fn db() -> &'static CardDb {
+        static DB: OnceLock<&'static CardDb> = OnceLock::new();
+        DB.get_or_init(|| {
+            let mut cards = crate::db::load_cube_document().cards;
+            cards.extend(crate::db::load_eoe_document().cards.into_iter().filter(|c| c.name == TV));
+            let db = CardDb::from_cards(&cards);
+            for n in [TV, ODDITY, CURTAINS, RABBIT, THOR, BOLT, JACE, COUNTERSPELL] {
+                db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+            }
+            db.leak()
+        })
+    }
+
+    fn scen() -> Scenario {
+        Scenario::new(db())
+            .spec(|s| {
+                s.auto_single = false;
+                s.log = true;
+            })
+            .library(0, &["Island"; 12])
+            .library(1, &["Island"; 12])
+    }
+
+    fn at_priority(g: &Game) -> bool {
+        g.kind() == Some(DecisionKind::Priority)
+    }
+
+    fn log(g: &Game) -> String {
+        g.log_lines().join("\n")
+    }
+
+    /// Pass, decline attacks and blocks, the first option otherwise, until
+    /// `stop`.
+    fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
+        for _ in 0..10_000 {
+            if stop(g) {
+                return;
+            }
+            let d = g.pending_decision().expect("game running");
+            let c = match d.kind {
+                DecisionKind::Priority | DecisionKind::DeclareAttackers | DecisionKind::DeclareBlockers => Choice::Pass,
+                _ => d.options[0].choice,
+            };
+            g.choose(c);
+        }
+        panic!("quiet_until: no progress\n{}", log(g));
+    }
+
+    /// Run the stack down, first options.
+    fn settle(g: &mut Game) {
+        for _ in 0..300 {
+            g.drive_until(|g| (g.stack().is_empty() && at_priority(g)) || !at_priority(g));
+            if g.stack().is_empty() && at_priority(g) {
+                return;
+            }
+            let c = if at_priority(g) { Choice::Pass } else { g.pending_decision().unwrap().options[0].choice };
+            g.choose(c);
+        }
+        panic!("settle: no progress\n{}", log(g));
+    }
+
+    fn pay(g: &mut Game) {
+        g.drive_until(|g| at_priority(g) || g.kind() != Some(DecisionKind::PayMana));
+        while matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)) {
+            let c = g.pending_decision().unwrap().options[0].choice;
+            g.choose(c);
+            g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+        }
+    }
+
+    /// `c` gains Terminal Velocity's two abilities ("When this permanent
+    /// leaves the battlefield, it deals damage equal to its mana value to each
+    /// creature", "At the beginning of your end step, sacrifice this
+    /// permanent"), one effect, as its resolution grants them (`W3::GrantTrigger`).
+    fn grant(g: &mut Game, c: CardIdx) {
+        let tv = g.db.id(TV).unwrap();
+        let d = g.db.def(tv);
+        g.next_ts = g.exact_inc(g.next_ts, "timestamps");
+        let ts = g.next_ts;
+        let r = g.obj_ref(c);
+        for k in d.delayed_base as usize..d.triggers.len() {
+            g.marks.push((r, Mark::Granted { def: tv, slot: k as u8, this_turn: false, ts }));
+        }
+        g.w3.granted = true;
+        g.refresh_decision();
+    }
+
+    /// On to P0's end step: the sacrifice, then the leave trigger.
+    fn end_step(g: &mut Game) {
+        let t = g.turn().number;
+        quiet_until(g, |g| g.turn().number == t && g.turn().step == Step::End);
+        settle(g);
+    }
+
+    /// The last known copiable values and mana value recorded for `c`'s
+    /// object `r` as it left.
+    fn lki(g: &Game, r: crate::ids::ObjRef) -> (CopyVals, u64) {
+        g.lki_copy.iter().rev().find(|x| x.0 == r).map(|x| (x.1, x.2)).expect("recorded as it left")
+    }
+
+    #[test]
+    fn cr_202_3b_707_8a_a_departed_token_copy_back_face_up_deals_0_not_its_front_faces() {
+        // P0's Ulvenwald Oddity transformed (Ulvenwald Behemoth, mana value 4:
+        // its front face's) and a token copy of it, created double-faced back
+        // face up (707.8a): their copiable values are the same, but the token
+        // is a copy of a back face, mana value 0 (202.3b). Each given Terminal
+        // Velocity's abilities in a game of its own and sacrificed at the end
+        // step: the token deals 0 damage to each creature, the Behemoth 4
+        // (608.2h: each as it last existed).
+        for token in [true, false] {
+            let mut g = scen()
+                .battlefield(0, &[ODDITY])
+                .transformed(0, ODDITY)
+                .battlefield(1, &[RABBIT, CURTAINS])
+                .counters(1, RABBIT, crate::db::Counter::P1P1, 5)
+                .hand(0, &[TV])
+                .at(Step::Main1, 0)
+                .turn_number(3)
+                .start();
+            let beh = g.card(0, BEHEMOTH, Zone::Battlefield);
+            let rabbit = g.card(1, RABBIT, Zone::Battlefield);
+            let vals = g.copiable(beh);
+            let tok = g.create_token_copies(vals, 0, 1)[0];
+            assert!(g.is_copy_obj(tok) && g.name(tok) == BEHEMOTH);
+            assert_eq!(g.copiable(tok), vals, "the same copiable values (707.8a: back face up, double-faced)");
+            assert_eq!((g.mana_value_of(tok), g.mana_value_of(beh)), (0, 4));
+            let c = if token { tok } else { beh };
+            let r = g.obj_ref(c);
+            grant(&mut g, c);
+            end_step(&mut g);
+            assert!(!g.live(r), "sacrificed\n{}", log(&g));
+            let (v, mv) = lki(&g, r);
+            assert_eq!(v, vals);
+            let want = if token { 0 } else { 4 };
+            assert_eq!(mv, want);
+            assert_eq!(g.obj(rabbit).damage, want, "token {token}\n{}", log(&g));
+        }
+    }
+
+    #[test]
+    fn cr_202_3a_707_9b_a_departed_copy_with_no_mana_cost_deals_0() {
+        // A creature becomes a copy of Ulvenwald Oddity "except it has no mana
+        // cost" (eternalize's exception, CR 702.129a, 707.9b): mana value 0
+        // (202.3a), though the copied face's is 4. Given Terminal Velocity's
+        // abilities and sacrificed, it deals 0 damage (608.2h).
+        let mut g = scen()
+            .battlefield(0, &[CURTAINS])
+            .battlefield(1, &[RABBIT])
+            .hand(0, &[TV])
+            .at(Step::Main1, 0)
+            .turn_number(3)
+            .start();
+        let c = g.card(0, CURTAINS, Zone::Battlefield);
+        let rabbit = g.card(1, RABBIT, Zone::Battlefield);
+        let oddity = g.db.id(ODDITY).unwrap();
+        let exc = Except { no_cost: true, ..Except::default() };
+        g.add_copy_effect(c, CopyVals { def: oddity, exc, dfc: false }, Until::Forever);
+        assert_eq!(g.name(c), g.db.def(oddity).name);
+        assert_eq!(g.mana_value_of(c), 0, "no mana cost");
+        let r = g.obj_ref(c);
+        grant(&mut g, c);
+        end_step(&mut g);
+        assert!(!g.live(r), "{}", log(&g));
+        assert_eq!(lki(&g, r).1, 0);
+        assert_eq!(g.obj(rabbit).damage, 0, "{}", log(&g));
+    }
+
+    #[test]
+    fn cr_202_3b_608_2h_thor_a_countered_copy_of_a_back_face_spell_has_mana_value_0() {
+        // Thor's trigger about a spell P0 cast; the spell is then made (by
+        // hand: no card of the tables puts one on the stack) the back face of
+        // Jace, Vryn's Prodigy (a nonmodal back face: its front face's mana
+        // value, 2), a copy in one game and not in the other. P1 counters it;
+        // Thor deals damage equal to its mana value as it last existed on the
+        // stack (608.2h): 0 for the copy (202.3b; it ceased to exist,
+        // 707.10a), 2 for the card.
+        for copy in [true, false] {
+            let mut g = scen()
+                .battlefield(0, &[THOR, "Mountain"])
+                .battlefield(1, &["Island", "Island"])
+                .hand(0, &[BOLT])
+                .hand(1, &[COUNTERSPELL])
+                .at(Step::Main1, 0)
+                .turn_number(3)
+                .start();
+            let b = g.card(0, BOLT, Zone::Hand);
+            g.choose(Choice::Cast(b));
+            g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+            g.choose(Choice::Target(Target::Player(1)));
+            pay(&mut g);
+            g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+            g.choose(Choice::Target(Target::Player(1)));
+            g.drive_until(|g| at_priority(g));
+            let r = g.obj_ref(b);
+            let back = g.db.def(g.db.id(JACE).unwrap()).back.expect("a back face");
+            assert!(g.db.def(back).front_mv.is_some());
+            g.objs[b.i()].def = back;
+            if copy {
+                let at = g.copy_objs.binary_search(&b).unwrap_err();
+                g.copy_objs.insert(at, b);
+            }
+            assert_eq!(g.mana_value_of(b), if copy { 0 } else { 2 });
+            g.refresh_decision();
+            let p: PlayerId = g.pending_decision().unwrap().player;
+            assert_eq!(p, 0);
+            g.pass();
+            g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 1);
+            let cs = g.card(1, COUNTERSPELL, Zone::Hand);
+            g.choose(Choice::Cast(cs));
+            g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+            g.choose(Choice::Target(Target::Obj(r)));
+            pay(&mut g);
+            settle(&mut g);
+            assert!(!g.live(r), "countered\n{}", log(&g));
+            assert_eq!(g.spell_mana_value_lki(r), if copy { 0 } else { 2 });
+            assert_eq!(g.life(1), if copy { 20 } else { 18 }, "copy {copy}\n{}", log(&g));
+        }
     }
 }

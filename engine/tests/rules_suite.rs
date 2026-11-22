@@ -44,6 +44,8 @@ mod rules_lands;
 mod rules_layers;
 #[path = "rules_library.rs"]
 mod rules_library;
+#[path = "rules_lki_mana_value.rs"]
+mod rules_lki_mana_value;
 #[path = "rules_loops.rs"]
 mod rules_loops;
 #[path = "rules_m8a.rs"]

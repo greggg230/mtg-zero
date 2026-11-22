@@ -24,8 +24,8 @@ pub enum W3 {
     /// The source deals damage equal to its mana value to each permanent
     /// matching `filter` ("it deals damage equal to its mana value to each
     /// creature"): the source as it is, or as it last existed on the
-    /// battlefield (CR 608.2h, 113.7a: its mana value and its qualities as a
-    /// source of damage).
+    /// battlefield (CR 608.2h, 113.7a: its mana value, copy effects included,
+    /// and its qualities as a source of damage; ENGINE.md 223).
     DamageEachSourceMv { filter: Filter },
     /// The permanent the source is attached to ("enchanted creature"; as the
     /// source last existed if it left, CR 608.2h) deals damage equal to its
@@ -272,19 +272,19 @@ impl Game {
             }
             W3::DamageEachSourceMv { filter } => {
                 let r = f.source;
-                let on_bf = self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield;
-                let (src, mv) = if on_bf {
+                // The source where it is (CR 608.2h: the current information
+                // of an object still in its zone), else as it last existed on
+                // the battlefield (113.7a), recorded as it left: its qualities
+                // as a source (`lki_damage`, kept with `SEEN_LKI_DAMAGE`, which
+                // this op sets) and its mana value with its copy effects (a copy
+                // of a back face 0, CR 202.3b; `Game::mana_value_lki`, ENGINE.md
+                // 223), never its card's in the zone it went to.
+                let (src, mv) = if self.live(r) {
                     (crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) }, self.mana_value_of(r.idx))
                 } else {
-                    // (Recorded as it left: `SEEN_LKI_DAMAGE`, `lki_copy`.)
-                    let src = match self.lki_damage.iter().rev().find(|x| x.0 == r) {
-                        Some(&(_, d)) => d,
-                        None => crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) },
-                    };
-                    let mv = match self.lki_copy.iter().rev().find(|x| x.0 == r) {
-                        Some((_, v)) => self.db.def(v.def).mana_value() as u64,
-                        None => self.def_of(r.idx).mana_value() as u64,
-                    };
+                    let src = self.lki_damage.iter().rev().find(|x| x.0 == r).map(|&(_, d)| d);
+                    let src = src.expect("the source's last known qualities (it left the battlefield this turn)");
+                    let mv = self.mana_value_lki(r).expect("the source's last known mana value (it left the battlefield this turn)");
                     (src, mv)
                 };
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(r) };
