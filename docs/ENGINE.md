@@ -45638,7 +45638,7 @@ the machine owner's setting for side work beside live runs), not the test time.
 `tests/test_gate.py` 102 passed (new: the Mac module checker, the `mac-build` step before a group and none for the suite
 tier, a Mac shard's basetemp, the jobs default, the core shards - every file once, the split of a measured file, the
 flaky retry's own basetemp, the one-step fallback - and a failed core shard failing the gate). **GATE PASSED WITH SKIPS
-python 567522d039cd in 190s** (skip: the desktop's one live-run-hazard test, fenced). The optin-core run above passed
+python 567522d039cd in 190s** (skip: the desktop's one live-run-hazard test, fenced). After the merge of origin/main c8dd218d (237): **GATE PASSED WITH SKIPS python 781f593cb1fc in 143s** (the same skip; this sentence is the next commit, docs only). The optin-core run above passed
 every step and failed only "the checkout unchanged by the gate" (the basetemp fix was edited in its checkout while it
 ran).
 
