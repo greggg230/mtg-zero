@@ -105,7 +105,7 @@ def test_the_engine_refuses_where_it_cannot_apply():
     dd_delver = C_deck_spec(DD, DELVER)
     E.mtg_spec_check(FF.with_forced_find(dd_delver, 0.0))
     for spec, why in ((FF.with_forced_find(C_deck_spec(DELVER, DELVER), 1.0), 'no deck'),
-                      (FF.with_forced_find(D.metagame_spec(fmt='bo3', game_episodes=True), 1.0), 'best-of-one'),
+                      (FF.with_forced_find(D.pairing_spec(D.IZZET_DELVER, D.SNEAK_SHOW), 1.0), 'no deck'),
                       (FF.with_forced_find(dd_delver, 1.0, spell='Brainstorm'), 'pile'),
                       (json.dumps({'forced_find': {'spell': 'Doomsday', 'card': "Thassa's Oracle", 'p': 1}}), 'constructed')):
         with pytest.raises(Exception, match=why):

@@ -26,8 +26,14 @@
 //! * With `"constructed": true` only, instead of `decks`; best-of-one or constructed best-of-three
 //!   (`game_episodes`, `start_game` 2 when every pair of positive weight is a mirror: game 1's result is drawn as a
 //!   fair coin, ENGINE.md 130, 147.4). Refused (loudly: no silent no-op): `decks`, `seed` (one match seed would play
-//!   one pairing), `start`, `build`, `sealed`, `pools`, `hidden_decklists`, `dealt_decks`, `sideboard_table`,
-//!   `keep_deck` / `keep_known` - settings built for one pair of 75s.
+//!   one pairing), `start`, `build`, `sealed`, `pools`, `hidden_decklists`, `sideboard_table` (one 75's table: a
+//!   metagame deck carries its own, below), `keep_deck` / `keep_known` - settings built for one pair of 75s.
+//! * **Per-deck sideboarding settings** (ENGINE.md 240, best-of-three): `"dealt_decks"` (ENGINE.md 154, 168.1) deals
+//!   each seat's 60s from ITS OWN 75 (every deck of a played pairing has a sideboard of at least the range's top), and
+//!   a deck entry's optional `"table"` (a choice table of ENGINE.md 168.3, its list that deck's 75) is played by
+//!   whichever seat plays that deck - the table is keyed by the deck, so it follows the deck to its seat.
+//!   `pair_json` passes both through (`dealt_decks` as it is, a deck's table as its seat's `decks.pN_table`), so a
+//!   metagame game is still exactly its pairing's fixed game.
 //!
 //! Nothing of a game reads the spec after `MtgAz::new` made it from the pairing's seats: the open decklists' pools,
 //! the constructed prior of the hidden 60s, the deck target, the worlds `determinize` deals - all are the match's
@@ -38,6 +44,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use super::matches::MatchPool;
+use super::sbtable::SideboardTable;
 use crate::db::CardDb;
 use crate::ids::DefId;
 use crate::rng::{split64, Rng};
@@ -55,6 +63,9 @@ pub struct MetaDeck {
     pub name: Arc<str>,
     pub main: Vec<DefId>,
     pub sideboard: Vec<DefId>,
+    /// The deck's choice table (ENGINE.md 168.3, 223; its list the deck's 75): played by the seat that plays this
+    /// deck. None: that seat sideboards by its own decisions.
+    pub table: Option<Arc<SideboardTable>>,
 }
 
 /// The spec's `"metagame"` (module docs).
@@ -119,8 +130,8 @@ impl Metagame {
         let mut decks: Vec<MetaDeck> = Vec::with_capacity(list.len());
         for (i, d) in list.iter().enumerate() {
             let e = d.as_object().ok_or_else(|| format!("mtg spec: metagame.decks[{i}] must be {{\"name\", \"main\", \"sideboard\"}}"))?;
-            if let Some(k) = e.keys().find(|k| !matches!(k.as_str(), "name" | "main" | "sideboard")) {
-                return Err(format!("mtg spec: unknown key {k:?} of metagame.decks[{i}] (name, main, sideboard)"));
+            if let Some(k) = e.keys().find(|k| !matches!(k.as_str(), "name" | "main" | "sideboard" | "table")) {
+                return Err(format!("mtg spec: unknown key {k:?} of metagame.decks[{i}] (name, main, sideboard, table)"));
             }
             let name = e.get("name").and_then(|v| v.as_str()).filter(|n| !n.trim().is_empty()).ok_or_else(|| format!("mtg spec: metagame.decks[{i}] needs a name (a non-empty string)"))?;
             if decks.iter().any(|x| &*x.name == name) {
@@ -131,7 +142,22 @@ impl Metagame {
                 Some(v) => ids(db, v, &format!("metagame deck {name:?}'s sideboard"))?,
                 None => Vec::new(),
             };
-            decks.push(MetaDeck { name: Arc::from(name), main, sideboard });
+            // (ENGINE.md 240: the deck's own choice table, its list exactly this deck's 75 - the format is checked by the
+            // spec, which knows it: a table is best-of-three's)
+            let table = match e.get("table") {
+                None => None,
+                Some(x) => {
+                    let t = SideboardTable::parse_as(x, db, &format!("metagame deck {name:?}'s table"))?;
+                    if !t.fits(&MatchPool::constructed(&main, &sideboard).0) {
+                        return Err(format!(
+                            "mtg spec: metagame deck {name:?}'s table (version {:?}) is not of its 75: a deck's table lists exactly that deck's main and sideboard (ENGINE.md 240)",
+                            t.version
+                        ));
+                    }
+                    Some(Arc::new(t))
+                }
+            };
+            decks.push(MetaDeck { name: Arc::from(name), main, sideboard, table });
         }
         let n = decks.len();
         let weights = match o.get("weights") {
@@ -200,6 +226,16 @@ impl Metagame {
         })
     }
 
+    /// The seats' choice tables of pairing `p` (ENGINE.md 240): each seat its deck's table, if the deck has one.
+    pub fn tables(&self, p: [u8; 2]) -> [Option<Arc<SideboardTable>>; 2] {
+        p.map(|i| self.decks[i as usize].table.clone())
+    }
+
+    /// Does any deck carry a choice table (ENGINE.md 240)?
+    pub fn has_tables(&self) -> bool {
+        self.decks.iter().any(|d| d.table.is_some())
+    }
+
     /// The pairs of positive weight.
     pub fn played(&self) -> impl Iterator<Item = [u8; 2]> + '_ {
         let n = self.decks.len();
@@ -208,7 +244,13 @@ impl Metagame {
 
     /// The spec `json` (a metagame spec) with pairing `p` as fixed `decks` lists instead of `metagame` - the spec
     /// whose game of any seed is the metagame spec's game of a seed with that pairing (module docs; the tests and the
-    /// fuzz check it). Each seat's sideboard as `pN_sideboard` when it has one.
+    /// fuzz check it). Each seat's sideboard as `pN_sideboard` when it has one, its deck's choice table as `pN_table`
+    /// when it has one (ENGINE.md 240: the table follows the deck to the seat that plays it; every other key of the
+    /// spec - `dealt_decks`, `forced_find`, ... - as it is, but a `forced_find` neither of the pair's decks can ever
+    /// apply to (no deck of the two holds both its spell and its card: in its 75 in best of three, its main in best of
+    /// one - the engine's own rule, which refuses such a spec, ENGINE.md 180) is left out: in the metagame it is inert
+    /// for that pairing's games - the spell never resolves, nothing of it is drawn from the game's RNG or encoded -, so
+    /// the game is the same without it).
     pub fn pair_json(json: &str, p: [u8; 2]) -> Result<String, String> {
         let mut v: Value = serde_json::from_str(json).map_err(|e| format!("mtg spec: {e}"))?;
         let o = v.as_object_mut().ok_or("mtg spec: not a JSON object")?;
@@ -221,8 +263,26 @@ impl Metagame {
             if d.get("sideboard").and_then(|x| x.as_array()).is_some_and(|a| !a.is_empty()) {
                 decks.insert(format!("p{s}_sideboard"), d["sideboard"].clone());
             }
+            if let Some(t) = d.get("table") {
+                decks.insert(format!("p{s}_table"), t.clone());
+            }
         }
         o.insert("decks".into(), Value::Object(decks));
+        if let Some(ff) = o.get("forced_find") {
+            let name = |k: &str| ff.get(k).and_then(|x| x.as_str()).map(str::to_owned);
+            let (spell, card) = (name("spell"), name("card"));
+            let bo3 = o.get("format").and_then(|f| f.as_str()) == Some("bo3");
+            let holds = |i: u8, n: &str| {
+                let d = &list[i as usize];
+                let has = |k: &str| d.get(k).and_then(|x| x.as_array()).is_some_and(|a| a.iter().any(|c| c.as_str() == Some(n)));
+                has("main") || (bo3 && has("sideboard"))
+            };
+            if let (Some(s), Some(c)) = (spell, card) {
+                if !p.iter().any(|&i| holds(i, &s) && holds(i, &c)) {
+                    o.remove("forced_find");
+                }
+            }
+        }
         Ok(v.to_string())
     }
 }

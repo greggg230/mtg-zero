@@ -10,8 +10,8 @@ ad-hoc shell script. It can never pass a check it did not perform:
     Every step needs its own positive marker ON TOP OF exit 0 (ENGINE.md 91 lists each one): a
     build's "mtgz._engine OK: <this checkout>/mtgz/..." line, cargo's "test result: ok. N passed"
     lines (N > 0, 0 failed), pytest's FINAL summary line (0 failed, 0 errors, N > 0 passed), the
-    digest line over the full 2,000 + 500 games, digest_formats' four lines (constructed, eoe, driver, metagame:
-    ENGINE.md 148.1, 157) and dealt_digests' line (154, 157), check_checkpoint_compat's {"identical": true}
+    digest line over the full 2,000 + 500 games, digest_formats' five lines (constructed, eoe, driver, metagame, pair:
+    ENGINE.md 148.1, 157, 176, 223) and dealt_digests' line (154, 157), check_checkpoint_compat's {"identical": true}
     with samples on both sides, a Mac step's "[mac] ... @ <this sha>" and "[mac] done @ <this sha>"
     lines (the Mac checkout's HEAD before and after the command), "0 failed of N
     configurations" with N the configurations asked for, ... A missing marker fails loudly.
@@ -256,18 +256,18 @@ def make_digest_checker(expect=None, record_only=False):
     return checker
 
 
-# engine/tests/digest_formats.rs's four digests (ENGINE.md 148.1; metagame: ENGINE.md 176)
-FORMATS = ('constructed', 'eoe', 'driver', 'metagame')
-FORMATS_RE = re.compile(r'^(constructed|eoe|driver|metagame): .*; combined digest ([0-9a-f]{16})\s*$', re.M)
+# engine/tests/digest_formats.rs's five digests (ENGINE.md 148.1; metagame: ENGINE.md 176; pair: ENGINE.md 240)
+FORMATS = ('constructed', 'eoe', 'driver', 'metagame', 'pair')
+FORMATS_RE = re.compile(r'^(constructed|eoe|driver|metagame|pair): .*; combined digest ([0-9a-f]{16})\s*$', re.M)
 FORMATS_ARGV = ['cargo', 'test', '--release', '-p', 'engine', '--test', 'digest_formats', '--', '--ignored',
                 '--nocapture']
 
 
 def check_digest_formats(output, rc):
-    """digest_formats' positive evidence (ENGINE.md 148.1, 157, 176): exactly four "<name>: ... combined digest <16
-    hex>" lines, one each of constructed, eoe, driver and metagame (each test compares its lines with the checkout's
+    """digest_formats' positive evidence (ENGINE.md 148.1, 157, 176, 223): exactly five "<name>: ... combined digest <16
+    hex>" lines, one each of constructed, eoe, driver, metagame and pair (each test compares its lines with the checkout's
     own tests/data/digests_<name>.txt and fails on a difference), no "wrote ...digests_" line (DIGEST_WRITE re-records
-    instead of comparing), exactly one "test result: ok. 4 passed" line + exit 0."""
+    instead of comparing), exactly one "test result: ok. 5 passed" line + exit 0."""
     ms = FORMATS_RE.findall(output)
     seen = {}
     for name, d in ms:
@@ -1667,20 +1667,26 @@ def junit_node(tc):
     return '::'.join([f, *parts[k + 1:], tc.get('name') or '']), f
 
 
-def record_durations(xml_path, name=PYTEST_DURATIONS):
-    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s `name` (this repo's
-    pytest_durations.json, the core suite's CORE_PYTEST_DURATIONS; under a lock file: the shards finish at about the same time). Best effort: a missing or unreadable file changes
-    nothing. A split file's parts each add their tests; the file's own total is written by the part that ran it whole
-    or, for a split file, summed from its tests' latest seconds."""
+def junit_seconds(xml_path):
+    """A junit file -> {test node id: seconds}, or None when it is missing or unreadable."""
     import xml.etree.ElementTree as ET
     try:
         root = ET.parse(xml_path).getroot()
     except (OSError, ET.ParseError):
-        return
+        return None
     tests = {}
     for tc in root.iter('testcase'):
         node, _ = junit_node(tc)
         tests[node] = tests.get(node, 0.0) + float(tc.get('time') or 0)
+    return tests
+
+
+def merge_durations(tests, name=PYTEST_DURATIONS):
+    """{test node id: seconds} into durations_dir()'s `name` (this repo's pytest_durations.json, the core suite's
+    CORE_PYTEST_DURATIONS), each touched file's total = the sum of its tests' latest seconds, under a lock file (the
+    shards finish at about the same time). Best effort: a failure changes nothing."""
+    if not tests:
+        return
     lock = os.path.join(durations_dir(), name + '.lock')
     for _ in range(100):
         try:
@@ -1688,22 +1694,76 @@ def record_durations(xml_path, name=PYTEST_DURATIONS):
             break
         except FileExistsError:
             time.sleep(0.1)
+        except OSError:
+            return
     else:
         return
     try:
         d = read_durations(name)
-        d.update({k: round(v, 2) for k, v in tests.items()})
+        d.update({k: round(float(v), 2) for k, v in tests.items()})
         for f in {n.split('::')[0] for n in tests}:
             d[f] = round(sum(v for k, v in d.items() if k.startswith(f + '::')), 2)
         with open(os.path.join(durations_dir(), name), 'w', encoding='utf-8') as fh:
             json.dump(d, fh, indent=1, sort_keys=True)
+    except (OSError, ValueError, TypeError):
+        pass
     finally:
         os.close(fd)
         os.remove(lock)
+
+
+def record_durations(xml_path, name=PYTEST_DURATIONS):
+    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s `name` (merge_durations);
+    the junit file is removed. Best effort: a missing or unreadable file changes nothing. A split file's parts each add
+    their tests; the file's own total is summed from its tests' latest seconds."""
+    tests = junit_seconds(xml_path)
+    if tests is None:
+        return
+    merge_durations(tests, name)
     try:
         os.remove(xml_path)
     except OSError:
         pass
+
+
+# A shard that ran on the Mac leaves its junit file there: its command prints the tests' seconds as one line after
+# pytest's own output (`python tools/gate.py --junit-seconds <file>`), and its checker records them once the shard
+# passed (ENGINE.md 238.9) - so the shards stay balanced beside a live run, when every shard runs on the Mac.
+SECONDS_PREFIX = 'GATE_PYTEST_SECONDS '
+
+
+def print_junit_seconds(xml_path):
+    """`gate.py --junit-seconds <file>`: the junit file's {test: seconds} as one SECONDS_PREFIX line (nothing when the
+    file is missing or unreadable: the shard's own result is pytest's summary, never this)."""
+    tests = junit_seconds(xml_path)
+    if tests:
+        print(SECONDS_PREFIX + json.dumps({k: round(v, 2) for k, v in tests.items()}, separators=(',', ':')), flush=True)
+    return 0
+
+
+def parse_seconds(output):
+    """The last SECONDS_PREFIX line of a step's output -> {test: seconds}, or {} (none, or not a JSON object of
+    numbers)."""
+    found = {}
+    for line in output.splitlines():
+        if line.startswith(SECONDS_PREFIX):
+            try:
+                d = json.loads(line[len(SECONDS_PREFIX):])
+            except ValueError:
+                continue
+            if isinstance(d, dict) and all(isinstance(v, (int, float)) for v in d.values()):
+                found = d
+    return found
+
+
+def recording(checker, name=PYTEST_DURATIONS):
+    """`checker`, and after a pass the seconds the step printed (parse_seconds) merged into the durations file."""
+    def check(output, rc):
+        res = checker(output, rc)
+        if res[0]:
+            merge_durations(parse_seconds(output), name)
+        return res
+    return check
 
 
 def pytest_step(name='pytest', step_id='pytest', ctx=None):
@@ -1746,15 +1806,17 @@ def pytest_step(name='pytest', step_id='pytest', ctx=None):
         # (its own --basetemp under the Mac checkout's gates/tmp, removed after: the shards run at once there too)
         mac_base = f'gates/tmp/pytest-{ctx.sha_short}-{tag}-{uuid.uuid4().hex[:8]}'
         mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={d}' for d in mac_desel],
-                          f'--basetemp={mac_base}'])
-        # (pytest makes the basetemp itself, not its parents: a new Mac checkout has no gates/tmp yet)
-        mac = f'{{ mkdir -p gates/tmp && {mac}; rc=$?; rm -rf {mac_base}; exit $rc; }}'
+                          f'--basetemp={mac_base}', f'--junitxml={mac_base}.xml'])
+        # (pytest makes the basetemp itself, not its parents: a new Mac checkout has no gates/tmp yet; the tests'
+        # seconds printed for the durations file here: `recording`)
+        mac = (f'{{ mkdir -p gates/tmp && {mac}; rc=$?; python tools/gate.py --junit-seconds {mac_base}.xml; '
+               f'rm -rf {mac_base} {mac_base}.xml; exit $rc; }}')
         nfiles = len({e.split('::')[0] for e in entries})
         s = Step(f'{name} {tag} ({nfiles} files)',
                  [python_exe(), '-m', 'pytest', *entries, *PYTEST_ARGS, *[f'--deselect={d}' for d in desel],
                   f'--basetemp={base}', f'--junitxml={xml}'],
                  id=f'{step_id}-{tag}', checker=check_pytest, heavy=True,
-                 mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None,
+                 mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None, mac_checker=recording(check_pytest),
                  cleanup=lambda base=base, xml=xml: (record_durations(xml), shutil.rmtree(base, ignore_errors=True)),
                  evidence=ev)
         if on_mac and first:
@@ -1853,11 +1915,12 @@ def digest_format_steps():
     """The digests beyond the cube table's, each compared with the checkout's own recorded file (a change meant to
     alter play re-records them in its commit, as digests.txt; the caller's DIGEST_* never reach them: step_env):
     engine/tests/digest_formats.rs (ENGINE.md 148.1: constructed best-of-three, the legacy decks, EoE, zero-core's
-    driver; 176: the three-deck metagame) and dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
-    return [Step('digest formats (constructed, EoE, driver, metagame)', list(FORMATS_ARGV), id='digest-formats',
+    driver; 176: the three-deck metagame; 223: a stew specialist's pairing with per-deck tables) and
+    dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
+    return [Step('digest formats (constructed, EoE, driver, metagame, pair)', list(FORMATS_ARGV), id='digest-formats',
                  mac_cmd=True, checker=check_digest_formats,
-                 evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe, driver '
-                          'and metagame, no "wrote ...digests_" line, exactly one "test result: ok. 4 passed" + exit 0'),
+                 evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe, driver, '
+                          'metagame and pair, no "wrote ...digests_" line, exactly one "test result: ok. 5 passed" + exit 0'),
             Step('digest dealt (dealt decks: the dealt preset\'s self-play spec)', list(DEALT_ARGV), id='digest-dealt',
                  mac_cmd=True,
                  checker=check_digest_dealt,
@@ -2387,14 +2450,14 @@ TIERS = {
                'artifact cache when no Rust input changed) + pytest in --pytest-shards shards beside a tiny run-loop smoke '
                '(~5 min).'),
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
-                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s '
+                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s '
                  'recorded files + --test az + checkpoint-load (--checkpoint) + pytest + farm compat (the release worker built, '
                  'tools/farm_compat.py). NO search smoke (~11 min).'),
     'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + a sharded 2,000-game fuzz per '
               f'pool (--fuzz-pools, default {FUZZ_POOLS}; tools/fuzz_shards.py, --fuzz-shards) at once on this commit; its '
               'report gates/<sha>-suite.json is the engine tier\'s evidence for --tested-sha.'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
-               'digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
+               'digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
                'the sharded fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
                'with overlapping engine/card_ir files; the release worker built + farm compat (tools/farm_compat.py) (~13 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
@@ -2406,7 +2469,7 @@ TIERS = {
                    'driver) + feature tests + build-only of the other games + core build + core pytest + the release worker built + '
                    'farm compat (~29 min).'),
     'repin': (tier_repin, 're-pin onto an already-verified commit: own-target build + digest == main\'s recorded value '
-              '+ digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s recorded files + the release worker built + farm compat + 1-config smoke on the run\'s --spec/--preset + mac.sh '
+              '+ digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s recorded files + the release worker built + farm compat + 1-config smoke on the run\'s --spec/--preset + mac.sh '
               '--eval-checkout, in parallel (~8 min).'),
 }
 
@@ -2483,7 +2546,7 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
         if r.extra.get('digest'):
             key = 'encoding_free' if 'encoding-free' in r.id else 'full'
             report['digests'][key] = {'value': r.extra['digest'], 'status': r.status}
-        for name, d in (r.extra.get('formats') or {}).items():          # (constructed, eoe, driver, metagame; dealt)
+        for name, d in (r.extra.get('formats') or {}).items():          # (constructed, eoe, driver, metagame, pair; dealt)
             report['digests'][name] = {'value': d, 'status': r.status}
         if 'passed' in r.extra and 'failed' in r.extra:
             report['test_counts'][r.name] = {k: r.extra[k] for k in ('passed', 'failed', 'errors', 'skipped', 'binaries')
@@ -2581,6 +2644,9 @@ def build_parser():
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) == 2 and argv[0] == '--junit-seconds':         # (a Mac pytest shard's own call: no tier, no checkout)
+        return print_junit_seconds(argv[1])
     args = build_parser().parse_args(argv)
     try:
         check_options(args)

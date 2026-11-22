@@ -1,5 +1,23 @@
-"""The in-run matchup model of a constructed best-of-three mirror and sideboarding by its choice table (docs/ENGINE.md
-168; the Delver best-of-three run pb3).
+"""The in-run matchup model of a constructed best-of-three pairing and sideboarding by its choice tables (docs/ENGINE.md
+168: the Delver best-of-three run pb3's mirror; docs/ENGINE.md 240: two different 75s, a stew specialist's pairing).
+
+**Two different 75s** (docs/ENGINE.md 240.3; everything below the mirror's, pb3's, which a mirror pairing still is
+exactly - the same code). For a pairing {C, D} (C the deck of the lower metagame index, a fixed spec's seat 0) every
+game is one row oriented C first, and the model is not antisymmetric - the pairing has its own base rate:
+
+    z(A, B) = m + w_C . dA - w_D . dB + (dA U_C) W (dB U_D)^T + c_pd pd + c_pdg3 pd g3 + c_g3 g3 + c_lead lead
+              + c_dC dealt_C + c_dD dealt_D,   P(C wins) = sigmoid(z)
+
+dA (dB): C's (D's) 60 as copies minus its own registered main per entry of its own 75; pd +1 when C starts; lead
+sign(C's wins - D's) before the game; dealt_C, dealt_D each deck's dealt flag. With C = D and the constraints w_C =
+w_D, U_C = U_D, W skew, m = c_g3 = 0, c_dC = -c_dD it is the mirror's model below; for a mirror the code fits the
+mirror's model itself. The same fit (the time split, the grid, the selection rule, the bootstrap ensembles and their
+seeds); the guard's baseline is the pairing's base rate + play / draw + game 3 (no deck term), the mirror's play / draw
+with the base rate a non-mirror needs. One choice table PER DECK (`pair_choice_tables`), each deck's 24 contexts
+against the OTHER deck's constructed prior (restricted to the dealt range for a dealt opponent), the decider's win
+probability sigmoid(z) for C, sigmoid(-z) for D; the tables go where the engine reads them (`with_tables`: a metagame
+deck's entry, a fixed spec's seat), so each follows its deck to whichever seat plays it. One pairing per model (a
+metagame of several pairings is refused: `the_pairing`).
 
 **What it predicts.** P(seat A wins a game) from the two 60s the game is played with - each as its copies minus the
 registered main's for every entry of the (shared) 75 -, who is on the play, game 2 or 3, the match score and whether
@@ -532,18 +550,405 @@ def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000
 def check_table(spec, table):
     """The engine parses the spec with the table (`mtgz._engine.mtg_spec_check`): a malformed table fails here, in the
     job, never in self-play."""
+    check_tables(spec, [table])
+
+
+def check_tables(spec, tables):
+    """`check_table` for the tables of a version, placed as self-play places them (`with_tables`, docs/ENGINE.md 240)."""
     from mtgz import _engine
-    sp = json.loads(spec)
-    sp['sideboard_table'] = table
-    _engine.mtg_spec_check(json.dumps(sp))
+    _engine.mtg_spec_check(with_tables(spec, tables))
+
+
+# ----------------------------------------------------------------------------- the pairing (docs/ENGINE.md 240)
+
+# the non-mirror model's context columns (docs/ENGINE.md 240.3): the pairing's base rate, then as the mirror's terms but
+# with no antisymmetry - a game 3 main effect and each deck's dealt flag on its own
+PAIR_CTX = ('base', 'pd', 'pd_g3', 'g3', 'lead', 'dealt_C', 'dealt_D')
+PAIR_BASELINE = 4                 # the first 4 columns: the baseline the deck model must beat (no deck term)
+
+
+class Pairing:
+    """The one pairing a matchup model is fit for (docs/ENGINE.md 240): deck C and deck D, each {'name', 'list'
+    ([[card, copies], ...] in the engine's list order), 'main' (the registered main's copies per entry), 'index' (its
+    metagame index; a fixed spec's seat)}. `mirror`: one 75 both seats - pb3's model and table, unchanged (C is D).
+    C is the deck of the lower metagame index (a fixed two-75 spec: seat 0's)."""
+
+    def __init__(self, decks, mirror):
+        self.decks = decks
+        self.mirror = mirror
+
+    def json(self):
+        return {'mirror': self.mirror, 'decks': [{k: d[k] for k in ('name', 'list', 'main')} for d in self.decks]}
+
+    def seat_of_c(self, sp):
+        """The seat that plays deck C in the games of spec line `sp` (a mirror: seat 0, pb3's A)."""
+        if self.mirror:
+            return 0
+        mg = sp.get('metagame')
+        if mg is None:
+            return 0
+        return 0 if mg['decks'][0] == self.decks[0]['index'] else 1
+
+
+def _seat_decks(sp):
+    mg = sp.get('metagame')
+    return [{'name': mg['names'][s] if mg else f'p{s}', 'list': sp['lists'][s], 'main': sp['mains'][s],
+             'index': mg['decks'][s] if mg else s} for s in (0, 1)]
+
+
+def the_pairing(specs, games):
+    """The one pairing of the games' spec lines (a Pairing): a mirror (both seats one list and main - pb3's case: the
+    same in every spec, as `the_75`), or two different 75s - the same two decks in every spec line, in either seat order
+    (a metagame restricted to the pairing plays both). More than one pairing is refused: a model is one pairing's
+    (docs/ENGINE.md 240: a stew specialist's)."""
+    keys = sorted({g['spec'] for g in games})
+    if not keys:
+        raise ValueError('no game')
+    found = {}
+    for k in keys:
+        a, b = _seat_decks(specs[k])
+        if a['list'] == b['list'] and a['main'] == b['main']:
+            if specs[k].get('metagame') and a['name'] != b['name']:
+                raise ValueError(f'metagame decks {a["name"]} and {b["name"]} are one 75: a deck\'s table is keyed by its '
+                                 f'name, so two names of one 75 cannot share a model (docs/ENGINE.md 240)')
+            key = ('mirror', json.dumps(a['list']), json.dumps(a['main']))
+            found.setdefault(key, Pairing([a, a], True))
+        else:
+            c, d = (a, b) if a['index'] <= b['index'] else (b, a)
+            key = ('pair', c['name'], json.dumps(c['list']), json.dumps(c['main']), d['name'], json.dumps(d['list']),
+                   json.dumps(d['main']))
+            found.setdefault(key, Pairing([c, d], False))
+    if len(found) != 1:
+        raise ValueError(f'the games play {len(found)} pairings: a matchup model is one pairing\'s (docs/ENGINE.md 240); '
+                         f'{sorted(" vs ".join(x[1:2] + x[4:5]) if x[0] == "pair" else "a mirror" for x in found)}')
+    return next(iter(found.values()))
+
+
+def pair_arrays(games, specs, P):
+    """The non-mirror model's inputs (docs/ENGINE.md 240.3), every game oriented deck C first: dA (C's 60, count deltas
+    against C's main, games x E_C), dB (D's, games x E_D), ctx (games x 7: PAIR_CTX from C's side), y (C's result), it."""
+    import numpy as np
+    mC = np.asarray(P.decks[0]['main'], dtype=np.float64)
+    mD = np.asarray(P.decks[1]['main'], dtype=np.float64)
+    a = [P.seat_of_c(specs[g['spec']]) for g in games]
+    dA = np.asarray([g['decks'][s] for g, s in zip(games, a)], dtype=np.float64) - mC
+    dB = np.asarray([g['decks'][1 - s] for g, s in zip(games, a)], dtype=np.float64) - mD
+    pd = np.asarray([1.0 if g['starter'] == s else -1.0 for g, s in zip(games, a)])
+    g3 = np.asarray([1.0 if g['game'] == 3 else 0.0 for g in games])
+    lead = np.asarray([float(np.sign(g['wins'][s] - g['wins'][1 - s])) for g, s in zip(games, a)])
+    dC = np.asarray([float(g['dealt'][s]) for g, s in zip(games, a)])
+    dD = np.asarray([float(g['dealt'][1 - s]) for g, s in zip(games, a)])
+    ctx = np.stack([np.ones(len(games)), pd, pd * g3, g3, lead, dC, dD], axis=1)
+    y = np.asarray([g['result'][s] for g, s in zip(games, a)], dtype=np.float64)
+    it = np.asarray([g['iter'] if g['iter'] is not None else -1 for g in games])
+    return dA, dB, ctx, y, it
+
+
+def z_pair(p, dA, dB, ctx):
+    """The non-mirror logit (numpy, float64) of member `p` ({'wC', 'wD', 'UC', 'UD', 'W', 'c'}): C's side."""
+    import numpy as np
+    z = dA @ p['wC'] - dB @ p['wD'] + ctx @ p['c']
+    UC = np.asarray(p['UC'])
+    if UC.size:
+        z = z + np.einsum('nd,de,ne->n', dA @ UC, np.asarray(p['W']), dB @ np.asarray(p['UD']))
+    return z
+
+
+def fit_pair(dA, dB, ctx, y, wt, dim, l2_w, l2_inter, seed=0, base_only=False, threads=4):
+    """One non-mirror fit (docs/ENGINE.md 240.3), the mirror's procedure (`fit`): full-batch L-BFGS (torch, float64) of the
+    weighted mean log loss + L2 (l2_w on both decks' w, l2_inter on U_C, U_D and W) -> member dict (numpy lists).
+    `base_only`: the baseline (the pairing's base rate, play / draw, game 3; no deck term, no lead, no dealt flags)."""
+    import numpy as np
+    import torch
+    torch.set_num_threads(max(1, threads))
+    g = torch.Generator().manual_seed(seed)
+    EC, ED = dA.shape[1], dB.shape[1]
+    K = ctx.shape[1]
+    tA, tB, tc = (torch.as_tensor(a, dtype=torch.float64) for a in (dA, dB, ctx))
+    ty, tw = torch.as_tensor(y, dtype=torch.float64), torch.as_tensor(wt, dtype=torch.float64)
+    tw = tw / tw.sum()
+    wC = torch.zeros(EC, dtype=torch.float64, requires_grad=not base_only)
+    wD = torch.zeros(ED, dtype=torch.float64, requires_grad=not base_only)
+    c = torch.zeros(K, dtype=torch.float64, requires_grad=True)
+    UC = (0.1 * torch.randn(EC, dim, generator=g, dtype=torch.float64)).requires_grad_(dim > 0)
+    UD = (0.1 * torch.randn(ED, dim, generator=g, dtype=torch.float64)).requires_grad_(dim > 0)
+    W = (0.1 * torch.randn(dim, dim, generator=g, dtype=torch.float64)).requires_grad_(dim > 0)
+    mask = torch.tensor([1.0] * PAIR_BASELINE + [0.0] * (K - PAIR_BASELINE), dtype=torch.float64) if base_only else \
+        torch.ones(K, dtype=torch.float64)
+    params = [c] + ([] if base_only else [wC, wD]) + ([UC, UD, W] if dim > 0 else [])
+    opt = torch.optim.LBFGS(params, lr=1.0, max_iter=500, tolerance_grad=1e-10, tolerance_change=1e-12,
+                            history_size=50, line_search_fn='strong_wolfe')
+
+    def logit():
+        z = tc @ (c * mask)
+        if not base_only:
+            z = z + tA @ wC - tB @ wD
+        if dim > 0:
+            z = z + torch.einsum('nd,de,ne->n', tA @ UC, W, tB @ UD)
+        return z
+
+    def closure():
+        opt.zero_grad()
+        z = logit()
+        loss = (tw * torch.nn.functional.binary_cross_entropy_with_logits(z, ty, reduction='none')).sum()
+        if not base_only:
+            loss = loss + l2_w * ((wC * wC).sum() + (wD * wD).sum())
+        if dim > 0:
+            loss = loss + l2_inter * ((UC * UC).sum() + (UD * UD).sum() + (W * W).sum())
+        loss = loss + 1e-6 * (c * c).sum()
+        loss.backward()
+        return loss
+
+    opt.step(closure)
+    z0 = np.zeros
+    return {'wC': (wC.detach().numpy() if not base_only else z0(EC)).tolist(),
+            'wD': (wD.detach().numpy() if not base_only else z0(ED)).tolist(),
+            'c': (c * mask).detach().numpy().tolist(),
+            'UC': UC.detach().numpy().tolist() if dim > 0 else [], 'UD': UD.detach().numpy().tolist() if dim > 0 else [],
+            'W': W.detach().numpy().tolist() if dim > 0 else [], 'dim': dim, 'l2_w': l2_w, 'l2_inter': l2_inter}
+
+
+def _npp(m):
+    import numpy as np
+    return {k: (np.asarray(v, dtype=np.float64) if k in ('wC', 'wD', 'UC', 'UD', 'W', 'c') else v) for k, v in m.items()}
+
+
+def logloss_pair(members, dA, dB, ctx, y):
+    """The per-game mean log loss of the members' mean probability (unweighted; `logloss`'s for the non-mirror model)."""
+    import numpy as np
+    p = np.mean([1.0 / (1.0 + np.exp(-np.asarray(z_pair(_npp(m), dA, dB, ctx)))) for m in members], axis=0)
+    p = np.clip(p, 1e-12, 1 - 1e-12)
+    return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+
+def select_and_fit_pair(games, specs, P, val_iters=2, half_life=16.0, threads=4, seed=0, log=print, members_n=MEMBERS):
+    """`select_and_fit` for two different 75s (docs/ENGINE.md 240.3): the same grid on the same time split (the newest
+    `val_iters` iterations validate), the same selection rule, the same held-out ensemble (MEMBERS bootstrap fits on the
+    training iterations: the yardstick) and the published ensemble (`members_n` bootstrap fits on the whole window, the
+    same seeds) -> (members, report)."""
+    import numpy as np
+    dA, dB, ctx, y, it = pair_arrays(games, specs, P)
+    its = sorted(set(int(x) for x in it if x >= 0))
+    if len(its) < val_iters + 1:
+        raise ValueError(f'games of {len(its)} iterations: too few for {val_iters} validation iterations')
+    vcut = its[-val_iters]
+    tr, va = it < vcut, it >= vcut
+    ref = its[-1]
+    wtr = weights(it[tr], its[-val_iters - 1], half_life)
+    base = fit_pair(dA[tr], dB[tr], ctx[tr], y[tr], wtr, 0, 0.0, 0.0, seed=seed, base_only=True, threads=threads)
+    base_val = logloss_pair([base], dA[va], dB[va], ctx[va], y[va])
+    grid = []
+    for dim in DIMS:
+        for l2w in L2_W:
+            for l2i in (L2_INTER if dim > 0 else (0.0,)):
+                m = fit_pair(dA[tr], dB[tr], ctx[tr], y[tr], wtr, dim, l2w, l2i, seed=seed, threads=threads)
+                v = logloss_pair([m], dA[va], dB[va], ctx[va], y[va])
+                grid.append({'dim': dim, 'l2_w': l2w, 'l2_inter': l2i, 'val_logloss': v})
+                log(f'# dim {dim} l2_w {l2w} l2_inter {l2i}: validation log loss {v:.5f} (base rate + play / draw only '
+                    f'{base_val:.5f})')
+    lo_v = min(g['val_logloss'] for g in grid)
+    best = min((g for g in grid if g['val_logloss'] <= lo_v + 1e-5), key=lambda g: (g['dim'], -g['l2_w'], -g['l2_inter']))
+    held = []
+    rng = np.random.default_rng(seed)
+    for k in range(MEMBERS):
+        ix = np.flatnonzero(tr)
+        b = rng.choice(ix, size=len(ix), replace=True)
+        held.append(fit_pair(dA[b], dB[b], ctx[b], y[b], weights(it[b], its[-val_iters - 1], half_life), best['dim'],
+                             best['l2_w'], best['l2_inter'], seed=seed + 1 + k, threads=threads))
+    held_val = logloss_pair(held, dA[va], dB[va], ctx[va], y[va])
+    dva = np.asarray([games[i]['dealt'][0] or games[i]['dealt'][1] for i in np.flatnonzero(va)])
+    held_val_dealt = logloss_pair(held, dA[va][dva], dB[va][dva], ctx[va][dva], y[va][dva]) if dva.any() else None
+    base_val_dealt = logloss_pair([base], dA[va][dva], dB[va][dva], ctx[va][dva], y[va][dva]) if dva.any() else None
+    members = []
+    wall = weights(it, ref, half_life)
+    for k in range(members_n):
+        b = rng.choice(len(y), size=len(y), replace=True)
+        members.append(fit_pair(dA[b], dB[b], ctx[b], y[b], wall[b], best['dim'], best['l2_w'], best['l2_inter'],
+                                seed=seed + 101 + k, threads=threads))
+
+    def centred(key, main):
+        mn = np.asarray(main, dtype=np.float64)
+        W = np.asarray([m[key] for m in members])
+        W = W - (W @ mn / mn.sum())[:, None]
+        return W.mean(0).tolist(), W.std(0, ddof=1).tolist()
+
+    (pcC, seC), (pcD, seD) = centred('wC', P.decks[0]['main']), centred('wD', P.decks[1]['main'])
+    rep = {'games': int(len(y)), 'train_games': int(tr.sum()), 'val_games': int(va.sum()), 'iterations': its,
+           'val_iterations': [i for i in its if i >= vcut], 'half_life': half_life, 'grid': grid, 'selected': best,
+           'val_logloss': held_val, 'val_logloss_pd': base_val, 'gain_nats': base_val - held_val,
+           'val_logloss_dealt': held_val_dealt, 'val_logloss_pd_dealt': base_val_dealt,
+           'pd_baseline': base['c'][:PAIR_BASELINE], 'per_copy': {P.decks[0]['name']: pcC, P.decks[1]['name']: pcD},
+           'per_copy_se': {P.decks[0]['name']: seC, P.decks[1]['name']: seD}, 'ctx_names': list(PAIR_CTX),
+           'ctx': np.asarray([m['c'] for m in members]).mean(0).tolist(),
+           'c_win_rate': float(np.mean(y)), 'baseline': 'base rate + play / draw + game 3 (no deck term)'}
+    return members, rep
+
+
+class PairObjective:
+    """F of one deck's 60 in one context for two different 75s (docs/ENGINE.md 240.3; `Objective`'s for a mirror): the
+    members' mean over the worlds of the OTHER deck's 60 (its constructed prior, restricted to the dealt range when it
+    is dealt) of the decider's win probability - sigmoid(z) when the decider plays C (`role` 0), sigmoid(-z) when it
+    plays D (`role` 1), z always C's side -, its better side of play and draw when it sideboards first, its worse
+    second."""
+
+    def __init__(self, members, worlds_delta, role, game, first, lead, opp_dealt):
+        import numpy as np
+        self.np = np
+        self.role = role
+        self.first = first
+        g3 = 1.0 if game == 3 else 0.0
+        self.parts = []
+        for m in (_npp(x) for x in members):
+            if role == 0:
+                s_o = worlds_delta @ m['wD']
+                g_o = (worlds_delta @ m['UD']) @ m['W'].T if m['UC'].size else None
+            else:
+                s_o = worlds_delta @ m['wC']
+                g_o = (worlds_delta @ m['UC']) @ m['W'] if m['UC'].size else None
+            ctx = {}
+            for pd in (1.0, -1.0):
+                pdc, lc = (pd, lead) if role == 0 else (-pd, -lead)
+                dc, dd = (0.0, opp_dealt) if role == 0 else (opp_dealt, 0.0)
+                ctx[pd] = float(np.asarray([1.0, pdc, pdc * g3, g3, lc, dc, dd]) @ m['c'])
+            self.parts.append((m, s_o, g_o, ctx))
+
+    def per_member(self, d):
+        """Each member's F of candidates `d` (k x E of the decider's deck) -> (members, k)."""
+        np = self.np
+        out = []
+        for m, s_o, g_o, ctx in self.parts:
+            sides = []
+            for pd in (1.0, -1.0):
+                if self.role == 0:
+                    z = (d @ m['wC'])[:, None] - s_o[None, :] + ctx[pd]
+                    if g_o is not None:
+                        z = z + (d @ m['UC']) @ g_o.T
+                    p = 1.0 / (1.0 + np.exp(-z))
+                else:
+                    z = s_o[None, :] - (d @ m['wD'])[:, None] + ctx[pd]
+                    if g_o is not None:
+                        z = z + (d @ m['UD']) @ g_o.T
+                    p = 1.0 / (1.0 + np.exp(z))
+                sides.append(p.mean(axis=1))
+            out.append(np.maximum(sides[0], sides[1]) if self.first else np.minimum(sides[0], sides[1]))
+        return np.asarray(out)
+
+    def __call__(self, d):
+        return self.per_member(d).mean(axis=0)
+
+
+def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0):
+    """Two different 75s (docs/ENGINE.md 240.3): one choice table PER DECK - each deck's 24 contexts' 60s by the same
+    guarded climb (`confident_climb`, `z`) against the other deck's constructed prior (its full swap range; the spec's
+    dealt range for a dealt opponent) -> ([C's table, D's table] - each the spec's {"version", "list", "choices"} of
+    its own 75 -, {deck name: per-context detail})."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    decks = P.decks
+    info = []
+    for d in decks:
+        copies = [int(x[1]) for x in d['list']]
+        main = list(d['main'])
+        info.append((d, [x[0] for x in d['list']], copies, main, sum(copies) - sum(main)))
+    # the worlds of each deck as the other's belief: D's first (C's table), then C's (D's table)
+    beliefs = {}
+    for k in (1, 0):
+        d, names, copies, main, S = info[k]
+        m = np.asarray(main, dtype=np.float64)
+        beliefs[k] = {0: sample_prior(copies, main, 0, S, worlds, rng) - m,
+                      1: sample_prior(copies, main, dealt_swaps[0], dealt_swaps[1], worlds, rng) - m}
+    tables, details = [], {}
+    for role in (0, 1):
+        d, names, copies, main, S = info[role]
+        m = np.asarray(main, dtype=np.float64)
+        key = 'wC' if role == 0 else 'wD'
+        strong = strength_optimum([{'w': x[key]} for x in members], copies, main)
+        choices, detail = [], []
+        for (g, f, l, o) in contexts():
+            F = PairObjective(members, beliefs[1 - role][o].astype(np.float64), role, g, f, l, o)
+            c, fv, sw = confident_climb(F, copies, main, z)
+            choices.append([g, f, l, o, c])
+            detail.append({'context': [g, f, l, o], 'deck': c, 'F': fv, 'F_main': float(F((np.asarray(main) - m)[None, :])[0]),
+                           'swaps': [{'out': names[a], 'in': names[b], 'gain': gm, 'se': gs} for a, b, gm, gs in sw],
+                           'z': z, 'argmax_in': {names[i]: strong[i] - main[i] for i in range(len(c)) if strong[i] > main[i]},
+                           'in': {names[i]: c[i] - main[i] for i in range(len(c)) if c[i] > main[i]},
+                           'out': {names[i]: main[i] - c[i] for i in range(len(c)) if c[i] < main[i]}})
+            log(f'# {d["name"]} context game {g} first {f} lead {l} opp_dealt {o}: F {fv:.4f} (main '
+                f'{detail[-1]["F_main"]:.4f}) in {detail[-1]["in"]} out {detail[-1]["out"]}')
+        tables.append({'version': version, 'list': [[n, k] for n, k in zip(names, copies)], 'choices': choices})
+        details[d['name']] = detail
+    return tables, details
 
 
 # ----------------------------------------------------------------------------- the self-play hook
 
-def with_table(spec, table):
+def _counts75(main, side):
+    from collections import Counter
+    return dict(Counter(list(main) + list(side or [])))
+
+
+def with_tables(spec, tables):
+    """`spec` (JSON) with the choice tables `tables` (each {"version", "list", "choices"}) where the engine reads them -
+    each on the deck whose 75 is its list: a metagame deck's entry (`"table"`, docs/ENGINE.md 240), a fixed spec's seat
+    (`decks.pN_table`), or for a fixed mirror (one 75 both seats) pb3's one `"sideboard_table"` (docs/ENGINE.md 168.3,
+    unchanged). A table that fits no deck, or two tables of one 75, are refused."""
     sp = json.loads(spec)
-    sp['sideboard_table'] = table
+    tabs = [t for t in tables if t is not None]
+    of = [{n: int(k) for n, k in t['list']} for t in tabs]
+    placed = [0] * len(tabs)
+
+    def hit(c75, where):
+        h = [i for i, x in enumerate(of) if x == c75]
+        if len(h) > 1:
+            raise ValueError(f'{len(h)} choice tables of the 75 of {where} (one table per deck, docs/ENGINE.md 240)')
+        for i in h:
+            placed[i] += 1
+        return tabs[h[0]] if h else None
+
+    if 'metagame' in sp:
+        for e in sp['metagame']['decks']:
+            t = hit(_counts75(e['main'], e.get('sideboard')), f'metagame deck {e["name"]}')
+            if t is not None:
+                e['table'] = t
+    else:
+        d = sp['decks']
+        c0, c1 = _counts75(d['p0'], d.get('p0_sideboard')), _counts75(d['p1'], d.get('p1_sideboard'))
+        if c0 == c1:
+            t = hit(c0, 'both seats')
+            if t is not None:
+                sp['sideboard_table'] = t
+        else:
+            for s_, c in ((0, c0), (1, c1)):
+                t = hit(c, f'p{s_}')
+                if t is not None:
+                    d[f'p{s_}_table'] = t
+    if not all(placed):
+        raise ValueError(f'a choice table ({[t["version"] for t, n in zip(tabs, placed) if not n]}) fits no deck of the '
+                         f'spec (its list is no deck\'s 75; docs/ENGINE.md 240)')
     return json.dumps(sp, separators=(',', ':'))
+
+
+def with_table(spec, table):
+    """pb3's one table (docs/ENGINE.md 168.3): `with_tables` of [table]."""
+    return with_tables(spec, [table])
+
+
+def has_tables(spec):
+    """Does `spec` (a dict) carry a choice table of any form (docs/ENGINE.md 168.3, 223)?"""
+    if 'sideboard_table' in spec:
+        return True
+    d = spec.get('decks')
+    if isinstance(d, dict) and ('p0_table' in d or 'p1_table' in d):
+        return True
+    return any('table' in e for e in (spec.get('metagame') or {}).get('decks', []))
+
+
+def version_tables(v):
+    """A published version's choice tables (a list; None: no table): a mirror's one `table` (pb3's), two different 75s'
+    `tables` (one per deck, docs/ENGINE.md 240)."""
+    if v.get('tables'):
+        return list(v['tables'])
+    return [v['table']] if v.get('table') is not None else None
 
 
 def selfplay_spec(R, it):
@@ -559,14 +964,14 @@ def selfplay_spec(R, it):
     sp = json.loads(c['spec'])
     if not (sp.get('constructed') and sp.get('format') == 'bo3' and sp.get('dealt_decks')):
         raise ValueError('matchup_every needs a constructed best-of-three self-play spec with dealt decks (docs/ENGINE.md 168)')
-    if 'sideboard_table' in sp:
-        raise ValueError('matchup_every: the run\'s spec has a sideboard_table of its own (the retrain writes it)')
+    if has_tables(sp):
+        raise ValueError('matchup_every: the run\'s spec has a choice table of its own (the retrain writes them)')
     run = R.run
     used = [r for r in _rows(os.path.join(mdir(run), 'used.jsonl')) if r['iter'] == it]
     if used:
         v = used[-1]['version']
-        t = None if v is None else _load(os.path.join(mdir(run), v)).get('table')
-        return None if t is None else with_table(c['spec'], t)
+        t = None if v is None else version_tables(_load(os.path.join(mdir(run), v)))
+        return None if t is None else with_tables(c['spec'], t)
     start = os.path.join(mdir(run), 'start.json')
     if not os.path.exists(start):
         os.makedirs(mdir(run), exist_ok=True)
@@ -580,14 +985,15 @@ def selfplay_spec(R, it):
         _append(os.path.join(mdir(run), 'used.jsonl'), {'iter': it, 'version': None, 'time': time.time()})
         return None
     name = os.path.basename(vs[-1][1])
-    table = _load(vs[-1][1]).get('table')
+    table = version_tables(_load(vs[-1][1]))
     _append(os.path.join(mdir(run), 'used.jsonl'), {'iter': it, 'version': name, 'table': table is not None,
                                                     'time': time.time()})
     if prev != name:
-        R.log(f'iter {it} self-play: the chosen-60 seats sideboard by the matchup model\'s choice table {name}' if table
+        R.log(f'iter {it} self-play: the chosen-60 seats sideboard by the matchup model\'s choice table'
+              f'{"s" if table is not None and len(table) > 1 else ""} {name}' if table
               is not None else f'iter {it} self-play: the matchup model {name} has no table (it did not beat play / draw '
               f'on its held-out games by matchup_table_min_gain): the chosen-60 seats sideboard by search')
-    return None if table is None else with_table(c['spec'], table)
+    return None if table is None else with_tables(c['spec'], table)
 
 
 def _load(path):
@@ -689,10 +1095,60 @@ def launch_if_due(R, it):
 
 # ----------------------------------------------------------------------------- the retrain job
 
+def _mirror_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads, worlds, log, min_gain, z,
+                    members_n):
+    """A mirror's version (pb3's, docs/ENGINE.md 168.3-168.4, unchanged): one model on the shared 75's count deltas, one
+    table for every seat -> (the version's dict, report, tables or None, table changes, per-copy strengths)."""
+    lst, main = P.decks[0]['list'], P.decks[0]['main']
+    names = [x[0] for x in lst]
+    copies = [int(x[1]) for x in lst]
+    members, rep = select_and_fit(games, main, val_iters, half_life, threads, seed=b, log=log, members_n=members_n)
+    dd = json.loads(cfg['spec']).get('dealt_decks') or {}
+    sw = tuple(dd.get('swaps') or (0, sum(copies) - sum(main)))
+    # (a model that does not beat play / draw on the held-out games by `min_gain` nats has not shown matchup
+    # knowledge: its version publishes no table, and the chosen-60 seats sideboard by search until one does -
+    # docs/ENGINE.md 168.4)
+    if rep['gain_nats'] >= min_gain:
+        table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log, z=z)
+        check_table(cfg['spec'], table)
+    else:
+        table, detail = None, []
+        log(f'# held-out gain {rep["gain_nats"]:+.5f} nats < {min_gain}: no table in {name}')
+    out = {'format': FORMAT, 'version': name, 'iter': b, 'window': [lo, b], 'list': lst, 'main': main,
+           'members': members, 'report': rep, 'table': table, 'table_detail': detail, 'worlds': worlds,
+           'min_gain': min_gain, 'swap_z': z,
+           'dealt_swaps': list(sw), 'time': time.time()}
+    changes = [{'context': x['context'], 'in': x['in'], 'out': x['out']} for x in detail]
+    return out, rep, (None if table is None else [table]), changes, dict(zip(names, rep['per_copy']))
+
+
+def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads, worlds, log, min_gain, z, members_n):
+    """Two different 75s' version (docs/ENGINE.md 240.3): the non-mirror model, then one table per deck, published only
+    when the model beats its baseline (the pairing's base rate, play / draw, game 3) on the held-out games by
+    `min_gain` nats -> as `_mirror_version`."""
+    members, rep = select_and_fit_pair(games, specs, P, val_iters, half_life, threads, seed=b, log=log,
+                                       members_n=members_n)
+    dd = json.loads(cfg['spec']).get('dealt_decks') or {}
+    S = [sum(int(x[1]) for x in d['list']) - sum(d['main']) for d in P.decks]
+    sw = tuple(dd.get('swaps') or (0, min(S)))
+    if rep['gain_nats'] >= min_gain:
+        tables, detail = pair_choice_tables(members, P, sw, name, worlds=worlds, seed=b, log=log, z=z)
+        check_tables(cfg['spec'], tables)
+    else:
+        tables, detail = None, {}
+        log(f'# held-out gain {rep["gain_nats"]:+.5f} nats < {min_gain}: no table in {name}')
+    out = {'format': FORMAT, 'version': name, 'iter': b, 'window': [lo, b], 'pairing': P.json(), 'model': 'pair',
+           'members': members, 'report': rep, 'table': None, 'tables': tables, 'table_detail': detail,
+           'worlds': worlds, 'min_gain': min_gain, 'swap_z': z, 'dealt_swaps': list(sw), 'time': time.time()}
+    changes = [{'deck': k, 'context': x['context'], 'in': x['in'], 'out': x['out']} for k, xs in detail.items() for x in xs]
+    return out, rep, tables, changes, rep['per_copy']
+
+
 def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log=print, min_gain=0.005, z=2.0,
             members_n=20):
     """The job (module docs): the run's logged self-play games of iterations lo..b -> status (status.json; a failure
-    raises after writing it)."""
+    raises after writing it). The games' one pairing (`the_pairing`): a mirror's version is pb3's (one model, one
+    table), two different 75s' the non-mirror model with one table per deck (docs/ENGINE.md 240)."""
     t0 = time.time()
     d = job_dir(run, b)
     os.makedirs(d, exist_ok=True)
@@ -705,25 +1161,10 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
         log(f'# {len(games)} games of iterations {lo}-{b}')
         if not games:
             raise RuntimeError(f'no logged self-play game in iterations {lo}-{b} (the game log: {os.path.join(run, "games")})')
-        lst, main = the_75(specs, games)
-        names = [x[0] for x in lst]
-        copies = [int(x[1]) for x in lst]
-        members, rep = select_and_fit(games, main, val_iters, half_life, threads, seed=b, log=log, members_n=members_n)
-        dd = json.loads(cfg['spec']).get('dealt_decks') or {}
-        sw = tuple(dd.get('swaps') or (0, sum(copies) - sum(main)))
-        # (a model that does not beat play / draw on the held-out games by `min_gain` nats has not shown matchup
-        # knowledge: its version publishes no table, and the chosen-60 seats sideboard by search until one does -
-        # docs/ENGINE.md 168.4)
-        if rep['gain_nats'] >= min_gain:
-            table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log, z=z)
-            check_table(cfg['spec'], table)
-        else:
-            table, detail = None, []
-            log(f'# held-out gain {rep["gain_nats"]:+.5f} nats < {min_gain}: no table in {name}')
-        out = {'format': FORMAT, 'version': name, 'iter': b, 'window': [lo, b], 'list': lst, 'main': main,
-               'members': members, 'report': rep, 'table': table, 'table_detail': detail, 'worlds': worlds,
-               'min_gain': min_gain, 'swap_z': z,
-               'dealt_swaps': list(sw), 'time': time.time()}
+        P = the_pairing(specs, games)
+        make = _mirror_version if P.mirror else _pair_version
+        out, rep, tables, changes, per_copy = make(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads,
+                                                   worlds, log, min_gain, z, members_n)
         staged = os.path.join(d, f'{name}.json')
         with open(staged, 'w', encoding='utf-8') as f:
             json.dump(out, f)
@@ -732,15 +1173,14 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
         shutil.copyfile(staged, tmp)
         os.replace(tmp, dst)
         status.update(ok=True, val_logloss=rep['val_logloss'], val_logloss_pd=rep['val_logloss_pd'],
-                      gain_nats=rep['gain_nats'], selected=rep['selected'], table=table is not None,
+                      gain_nats=rep['gain_nats'], selected=rep['selected'], table=tables is not None,
                       seconds=round(time.time() - t0, 1))
         _append(os.path.join(mdir(run), 'index.jsonl'), {
             'version': name, 'iter': b, 'window': [lo, b], 'games': rep['games'], 'val_games': rep['val_games'],
             'selected': rep['selected'], 'val_logloss': rep['val_logloss'], 'val_logloss_pd': rep['val_logloss_pd'],
             'gain_nats': rep['gain_nats'], 'val_logloss_dealt': rep['val_logloss_dealt'],
-            'val_logloss_pd_dealt': rep['val_logloss_pd_dealt'], 'per_copy': dict(zip(names, rep['per_copy'])),
-            'table': table is not None,
-            'table_changes': [{'context': x['context'], 'in': x['in'], 'out': x['out']} for x in detail], 'time': time.time()})
+            'val_logloss_pd_dealt': rep['val_logloss_pd_dealt'], 'per_copy': per_copy,
+            'table': tables is not None, 'table_changes': changes, 'time': time.time()})
     except Exception as e:                         # noqa: BLE001 (recorded, then raised: the run logs it loudly)
         status.update(ok=False, error=f'{type(e).__name__}: {e}', traceback=traceback.format_exc()[-3000:],
                       seconds=round(time.time() - t0, 1))
@@ -761,20 +1201,24 @@ def per_copy_lines(names, rep):
 
 def census(run, lo=None, hi=None):
     """What the chosen-60 seats board (the game log): per mode ('table', 'chosen') and game, the seats' 60s as changes
-    against the main - each card's mean copies in / out, and the most common 60s."""
+    against the main - each card's mean copies in / out, and the most common 60s. Two different 75s (docs/ENGINE.md
+    223): per deck, its seats against its own main (keys '<deck> <mode> game <g>')."""
     from collections import Counter
     games, specs = load_games(run, lo, hi)
     if not games:
         return {'games': 0}
-    lst, main = the_75(specs, games)
-    names = [x[0] for x in lst]
+    P = the_pairing(specs, games)
     out = {}
     for g in games:
+        a = P.seat_of_c(specs[g['spec']])
         for p in (0, 1):
             mode = g['mode'][p]
             if mode not in ('table', 'chosen'):
                 continue
-            k = f'{mode} game {g["game"]}'
+            deck = P.decks[0 if p == a else 1]
+            names = [x[0] for x in deck['list']]
+            main = deck['main']
+            k = f'{mode} game {g["game"]}' if P.mirror else f'{deck["name"]} {mode} game {g["game"]}'
             o = out.setdefault(k, {'seats': 0, 'decks': Counter(), 'in': Counter(), 'out': Counter()})
             o['seats'] += 1
             c = g['decks'][p]
@@ -835,7 +1279,29 @@ def main(argv=None):
     elif a.cmd == 'fit':
         lo, hi = rng(a.iters)
         games, specs = load_games(a.run, lo, hi)
-        lst, main_ = the_75(specs, games)
+        P = the_pairing(specs, games)
+        if not P.mirror:
+            members, rep = select_and_fit_pair(games, specs, P, a.val_iters, a.half_life, a.threads, members_n=a.members)
+            print(f'{rep["games"]} games of {P.decks[0]["name"]} vs {P.decks[1]["name"]} ({rep["train_games"]} train, '
+                  f'{rep["val_games"]} validation of iterations {rep["val_iterations"]}); selected {rep["selected"]}')
+            print(f'held-out log loss {rep["val_logloss"]:.5f} vs the baseline {rep["val_logloss_pd"]:.5f}: gain '
+                  f'{rep["gain_nats"]:+.5f} nats a game')
+            for dk in P.decks:
+                print(f'{dk["name"]} per copy (ensemble mean +- sd):')
+                rp = {'per_copy': rep['per_copy'][dk['name']], 'per_copy_se': rep['per_copy_se'][dk['name']]}
+                for line in per_copy_lines([x[0] for x in dk['list']], rp):
+                    print(line)
+            out = {'report': rep, 'members': members, 'pairing': P.json()}
+            if a.table:
+                S = min(sum(int(x[1]) for x in dk['list']) - sum(dk['main']) for dk in P.decks)
+                out['tables'], out['table_detail'] = pair_choice_tables(members, P, (0, S), 'fit', worlds=a.worlds,
+                                                                        z=a.swap_z)
+            if a.out:
+                os.makedirs(a.out, exist_ok=True)
+                with open(os.path.join(a.out, 'matchup_fit.json'), 'w', encoding='utf-8') as fh:
+                    json.dump(out, fh, indent=1)
+            return
+        lst, main_ = P.decks[0]['list'], P.decks[0]['main']
         names = [x[0] for x in lst]
         members, rep = select_and_fit(games, main_, a.val_iters, a.half_life, a.threads, members_n=a.members)
         print(f'{rep["games"]} games ({rep["train_games"]} train, {rep["val_games"]} validation of iterations '
@@ -858,7 +1324,8 @@ def main(argv=None):
             print(f'{row["version"]}: {row["games"]} games of {row["window"]}, held-out {row["val_logloss"]:.5f} vs '
                   f'play / draw {row["val_logloss_pd"]:.5f} (gain {row["gain_nats"]:+.5f} nats), selected {row["selected"]}')
             for ch in row['table_changes']:
-                print(f'   context {ch["context"]}: in {ch["in"]} out {ch["out"]}')
+                deck = f'{ch["deck"]} ' if 'deck' in ch else ''
+                print(f'   {deck}context {ch["context"]}: in {ch["in"]} out {ch["out"]}')
     elif a.cmd == 'census':
         lo, hi = rng(a.iters)
         print(json.dumps(census(a.run, lo, hi), indent=1))

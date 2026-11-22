@@ -141,13 +141,13 @@ def DIGEST(d, games=(2000, 500)):
 
 
 D_FORMATS = {'constructed': '63f58560ad7b3df0', 'eoe': 'b36df9098a38d794', 'driver': '837d42c28214befe',
-             'metagame': '0123456789abcdef'}
+             'metagame': '0123456789abcdef', 'pair': 'fedcba9876543210'}
 
 
-def FORMATS(digests=None, passed=4):
-    """digest_formats' output as the four tests print it (ENGINE.md 148.1, 176), in the order they finished."""
+def FORMATS(digests=None, passed=5):
+    """digest_formats' output as the five tests print it (ENGINE.md 148.1, 176, 223), in the order they finished."""
     d = dict(D_FORMATS, **(digests or {}))
-    return ('running 4 tests\n'
+    return ('running 5 tests\n'
             'driver (8 threads, 2 groups of 8 games): 20000 batches, 90491 rows, 1251 samples (the first at batch 7532), '
             '5 results (the first at batch 12020); sims 85674, leaves 90491, cache hits 51316, view rows 10061, belief '
             'rows 2159, busy 4.1 s (47.9 us a simulation)\n'
@@ -157,6 +157,8 @@ def FORMATS(digests=None, passed=4):
             'test constructed_digests ... ok\n'
             f'metagame: 225 best-of-one games and 63 best-of-three matches in 20.1 s; combined digest {d["metagame"]}\n'
             'test metagame_digests ... ok\n'
+            f'pair: 70 best-of-three matches in 6.0 s; combined digest {d["pair"]}\n'
+            'test pair_digests ... ok\n'
             f'eoe: 160 games in 38.4 s; combined digest {d["eoe"]}\n'
             'test eoe_digests ... ok\n\n'
             f'test result: ok. {passed} passed; 0 failed; 0 ignored; 0 measured; {30 - passed} filtered out; '
@@ -801,23 +803,24 @@ def test_a_failed_retry_fails_the_step(core_step):
 
 
 def test_the_digest_formats_checker():
-    """digest_formats (ENGINE.md 148.1, 157, 176): exactly one line each of constructed, eoe, driver and metagame, no
-    re-record, the binary's one "test result: ok. 4 passed" line + exit 0 - the four digests named in the reason and the
-    report."""
+    """digest_formats (ENGINE.md 148.1, 157, 176, 223): exactly one line each of constructed, eoe, driver, metagame and
+    pair, no re-record, the binary's one "test result: ok. 5 passed" line + exit 0 - the five digests named in the reason
+    and the report."""
     check = G.check_digest_formats
     ok, why, extra = check(FORMATS(), 0)
     assert ok and extra['formats'] == D_FORMATS and all(f'{n} {d}' in why for n, d in D_FORMATS.items())
     out = FORMATS()
     assert not check(out.replace('eoe: 160', 'eoe (encodings off): 160'), 0)[0]          # a line missing
     ok, why, _ = check(out + f'constructed: x; combined digest {D_FORMATS["constructed"]}\n', 0)
-    assert not ok and '5 "<name>' in why                                                  # a line twice
-    ok, why, _ = check(out.replace('test result: ok. 4 passed', 'wrote E:/x/engine/tests/data/digests_eoe.txt\n'
-                                   'test result: ok. 4 passed'), 0)
+    assert not ok and '6 "<name>' in why                                                  # a line twice
+    ok, why, _ = check(out.replace('test result: ok. 5 passed', 'wrote E:/x/engine/tests/data/digests_eoe.txt\n'
+                                   'test result: ok. 5 passed'), 0)
     assert not ok and 'RE-RECORDED' in why                                                # DIGEST_WRITE
-    ok, why, _ = check(FORMATS(passed=3), 0)
-    assert not ok and '3 passed, not the 4' in why
-    assert not check(out.replace('test result: ok. 4 passed; 0 failed', 'test result: FAILED. 3 passed; 1 failed'), 101)[0]
+    ok, why, _ = check(FORMATS(passed=4), 0)
+    assert not ok and '4 passed, not the 5' in why
+    assert not check(out.replace('test result: ok. 5 passed; 0 failed', 'test result: FAILED. 4 passed; 1 failed'), 101)[0]
     assert not check(out.replace('metagame: 225', 'metagame (encodings off): 225'), 0)[0]   # the metagame line missing
+    assert not check(out.replace('pair: 70', 'pair (encodings off): 70'), 0)[0]             # the pair line missing
     assert not check(out, 1)[0]
     assert 'did it compile' in check('error[E0425]: cannot find value\n', 101)[1]
 
@@ -1500,9 +1503,12 @@ def test_a_mac_shard_has_its_own_basetemp_removed_after(monkeypatch):
     monkeypatch.setattr(G, 'read_durations', lambda *a: {})
     steps = G.pytest_step(ctx=types.SimpleNamespace(pytest_shards=3, sha_short=SHA[:12]))
     macs = [s.mac_cmd(None)[0][2] for s in steps if s.mac_cmd]
-    bases = [m.split('--basetemp=')[1].split(';')[0] for m in macs]
+    bases = [m.split('--basetemp=')[1].split()[0] for m in macs]
     assert len(set(bases)) == 3 and all(b.startswith(f'gates/tmp/pytest-{SHA[:12]}-') for b in bases)
-    assert all(m.endswith(f'; rc=$?; rm -rf {b}; exit $rc; }}') for m, b in zip(macs, bases))
+    # its junit file read on the Mac (the tests' seconds printed for the durations file: ENGINE.md 238.9), then removed
+    assert all(f'--junitxml={b}.xml; rc=$?; python tools/gate.py --junit-seconds {b}.xml; rm -rf {b} {b}.xml; exit $rc; }}'
+               in m for m, b in zip(macs, bases))
+    assert all(s.mac_checker is not None for s in steps if s.mac_cmd)
     assert all('{ mkdir -p gates/tmp && python -m pytest ' in m for m in macs)      # (pytest makes no parents)
 
 
@@ -1573,3 +1579,38 @@ def test_the_core_tier_runs_every_core_shard_and_a_failed_one_fails_the_gate(gat
     gate.fake.core_pytest = [('.\n9 passed in 1.00s\n', 0), (PYTEST_FAILED('tests/test_a.py::test_x', passed=3), 1)]
     rc, out, _, report = gate(*args, capsys=capsys)
     assert rc == 1 and final(out).startswith('GATE FAILED optin-core') and 'core-pytest-' in final(out)
+
+
+def test_a_mac_shards_seconds_reach_the_durations_file(tmp_path, monkeypatch, capsys):
+    """ENGINE.md 238.9: a shard on the Mac prints its junit file's seconds (`gate.py --junit-seconds`), and its checker
+    merges them into the durations file once the shard passed - never after a failure, and a line that is not a JSON
+    object of numbers is ignored."""
+    xml = tmp_path / 'shard.xml'
+    xml.write_text('<testsuites><testsuite>'
+                   '<testcase classname="tests.test_x" name="test_a" time="1.5"/>'
+                   '<testcase classname="tests.test_x.TestC" name="test_b[1]" time="0.25"/>'
+                   '<testcase classname="tests.ir.test_y" name="test_c" time="2"/>'
+                   '</testsuite></testsuites>', encoding='utf-8')
+    assert G.main(['--junit-seconds', str(xml)]) == 0
+    line = capsys.readouterr().out.strip()
+    assert line.startswith(G.SECONDS_PREFIX) and '\n' not in line
+    want = {'tests/test_x.py::test_a': 1.5, 'tests/test_x.py::TestC::test_b[1]': 0.25, 'tests/ir/test_y.py::test_c': 2.0}
+    assert G.parse_seconds(f'...\n3 passed in 4.00s\n{line}\n[mac] done\n') == want
+    assert G.main(['--junit-seconds', str(tmp_path / 'missing.xml')]) == 0 and capsys.readouterr().out == ''
+    assert G.parse_seconds('no such line') == {} and G.parse_seconds(G.SECONDS_PREFIX + '{broken') == {}
+    assert G.parse_seconds(G.SECONDS_PREFIX + '{"t": "x"}') == {} and G.parse_seconds(G.SECONDS_PREFIX + '[1]') == {}
+    monkeypatch.setattr(G, 'durations_dir', lambda: str(tmp_path))
+    (tmp_path / G.PYTEST_DURATIONS).write_text(json.dumps({'tests/test_x.py': 9.0, 'tests/test_x.py::test_a': 9.0,
+                                                           'tests/test_old.py': 3.0}), encoding='utf-8')
+    check = G.recording(G.check_pytest)
+    out = f'.\n3 passed in 4.00s\n{line}\n'
+    assert check(out.replace('3 passed', '1 failed, 2 passed'), 1)[0] is False          # a failed shard records nothing
+    assert json.load(open(tmp_path / G.PYTEST_DURATIONS, encoding='utf-8'))['tests/test_x.py'] == 9.0
+    assert check(out, 0)[0] is True
+    d = json.load(open(tmp_path / G.PYTEST_DURATIONS, encoding='utf-8'))
+    assert d['tests/test_x.py'] == 1.75 and d['tests/test_x.py::test_a'] == 1.5 and d['tests/ir/test_y.py'] == 2.0
+    assert d['tests/test_old.py'] == 3.0 and not os.path.exists(tmp_path / (G.PYTEST_DURATIONS + '.lock'))
+    assert check('.\n3 passed in 4.00s\n', 0)[0] is True                                # no line: nothing to record
+    # the desktop's own way is unchanged: the junit file read, merged and removed
+    G.record_durations(str(xml))
+    assert not xml.exists() and json.load(open(tmp_path / G.PYTEST_DURATIONS, encoding='utf-8'))['tests/test_x.py'] == 1.75
