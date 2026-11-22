@@ -9,6 +9,9 @@ if ROOT not in sys.path:
 import torch  # noqa: E402
 
 torch.set_num_threads(1)          # docs/az.md 7: > 1 thread collapses on a saturated CPU
+# the tests' runs stay on this machine: their reason, so a fresh test run beside a published farm build of this commit
+# is not refused (zero-core docs/az.md 70; docs/ENGINE.md 218) - inherited by the runs they start as processes
+os.environ.setdefault('ZERO_SELFPLAY_LOCAL_REASON', 'a pytest run')
 
 
 def pytest_configure(config):

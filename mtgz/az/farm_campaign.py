@@ -31,6 +31,9 @@ A campaign is a farm run of its own (`cmp-<name>`) holding one such job:
   * games      ids [0, games); `games_per_lease` ('auto' = ~7.5 min of a machine)
   * share      the campaign's share of the farm's run leases while a live run's self-play also wants them
                (PROTOCOL rev 13; default 0.25; a coordinator before rev 13 ignores it: evaluation goes first)
+  * job_class  the eval batch's lane class (None: none, the batch of before): e.g. 'backfill' puts `"class":
+               "backfill"` on the run PUT's eval batch and no `share` (a backfill takes none) - for the coordinator's
+               backfill lane (zero-farm rev 25, not yet live: rev 24 refuses the field, so nothing passes it yet)
   * deadline   seconds after which the games the farm has not delivered are played here (`local`), by the same
                worker executable on the same graphs (so they are the same games)
   * alternates the routes beside the build's CPU worker (zero-farm PROTOCOL 9.4, 11.4, 14; docs/ENGINE.md 215): by
@@ -54,6 +57,11 @@ fails loudly naming the missing ranges. The result: `games.jsonl` (one traced ro
 digest (zero.farm_eval.games_digest: the same games give the same digest wherever and however they were played) and,
 with `describe`, `records.jsonl.gz`: each game replayed into its moves - who decided, the decision's kind and the
 option chosen in words (the engine's spectator view, engine/src/az/view.rs), per game of a match - for analyses.
+Routes (docs/ENGINE.md 217): each game's row in games.jsonl names the route that played it - `route` {build, variant,
+label}: the lease's worker build (the default CPU build or an alternate) and the model variant it was granted
+('gpu' = float16 on CUDA, 'dml' = the float32 MatMul form on AMD's DirectML), read from the coordinator's leases table
+(`lease_routes`; the results listing does not carry them), 'local' for the top-up - and the result's `by_route`
+(and the readout's) summarizes A's score per route, so a comparison can be checked within one route.
 
 State: `~/.zero-farm/campaigns/<run>/` (state.json, ckpt/, results/, local/, games.jsonl). Every step is idempotent;
 `collect` resumes. The admin token, data key and farm-release are zero.farm_def's (never printed).
@@ -256,6 +264,35 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
                                 f'match\'s seat - an eval job seats both sides from one run\'s settings (a per-side '
                                 f'option changes only what zero.h2h\'s per-side options set)')
     return cfg, rule
+
+
+BASE_KEYS = ('margin_w', 'redet', 'eval_cache')       # (a seat's keys from its own run: h2h.run_seat_keys)
+
+
+def match_job(rule_ck, a, b, sims, spec, tilts=None, chance_k=2, c_puct=1.0, max_steps=5000):
+    """The eval job of zero.h2h.match(a, b, seat_a=seat_b=<rule_ck's run's rule with root belief tilts `tilts`>) in
+    which each side keeps its own run's margin_w / redet / eval_cache (h2h._seats; without a run config margin_w 0,
+    redet on, no cache) - the metagame cells' local match (yardsticks.play_pair_local) of any two checkpoints:
+    `match_settings` of `rule_ck` with each side's own keys, where they differ from the settings', as its seat's set
+    (zero-core docs/az.md 68) -> (settings, rule, seats): [net 1, net 2], or [net 1, net 1] when `a` and `b` are one
+    file; the farm's seats checked against the local match's dict for dict (CampaignError). A seat set needs a build
+    announcing `seat_settings`; without differences the seats carry none (match_settings' job)."""
+    from zero import h2h, seat_settings as SS
+    cfg, rule = match_settings(rule_ck, sims, spec, tilts=tilts, chance_k=chance_k, c_puct=c_puct, max_steps=max_steps)
+
+    def own(ck):
+        k = h2h.run_seat_keys(ck) or {'margin_w': 0.0, 'redet': True, 'eval_cache': 0}
+        return {x: type(cfg[x])(k[x]) if x in cfg and cfg[x] is not None else k[x] for x in BASE_KEYS}
+    same = os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    sets = [SS.changed({x: cfg.get(x) for x in BASE_KEYS}, own(ck)) for ck in (a, b)]
+    seats = [SS.net_seat(1, sets[0] or None), SS.net_seat(1 if same else 2, sets[1] or None)]
+    want = [match_seat(ck, sims, rule, chance_k, c_puct) for ck in (a, b)]
+    got = farm_seats(cfg, seats)
+    for side, (w, g) in enumerate(zip(want, got)):
+        if w != g:
+            diff = {k: (w.get(k), g.get(k)) for k in sorted(set(w) | set(g)) if w.get(k) != g.get(k)}
+            raise CampaignError(f'seat {"AB"[side]}: the farm would play {diff} (match vs farm)')
+    return cfg, rule, seats
 
 
 def selfplay_settings(ckpt, overrides=None):
@@ -677,14 +714,18 @@ def run_body(st, eval_on=True, state=None):
         # allows, so ids stay below `games`; checkpoints never change, so max_stale is moot)
         sp = {'quota': st['games'], 'slack': 0, 'max_stale': 1000, 'games_per_lease': st['games_per_lease'],
               'gpu': 'any', 'needs': st.get('needs'), 'job': dict(eval_template(st), seed=int(st['seed']))}
-        if st.get('share') is not None:
+        if st.get('job_class'):
+            sp['class'] = st['job_class']              # (a lane class takes no share: rev 25's backfill)
+        elif st.get('share') is not None:
             sp['share'] = st['share']
         b['selfplay'] = sp
     elif eval_on:
         job = dict(eval_template(st), seed=int(st['seed']))
         ev = {'batch': st['batch'], 'games': st['games'], 'checkpoints': sorted(int(g) for g in st['gens']),
               'games_per_lease': st['games_per_lease'], 'gpu': 'any', 'needs': st.get('needs'), 'job': job}
-        if st.get('share') is not None:
+        if st.get('job_class'):
+            ev['class'] = st['job_class']              # (a lane class takes no share: rev 25's backfill)
+        elif st.get('share') is not None:
             ev['share'] = st['share']
         b['eval'] = ev
     return b
@@ -759,7 +800,7 @@ def setup_farm(cl, d, st, log, opts):
 def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=None, paired=True, share=DEFAULT_SHARE,
            priority=0.5, games_per_lease='auto', deadline_s=DEFAULT_DEADLINE_S, spot=DEFAULT_SPOT, ort_dll=None,
            min_agent=None, needs=None, meta=None, client=None, root=None, log=log_stderr, opts=None, samples=False,
-           alternates=RELEASE, variants=DEFAULT_VARIANTS):
+           alternates=RELEASE, variants=DEFAULT_VARIANTS, job_class=None):
     """A new campaign (or the existing one of that name, resumed where it stopped) -> its state directory. `settings`:
     a run's evaluation settings (match_settings); `seats` [{"net": 1}, {"net": 2}] (A vs B, `b` given) or
     [{"net": 1}, {"net": 1}] (self-play of A), each network seat with its set when it has one (`campaign_seats`,
@@ -769,7 +810,8 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
     `settings` = selfplay_settings; seats [{"net": 1}, {"net": 1}], unpaired). `alternates` / `variants`: the farm's
     other routes and the graphs their GPUs play (module docstring; prepare_alternates): RELEASE (the default) the
     release index's for the build, None none, or a list of build ids; `variants` a pool_variants text ('' none: the GPU
-    alternates play each gen's default graph). A resumed campaign keeps what it was created with."""
+    alternates play each gen's default graph). `job_class`: the eval batch's lane class (module docs; None: none - the
+    PUT bodies of before). A resumed campaign keeps what it was created with."""
     run = slug(name)
     d = state_dir(run, root)
     opts = opts or {}
@@ -797,6 +839,10 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
               'spot': float(spot), 'created': time.time(), 'meta': meta or {}, 'have': [], 'failed': {},
               'machines': {}, 'leases': {}, 'cursor': 0, 'job': {'kind': 'play', 'trace': True, 'samples': bool(samples)},
               'alt_want': want}
+        if job_class:
+            if not isinstance(job_class, str) or not SLUG_RE.match(job_class):
+                raise CampaignError(f'job_class {job_class!r}: a lane class name ([a-z0-9-])')
+            st['job_class'] = job_class
         os.makedirs(d, exist_ok=True)
         st['settings'] = job_settings(worker, build_id, settings, d, log, samples, seats=seats)
         st['spec'] = st['settings']['spec' if samples else 'eval_spec']
@@ -893,6 +939,7 @@ def pull(cl, d, st, log=log_stderr):
                     new.append(row)
             _append_rows(d, new)
             if new:
+                st.setdefault('first_result', time.time())    # (the queue's wait: the batch put to its first game)
                 m = st['machines'].setdefault(r.get('machine_id') or '?', 0)
                 st['machines'][r.get('machine_id') or '?'] = m + len(new)
                 lz = st['leases'].setdefault(r.get('lease_id') or '?', {'machine': r.get('machine_id'), 'games': 0})
@@ -1044,7 +1091,7 @@ def local_ranges(gids, paired, chunk=64):
 def play_local(d, st, gids, threads=4, wrap=None, log=log_stderr):
     """Games `gids` played here by the campaign's own worker executable on its graphs (`mtgz-worker eval`: the same
     games the farm would have played), below normal priority, `wrap` (a command prefix, e.g. the desktop's slot
-    throttle) around each piece. Each piece's rows are checked as the farm's (digest) and taken; a piece that fails
+    throttle; a callable: asked for it before each piece, None for none) around each piece. Each piece's rows are checked as the farm's (digest) and taken; a piece that fails
     marks its games failed with the worker's error (the reason)."""
     from zero import farm_eval as FE
     os.makedirs(os.path.join(d, 'local'), exist_ok=True)
@@ -1054,7 +1101,7 @@ def play_local(d, st, gids, threads=4, wrap=None, log=log_stderr):
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, 'settings.json'), 'w', encoding='utf-8') as f:
             json.dump(st['settings'], f)
-        cmd = list(wrap or []) + local_cmd(st, lo, hi, out, threads)
+        cmd = list((wrap() if callable(wrap) else wrap) or []) + local_cmd(st, lo, hi, out, threads)
         kw = {'creationflags': 0x08000000 | 0x00004000} if os.name == 'nt' else {}
         log(f'local: games [{lo}, {hi}) ({threads} threads)')
         t0 = time.time()
@@ -1206,6 +1253,96 @@ def read_records(d):
         return [json.loads(line) for line in f if line.strip()]
 
 
+# ------------------------------------------------------------------------------------------------ routes
+def coordinator_dir():
+    """The zero-farm coordinator checkout whose wrangler reads the coordinator's database: ZERO_FARM_COORDINATOR (the
+    environment, else ~/.config/zero/local.env), else ~/zero-farm/coordinator - None when it is not there."""
+    d = os.environ.get('ZERO_FARM_COORDINATOR') or local_config.get('ZERO_FARM_COORDINATOR') or \
+        os.path.join(os.path.expanduser('~'), 'zero-farm', 'coordinator')
+    return d if any(os.path.isfile(os.path.join(d, f)) for f in ('wrangler.jsonc', 'wrangler.toml')) else None
+
+
+def lease_routes(run, log=log_stderr, cdir=None, timeout=180):
+    """{lease_id: {'build', 'variant', 'machine'}} of a campaign run's leases, read (read only) from the coordinator's
+    leases table - `npx wrangler d1 execute zero-farm --remote --json --command "SELECT lease_id, build_id, variant,
+    machine_id FROM leases WHERE run = '<run>'"` in the coordinator checkout (`coordinator_dir`): the admin API's results
+    listing names a result's lease and machine but not the lease's build or variant (a coordinator proposal, docs/ENGINE.md
+    217). None when they cannot be read (no checkout, no wrangler login, an error: said in the log)."""
+    import shutil
+    cdir = cdir or coordinator_dir()
+    if not SLUG_RE.match(run or ''):
+        raise CampaignError(f'lease_routes: {run!r} is not a run name')
+    npx = shutil.which('npx')
+    if not cdir or not npx:
+        log(f'routes: not read ({"no zero-farm coordinator checkout (ZERO_FARM_COORDINATOR)" if not cdir else "no npx"})')
+        return None
+    sql = f"SELECT lease_id, build_id, variant, machine_id FROM leases WHERE run = '{run}'"
+    kw = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    try:
+        p = subprocess.run([npx, 'wrangler', 'd1', 'execute', 'zero-farm', '--remote', '--json', '--command', sql],
+                           cwd=cdir, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout,
+                           stdin=subprocess.DEVNULL, **kw)
+        ans = json.loads(p.stdout)
+        res = ans[0]['results'] if isinstance(ans, list) else ans['results']
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError, TypeError) as e:
+        log(f'routes: the leases table could not be read ({type(e).__name__}: {str(e)[:200]})')
+        return None
+    return {r['lease_id']: {'build': r.get('build_id'), 'variant': r.get('variant'), 'machine': r.get('machine_id')}
+            for r in res if r.get('lease_id')}
+
+
+def route_label(st, build, variant=None, local=False):
+    """A route in words: 'local' (the top-up), 'cpu' (the default build), an alternate by its `when` ('nvidia' -> 'cuda',
+    'amd' -> 'dml', a platform's name: 'macos-arm64'), with ':<variant>' when the lease was granted one; '?' unknown."""
+    if local:
+        return 'local'
+    if not build:
+        return '?'
+    if build == st.get('build_id'):
+        base = 'cpu'
+    else:
+        when = next((x.get('when') or {} for x in st.get('alternates') or [] if x.get('build_id') == build), None)
+        if when is None:
+            base = build[:8]
+        elif 'vendor' in when:
+            base = {'nvidia': 'cuda', 'amd': 'dml'}.get(when['vendor'], when['vendor'])
+        else:
+            base = when.get('platform') or build[:8]
+    return f'{base}:{variant}' if variant else base
+
+
+def attach_routes(st, rows, routes):
+    """Each row's `route` from its lease (`routes`: lease_routes', None = unknown) -> the rows."""
+    for r in rows:
+        by = r.get('by') or {}
+        if by.get('machine') == 'local':
+            r['route'] = {'build': st['build_id'], 'variant': None, 'label': 'local'}
+            continue
+        x = (routes or {}).get(by.get('lease'))
+        if x is None:
+            r['route'] = {'build': None, 'variant': None, 'label': '?'}
+        else:
+            r['route'] = {'build': x['build'], 'variant': x['variant'], 'label': route_label(st, x['build'], x['variant'])}
+    return rows
+
+
+def by_route(st, rows):
+    """A's score per route (rows with `route`; A = the job's seats[0] in seat gid % 2, zero.h2h.summary of the route's
+    games) -> {label: {games, a_score, se, elo_diff}}; self-play campaigns: {label: {games}}."""
+    from zero import farm_eval as FE, h2h
+    groups = {}
+    for r in rows:
+        groups.setdefault((r.get('route') or {}).get('label', '?'), []).append(r)
+    out = {}
+    for lab, rs in sorted(groups.items()):
+        if samples_job(st) or st['seats'][0] == st['seats'][1]:
+            out[lab] = {'games': len(rs)}
+            continue
+        s = h2h.summary(FE.h2h_rows(sorted(rs, key=lambda r: int(r['gid']))), st['paired'])
+        out[lab] = {k: s[k] for k in ('games', 'a_score', 'se', 'elo_diff')}
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ collect
 def readout(d, st):
     """A vs B (seats [{"net": 1}, {"net": 2}]) or two seats of one network with their own settings: zero.h2h's summary
@@ -1240,13 +1377,15 @@ def stop_farm(cl, st, log):
 
 
 def collect(d, client=None, poll=60, local=True, threads=4, wrap=None, describe_games=True, allow_failed=False,
-            wait=True, log=log_stderr, engine=None, opts=None, deadline_s=None):
+            wait=True, log=log_stderr, engine=None, opts=None, deadline_s=None, routes=None):
     """Pull until every game is in or the deadline passes; then the missing games locally (`local`; else
     CampaignError naming them); the farm run paused; every row's digest checked, the spot check, coverage (failed games
     refuse unless `allow_failed`); games.jsonl, the games' digest, the readout and (with `describe_games`) the per-game
     records -> the result dict (also in state['result']). `wait` False: one pull, then return None if games are still
     out and the deadline has not passed. `deadline_s`: a new deadline (seconds after the submit; kept in the state):
-    0 = now, e.g. to stop waiting on a farm whose machines went quiet."""
+    0 = now, e.g. to stop waiting on a farm whose machines went quiet. Each game's route (module docs): `routes` None
+    reads the leases table (`lease_routes`; only for the real coordinator, zero.farm_def.URL), a dict gives them, False
+    reads nothing (routes '?'); the result's `by_route`."""
     from zero import farm_def as FD
     from zero import farm_eval as FE
     st = load_state(d)
@@ -1296,6 +1435,14 @@ def collect(d, client=None, poll=60, local=True, threads=4, wrap=None, describe_
     for r in rows.values():
         FE.check_digest(r)
     spot = spot_check(d, st, engine=engine, log=log)
+    if routes is None and getattr(cl, 'url', None) != FD.URL.rstrip('/'):
+        routes = False                             # (the leases table is the real coordinator's: not a test's or another's)
+    if any((r.get('by') or {}).get('machine') != 'local' for r in rows.values()) and routes is not False:
+        got = lease_routes(st['run'], log) if routes is None else routes
+        if got is not None:
+            st['lease_routes'] = got
+            save_state(d, st)
+    attach_routes(st, list(rows.values()), st.get('lease_routes'))
     with open(os.path.join(d, 'games.jsonl'), 'w', encoding='utf-8', newline='\n') as f:
         for g in sorted(rows):
             f.write(json.dumps(rows[g], separators=(',', ':')) + '\n')
@@ -1308,7 +1455,10 @@ def collect(d, client=None, poll=60, local=True, threads=4, wrap=None, describe_
            'alternates': st.get('alternates'), 'alternates_note': st.get('alternates_note'),
            'job': st.get('job') or {'kind': 'play', 'trace': True, 'samples': False},
            'gens': {g: {'checkpoint': x['checkpoint'], 'sha256': x['sha256']} for g, x in st['gens'].items()},
-           'seconds': round(time.time() - (st.get('submitted') or st['created']), 1), 'readout': readout(d, st)}
+           'seconds': round(time.time() - (st.get('submitted') or st['created']), 1), 'readout': readout(d, st),
+           'by_route': by_route(st, list(rows.values()))}
+    if res['readout'] is not None:
+        res['readout']['by_route'] = res['by_route']
     if describe_games:
         res['records'] = write_records(d, st, log, engine)
     st['result'] = res
@@ -1333,3 +1483,24 @@ def run_pool(cfg):
         return None
     return {'farm': farm, 'build_id': cfg['pool_build'], 'runtime': cfg.get('pool_runtime'),
             'worker': cfg['pool_worker'], 'min_agent': cfg.get('pool_min_agent') or None}
+
+
+def run_pool_note(cfg):
+    """Why a run with farm settings gets no farm yardsticks (docs/ENGINE.md 218; `run_pool` None): pool_* settings set
+    while `selfplay_remote` names no `pool:<farm run>` (they do nothing - zero.run warns at the run's start too, zero-core
+    docs/az.md 70), or a pool without pool_build / pool_worker -> the line for the yardsticks' log, or None (a farm pool,
+    or no farm settings at all: local by plain choice)."""
+    if run_pool(cfg) is not None:
+        return None
+    from zero import run as R
+    rem = cfg.get('selfplay_remote') or ''
+    names = [x.strip() for x in (rem.split(',') if isinstance(rem, str) else rem) if str(x).strip()]
+    farm = next((x[5:] for x in names if str(x).startswith('pool:')), None)
+    if farm:
+        return (f'the yardsticks play here: selfplay_remote names pool:{farm} but pool_build / pool_worker are not set '
+                f'(the farm path needs both)')
+    keys = sorted(k for k in R.DEFAULTS if k.startswith('pool_') and k in cfg and cfg[k] != R.DEFAULTS[k])
+    if not keys:
+        return None
+    return (f'the yardsticks play here, not on the farm: the run sets {", ".join(keys)} but selfplay_remote names no '
+            f'pool:<farm run> (those settings do nothing; attach the farm, or drop them - docs/ENGINE.md 218)')

@@ -19,6 +19,7 @@
     python tools/farm_gates.py --mac --mac-worker <its path on the Mac, from ~> --mac-runtime <the macOS pack there>
         --config <run>/config.json --model <the run's export: model.onnx> --net N [--games3 12]
         [--fuzz-worker <this PC's fuzz build> --mac-fuzz-worker <the Mac's> --fuzz-mode games --fuzz-first F --fuzz-count N]
+        [--no-fuzz-faults] [--skip-identity]
 
 a. **Farm parity on the Mac**: tools/farm_compat.py (gate.py's farm-compat step: the worker vs the Python remote worker,
    records -> rows, the features) with the macOS worker, worker and Python driver both on the Mac.
@@ -30,6 +31,12 @@ b. **Records across platforms**: the macOS worker's self-play records with the r
    e.g. the encoding's squash `ln_1p`, ENGINE.md 197).
 c. **Fuzz identity**: one fuzz job (mode, seeds) on this PC's fuzz build and on the Mac's, chunks kept: every seed's
    outcome (pass/fail, its fingerprint, result, turns, decisions) identical.
+d. **Failures reported the same way** (docs/ENGINE.md 219.3; with the fuzz builds, `--no-fuzz-faults`: not): one fuzz
+   job with the worker's test faults (zero-core `ZERO_FARM_TEST_FAULT`, taken by fuzz-profile builds with
+   ZERO_FARM_ALLOW_TEST_FAULTS=1) - a panic, an abort, a stack overflow and a hang at fixed seeds - on both builds; each
+   side's `fuzz-final.json` (the failures an agent uploads) read: the same seeds fail on both and nothing else, and
+   each failure's steward id (tools/fuzz_steward.py failure_id: its platform-neutral site and message), its mode and
+   its repro (the engine commit aside) are equal. The raw sites are recorded (a crash's exit code is platform-specific).
 
 Prints one JSON summary and "MAC FARM GATES PASSED|FAILED: ..."; exit 0 iff every part run passed.
 
@@ -185,6 +192,38 @@ def fuzz_outcomes(work):
     return res
 
 
+FAULT_OFFSETS = (('panic', 2), ('abort', 5), ('overflow', 8), ('hang', 11))    # (part d: a fault at first + offset)
+
+
+def fault_spec(first):
+    return ','.join(f'{k}:{first + o}' for k, o in FAULT_OFFSETS)
+
+
+def fault_failures(final):
+    """Part (d): the failures of a fuzz job's `fuzz-final.json` (a dict) -> {seed: {site, neutral, id, mode, repro}},
+    each keyed the way tools/fuzz_steward.py keys a farm failure."""
+    import re
+    import fuzz_steward as S
+    out = {}
+    for f in final.get('failures') or []:
+        msg = S.failure_message(f.get('panic'))
+        fid, _ = S.failure_id(f.get('site'), msg)
+        out[str(f['seed'])] = {'site': f.get('site'), 'neutral': S.neutral_site(f.get('site'), msg), 'id': fid,
+                               'mode': final.get('mode'),
+                               'repro': re.sub(r'\(at [0-9a-f]{7,40}\)', '(at <commit>)', f.get('repro') or '')}
+    return out
+
+
+def compare_fault_failures(here, mac, first):
+    """Part (d)'s verdict: {passed, injected, here, mac, different}."""
+    want = sorted(str(first + o) for _, o in FAULT_OFFSETS)
+    keys = ('id', 'neutral', 'mode', 'repro')
+    diff = sorted(s for s in set(here) | set(mac)
+                  if s not in here or s not in mac or any(here[s][k] != mac[s][k] for k in keys))
+    return {'passed': sorted(here) == want and sorted(mac) == want and not diff, 'injected': dict(
+        (k, first + o) for k, o in FAULT_OFFSETS), 'here': here, 'mac': mac, 'different': diff}
+
+
 def mac_main(a):
     """--mac (module docs)."""
     out = os.path.abspath(a.out or os.path.join(os.getcwd(), f'mac-farm-gates-{int(time.time())}'))
@@ -257,7 +296,7 @@ def mac_main(a):
               f'{b["desktop_replay"]["refused"]} refused; desktop rows vs Mac shards '
               f'{"identical" if (r2 or {}).get("identical") else "DIFFERENT"} ({(r2 or {}).get("arrays")} arrays)', flush=True)
     # (c) fuzz identity
-    if a.fuzz_worker and a.mac_fuzz_worker:
+    if a.fuzz_worker and a.mac_fuzz_worker and not a.skip_identity:
         t0 = time.time()
         env = sum((['--env', e] for e in a.fuzz_env), [])
         fw = os.path.join(out, 'fuzz-here')
@@ -283,6 +322,36 @@ def mac_main(a):
         f = summary['parts']['fuzz']
         print(f'(c) fuzz {a.fuzz_mode} seeds [{a.fuzz_first}, {a.fuzz_first + a.fuzz_count}): here {f["here"]}, Mac {f["mac"]} seeds, '
               f'{len(diff)} different', flush=True)
+    # (d) failures reported the same way (docs/ENGINE.md 219.3)
+    if a.fuzz_worker and a.mac_fuzz_worker and not a.no_fuzz_faults:
+        t0 = time.time()
+        first = a.fault_first
+        args = ['fuzz', '--mode', 'games', '--first', str(first), '--count', '16', '--threads', '2', '--chunk', '16',
+                '--seed-timeout', str(a.fault_seed_timeout), '--env', f'ZERO_FARM_TEST_FAULT={fault_spec(first)}']
+        fw = os.path.join(out, 'faults-here')
+        shutil.rmtree(fw, ignore_errors=True)
+        p = subprocess.run([a.fuzz_worker, *args, '--work', os.path.join(fw, 'work'), '--out', os.path.join(fw, 'out')],
+                           capture_output=True, text=True, cwd=out, env=dict(os.environ, ZERO_FARM_ALLOW_TEST_FAULTS='1'))
+        here_final = os.path.join(fw, 'out', 'fuzz-final.json')
+        q = ' '.join(args)
+        rc, txt = mac_shell(f'cd "$HOME/{remote}" && rm -rf faults && ZERO_FARM_ALLOW_TEST_FAULTS=1 nice -n 15 '
+                            f'"$HOME/{a.mac_fuzz_worker}" {q} --work faults/work --out faults/out > faults.log 2>&1; echo "exit $?"\n',
+                            timeout=3600)
+        local = os.path.join(out, 'faults-mac')
+        shutil.rmtree(local, ignore_errors=True)
+        os.makedirs(local, exist_ok=True)
+        mac_scp(f'{remote}/faults/out/fuzz-final.json', os.path.join(local, 'fuzz-final.json'), back=True)
+        with open(here_final, encoding='utf-8') as f:
+            here = fault_failures(json.load(f))
+        with open(os.path.join(local, 'fuzz-final.json'), encoding='utf-8') as f:
+            mac = fault_failures(json.load(f))
+        res = compare_fault_failures(here, mac, first)
+        res['passed'] = res['passed'] and p.returncode == 0
+        res['seconds'] = round(time.time() - t0)
+        summary['parts']['faults'] = res
+        print(f'(d) injected faults at {res["injected"]}: here {sorted(here)}, Mac {sorted(mac)}; '
+              f'{len(res["different"])} keyed differently; raw sites here {[here[s]["site"] for s in sorted(here)]}, '
+              f'Mac {[mac[s]["site"] for s in sorted(mac)]}', flush=True)
     ok = bool(summary['parts']) and all(x['passed'] for x in summary['parts'].values())
     summary['passed'] = ok
     with open(os.path.join(out, 'summary.json'), 'w', encoding='utf-8') as f:
@@ -319,6 +388,10 @@ def main(argv=None):
         ap.add_argument('--fuzz-count', type=int, default=400)
         ap.add_argument('--fuzz-chunk', type=int, default=100)
         ap.add_argument('--fuzz-threads', type=int, default=4)
+        ap.add_argument('--skip-identity', action='store_true', help='(c) not run')
+        ap.add_argument('--no-fuzz-faults', action='store_true', help='(d) not run')
+        ap.add_argument('--fault-first', type=int, default=500, help='(d): the job\'s first seed')
+        ap.add_argument('--fault-seed-timeout', type=float, default=20, help='(d): CPU seconds before a seed is a hang')
         ap.add_argument('--set', action='append', default=[])
         ap.add_argument('--out')
         return mac_main(ap.parse_args(argv))

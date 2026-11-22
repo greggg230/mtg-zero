@@ -13,8 +13,11 @@ opponents and the canary library, on every evaluated checkpoint, once each, in o
   python tools/run_yardsticks.py cells-fit RUN [--json] [--boot B]       (the joint fit from the records only: no games)
   python tools/run_yardsticks.py cells-freeze RUN --iter N [--label L] [--to PATH]    (the next reference)
   python tools/run_yardsticks.py cells-match CKPT --ref PATH [--games G] [--sims S] [--decks a,b,c] [--cache DIR]
-                                 [--out FILE.jsonl] [--device cpu|cuda] [--json] [--records DIR]   (standalone, local games;
+                                 [--out FILE.jsonl] [--device cpu|cuda] [--json] [--records DIR]   (standalone;
                                  --records: every game a game record, docs/gamedb.md)
+                                 [--backend auto|farm|local] [--reuse-control] [--farm-share X] [--farm-deadline-h H]
+                                 (auto, the default: the farm when it can play exactly these games and the
+                                 comparison's earlier games were not played here, docs/ENGINE.md 217)
                                  [--publish EXPERIMENT --title T [--a-label ..]]     (and to delverai's h2h tab:
                                  the overall match and one per cell, mtgz.az.site_h2h, ENGINE.md 193)
 
@@ -548,6 +551,10 @@ class Watcher:
                 return 0
             self.log(f"watching {self.run}: {json.dumps(ys)}" + ('' if not ys['bo1_games'] else
                      f"; best-of-one opponents {[o['name'] for o in Y.opponents(self.run, cfg, ys)]}"))
+            from mtgz.az import farm_campaign as C
+            note = C.run_pool_note(cfg)        # (farm settings that do nothing: said, docs/ENGINE.md 218)
+            if note:
+                self.log(f'WARNING: {note}')
             lanes = Y.lanes(self.run, cfg, ys)
             ew = None
             if not self.once:
@@ -792,7 +799,9 @@ def cmd_freeze(a):
 
 
 def cmd_match(a):
-    """Standalone: a checkpoint's cells against a reference (local games), outside any run's watcher."""
+    """Standalone: a checkpoint's cells against a reference, outside any run's watcher - on the farm when it can play
+    exactly these games (--backend auto, the default; docs/ENGINE.md 217), else here."""
+    from mtgz.az import h2h_farm as HF
     ov = {'bo1_games': 0, 'blunders': False, 'cells_games': a.games, 'cells_refs': ['ref=' + a.ref]}
     ov.update(json.loads(a.yardsticks) if a.yardsticks else {})
     for k, v in (('cells_sims', a.sims), ('cells_device', a.device), ('cells_seed', a.seed)):
@@ -800,15 +809,27 @@ def cmd_match(a):
             ov[k] = v
     if a.decks:
         ov['cells_decks'] = a.decks.split(',')
+    if a.reuse_control:
+        ov['cells_reuse_base'] = True
+    # (an auto campaign's share and deadline: zero.h2h's farm backend's, docs/ENGINE.md 217)
+    ov.setdefault('bo1_farm_share', HF.AUTO_SHARE if a.farm_share is None else a.farm_share)
+    ys0 = Y.normalize(ov)
+    n = Y.pair_jobs(Y.cell_pairs(ys0)[-1], ys0['cells_games'], ys0)[0]['games']     # (a chooser match's games)
+    ov.setdefault('bo1_farm_wait_s', a.farm_deadline_h * 3600 if a.farm_deadline_h is not None else
+                  min(HF.DEADLINE_MAX_S, HF.DEADLINE_BASE_S + HF.DEADLINE_PER_WORK_S * n * ys0['cells_sims']))
     ys = Y.normalize(ov)
     S.check(a)
     cdir = a.cache or os.path.join(os.path.dirname(os.path.abspath(a.out or a.ckpt)), 'cells_base')
-    rows, s = Y.measure_cells_standalone(os.path.abspath(a.ckpt), os.path.abspath(a.ref), ys, cdir,
+    ck, ref = os.path.abspath(a.ckpt), os.path.abspath(a.ref)
+    backend, why, farm = Y.standalone_backend(ck, ref, ys, cdir, a.backend, a.out)
+    print(f'cells-match: backend {backend} - {why}', file=sys.stderr, flush=True)
+    rows, s = Y.measure_cells_standalone(ck, ref, ys, cdir,
                                          label=a.ref_label, rows_out=a.out,
                                          log=lambda m: print('# ' + m, file=sys.stderr, flush=True),
-                                         records=os.path.abspath(a.records) if a.records else None)
+                                         records=os.path.abspath(a.records) if a.records else None,
+                                         backend=backend, farm=farm)
     if a.json:
-        print(json.dumps({'summary': s, 'rows': rows}, indent=1))
+        print(json.dumps({'summary': s, 'rows': rows, 'backend': backend}, indent=1))
     else:
         print_summary(s, ys['cells_decks'], f'{a.ckpt} against {a.ref}:')
     if a.publish:
@@ -881,6 +902,17 @@ def main(argv=None):
                         '(docs/gamedb.md: tools/gamedb.py ingest --records DIR)')
     m.add_argument('--json', action='store_true')
     m.add_argument('--yardsticks', default=None, help='more cells_* options as JSON')
+    m.add_argument('--backend', default='auto', choices=['auto', 'farm', 'local'],
+                   help="where the games are played (docs/ENGINE.md 217): 'auto' (default) - the farm when it can play "
+                        "exactly these games and the comparison's earlier games (its cache, --out) were not played here, "
+                        "else here; 'farm' - there or refused; 'local' - here")
+    m.add_argument('--reuse-control', action='store_true',
+                   help="reuse a cached baseline (each pair's control) played on another backend (cells_reuse_base: "
+                        "the opt-out of one backend per comparison; said in the log and the row)")
+    m.add_argument('--farm-share', type=float, default=None, help='the campaigns\' share of the farm (default 0.5)')
+    m.add_argument('--farm-deadline-h', type=float, default=None,
+                   help='hours before the games the farm has not delivered are played here (default 1 h + 0.25 s per '
+                        'game-simulation of a chooser match, at most 12 h)')
     S.add_args(m)
     m.add_argument('--publish-overall-only', action='store_true', help='with --publish: the overall match only, no '
                    'match per cell')
