@@ -313,7 +313,7 @@ fn pay_tasks(g: &Game) -> impl Iterator<Item = &Task> {
 /// the viewer knows it: `Cx::seen_def`, as a pick in progress shows a card).
 fn write_src_obj(cx: &Cx, out: &mut [f32], c: CardIdx) -> Option<crate::ids::DefId> {
     let d = cx.seen_def(c);
-    cx.write_ref_as(out, cx.g.obj_ref(c), d);
+    cx.write_obj_as(out, c, d);                    // (named by where it is: written live, ENGINE.md 235)
     d
 }
 
@@ -375,7 +375,7 @@ fn write_payment(cx: &Cx, tail: &mut TailBuf) {
                 }
                 if let Some(c) = card {
                     s[pm::CARD] = 1.0;
-                    cx.write_ref(&mut s[pm::CARD_OBJ..pm::CARD_OBJ + rf::W], g.obj_ref(*c));
+                    cx.write_obj(&mut s[pm::CARD_OBJ..pm::CARD_OBJ + rf::W], *c);
                 }
                 s[pm::AGAIN] = *again as u8 as f32;
             }
@@ -400,7 +400,7 @@ fn pick_fields(cx: &Cx, x: &mut [f32], pm: &PayMana, s: &Src, rank: usize, prod:
     }
     if let Some(&(_, a)) = pm.actors.iter().find(|(x, _)| x == s) {
         o[pm::ACTOR] = 1.0;
-        cx.write_ref(&mut o[pm::ACTOR_OBJ..pm::ACTOR_OBJ + rf::W], cx.g.obj_ref(a));
+        cx.write_obj(&mut o[pm::ACTOR_OBJ..pm::ACTOR_OBJ + rf::W], a);
     }
     o[pm::RANK] = (rank + 1) as f32 / 32.0;
     bits(&mut o[pm::RANK_BITS..pm::RANK_BITS + 16], rank as u64);
@@ -448,7 +448,7 @@ fn state_fields(cx: &Cx, s: &mut [f32], pm: &PayMana) {
     }
     if let Some(c) = pm.which {
         s[pm::WHICH] = 1.0;
-        cx.write_ref(&mut s[pm::WHICH_OBJ..pm::WHICH_OBJ + rf::W], g.obj_ref(c));
+        cx.write_obj(&mut s[pm::WHICH_OBJ..pm::WHICH_OBJ + rf::W], c);
         let n = pm.card_slots.iter().find(|(x, _)| *x == c).map_or(0, |(_, v)| v.len());
         s[pm::WHICH_N] = squash(n as f32 / 8.0);
         bits(&mut s[pm::WHICH_N_BITS..pm::WHICH_N_BITS + 16], n as u64);

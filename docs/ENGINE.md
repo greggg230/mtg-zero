@@ -44958,6 +44958,200 @@ tests then passed.
   of "cast or play from the graveyard" (Kaldra Compleat and Minsc & Boo in P0's hand) - for the payment-search lanes
   (231's step, 100.4.9).
 
+## 235. A reference to a library card its viewer lost track of shows what a gone object's shows: a shuffled-in card's draw out of the rows (the fuzz steward's queue entry 32da3af07aa6; branch `fix/infoset-keys-1122`, 2026-11-22)
+
+Branch from main e445ba27 (zero-core 899e0eb), merged with main 71ca1493 (232, 233; zero-core b0bce34) before the
+gates; renumbered 233 -> 235 (234 is another lane's).
+
+### 235.1 The finding
+
+A confirmed entry of the fuzz steward's queue (171):
+**32da3af07aa6**, mode `games` (the default pool), engine e9ff0e24, games.rs:3280, seed 100219136 step 15: "same
+keys, different views (first at 628 of 830 / 830: Some(3000) / Some(7777)); the checkpoint's decider P1, the walk's
+viewer P0"; P1 asked `Priority` [`PASS`, 580 = `Ability(CardIdx(83), Activated(0))`] in both worlds. It reproduces at
+e9ff0e24 under the `fuzz` profile (`FUZZ_FIRST=100219136 FUZZ_GAMES=1 FUZZ_LOG=1 cargo test --profile fuzz -p engine
+--test fuzz fuzz_random_games -- --exact --nocapture`) and **passes on main e445ba27**: main's commits since (229's
+payment fixes, 231's 601.2g step and the Hogaak cards among them) change what the games ask, so the seed plays another
+game. The cause is on main unchanged (235.2); 235.5's test builds the state directly.
+
+An instrumented replay at e9ff0e24 (reverted) named the parts: `CardIdx(83)` is P1's other Blood token on the
+battlefield (its `Activated(0)`: "{1}, {T}, Discard a card, Sacrifice this artifact: Draw a card"); float 628 is the
+event object of the stack's middle item, Ivora, Insatiable Heir's discard trigger (definition 221, `Trigger(2)`), between
+the first Blood's draw ability and Shifting Woodland's copy ability.
+
+The walk (`check_information_set`, 148.2): P0's two worlds of P1's hidden hand gave the hand slot P1's Blood token
+discarded (`DiscardCost`, the walk's first action, a hand slot) to a Blightsteel Colossus in both, at two different
+slots (#73 in one world, #75 in the other). The Colossus' replacement (CR 614.1a: "reveal it and shuffle it into its
+owner's library instead") shuffled it into P1's library - each world shuffling with its own generator - and Ivora,
+Insatiable Heir's "whenever you discard a card, put a +1/+1 counter on Ivora" went on the stack naming it as its event's
+object (`ev.obj` #73.2 / #75.2, live, in the library). Fourteen actions later P1 activated Library of Alexandria (draw a
+card): in one world the shuffle had put the Colossus on top and P1 drew it (#75.2 stale, its object now #75.3 in the
+hand), in the other P1 drew Flooded Strand and the Colossus stayed in the library. Equal keys (P1's draw is P1's
+private key). View float 628 is the Ivora trigger's stack entry's event object by place (`view_live_place`): 3000 "a
+live object in a hidden zone" in one world, 7777 "a gone object" in the other. The layout v7 row differs the same way
+(`tail_encode::Cx::write_ref`: `rf::LIVE` and the zone one-hot against `rf::STALE_KEY`); the view, compared first,
+failed first.
+
+### 235.2 The rule, and why it is a real leak
+
+A library is hidden (CR 400.2) and a shuffle randomizes it: nobody, its owner included, knows where its cards are
+afterwards (CR 701.20a). Once the Colossus is shuffled in, which of the library's places holds it is no player's to
+know, so neither is whether a later draw - or a mill, a search's find, a card put from the top on the bottom - took
+**that object** or another card. P1 sees what it drew (a Colossus or not), P0 only that P1 drew; neither can tell from
+the cards that the trigger's reference still names a card in the library. A private rearrangement (a pile put back in
+any order, a search) does the same to the other player, and cards put into a library "in an order nobody knows" to
+both.
+
+The engine's references (`ObjRef`, CR 400.7) follow the object exactly, and every reader of the public state showed
+the viewer that ground truth: live in the library, or gone. So it was **not a false positive of the check**. And it
+leaked in the real game too, not only in worlds: `determinize` deals identities to slots and keeps every slot where it
+is (128.2), so in every world of P0's the referenced slot sits where the real game has it, and P0's row of the real
+game (and of every world its search builds before the draw) showed whether P1 had drawn the shuffled-in card - the
+shuffle's hidden result - wherever a public reference named a library card after a shuffle or a private
+rearrangement. The walk saw it only when the shuffle happened inside the walk (its worlds shuffling apart). The owner's
+own row showed it too (which of two twins it drew).
+
+Readers that showed it: `Game::view_of` (the walks' view, `view_live_place`: an event's objects, noted objects, links,
+marks, permissions, delayed triggers, the discarded, resolved and attacked-with records), the layout v7 row (`Cx::write_ref`
+/ `Cx::ref_def`: every reference token, and the marks' `continue` on a gone object), layout v6's first noted object
+(`stack::NOTED_*`, EoE), the decider's loop hash (`loops.rs`: its view part, the stale references whose last known
+information it hashes, its frames, targets and events), and the last known identity recorded as the object left
+(`ref_lki`): a card that left while the viewer could not tell it from others recorded the viewer's knowledge of the card
+that moved (a Colossus milled face up: "everyone knew it"), as if the viewer knew it was the referenced object.
+
+### 235.3 The fix: who lost track of a library card
+
+* **`Obj::lost`** (game.rs), a bit per player: that player lost track of this library card among others since it
+  entered the library. Set by `Game::lose_track`: `shuffle_library` (both players: CR 701.20a), `scramble` (the
+  other player: the owner's private rearrangements - a looked-at pile put back, a search, a Doomsday pile; a hand card
+  told apart stays tracked, 210), `forget_order` (both: cards put on the bottom in a random order). A domain of one card
+  sets nothing (it is where it was put). A zone change clears it (`move_card_ctl`, the public-state gate's `raw_move`):
+  a new object, CR 400.7. Determinize keeps it (it deals identities, not slots). Nothing in the rules reads it.
+* **`Game::ref_seen_live(viewer, r)`** (hidden.rs): live, and not a library card `viewer` lost track of. Every reader
+  above reads it instead of `live` - `view_live_place(viewer, r)` (the view's `attacked_with` and `resolved` lines
+  through it too), `Cx::live` (the knower's) in `write_ref_as`, `ref_def` and the marks' filter, layout v6's noted
+  object, and the loop hash (`Canon::viewer`, the decider: `loop_stale_refs`, `until_canon`, `ev_canon`,
+  `target_canon`, `item_canon`, `frame_canon`, the flips of a source). A reference to such a card is written as a gone
+  object's: no zone, a stale key (its rank among the row's stale references: the same key once the object is gone), no
+  identity (it has no departure recorded; 156's last known identity for a gone one).
+* **The last known identity** (`move_card_ctl`, `ref_lki`): a card leaving a library records no knowledge for a player
+  who lost track of it, public departure or not - that player saw a card leave, not that it was this object.
+* **An object named by where it is now is not a reference** (`Cx::write_obj`, `Cx::obj_def`; tail_encode.rs): the
+  `found` tokens (a find by its place, 223), a pick in progress (`links`' picked card), a counter's, a face-down card's
+  and the `nb` token's object are the object at that place now, built from the place (`obj_ref(c)`), so they are
+  written live as before, whoever lost track of the card. (A first version wrote them through `write_ref` too: the
+  digests moved, 13 cube games, 15 constructed and 21 metagame lines - every one a fetch land's search picks or a
+  Doomsday pile's finds in a library shuffled before - with nothing hidden in them; with `write_obj` every digest is
+  main's again, 235.6.)
+
+**Why sticky until the card leaves** (and not "until the viewer learns the card at a known place"): a reference made
+before the loss names an object the viewer can't link to any place again. If a look at the top card gave the track
+back, a world whose shuffle put the referenced card on top and one whose shuffle put a twin there (the reference's
+object deeper, or drawn before) would show the same look (the same identity, the same key) and different references:
+the same failure. A reference the public state takes after the loss to a card already in the library would deserve
+its object's place (a trigger naming the revealed top card); none was found: every public reference to a library card
+235.4's census met was taken as the card entered the library (the event of the move that put it there: Blightsteel
+Colossus' replacement under a discard trigger), before any loss, and the tokens that name a library card by its
+place now (finds, picks) are not references (above).
+
+**What it is not.** No key, no legal action and no rule changes (the chance keys and the search's signatures are as
+before); no layout change (the same reference floats: a stale reference's). `Obj::lost` is classified **derived** in
+`public_state.rs`, as `Game.ref_lki` is: read only through references (no perturbation of its own; the gate's
+pairwise combinations unchanged). **233's merge key** (merged in from main 71ca1493) needs nothing: it hashes both
+rows of a state `build::describe_for_key` describes, and `describe` refuses a reference to a library card (any
+reference to a card in a zone the viewer does not see, live or earlier), so no keyed state holds a reference this
+section changes; and `Obj::lost` without such a reference is read by nothing later (a reference to a library card is
+taken as the card enters, which clears it).
+
+### 235.4 Who it reaches
+
+**How often** (an uncommitted counter in the walk, on the Mac: random play under the `fuzz` profile, 400 games a pool
+from seed 5,000,000, every checkpoint of both viewers; the states where a reference of the public state,
+`for_each_public_ref`, names a live library card, and those where the viewer lost track of it):
+
+| pool | checkpoint states | a library card referenced | lost to the viewer |
+|---|---|---|---|
+| default (the cube) | 91,840 | 4 | 4 |
+| delver | 76,530 | 0 | 0 |
+| doomsday | 62,722 | 0 | 0 |
+| sneak_show | 47,166 | 0 | 0 |
+| hogaak | 48,294 | 0 | 0 |
+| cross | 47,610 | 0 | 0 |
+| meta (the three-deck metagame) | 58,064 | 0 | 0 |
+| eoe | 130,140 | 0 | 0 |
+
+The default pool's four are one game (seed 5,000,187, both viewers at two checkpoints): a Blightsteel Colossus
+discarded, its replacement shuffling it in, Currency Converter's trigger naming it - the queue entry's shape. Only
+Blightsteel Colossus' replacement ("shuffle it into its owner's library instead") puts a card a trigger names into a
+library (208.2's list: the only `gy_to_library` card), and the Legacy 75s have none.
+
+* **Release self-play.** It was a real leak: wherever it arises, the viewer's row (the network's input) of the real
+  game and of the search's worlds showed whether a card shuffled into a library had been drawn, milled or found since,
+  and the open-decklist walk could find merged nodes showing different rows. It arises only where Blightsteel
+  Colossus, bound for a graveyard, is shuffled into its library instead while a trigger names it (a discard
+  trigger's event): cube games. **The live runs
+  (legacy-meta3: Delver, Doomsday, Sneak and Show, Hogaak; the Delver best-of-three presets) are not affected** -
+  their pools never reference a library card - and a run pinned to an older commit trained on no such row. Keys,
+  legal actions and the search's signatures are unchanged everywhere, so tree reuse and node merging are as before: no
+  re-pin is needed for this fix.
+* **The loop hash**: read through the decider's view as above; a loop hash differs only where a library card the
+  decider lost track of is referenced (no digest game: the encoding-free digests are equal).
+
+### 235.5 Tests
+
+* `rules_farm.rs` `cr_701_20a_a_reference_to_a_card_shuffled_into_a_library_does_not_show_whether_it_was_drawn`: P0
+  casts Faithless Looting with Ivora, Insatiable Heir out and discards Blightsteel Colossus and an Island; the Colossus
+  is shuffled into P0's three-card library while Ivora's trigger names it there; Frantic Search draws two of the
+  three - the Colossus or not, by the scenario seed's shuffle. P1's row and view are the same whether P0 drew it (P0's
+  view differs: it knows what it drew). On main's reading (`ref_seen_live` as `live`) it fails at P1's row, then at the
+  view (3000 / 7777, the queue entry's floats).
+* `rules_farm.rs` `engine_235_who_loses_track_of_a_library_card`: after the shuffle every card of P0's library is lost
+  to both players, a drawn one is cleared, P1's unshuffled library is tracked.
+* The seed: on e9ff0e24 with this fix applied (a local cherry-pick, not committed), 100219136 under the `fuzz`
+  profile passes (204 walks, 927 states compared). No seed test is added: on main the seed plays another game (235.1).
+
+### 235.6 Digests and checks
+
+**Every digest equal to main's recorded files** (the Mac, at this section's code): full 9473f7debc4bceb3,
+`DIGEST_ENCODING=0` d3c144b6cc2977e5, constructed, EoE, driver 6a03572828250b86, metagame and dealt (each test passed
+against the checkout's own file). No key, legal action or action of any digest game changes (the encoding-free digest),
+and no digest game encodes a reference to a library card its viewer lost track of at a digest decision (the default
+pool's rate above: 4 states in 91,840).
+
+Checks:
+* the full engine suite on the Mac (`cargo test --release -p engine -p card_ir --no-fail-fast`, the first version):
+  every binary passed but `az`'s `public_states_encode_apart`, which failed on three collisions of perturbations no
+  known gap covers - none involving the field: the first version gave `Obj::lost` a public perturbation of its own,
+  which shifted the pairwise pass's partner draws (`combinable.len()`) onto pre-existing gaps (a controlled turn's framed
+  row; layout v6's delve promise and saddled marks). Classified derived instead (235.3), the pass draws as on main.
+
+### 235.7 Gates and the fresh-seed fuzz
+
+* **The suite gate** on 779185cd (this branch merged with main 71ca1493; in its worktree, every step on the Mac beside
+  the live legacy-meta3 runs): `python tools/gate.py suite --fuzz-pools
+  default,default+hidden,delver_dealt,doomsday,cross,hogaak,delver` - **GATE PASSED suite 779185cd2230 in 734s**:
+  privacy 0 findings; the full engine suite 2,925 passed (24 binaries); the sharded 2,000-game fuzz of each pool passed
+  (the default with 100 matches; default with hidden decklists; delver_dealt, cross, hogaak and delver each with 100
+  matches + 100 post-sideboard; doomsday games only); the checkout unchanged (`gates/779185cd2230-suite.json`).
+* **The engine gate** on the same commit: `python tools/gate.py engine --tested-sha 779185cd2230 --expect-digest
+  9473f7debc4bceb3 --expect-digest0 d3c144b6cc2977e5` - **GATE PASSED WITH SKIPS engine 779185cd2230 in 791s**
+  (skipped: three live-run-hazard pytest tests, fenced by the live runs here): the digests full 9473f7debc4bceb3 and
+  encoding-free d3c144b6cc2977e5 (= main's), constructed 4a03293608edeba2, EoE 5ffb850dd963bad0, driver
+  6a03572828250b86, metagame d72ae0c904a0ffbd, dealt f858b1880091d94f (each = the recorded file: **no digest moves**);
+  `az` 57, `limits` 13, `hidden` 28 passed; pytest 133 + 170 (desktop, throttled) + 243 + 189 (Mac) + 49 (desktop part);
+  the smoke config; **farm compat identical** (`delver-mirror-bo3-dealt`: gate 2 6 games, 2,468 rows, 150 batches; gate
+  3 6 games, 2,598 rows); the suite evidence of 779185cd2230.
+* **Fresh seeds** (the Mac, 779185cd): the `fuzz` profile (every checkpoint walked, 173.2) on the default pool, games
+  4,236,000,000.. in six shards of 500 - five passed (559,276 open-decklist walks, 3,099,714 states compared), the
+  sixth stopped at seed 4,236,000,644; hidden decklists, games 4,237,000,000.. in four shards of 500 - three passed
+  (1,308,073 hidden-decklist steps), the fourth stopped at 4,237,001,606; release, the default pool's games
+  4,235,000,000..4,235,019,999 in twelve shards - ten passed, two stopped at seeds 4,235,003,677 and 4,235,009,397;
+  1,000 matches from 4,239,000,000 passed. **Every stop is the payment search's node cap** ("the payment search passed
+  2000000 copies (ENGINE.md 100.4.9)", cost_order.rs, Squandered Resources' cast with lands to sacrifice for mana) and
+  **fails the same on main 71ca1493** (4,235,003,677 release and 4,236,000,644 under the `fuzz` profile, replayed
+  there): a pre-existing blow-up of the 601.2g / payment search, not this section's (which changes no rule, key or
+  legal action). No information-set check failed.
+
 ## 236. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg_v8`; branch `feat/layout-v8`, 2026-11-22)
 
 **Why.** Three public facts the input left out, each found by a Hogaak-era fix and deferred to one additive layout by

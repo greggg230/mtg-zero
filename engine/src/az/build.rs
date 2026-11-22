@@ -1050,7 +1050,7 @@ impl Describer<'_> {
         let o = &g.objs[c.i()];
         let crate::game::Obj {
             def, owner, controller, zone: _, inc: _, timestamp: _, tapped, damage, deathtouched, control_since, attacking, blocked, blocking,
-            struck_first, known: _, attached, evoked, flashback, escaped, chosen_player, monstrous, attacks, entered, flips,
+            struck_first, known: _, lost: _, attached, evoked, flashback, escaped, chosen_player, monstrous, attacks, entered, flips,
         } = o;
         // (loyalty activations: out of Obj on v6 engines, Game::loyalty_of; extra ones are refused in run)
         let crate::game::Loyalty { turn: pw_turn, used: pw_used, .. } = g.loyalty_of(c);
