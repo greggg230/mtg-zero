@@ -44788,3 +44788,14 @@ attention's T), the six segments' input maps (d x width each) and one pointer co
 * `python tools/gate.py suite` on 191aa9dc: **GATE PASSED suite 191aa9dc6771 in 575s** (privacy 0 findings; the full
   engine suite 2,915 passed in 24 binaries; the 2,000-game fuzz of default, default with hidden decklists and
   delver_dealt passed).
+* On 4ef275e0 (191aa9dc + the paragraphs above, docs only), env MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME, the system Python:
+  `python tools/gate.py engine --expect-digest c2b04fed925eed67 --expect-digest0 d3c144b6cc2977e5 --tested-sha
+  191aa9dc6771` - **GATE PASSED WITH SKIPS engine 4ef275e0ac18 in 695s** (skipped: one live-run-hazard test of the
+  desktop's pytest, fenced by a live run); `python tools/gate.py encoding --expect-digest c2b04fed925eed67
+  --expect-digest0 d3c144b6cc2977e5 --checkpoint <a copy of legacy-meta3-r1's iteration 1233>` - **GATE PASSED WITH SKIPS
+  encoding 4ef275e0ac18 in 748s** (the same fence). Both: the digests as recorded (full c2b04fed925eed67, encoding-free
+  d3c144b6cc2977e5, constructed 38ef93512e0a7259, EoE 5ffb850dd963bad0, driver 6a03572828250b86, metagame
+  ed86a2f5ed21c436, dealt f858b1880091d94f), `az` 58 passed, pytest on the Mac 239 + 176 + 172 + 112 passed and the
+  desktop part 49, farm compat identical (the preset as `mtg`); the encoding tier's checkpoint loads and plays (8 games).
+  (A first engine run on 191aa9dc failed one timing test of pytest, `test_cells_local_parallel`'s 300 s bound, on a Mac
+  under another job's load; it passed on the rerun and in the full Mac pytest.) The next commit adds this paragraph only.
