@@ -1,4 +1,4 @@
-"""The row selector of a multi-source distillation (mtgz/az/rowselect.py, docs/ENGINE.md 222.1; zero-core docs/az.md 71):
+"""The row selector of a multi-source distillation (mtgz/az/rowselect.py, docs/ENGINE.md 239.1; zero-core docs/az.md 76):
 checked against the engine - every decision of random best-of-one and best-of-three metagame games, both players'
 rows - the opponent's deck read from the opponent-pool bag is the pairing's, the acting player's true deck is always
 among its candidates, and the candidates are one deck wherever the docstring says they must be (every best-of-one

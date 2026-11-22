@@ -256,7 +256,7 @@ def make_digest_checker(expect=None, record_only=False):
     return checker
 
 
-# engine/tests/digest_formats.rs's five digests (ENGINE.md 148.1; metagame: ENGINE.md 176; pair: ENGINE.md 223)
+# engine/tests/digest_formats.rs's five digests (ENGINE.md 148.1; metagame: ENGINE.md 176; pair: ENGINE.md 240)
 FORMATS = ('constructed', 'eoe', 'driver', 'metagame', 'pair')
 FORMATS_RE = re.compile(r'^(constructed|eoe|driver|metagame|pair): .*; combined digest ([0-9a-f]{16})\s*$', re.M)
 FORMATS_ARGV = ['cargo', 'test', '--release', '-p', 'engine', '--test', 'digest_formats', '--', '--ignored',

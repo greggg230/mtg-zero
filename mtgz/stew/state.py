@@ -1,4 +1,4 @@
-"""state.json (docs/ENGINE.md 222.2): the stew's lineage and phase machine, written atomically.
+"""state.json (docs/ENGINE.md 239.2): the stew's lineage and phase machine, written atomically.
 
     {"v": 1, "name", "created", "updated",
      "round": g, "phase": "train" | "distil_decks" | "judge_deck_gap" | "distil_main" | "judge",

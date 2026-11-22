@@ -1,4 +1,4 @@
-//! pb3's sideboarding method for a pairing of two DIFFERENT 75s (ENGINE.md 223): each seat dealt from its own 75
+//! pb3's sideboarding method for a pairing of two DIFFERENT 75s (ENGINE.md 240): each seat dealt from its own 75
 //! (`"dealt_decks"` with `"per_seat"`, ENGINE.md 154, 168.1) and one choice table per deck (ENGINE.md 168.3) - in the
 //! fixed two-75 constructed best-of-three spec (`decks.p0_table`, `decks.p1_table`: each seat its own deck's table) and
 //! in the metagame spec (a deck entry's `"table"`, `"dealt_decks"`, and the forced find in best-of-three), passed
@@ -503,7 +503,7 @@ fn two_75s_deals_are_keyed_privately_each_by_its_own_75() {
     assert!(checked > 0, "no dealing step checked (75 lists of {lens:?} entries)");
 }
 
-/// The forced find in best-of-three (ENGINE.md 223): every game of a match carries it, each game's draws from that
+/// The forced find in best-of-three (ENGINE.md 240): every game of a match carries it, each game's draws from that
 /// game's own seed - game 2's draw a share p of matches, independent of game 1's -, the same in every world.
 #[test]
 fn the_forced_find_draws_each_games_own_in_best_of_three() {

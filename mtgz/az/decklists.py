@@ -199,7 +199,7 @@ def metagame_spec(decks=META3, fmt='bo1', weights=None, max_turns=60, mulligans=
     plays a lagging cell twice as often. `fmt` 'bo1': each deck its main (no sideboard, as `mirror_spec`); 'bo3':
     constructed best-of-three, each 75 (`game_episodes`; `start_game` 2 only when every cell of positive weight is a
     mirror, ENGINE.md 147.4). `dealt_decks` ({'p', 'swaps', 'per_seat'}; best-of-three, docs/ENGINE.md 154, 168.1,
-    223): each seat's 60s dealt from its own 75. A deck's choice table is its entry's "table" (docs/ENGINE.md 223: the
+    223): each seat's 60s dealt from its own 75. A deck's choice table is its entry's "table" (docs/ENGINE.md 240: the
     matchup model's hook writes them, `matchup.with_tables`). The engine refuses `sideboard_table`, keep_deck and hidden
     decklists with it. The evaluation spec is the same spec without dealt decks, tables and the forced find
     (`evaldecks.eval_spec`). JSON."""
@@ -236,7 +236,7 @@ def metagame_spec(decks=META3, fmt='bo1', weights=None, max_turns=60, mulligans=
 
 
 def pairing_spec(a, b, fmt='bo3', max_turns=60, mulligans=True, game_episodes=True, start_game=1, dealt_decks=None):
-    """A stew specialist's self-play spec (docs/ENGINE.md 223; the stew brief's "the best-of-three metagame restricted
+    """A stew specialist's self-play spec (docs/ENGINE.md 240; the stew brief's "the best-of-three metagame restricted
     to its pairing"): `metagame_spec` of decks [a, b] with weights [[0, 1], [1, 0]] - every match a against b, a's seat
     drawn from the match's seed - or, for a mirror (a == b), decks [a] with weights [[1]]. Each match is exactly its
     pairing's fixed spec's match of the seed (`pair_spec`, the engine's `Metagame::pair_json`), the per-deck settings

@@ -1,4 +1,4 @@
-"""The stew's phases and loop (docs/ENGINE.md 222.2). `Stew(dir)` over an `Ops` (mtgz.stew.control; tests: fakes).
+"""The stew's phases and loop (docs/ENGINE.md 239.2). `Stew(dir)` over an `Ops` (mtgz.stew.control; tests: fakes).
 
 Generation g (round g) runs five phases, each tagged '<phase>@g', reading version g of every net and writing version
 g + 1:
@@ -1003,7 +1003,7 @@ class Stew:
 
 
 def distill_summary(extra, doc):
-    """The distillation record of a checkpoint's `extra` (zero.distill's --sources record, zero-core docs/az.md 71:
+    """The distillation record of a checkpoint's `extra` (zero.distill's --sources record, zero-core docs/az.md 76:
     `distill` {sources_sha256, sources: [{name, teacher_sha256, rows, selected, used, ...}], step, heldout: [{step,
     policy_kl, top1, value_mse, value_mae, margin_mse, sources: {name: agreement}}]}) for the report: the steps and
     each source's weight, rows and last held-out agreement."""

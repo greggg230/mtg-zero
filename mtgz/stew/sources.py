@@ -1,4 +1,4 @@
-"""The stew's distillation sources files (docs/ENGINE.md 222.1 is the contract, 222.2 how the stew fills it).
+"""The stew's distillation sources files (docs/ENGINE.md 239.1 is the contract, 239.2 how the stew fills it).
 
 * **A deck stew X** (round g): warm start = its version g; one source per specialist whose pairing holds X - teacher
   = that specialist's version g + 1 (its checkpoint after the round's turn), data = the turn's newest shards
@@ -22,7 +22,7 @@ from . import config as C
 
 def run_config_of(dirs):
     """The run config.json beside the data of a snapshot's iteration directories (<x>/data/iter_N -> <x>/config.json):
-    the row selector's context (zero-core docs/az.md 71: a source's "config")."""
+    the row selector's context (zero-core docs/az.md 76: a source's "config")."""
     return os.path.join(os.path.dirname(os.path.dirname(dirs[0])), 'config.json').replace('\\', '/')
 
 

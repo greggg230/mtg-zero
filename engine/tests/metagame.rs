@@ -129,7 +129,7 @@ fn unsupported_combinations_are_refused_loudly() {
         w[k] = x;
         w
     };
-    // (dealt decks are a metagame's in best-of-three since ENGINE.md 223: each seat from its own 75 - the per-deck
+    // (dealt decks are a metagame's in best-of-three since ENGINE.md 240: each seat from its own 75 - the per-deck
     // settings' test below; best-of-one refuses them as any spec does)
     refused(&with("dealt_decks", json!({"p": 0.5, "swaps": [0, 4]})), "dealt_decks is for a constructed best-of-three");
     refused(&with3("keep_deck", json!([0])), "metagame with \"keep_deck\"");
@@ -231,7 +231,7 @@ pub(crate) fn lockstep(meta: &str, seed: u64) -> [u8; 2] {
     let fs = MtgSpec::parse(&fixed).unwrap();
     let mut b = MtgAz::new_game(&fs, 2, seed).unwrap();
     assert_eq!(b.m.pairing, None);
-    // (ENGINE.md 223: the per-deck settings follow the pairing - each seat's dealt flag and choice table)
+    // (ENGINE.md 240: the per-deck settings follow the pairing - each seat's dealt flag and choice table)
     assert_eq!([a.m.is_dealt(0), a.m.is_dealt(1)], [b.m.is_dealt(0), b.m.is_dealt(1)], "seed {seed}: the dealt seats");
     assert_eq!(a.m.table, b.m.table, "seed {seed}: the seats' choice tables");
     // the game record names the pairing; otherwise it is the fixed game's
@@ -270,7 +270,7 @@ pub(crate) fn lockstep(meta: &str, seed: u64) -> [u8; 2] {
         a.legal_actions(&mut la);
         b.legal_actions(&mut lb);
         assert_eq!(la, lb, "seed {seed} step {step}: the legal actions");
-        // (ENGINE.md 223: a seat's choice table - the same in both games, played as zero-core's driver plays a
+        // (ENGINE.md 240: a seat's choice table - the same in both games, played as zero-core's driver plays a
         // teacher decision; every other decision at random)
         let taught = a.table_action();
         assert_eq!(taught, b.table_action(), "seed {seed} step {step}: the table's action");

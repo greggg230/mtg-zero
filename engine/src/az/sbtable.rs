@@ -64,7 +64,7 @@ impl SideboardTable {
     }
 
     /// A table of the spec at `what` (its refusals name it): `"sideboard_table"` (ENGINE.md 168.3), a seat's own
-    /// `decks.p0_table` / `decks.p1_table` or a metagame deck's `table` (ENGINE.md 223: one table per deck).
+    /// `decks.p0_table` / `decks.p1_table` or a metagame deck's `table` (ENGINE.md 240: one table per deck).
     pub fn parse_as(x: &Value, db: &CardDb, what: &str) -> Result<SideboardTable, String> {
         let err = |m: String| format!("mtg spec: {what}: {m} (ENGINE.md 168.3)");
         let o = x.as_object().ok_or_else(|| err("must be {\"version\", \"list\", \"choices\"}".into()))?;

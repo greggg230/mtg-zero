@@ -1,4 +1,4 @@
-"""stew.json (docs/ENGINE.md 222.2): the stew's config - its field, candidates, source run, seeds, recipe, code and
+"""stew.json (docs/ENGINE.md 239.2): the stew's config - its field, candidates, source run, seeds, recipe, code and
 the runs it yields to - with its defaults and checks, and the field's arithmetic: the pairings (one specialist per
 unordered pairing with at least one candidate, mirrors included), the shares, the cells and their weights.
 

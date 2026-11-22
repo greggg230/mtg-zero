@@ -28,7 +28,7 @@
 //!   fair coin, ENGINE.md 130, 147.4). Refused (loudly: no silent no-op): `decks`, `seed` (one match seed would play
 //!   one pairing), `start`, `build`, `sealed`, `pools`, `hidden_decklists`, `sideboard_table` (one 75's table: a
 //!   metagame deck carries its own, below), `keep_deck` / `keep_known` - settings built for one pair of 75s.
-//! * **Per-deck sideboarding settings** (ENGINE.md 223, best-of-three): `"dealt_decks"` (ENGINE.md 154, 168.1) deals
+//! * **Per-deck sideboarding settings** (ENGINE.md 240, best-of-three): `"dealt_decks"` (ENGINE.md 154, 168.1) deals
 //!   each seat's 60s from ITS OWN 75 (every deck of a played pairing has a sideboard of at least the range's top), and
 //!   a deck entry's optional `"table"` (a choice table of ENGINE.md 168.3, its list that deck's 75) is played by
 //!   whichever seat plays that deck - the table is keyed by the deck, so it follows the deck to its seat.
@@ -142,7 +142,7 @@ impl Metagame {
                 Some(v) => ids(db, v, &format!("metagame deck {name:?}'s sideboard"))?,
                 None => Vec::new(),
             };
-            // (ENGINE.md 223: the deck's own choice table, its list exactly this deck's 75 - the format is checked by the
+            // (ENGINE.md 240: the deck's own choice table, its list exactly this deck's 75 - the format is checked by the
             // spec, which knows it: a table is best-of-three's)
             let table = match e.get("table") {
                 None => None,
@@ -150,7 +150,7 @@ impl Metagame {
                     let t = SideboardTable::parse_as(x, db, &format!("metagame deck {name:?}'s table"))?;
                     if !t.fits(&MatchPool::constructed(&main, &sideboard).0) {
                         return Err(format!(
-                            "mtg spec: metagame deck {name:?}'s table (version {:?}) is not of its 75: a deck's table lists exactly that deck's main and sideboard (ENGINE.md 223)",
+                            "mtg spec: metagame deck {name:?}'s table (version {:?}) is not of its 75: a deck's table lists exactly that deck's main and sideboard (ENGINE.md 240)",
                             t.version
                         ));
                     }
@@ -226,12 +226,12 @@ impl Metagame {
         })
     }
 
-    /// The seats' choice tables of pairing `p` (ENGINE.md 223): each seat its deck's table, if the deck has one.
+    /// The seats' choice tables of pairing `p` (ENGINE.md 240): each seat its deck's table, if the deck has one.
     pub fn tables(&self, p: [u8; 2]) -> [Option<Arc<SideboardTable>>; 2] {
         p.map(|i| self.decks[i as usize].table.clone())
     }
 
-    /// Does any deck carry a choice table (ENGINE.md 223)?
+    /// Does any deck carry a choice table (ENGINE.md 240)?
     pub fn has_tables(&self) -> bool {
         self.decks.iter().any(|d| d.table.is_some())
     }
@@ -245,7 +245,7 @@ impl Metagame {
     /// The spec `json` (a metagame spec) with pairing `p` as fixed `decks` lists instead of `metagame` - the spec
     /// whose game of any seed is the metagame spec's game of a seed with that pairing (module docs; the tests and the
     /// fuzz check it). Each seat's sideboard as `pN_sideboard` when it has one, its deck's choice table as `pN_table`
-    /// when it has one (ENGINE.md 223: the table follows the deck to the seat that plays it; every other key of the
+    /// when it has one (ENGINE.md 240: the table follows the deck to the seat that plays it; every other key of the
     /// spec - `dealt_decks`, `forced_find`, ... - as it is, but a `forced_find` neither of the pair's decks can ever
     /// apply to (no deck of the two holds both its spell and its card: in its 75 in best of three, its main in best of
     /// one - the engine's own rule, which refuses such a spec, ENGINE.md 180) is left out: in the metagame it is inert

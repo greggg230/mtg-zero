@@ -1,4 +1,4 @@
-"""The stew's real operations (docs/ENGINE.md 222.2): everything that starts a process, touches a run's control files
+"""The stew's real operations (docs/ENGINE.md 239.2): everything that starts a process, touches a run's control files
 or calls the farm coordinator. The orchestrator talks to an `Ops`; tests give it a fake with the same methods.
 
 Every process runs from the stew's code (`code.worktree`, default this checkout; `code.python`, default this

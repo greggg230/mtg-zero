@@ -19,6 +19,6 @@ def test_the_digest_specs_are_the_presets_specs():
     assert specs['eoe_choice'] == json.loads(A.SPEC_EOE_CHOICE) == json.loads(A.PRESETS['eoe-2']['spec'])
     # (the three-deck Legacy metagame, docs/ENGINE.md 176: metagame_digests)
     assert specs['meta3'] == json.loads(A.SPEC_META3) == json.loads(A.PRESETS['legacy-meta3']['spec'])
-    # (a stew specialist's spec, docs/ENGINE.md 223: pair_digests adds each deck's table and varies the pairing)
+    # (a stew specialist's spec, docs/ENGINE.md 240: pair_digests adds each deck's table and varies the pairing)
     assert specs['pair'] == json.loads(A.PRESETS['legacy-pair-bo3-varied']['spec'])
     assert set(specs) == {'_doc', 'delver_bo3', 'eoe', 'eoe_choice', 'meta3', 'pair'}

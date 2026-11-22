@@ -1,6 +1,6 @@
-"""The stew's judging (mtgz.stew.judge, docs/ENGINE.md 222.3): the jobs of a cell (the deck follows the net, both
+"""The stew's judging (mtgz.stew.judge, docs/ENGINE.md 239.3): the jobs of a cell (the deck follows the net, both
 orientations x both choosers, common deals across arms), the units and the statistics on synthetic results, the
-matchup table. No match is played here (the CPU smoke plays them: docs/ENGINE.md 222.3)."""
+matchup table. No match is played here (the CPU smoke plays them: docs/ENGINE.md 239.3)."""
 import json
 import math
 

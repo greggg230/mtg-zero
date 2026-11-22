@@ -470,7 +470,7 @@ fn the_spec_option_and_its_refusals() {
     let delver = json!({"max_turns": 60, "constructed": true,
                         "decks": {"p0": Decklist::izzet_delver().main_names(), "p1": Decklist::izzet_delver().main_names()}});
     refused(&with_ff(delver, wheel(1.0)), "no deck's main holds both");
-    // best-of-three (ENGINE.md 223): every game of the match carries it; refused where no deck's 75 holds both
+    // best-of-three (ENGINE.md 240): every game of the match carries it; refused where no deck's 75 holds both
     let mut bo3 = with_ff(dd_delver(), wheel(1.0));
     bo3["format"] = json!("bo3");
     let sp3 = parse(&bo3).unwrap();

@@ -67,7 +67,7 @@ def test_the_engine_parses_and_refuses():
     e.mtg_spec_check(A.SPEC_META3)
     e.mtg_spec_check(D.metagame_spec(fmt='bo3', game_episodes=True))
     e.mtg_spec_check(D.metagame_spec(fmt='bo3', game_episodes=True, start_game=2, weights=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
-    # dealt decks in the best-of-three metagame (docs/ENGINE.md 223: the stew's pairings); best of one still refuses them
+    # dealt decks in the best-of-three metagame (docs/ENGINE.md 240: the stew's pairings); best of one still refuses them
     e.mtg_spec_check(json.dumps(dict(json.loads(D.metagame_spec(fmt='bo3')), dealt_decks={'p': 0.5, 'swaps': [0, 4]})))
     for spec, why in [
         (D.metagame_spec(fmt='bo3', game_episodes=True, start_game=2), 'start_game 2 is for mirrors'),

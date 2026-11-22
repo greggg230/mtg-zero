@@ -20,7 +20,7 @@
 //!   its seed) - 180 games of random play, 45 of `MtgAz`'s heuristic against random play -, 45 matches of its
 //!   best-of-three (the 75s, one episode per game) and 18 post-sideboard matches of its mirrors (`"start_game": 2`,
 //!   weights on the diagonal); each line names the game's pairing.
-//! * `pair_digests` (`digests_pair.txt`, ENGINE.md 223): a stew specialist's spec (`legacy-pair-bo3-varied`,
+//! * `pair_digests` (`digests_pair.txt`, ENGINE.md 240): a stew specialist's spec (`legacy-pair-bo3-varied`,
 //!   `digest_specs.json`'s `pair`: the best-of-three metagame restricted to Delver against Doomsday, whole matches,
 //!   each seat dealt from its own 75 with probability 0.85, the forced find at p 0) with a choice table per deck (seeded
 //!   random legal 60s), the same with the forced find at p 1, the same shape for Delver against Sneak and Show and for
@@ -507,7 +507,7 @@ fn pair_table(d: &Decklist, seed: u64) -> serde_json::Value {
     serde_json::json!({"version": format!("d{seed}"), "list": list, "choices": choices})
 }
 
-/// `legacy-pair-bo3-varied`'s spec (ENGINE.md 223, `digest_specs.json`'s `pair`: Delver against Doomsday) with each
+/// `legacy-pair-bo3-varied`'s spec (ENGINE.md 240, `digest_specs.json`'s `pair`: Delver against Doomsday) with each
 /// deck's choice table, or its shape for the pairing `ks` of the real 75s (0 Delver, 1 Doomsday, 2 Sneak and Show; one
 /// index: the mirror); the forced find at `ff` (None: none).
 fn pair_value(ks: &[usize], ff: Option<f64>) -> serde_json::Value {

@@ -200,7 +200,7 @@
 //! matches' checks keep the pairing (`check_constructed_world`). With 200 games (90 matches, 20 post-sideboard
 //! matches) or more every cell (the post-sideboard matches: every mirror) must have been played.
 //!
-//! `FUZZ_POOL=meta_pair` (ENGINE.md 223): `meta` with a stew specialist's sideboarding settings in its matches - each
+//! `FUZZ_POOL=meta_pair` (ENGINE.md 240): `meta` with a stew specialist's sideboarding settings in its matches - each
 //! seat dealt from its own 75 (`"dealt_decks"` per seat: by seed p 0.85 with swaps [0, 15], p 1 with [0, 15], or p 0.5
 //! with [2, 6]), a choice table per deck in two matches of three (each deck's own: random legal 60s of its 75, in its
 //! metagame entry, so it follows the deck to its seat), and the forced find (Doomsday for Thassa's Oracle at p 1, 0.5
@@ -623,7 +623,7 @@ pub enum PoolMode {
     Meta,
     /// `FUZZ_POOL=meta_wheel` (ENGINE.md 180): the best-of-one metagame's Doomsday games with the forced find.
     MetaWheel,
-    /// `FUZZ_POOL=meta_pair` (ENGINE.md 223): `meta` with per-seat dealt decks, per-deck tables and the forced find.
+    /// `FUZZ_POOL=meta_pair` (ENGINE.md 240): `meta` with per-seat dealt decks, per-deck tables and the forced find.
     MetaPair,
 }
 
@@ -770,7 +770,7 @@ fn swaps_vs(main: &[u16], deck: &[u16]) -> usize {
 }
 
 /// A dealt match's checks (ENGINE.md 154): the registered main of seat `p` of spec `sp` in match `seed` (a metagame's:
-/// the seat's pairing deck's, ENGINE.md 223), and the spec's swap range.
+/// the seat's pairing deck's, ENGINE.md 240), and the spec's swap range.
 fn dealt_main(sp: &crate::az::MtgSpec, p: usize, seed: u64) -> (Vec<u16>, (usize, usize)) {
     let dd = sp.dealt_decks.expect("a dealt spec");
     let main = match &sp.decks {
@@ -987,12 +987,12 @@ fn wheel_walk(seed: u64) -> WheelSeen {
     seen
 }
 
-/// `FUZZ_POOL=meta` (ENGINE.md 176), or `meta_pair` (ENGINE.md 223: its matches with the per-deck settings).
+/// `FUZZ_POOL=meta` (ENGINE.md 176), or `meta_pair` (ENGINE.md 240: its matches with the per-deck settings).
 pub fn meta_mode() -> bool {
     matches!(pool_mode(), PoolMode::Meta | PoolMode::MetaPair)
 }
 
-/// `FUZZ_POOL=meta_pair` (ENGINE.md 223).
+/// `FUZZ_POOL=meta_pair` (ENGINE.md 240).
 pub fn pair_mode() -> bool {
     pool_mode() == PoolMode::MetaPair
 }
@@ -1062,7 +1062,7 @@ fn meta_match_json(seed: u64, post: bool) -> String {
     if !pair_mode() {
         return json;
     }
-    // (`FUZZ_POOL=meta_pair`, ENGINE.md 223: the stew specialists' per-deck settings)
+    // (`FUZZ_POOL=meta_pair`, ENGINE.md 240: the stew specialists' per-deck settings)
     let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
     pair_settings(seed, &mut v);
     v.to_string()
@@ -1085,7 +1085,7 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
     assert_eq!(ms.pools(seed), fs.pools(seed), "seed {seed}: the seats are the pairing's lists");
     let mut b = MtgAz::new_game(&fs, 2, seed).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
     assert_eq!(b.m.pairing, None, "seed {seed}: a fixed spec's game has no pairing");
-    // (ENGINE.md 223: the per-deck settings follow the pairing - each seat's dealt flag and choice table)
+    // (ENGINE.md 240: the per-deck settings follow the pairing - each seat's dealt flag and choice table)
     assert_eq!([a.m.is_dealt(0), a.m.is_dealt(1)], [b.m.is_dealt(0), b.m.is_dealt(1)], "seed {seed}: the dealt seats");
     assert_eq!(a.m.table, b.m.table, "seed {seed}: the seats' choice tables");
     assert_eq!(a.m.pools, b.m.pools, "seed {seed}: the match's pools are the pairing's 75s");
@@ -1158,7 +1158,7 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
         a.legal_actions(&mut la);
         b.legal_actions(&mut lb);
         assert_eq!(la, lb, "{}: the legal actions", what(step));
-        // (ENGINE.md 223: a seat's choice table, the same in both games, played as a teacher decision; every other
+        // (ENGINE.md 240: a seat's choice table, the same in both games, played as a teacher decision; every other
         // decision at random - no table, no change: `meta`'s draws as before)
         let taught = a.table_action();
         assert_eq!(taught, b.table_action(), "{}: the table's action", what(step));
@@ -4570,7 +4570,7 @@ pub fn check_matches(n: u64, t: &Totals) {
         assert!(g("table_decisions") > 0, "no choice table decision (ENGINE.md 168.3)");
     }
     if pair_mode() && n >= 100 {
-        // (ENGINE.md 223: the forced find beside the dealt decks in best-of-three)
+        // (ENGINE.md 240: the forced find beside the dealt decks in best-of-three)
         assert!(g("ff_res") > 0 && g("ff_forced") > 0, "FUZZ_POOL=meta_pair: no Doomsday resolution forced in {n} matches ({} resolutions)", g("ff_res"));
     }
     assert!(g("pk_new_games") > 0 && g("pk_new_game_keys") > 0, "the private-key check reached no game a world started (ENGINE.md 141)");
@@ -5094,7 +5094,7 @@ static MATCH_IS_STEPS: AtomicU64 = AtomicU64::new(0);
 static PK_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_MATCH_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
-/// The forced find's resolutions in matches (ENGINE.md 223, `FUZZ_POOL=meta_pair`): all, forced, forced in a game 2 or 3.
+/// The forced find's resolutions in matches (ENGINE.md 240, `FUZZ_POOL=meta_pair`): all, forced, forced in a game 2 or 3.
 static PAIR_FF_RES: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_FORCED: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_FORCED_LATER: AtomicU64 = AtomicU64::new(0);
@@ -5331,7 +5331,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     } else {
         assert!(!g.m.any_dealt());
     }
-    // (ENGINE.md 168.3: the choice table's seats are those whose 75 is its list; ENGINE.md 223: each seat's own table,
+    // (ENGINE.md 168.3: the choice table's seats are those whose 75 is its list; ENGINE.md 240: each seat's own table,
     // a metagame seat its pairing deck's)
     for p in 0..2 {
         let want = match (&sp.sideboard_table, &sp.decks) {
@@ -5520,7 +5520,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
         }
         // (`FUZZ_POOL=hogaak`, ENGINE.md 220.4: a Massacre on top of the stack resolved by this pass, the game going on)
         let massacre_top = (hogaak_mode() && g.sideboarding().is_none()).then(|| hogaak_b_massacre_on_top(&g.g, a)).flatten().map(|id| (id, g.m.game_no));
-        // (the forced find in best-of-three, ENGINE.md 223: its records of the game's resolutions, each counted once)
+        // (the forced find in best-of-three, ENGINE.md 240: its records of the game's resolutions, each counted once)
         let (ff_game, ff_seen) = (g.m.game_no, g.g.forced_finds().len());
         g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
         if g.m.game_no == ff_game {
@@ -5706,7 +5706,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     }
     if pair_mode() {
         println!(
-            "FUZZ_POOL=meta_pair (ENGINE.md 223): the forced find in best-of-three - {} Doomsday resolutions, {} forced ({} in a game 2 or 3)",
+            "FUZZ_POOL=meta_pair (ENGINE.md 240): the forced find in best-of-three - {} Doomsday resolutions, {} forced ({} in a game 2 or 3)",
             PAIR_FF_RES.load(Ordering::Relaxed),
             PAIR_FF_FORCED.load(Ordering::Relaxed),
             PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)

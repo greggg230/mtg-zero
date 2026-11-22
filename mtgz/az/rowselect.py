@@ -1,5 +1,5 @@
-"""The row selector of a multi-source distillation (zero-core docs/az.md 71, `GamePackage.row_selectors`; docs/ENGINE.md
-222.1): which rows of a metagame run's shard a source takes, by the deck its acting player plays and the pairing.
+"""The row selector of a multi-source distillation (zero-core docs/az.md 76, `GamePackage.row_selectors`; docs/ENGINE.md
+239.1): which rows of a metagame run's shard a source takes, by the deck its acting player plays and the pairing.
 
     {"actor": "izzet_delver_8016541"}                          rows whose acting player plays that 75
     {"pairing": ["izzet_delver_8016541", "doomsday_8027957"]}  rows of games of that pairing (unordered; [x, x]: x's mirror)
@@ -233,7 +233,7 @@ def evaluate(parsed, o, cand, n_decks):
 
 
 def row_select(select, shard, ctx):
-    """zero-core's row selector hook (`GamePackage.row_selectors['mtg']`, docs/az.md 71): the shard's rows the
+    """zero-core's row selector hook (`GamePackage.row_selectors['mtg']`, docs/az.md 76): the shard's rows the
     selector takes (module docstring). Raises (ValueError) on a key or deck it does not know, a shard of another
     spec, and any row it cannot decide."""
     mg = metagame_of(ctx.get('config'))
@@ -258,7 +258,7 @@ def row_select(select, shard, ctx):
     if undecided:
         raise ValueError(f'shard {shard}: {undecided} of {N} rows the selector {json.dumps(select)} cannot decide (row '
                          f'{first[0]}: its acting player plays one of {first[1]} against {first[2]}, and the row holds '
-                         f'none of its own cards - a sideboarding row; mtgz/az/rowselect.py, docs/ENGINE.md 222.1)')
+                         f'none of its own cards - a sideboarding row; mtgz/az/rowselect.py, docs/ENGINE.md 239.1)')
     return out
 
 

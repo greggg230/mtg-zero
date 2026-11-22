@@ -1,4 +1,4 @@
-"""The stew's real operations (mtgz.stew.control, docs/ENGINE.md 222.2) where they can be checked without a run: the
+"""The stew's real operations (mtgz.stew.control, docs/ENGINE.md 239.2) where they can be checked without a run: the
 coordinator's body handling on a fake client, a long process stopped by the stew's STOP, the judge's job processes
 (a stand-in for the match process). The process tests spawn processes: live_run_hazard."""
 import json

@@ -1,4 +1,4 @@
-"""The stew (docs/ENGINE.md 222): specialists trained by self-play on one pairing each, deck stews and a main stew
+"""The stew (docs/ENGINE.md 239): specialists trained by self-play on one pairing each, deck stews and a main stew
 distilled upward from them, judged every generation (mtgz.stew).
 
   python tools/stew.py init    DIR --config FILE  # check the config, copy the main stew's gen 0 and the deck stews',

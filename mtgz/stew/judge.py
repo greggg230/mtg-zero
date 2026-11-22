@@ -1,4 +1,4 @@
-"""The stew's judging (docs/ENGINE.md 222.3): best-of-three matches on common deals, the deck following the net.
+"""The stew's judging (docs/ENGINE.md 239.3): best-of-three matches on common deals, the deck following the net.
 
 **Matches where the deck follows the net.** zero.h2h seats side A in seat gid % 2, so a match of A against B on
 pair_spec(X, Y) moves A onto Y every other game. A stew comparison is a property of one cell (X|Y: X's pilot against
@@ -411,7 +411,7 @@ def report_md(rep):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) != 3 or argv[0] != 'play':
-        raise SystemExit('usage: python -m mtgz.stew.judge play JOB.json OUT.json (docs/ENGINE.md 222.3)')
+        raise SystemExit('usage: python -m mtgz.stew.judge play JOB.json OUT.json (docs/ENGINE.md 239.3)')
     import mtgz.az  # noqa: F401  (the pinned core + the game package)
     from .state import jsave
     with open(argv[1], encoding='utf-8') as f:

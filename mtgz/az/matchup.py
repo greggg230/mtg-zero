@@ -1,7 +1,7 @@
 """The in-run matchup model of a constructed best-of-three pairing and sideboarding by its choice tables (docs/ENGINE.md
-168: the Delver best-of-three run pb3's mirror; docs/ENGINE.md 223: two different 75s, a stew specialist's pairing).
+168: the Delver best-of-three run pb3's mirror; docs/ENGINE.md 240: two different 75s, a stew specialist's pairing).
 
-**Two different 75s** (docs/ENGINE.md 223.3; everything below the mirror's, pb3's, which a mirror pairing still is
+**Two different 75s** (docs/ENGINE.md 240.3; everything below the mirror's, pb3's, which a mirror pairing still is
 exactly - the same code). For a pairing {C, D} (C the deck of the lower metagame index, a fixed spec's seat 0) every
 game is one row oriented C first, and the model is not antisymmetric - the pairing has its own base rate:
 
@@ -554,21 +554,21 @@ def check_table(spec, table):
 
 
 def check_tables(spec, tables):
-    """`check_table` for the tables of a version, placed as self-play places them (`with_tables`, docs/ENGINE.md 223)."""
+    """`check_table` for the tables of a version, placed as self-play places them (`with_tables`, docs/ENGINE.md 240)."""
     from mtgz import _engine
     _engine.mtg_spec_check(with_tables(spec, tables))
 
 
-# ----------------------------------------------------------------------------- the pairing (docs/ENGINE.md 223)
+# ----------------------------------------------------------------------------- the pairing (docs/ENGINE.md 240)
 
-# the non-mirror model's context columns (docs/ENGINE.md 223.3): the pairing's base rate, then as the mirror's terms but
+# the non-mirror model's context columns (docs/ENGINE.md 240.3): the pairing's base rate, then as the mirror's terms but
 # with no antisymmetry - a game 3 main effect and each deck's dealt flag on its own
 PAIR_CTX = ('base', 'pd', 'pd_g3', 'g3', 'lead', 'dealt_C', 'dealt_D')
 PAIR_BASELINE = 4                 # the first 4 columns: the baseline the deck model must beat (no deck term)
 
 
 class Pairing:
-    """The one pairing a matchup model is fit for (docs/ENGINE.md 223): deck C and deck D, each {'name', 'list'
+    """The one pairing a matchup model is fit for (docs/ENGINE.md 240): deck C and deck D, each {'name', 'list'
     ([[card, copies], ...] in the engine's list order), 'main' (the registered main's copies per entry), 'index' (its
     metagame index; a fixed spec's seat)}. `mirror`: one 75 both seats - pb3's model and table, unchanged (C is D).
     C is the deck of the lower metagame index (a fixed two-75 spec: seat 0's)."""
@@ -600,7 +600,7 @@ def the_pairing(specs, games):
     """The one pairing of the games' spec lines (a Pairing): a mirror (both seats one list and main - pb3's case: the
     same in every spec, as `the_75`), or two different 75s - the same two decks in every spec line, in either seat order
     (a metagame restricted to the pairing plays both). More than one pairing is refused: a model is one pairing's
-    (docs/ENGINE.md 223: a stew specialist's)."""
+    (docs/ENGINE.md 240: a stew specialist's)."""
     keys = sorted({g['spec'] for g in games})
     if not keys:
         raise ValueError('no game')
@@ -610,7 +610,7 @@ def the_pairing(specs, games):
         if a['list'] == b['list'] and a['main'] == b['main']:
             if specs[k].get('metagame') and a['name'] != b['name']:
                 raise ValueError(f'metagame decks {a["name"]} and {b["name"]} are one 75: a deck\'s table is keyed by its '
-                                 f'name, so two names of one 75 cannot share a model (docs/ENGINE.md 223)')
+                                 f'name, so two names of one 75 cannot share a model (docs/ENGINE.md 240)')
             key = ('mirror', json.dumps(a['list']), json.dumps(a['main']))
             found.setdefault(key, Pairing([a, a], True))
         else:
@@ -619,13 +619,13 @@ def the_pairing(specs, games):
                    json.dumps(d['main']))
             found.setdefault(key, Pairing([c, d], False))
     if len(found) != 1:
-        raise ValueError(f'the games play {len(found)} pairings: a matchup model is one pairing\'s (docs/ENGINE.md 223); '
+        raise ValueError(f'the games play {len(found)} pairings: a matchup model is one pairing\'s (docs/ENGINE.md 240); '
                          f'{sorted(" vs ".join(x[1:2] + x[4:5]) if x[0] == "pair" else "a mirror" for x in found)}')
     return next(iter(found.values()))
 
 
 def pair_arrays(games, specs, P):
-    """The non-mirror model's inputs (docs/ENGINE.md 223.3), every game oriented deck C first: dA (C's 60, count deltas
+    """The non-mirror model's inputs (docs/ENGINE.md 240.3), every game oriented deck C first: dA (C's 60, count deltas
     against C's main, games x E_C), dB (D's, games x E_D), ctx (games x 7: PAIR_CTX from C's side), y (C's result), it."""
     import numpy as np
     mC = np.asarray(P.decks[0]['main'], dtype=np.float64)
@@ -655,7 +655,7 @@ def z_pair(p, dA, dB, ctx):
 
 
 def fit_pair(dA, dB, ctx, y, wt, dim, l2_w, l2_inter, seed=0, base_only=False, threads=4):
-    """One non-mirror fit (docs/ENGINE.md 223.3), the mirror's procedure (`fit`): full-batch L-BFGS (torch, float64) of the
+    """One non-mirror fit (docs/ENGINE.md 240.3), the mirror's procedure (`fit`): full-batch L-BFGS (torch, float64) of the
     weighted mean log loss + L2 (l2_w on both decks' w, l2_inter on U_C, U_D and W) -> member dict (numpy lists).
     `base_only`: the baseline (the pairing's base rate, play / draw, game 3; no deck term, no lead, no dealt flags)."""
     import numpy as np
@@ -722,7 +722,7 @@ def logloss_pair(members, dA, dB, ctx, y):
 
 
 def select_and_fit_pair(games, specs, P, val_iters=2, half_life=16.0, threads=4, seed=0, log=print, members_n=MEMBERS):
-    """`select_and_fit` for two different 75s (docs/ENGINE.md 223.3): the same grid on the same time split (the newest
+    """`select_and_fit` for two different 75s (docs/ENGINE.md 240.3): the same grid on the same time split (the newest
     `val_iters` iterations validate), the same selection rule, the same held-out ensemble (MEMBERS bootstrap fits on the
     training iterations: the yardstick) and the published ensemble (`members_n` bootstrap fits on the whole window, the
     same seeds) -> (members, report)."""
@@ -785,7 +785,7 @@ def select_and_fit_pair(games, specs, P, val_iters=2, half_life=16.0, threads=4,
 
 
 class PairObjective:
-    """F of one deck's 60 in one context for two different 75s (docs/ENGINE.md 223.3; `Objective`'s for a mirror): the
+    """F of one deck's 60 in one context for two different 75s (docs/ENGINE.md 240.3; `Objective`'s for a mirror): the
     members' mean over the worlds of the OTHER deck's 60 (its constructed prior, restricted to the dealt range when it
     is dealt) of the decider's win probability - sigmoid(z) when the decider plays C (`role` 0), sigmoid(-z) when it
     plays D (`role` 1), z always C's side -, its better side of play and draw when it sideboards first, its worse
@@ -838,7 +838,7 @@ class PairObjective:
 
 
 def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0):
-    """Two different 75s (docs/ENGINE.md 223.3): one choice table PER DECK - each deck's 24 contexts' 60s by the same
+    """Two different 75s (docs/ENGINE.md 240.3): one choice table PER DECK - each deck's 24 contexts' 60s by the same
     guarded climb (`confident_climb`, `z`) against the other deck's constructed prior (its full swap range; the spec's
     dealt range for a dealt opponent) -> ([C's table, D's table] - each the spec's {"version", "list", "choices"} of
     its own 75 -, {deck name: per-context detail})."""
@@ -889,7 +889,7 @@ def _counts75(main, side):
 
 def with_tables(spec, tables):
     """`spec` (JSON) with the choice tables `tables` (each {"version", "list", "choices"}) where the engine reads them -
-    each on the deck whose 75 is its list: a metagame deck's entry (`"table"`, docs/ENGINE.md 223), a fixed spec's seat
+    each on the deck whose 75 is its list: a metagame deck's entry (`"table"`, docs/ENGINE.md 240), a fixed spec's seat
     (`decks.pN_table`), or for a fixed mirror (one 75 both seats) pb3's one `"sideboard_table"` (docs/ENGINE.md 168.3,
     unchanged). A table that fits no deck, or two tables of one 75, are refused."""
     sp = json.loads(spec)
@@ -900,7 +900,7 @@ def with_tables(spec, tables):
     def hit(c75, where):
         h = [i for i, x in enumerate(of) if x == c75]
         if len(h) > 1:
-            raise ValueError(f'{len(h)} choice tables of the 75 of {where} (one table per deck, docs/ENGINE.md 223)')
+            raise ValueError(f'{len(h)} choice tables of the 75 of {where} (one table per deck, docs/ENGINE.md 240)')
         for i in h:
             placed[i] += 1
         return tabs[h[0]] if h else None
@@ -924,7 +924,7 @@ def with_tables(spec, tables):
                     d[f'p{s_}_table'] = t
     if not all(placed):
         raise ValueError(f'a choice table ({[t["version"] for t, n in zip(tabs, placed) if not n]}) fits no deck of the '
-                         f'spec (its list is no deck\'s 75; docs/ENGINE.md 223)')
+                         f'spec (its list is no deck\'s 75; docs/ENGINE.md 240)')
     return json.dumps(sp, separators=(',', ':'))
 
 
@@ -945,7 +945,7 @@ def has_tables(spec):
 
 def version_tables(v):
     """A published version's choice tables (a list; None: no table): a mirror's one `table` (pb3's), two different 75s'
-    `tables` (one per deck, docs/ENGINE.md 223)."""
+    `tables` (one per deck, docs/ENGINE.md 240)."""
     if v.get('tables'):
         return list(v['tables'])
     return [v['table']] if v.get('table') is not None else None
@@ -1123,7 +1123,7 @@ def _mirror_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, thr
 
 
 def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads, worlds, log, min_gain, z, members_n):
-    """Two different 75s' version (docs/ENGINE.md 223.3): the non-mirror model, then one table per deck, published only
+    """Two different 75s' version (docs/ENGINE.md 240.3): the non-mirror model, then one table per deck, published only
     when the model beats its baseline (the pairing's base rate, play / draw, game 3) on the held-out games by
     `min_gain` nats -> as `_mirror_version`."""
     members, rep = select_and_fit_pair(games, specs, P, val_iters, half_life, threads, seed=b, log=log,
@@ -1148,7 +1148,7 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
             members_n=20):
     """The job (module docs): the run's logged self-play games of iterations lo..b -> status (status.json; a failure
     raises after writing it). The games' one pairing (`the_pairing`): a mirror's version is pb3's (one model, one
-    table), two different 75s' the non-mirror model with one table per deck (docs/ENGINE.md 223)."""
+    table), two different 75s' the non-mirror model with one table per deck (docs/ENGINE.md 240)."""
     t0 = time.time()
     d = job_dir(run, b)
     os.makedirs(d, exist_ok=True)

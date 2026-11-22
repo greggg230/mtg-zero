@@ -45662,17 +45662,32 @@ cache), then the group - the four core shards 427 to 745 s of pytest after 120 t
 minutes of waiting at 4 slots), 787 passed; the build-only step 138 s for the three games at once; checkpoint_compat
 identical (3,554 samples per target) in 1,808 s - one step, now the longest of the tier and what its wall time is.
 
-## 222. The stew: specialists, deck stews and a main stew, distilled upward (branches `feat/stew-distill`, `feat/stew`, zero-core `feat/multi-distill`; 2026-11-21)
+### 238.8 zero-core pin 2f7263c -> 61341a7: `check_checkpoint_compat.py` plays its digests at once
 
-### 222.1 Several teachers, each on its own rows: `tools/distill.py --sources` and the MTG row selector (zero-core pin c850a5d -> ae3bc6c, zero-core `feat/multi-distill`, docs/az.md 71)
+zero-core `main` 61341a7 (its docs/az.md 75.1; tools, tests and docs only, and 0d2a503 before it: docs): the core
+tiers' checkpoint_compat step runs each target's self-play and the match of both checkouts as six processes at once
+instead of two processes one after the other, with the same printed lines (make_compat_checker reads them unchanged)
+and the same digests - this gate's command on one checkout against itself: 384 s against the 1,808 s of 238.7's gate,
+visits 4c42f1160eca9121, cq 88ab3306d3beba12, the match f2a5103266c05aa6, each the gate's own value.
+
+`python tools/gate.py optin-core --baseline-root <a warm worktree of main 73dcf783, its module built>` on 790dc7b6 (the
+pin commit; this paragraph is the next commit, docs only): **GATE PASSED WITH SKIPS optin-core 790dc7b6e0fa in 984s**
+(the skips: the core's live-run-hazard tests, fenced) - against 2,378 s for 238.7's gate and 1,833 s for 236.10's.
+checkpoint_compat identical in 540 s (1,808 s); the four core shards 641 to 871 s, now the tier's longest steps; the
+build-only step 149 s; the module, the worker and the core module from the artifact cache (the pin changed no Rust
+input).
+
+## 239. The stew: specialists, deck stews and a main stew, distilled upward (branches `feat/stew-distill`, `feat/stew`, zero-core `feat/multi-distill`; 2026-11-21)
+
+### 239.1 Several teachers, each on its own rows: `tools/distill.py --sources` and the MTG row selector (zero-core pin c850a5d -> ae3bc6c, zero-core `feat/multi-distill`, docs/az.md 76)
 
 Branch `feat/stew-distill` from main 1e7416c5. **Why.** The stew distils a *deck stew* of deck X from every
 specialist whose pairing includes X, on the rows where X's player acts, and the *main stew* from each row's
-acting deck's deck stew plus a retention share (the stew's design, the rest of section 222). Distillation (62,
+acting deck's deck stew plus a retention share (the stew's design, the rest of section 239). Distillation (62,
 zero-core docs/az.md 13) took one teacher and every row. This lane adds several sources to zero-core's tool and the
 row selector that says, exactly, which deck the acting player of a training row plays.
 
-**zero-core (docs/az.md 71).** `python tools/distill.py --sources SOURCES.json OUT.pt` (this repo's wrapper passes
+**zero-core (docs/az.md 76).** `python tools/distill.py --sources SOURCES.json OUT.pt` (this repo's wrapper passes
 it through): a student (`{"init": S.pt}` warm start, or a fresh size), sources `{name, teacher, data, select,
 weight, heldout, config}`, `heldout` "auto" (each source's last shard with selected rows), the `train` block (the
 flags' settings). One window of every source's selected rows, each teacher's answers on its own rows only, every
@@ -45726,7 +45741,7 @@ needs a per-row tag (below).
 
 **By its 75, never by its 60.** The deck is identified by its pool: the opponent-pool bag is the whole 75 whatever 60
 the opponent plays, and U is checked against each deck's 75. So a post-board 60 with sideboard cards in, a dealt
-random 60 (ENGINE.md 154, 168.1: the stew's specialists will be dealt per seat, section 222's lane 3) and a sideboarding
+random 60 (ENGINE.md 154, 168.1: the stew's specialists will be dealt per seat, section 239's lane 3) and a sideboarding
 row whose decision is a table's teacher decision (168.3: one-hot targets) are read alike. The metagame spec refuses
 dealt decks until that lane lands, so it is checked on a fixed mirror: the engine test below plays a best-of-three
 Delver mirror dealt per seat (`dealt_decks` p 1.0, swaps 0-15, `start_game` 1 and 2), and on real data the Delver
@@ -45805,7 +45820,7 @@ mirror run, all `format` bo3, `game_episodes`, `start_game` 1):
 * **The selector on these shards**: the Delver|Doomsday run 18,756 rows (Delver acting 9,512, Doomsday 9,244), the
   Delver mirror run 29,235 rows - **every row decided by the opponent's deck alone, 0 undecided**; the three-deck run
   30,394 rows, 30,137 decided by U, **257 undecidable for `actor`** (169 sideboarding decisions, 88 the waiting
-  player's value-only rows at sideboarding): exactly its sideboarding rows, as 222.1 says.
+  player's value-only rows at sideboarding): exactly its sideboarding rows, as 239.1 says.
 * **The two-source distillation** (`E:/mtg-zero-scratch/stew/m0/`: `sources_bo3_smoke.json`, `run_proof.sh`; CPU,
   4 torch threads): a Delver deck stew warm-started from the three-deck run's last checkpoint (32 x 1 tokens with
   the belief and deck heads), source 1 the Delver mirror run's last checkpoint on its rows where Delver acts, source
@@ -45844,7 +45859,7 @@ worktree) and `test_token_graphs::test_absent_slots_are_never_read[max]` (a 3e-8
 c850a5d too). This repo: `tests/test_rowselect.py` 9 passed, with `test_mtg_az`'s distillation test,
 `test_delverai_meta` and `test_privacy`. The `python` gate on 4c11cd0d: GATE PASSED WITH SKIPS (only the live-run fence: 8 `live_run_hazard` tests fenced off beside the live runs; pytest 4 shards 227 + 178 + 163 + 150 passed, the desktop part 48, the run-loop smoke 16 games 0 unfinished; 1,830 s).
 
-### 222.2 The orchestrator: `tools/stew.py`, `mtgz/stew` (branch `feat/stew`)
+### 239.2 The orchestrator: `tools/stew.py`, `mtgz/stew` (branch `feat/stew`)
 
 **Why.** The design agreed with the user on 2026-11-21 (the brief of the build): a **metagame** of N decks with field
 shares, **candidates** among them; one **specialist** per unordered pairing with at least one candidate (mirrors
@@ -45854,7 +45869,7 @@ where that deck acts; one **main stew**, distilled from the deck stews (each row
 deck) plus a retention share for the pairings no specialist covers. Everything in the stew is best of three (the
 user, 2026-11-21): the specialists self-play full matches with sideboarding (`"format": "bo3"`, `game_episodes`,
 `start_game` 1; their sideboarding learnt the Delver mirror's way - dealt decks per seat, a per-pairing matchup model
-and its tables as teacher decisions - once that lane merges: section 223), and every judging comparison is
+and its tables as teacher decisions - once that lane merges: section 240), and every judging comparison is
 best-of-three matches on the plain evaluation spec (the network's own sideboarding). Until now each of
 these steps was made by hand for one experiment (the mirror-only fork's launch script with the source run's supervisor
 arguments, the farm runs paused and activated on the coordinator by a script, an end watcher that resumes the meta3
@@ -45867,7 +45882,7 @@ the seed: no inherited window, a fresh AdamW with its warm-up) and `check_heads`
 through `zero.farm_def.Client` (a farm run's whole body as GET returns it with only `state` changed, as tools/ab.py's
 `farm_pause`); `tools/farm_gates.py` + the worker's check-config before a specialist's first farm turn (tools/ab.py's
 `farm_gates`); `mtgz.az.farm_builds` for `"pool_build": "published"`; `decklists.metagame_spec` / `pair_spec`;
-`yardsticks.cell_stats` (177.2's statistics); zero-core's multi-teacher `tools/distill.py --sources` (222.1).
+`yardsticks.cell_stats` (177.2's statistics); zero-core's multi-teacher `tools/distill.py --sources` (239.1).
 
 **The stew directory** (the code takes its path; the maintainer's: `stews/<name>/` on the big disk):
 
@@ -45877,7 +45892,7 @@ through `zero.farm_def.Client` (a farm run's whole body as GET returns it with o
 | `state.json` | the lineage and the phase machine (atomic writes) |
 | `runs/spec-<A>-<B>/` | each specialist: an ordinary zero-core run |
 | `nets/main/gen_NNN.pt`, `nets/deck-<X>/gen_NNN.pt` | the main stew's and the deck stews' versions (+ `.stew.json`: its sources file's sha256) |
-| `sources/gen_NNN-<net>.json` | the distillation sources files (222.1's contract) |
+| `sources/gen_NNN-<net>.json` | the distillation sources files (239.1's contract) |
 | `rows/gen_NNN/spec-<A>-<B>/` | the shards a generation distils from (hard links of the specialist's newest data iterations + its config.json) |
 | `archive/` | the source run's window copied at init + its config.json: the retention source's rows |
 | `judge/gen_NNN/` | the judge's jobs and results (`<id>.job.json`, `<id>.json`, `<id>.log`) |
@@ -45893,7 +45908,7 @@ format: a best-of-three 60 + its sideboard), `candidates`, `source` {`run`, `ite
 `spec`, `eval_spec`, `iters`, `selfplay_remote`, `run`, `resolver` - refused), `pair_settings`, `farm` (true: each
 specialist self-plays on its own farm run), `distill` (the sources file's `train` block), `distill_cli` (extra
 tools/distill.py arguments: `--device cuda`), `distill_iters` (6: the newest data iterations of a turn a generation
-distils from), `retention_share` ("field" or a number), `judge` {...} (222.3), `hold_after` (["<phase>@<generation>"]),
+distils from), `retention_share` ("field" or a number), `judge` {...} (239.3), `hold_after` (["<phase>@<generation>"]),
 `env` (the stew's processes' environment), `archive` ("copy" | "link"), `spec_extra` / `deck_spec_extra` (below)},
 `code` {`worktree`, `sha`, `python`, `farm`
 (pool_build, pool_runtime, pool_worker, pool_alternates, pool_variants, pool_min_agent; `"pool_build": "published"` =
@@ -45921,16 +45936,16 @@ passes only `--iters`) - and the seed's heads checked against it (fork_run's `ch
 reported, never patched around). The stew's own keys: `spec` = `eval_spec` = the recipe's metagame restricted to the
 pairing (`metagame_spec([A, B], weights [[0, 1], [1, 0]])`: every match A against B, either seat; a mirror `[A]`,
 `[[1]]`) with `recipe.spec_extra` over its top level and `recipe.deck_spec_extra[<deck>]` over each deck's entry
-(self-play options: dealt decks per seat, the per-deck table keys of 223) - and `eval_spec` the plain one (no extras:
+(self-play options: dealt decks per seat, the per-deck table keys of 240) - and `eval_spec` the plain one (no extras:
 an evaluation never deals decks or plays tables) -, `iters` 0, evaluation off (`eval_every` 100000, and `eval_games`,
 `eval_random_games`, `elo_games` 0: zero.run always evaluates iteration 0; `elo_anchors` '', `eval_remote` '',
 `yardsticks` {}), `publish` {}, `forced_find_schedule` {} (the source spec's forced find is dropped, with a note in
 state.json and the report: the engine refuses it in best of three, 180.1, and a new run would restart its schedule
 at its first p), `selfplay_remote` 'pool:<name>-<alias A>-<alias B>' (`recipe.farm`; '' without). The matchup
-model's settings (`matchup_every`, `matchup_window`, ...: 223's sideboarding) are ordinary run settings of
+model's settings (`matchup_every`, `matchup_window`, ...: 240's sideboarding) are ordinary run settings of
 `recipe.settings` - the stew neither sets nor clears them, so they come from the recipe or the source. The engine
 parses each specialist's spec at init (a game made from it): an option this build refuses - dealt decks in a metagame
-before 223 merges - fails `init`, not the run's first start.
+before 240 merges - fails `init`, not the run's first start.
 
 **1. train.** Each specialist of the generation in turn (the field's pairing order): its turn's target (version g's
 iteration + `turn_iters`) recorded in state.json first (a resumed turn keeps it); the stew's STOP / PAUSE checked; the
@@ -45951,7 +45966,7 @@ version g; one source per specialist {X, Y}: `teacher` the specialist's version 
 copied config.json (the row selector's context), `select` {"actor": X}, `weight` share(Y) (the mirror's: share(X));
 `heldout` "auto"; `train` = `recipe.distill`. Then `tools/distill.py --sources FILE OUT.pt <distill_cli>` (`--resume`
 when OUT.pt.partial exists). The version is recorded with the per-source rows and held-out agreement read from OUT.pt's
-`extra` (zero-core docs/az.md 71); an OUT.pt whose record names another sources file, or a source with 0 selected rows,
+`extra` (zero-core docs/az.md 76); an OUT.pt whose record names another sources file, or a source with 0 selected rows,
 fails.
 
 **4. distil_main.** `student.init` the main stew's version g; per specialist {A, B} and acting deck Z of it a source on
@@ -46022,7 +46037,7 @@ without progress, the live-supervisor refusal (and yield / beside / own runs all
 stew left paused, add-deck (pending, joining at generation 1 with its deck stew and specialist, a request file beside a
 live run), plan / status, main sources with a deck outside the archive (retention 4/11).
 
-### 222.3 Judging: best-of-three matches where the deck follows the net, on common deals (branch `feat/stew`)
+### 239.3 Judging: best-of-three matches where the deck follows the net, on common deals (branch `feat/stew`)
 
 **Why not zero.h2h as it is.** zero.h2h seats side A in seat gid % 2: on pair_spec(X, Y) every other match moves A onto
 Y. Its per-seat settings (214) set a seat's search, not its deck. A stew comparison is a property of one cell - X's
@@ -46100,7 +46115,7 @@ touches it).
   matches each, Delver mirror 12 min and Delver-Doomsday 6.5 min, versions 1 = iteration 2, the source (a stopped run in
   `yield_runs`) recorded "was stopped" and neither paused nor resumed. Self-play rows a match: 397 (mirror, 2.1-2.75
   games a match) and 312 (Delver-Doomsday), against 111 rows a best-of-one game of the source - the tiny network's games
-  run long and draw at the turn limit, so the first stew's games an iteration come from the real network (222.2).
+  run long and draw at the turn limit, so the first stew's games an iteration come from the real network (239.2).
 * *The CPU smoke, part 2* (a local merge of this branch with `feat/stew-distill`, never pushed): `run` went on from the
   train phase - `distil_decks@0` (50-step `tools/distill.py --sources` distillations: deck stew Delver from both
   specialists, its Delver-Doomsday source selecting 1,927 of 3,886 rows by `actor`, the mirror's all 6,400; deck stew
@@ -46132,22 +46147,22 @@ touches it).
   it is: the main stew's first distillation (after generation 0's hold) needs them replayed as v8 rows or another
   retention source - decided at the hold.
 
-## 223. pb3's sideboarding for every stew specialist: dealt decks from each seat's own 75, the per-pairing matchup model and one choice table per deck, in the best-of-three metagame restricted to a pairing (branch `feat/pair-sideboarding`, 2026-11-21)
+## 240. pb3's sideboarding for every stew specialist: dealt decks from each seat's own 75, the per-pairing matchup model and one choice table per deck, in the best-of-three metagame restricted to a pairing (branch `feat/pair-sideboarding`, 2026-11-21)
 
 Branch `feat/pair-sideboarding` from main 1e7416c5, then main 45dbf2e1 (220, Legacy Hogaak Tempo) merged in (two
 conflicts, the fuzz pool lists and the match step: both sides kept); zero-core pinned at c850a5d, unchanged - the
 existing hooks suffice (`SearchGame::teacher_policy`, 168.3; `selfplay_specs`, 168.4; `value_only_decision`, 180.12).
-Section number: the stew brief's (222 is the stew's own, its lanes 1 and 2).
+Section number: assigned at the merge onto main (239 is the stew's own, its lanes 1 and 2).
 
 **Why** (the stew brief, section 7; the user's go of 2026-11-21: "everything in the stew is best-of-three"). Each stew
-specialist (one pairing {C, D} of the field, mirrors included; ENGINE.md 222) self-plays full best-of-three matches with
+specialist (one pairing {C, D} of the field, mirrors included; ENGINE.md 239) self-plays full best-of-three matches with
 sideboarding, and learns sideboarding the way the Delver mirror did (pb3, 168), not by its own search (pb1's way stalled:
 the inherited swap held 0.93 of the prior for 130 generations of pb2, 168). pb3's three parts - dealt decks per seat,
 the matchup model, its choice table as teacher decisions - were one shared 75 only; here each works for a pairing of two
 DIFFERENT 75s, inside the best-of-three metagame spec restricted to the pairing (the stew's specialists' spec), and a
 mirror is exactly what it was.
 
-### 223.1 The specs (engine)
+### 240.1 The specs (engine)
 
 | | the fixed two-75 spec (`decks`) | the metagame spec (`metagame`, 176) |
 |---|---|---|
@@ -46190,7 +46205,7 @@ mirror is exactly what it was.
 3. *A dealt range past a deck's sideboard is refused, never clamped per deck* (a clamp would deal another swap
    distribution than the spec says). Every 75 of the stew's field has a 15-card sideboard.
 
-### 223.2 Hidden information
+### 240.2 Hidden information
 
 Nothing new is encoded and `MatchState` has no new field. Per seat with two 75s: who is dealt is public (154.2, both
 flags); each deal is `KEY_DEALT` of its seat with as many keys as ITS 75's list needs (public: the 75 is), its payload
@@ -46202,7 +46217,7 @@ Hidden in the public-state gate, 168.3), never encoded. The forced find stays De
 `delver`'s and `meta`'s matches on it: worlds of both viewers, the private-key check (every dealt-deck key of another
 player `HIDDEN`), the information-set walks.
 
-### 223.3 The per-pairing matchup model (`mtgz/az/matchup.py`)
+### 240.3 The per-pairing matchup model (`mtgz/az/matchup.py`)
 
 **One pairing per model** (`the_pairing`): the games' spec lines must play one pairing - a mirror (one 75 both seats:
 pb3's case) or two different 75s in either seat order (a metagame restricted to the pairing plays both). Several
@@ -46245,7 +46260,7 @@ logged self-play games of iterations 113-144 (61,967 games), fit and tabled at p
 threads, 8,000 worlds, 20 members, min gain 0.005, z 2) by main's code and by this branch's path (`the_pairing` ->
 mirror -> `_mirror_version`): both reproduce pb3's published `matchup/v0144.json` exactly - `list`, `main`, `members`, `report`, `table`, `table_detail` and `dealt_swaps` all equal (gain 0.0659 nats, the selected model dim 0, l2_w 0.001, validation log loss 0.6266; ~5.3 min each on 4 threads): the mirror path is pb3's code path, untouched.
 
-### 223.4 The hook and where the tables go (`with_tables`)
+### 240.4 The hook and where the tables go (`with_tables`)
 
 The `selfplay_specs` hook (168.4: one answer per iteration in `used.jsonl`, so the local driver, the Mac's workers and the
 farm's definition play one spec) publishes a version's tables (`version_tables`: a mirror's one `table`, two 75s'
@@ -46254,7 +46269,7 @@ seat, and for a fixed mirror pb3's one `"sideboard_table"` (so pb3's spec is wha
 two tables of one 75, are refused; the run's own spec may hold no table (the retrain writes them). The retrain job
 checks every version's tables through the engine's parser (`check_tables`) before publishing.
 
-### 223.5 Specs and presets
+### 240.5 Specs and presets
 
 * `decklists.pairing_spec(a, b, ...)`: the stew specialist's spec - `metagame_spec([a, b], weights [[0, 1], [1, 0]])`, a
   mirror `([a], [[1]])` - best-of-three, game 1 played, one episode per game; `metagame_spec` and `pair_spec` take
@@ -46264,12 +46279,12 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   and deck tilt (`delver-mirror-bo3`'s), pb3's matchup settings (168.4, the guards user-approved 2026-11-15), the spec
   `pair_varied_specs(Delver, Doomsday)`: dealt decks per seat 0.85 / [0, 15], the forced find kept at p 0.0 (the meta3
   run's schedule reached 0 at its iteration 61; `forced_find_schedule` {} holds the spec's p), the evaluation spec without
-  dealt decks, tables and the forced find; `games` PAIR_GAMES (223.8). `pair_varied_settings(a, b)` gives any pairing's
+  dealt decks, tables and the forced find; `games` PAIR_GAMES (240.8). `pair_varied_settings(a, b)` gives any pairing's
   settings (the forced find only beside a deck whose 75 holds Doomsday and Thassa's Oracle).
 * **`legacy-pair-bo3-varied-smoke`**: `mtg-smoke`'s tiny network on the same spec shape, the forced find at p 1.0, a
   retrain every iteration from the second.
 
-### 223.6 The fuzz pool and the digest
+### 240.6 The fuzz pool and the digest
 
 * **`FUZZ_POOL=meta_pair`**: `meta`'s games and matches with the specialists' settings in its matches (whole and the
   mirrors' post-sideboard): per-seat dealt decks (p 0.85 [0, 15], p 1 [0, 15] or p 0.5 [2, 6] by seed), a table per deck
@@ -46286,7 +46301,7 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   Doomsday against Delver with its seat tables (10); a seat with a table plays its table's action (`play` now takes
   `table_action` first: no spec of the other digests has a table, so theirs are unchanged).
 
-### 223.7 Checks
+### 240.7 Checks
 
 * **The engine tests** (`engine/tests/pair_sideboarding.rs`, 8 tests in `misc_suite`, with `metagame.rs`, `forced_find.rs`,
   `dealt_per_seat.rs`): the whole `misc_suite` 220 passed, 0 failed. Two of the branch's first tests were wrong, not the
@@ -46301,7 +46316,7 @@ checks every version's tables through the engine's parser (`check_tables`) befor
 * **Python** (with the branch's engine module): `test_pair_sideboarding` (all, the engine-module ones included),
   `test_forced_find`, `test_metagame`, `test_dealt_decks`, `test_matchup`, `test_digest_specs`, `test_gate`: 133 passed.
   `test_metagame::test_the_engine_parses_and_refuses` expected dealt decks in a best-of-three metagame to be refused;
-  they are accepted now (223.1), so the test checks that they parse and that best of one still refuses them.
+  they are accepted now (240.1), so the test checks that they parse and that best of one still refuses them.
 * **Digests**: on the branch, every existing digest_formats digest equal to main's 220 values - constructed
   91b6cf60576961a7, metagame be3766d1f943c95c, EoE c3a9c786030f42eb, the driver 6a03572828250b86 -; the pair digest
   recorded f82ab8148a4870a9 (`DIGEST_WRITE=1 ... pair_digests`, then re-run equal, 70 matches). Merged with main's
@@ -46318,7 +46333,7 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   rows, 6 decks. And with a published table phase (`--set spec=` the pairing spec with a 24-context table per deck and
   the forced find at p 1, `E:/mtg-zero-scratch/stew/lane3/table_spec.py`): PASSED - gate 2 identical, 2,980 rows, 150
   batches; gate 3 identical, 2,839 rows.
-* **The CPU smoke** (`legacy-pair-bo3-varied-smoke`, 4 iterations x 16 matches): iterations 1-2 self-play with no table, the retrain of v0002 (the games of iterations 1-2: 88 games) and v0003 as subprocesses, versions published with `"model": "pair"`; at the preset's guard (`matchup_table_min_gain` 0.005) neither published a table - held-out log loss 0.711 vs play / draw 0.577, gain -0.134 nats on 88 games of a tiny network - and iteration 4's chosen-60 seats sideboarded by search, as the guard says. Run again with `--matchup-table-min-gain -10` (the tables forced through, `E:/mtg-zero-scratch/stew/lane3/smoke2`): v0002 and v0003 each published two tables (one per deck), iteration 4's self-play sideboarded by them ("the chosen-60 seats sideboard by the matchup model's choice tables v0002.json"), and the game log's spec lines of those matches carry `"tables": ["v0002", "v0002"]`. The stew's row selector (222.1) on this smoke's rows - two different 75s, dealt per seat, post-board 60s hidden: 19,204 rows, 8,979 Delver acting and 10,225 Doomsday acting, 0 undecided.
+* **The CPU smoke** (`legacy-pair-bo3-varied-smoke`, 4 iterations x 16 matches): iterations 1-2 self-play with no table, the retrain of v0002 (the games of iterations 1-2: 88 games) and v0003 as subprocesses, versions published with `"model": "pair"`; at the preset's guard (`matchup_table_min_gain` 0.005) neither published a table - held-out log loss 0.711 vs play / draw 0.577, gain -0.134 nats on 88 games of a tiny network - and iteration 4's chosen-60 seats sideboarded by search, as the guard says. Run again with `--matchup-table-min-gain -10` (the tables forced through, `E:/mtg-zero-scratch/stew/lane3/smoke2`): v0002 and v0003 each published two tables (one per deck), iteration 4's self-play sideboarded by them ("the chosen-60 seats sideboard by the matchup model's choice tables v0002.json"), and the game log's spec lines of those matches carry `"tables": ["v0002", "v0002"]`. The stew's row selector (239.1) on this smoke's rows - two different 75s, dealt per seat, post-board 60s hidden: 19,204 rows, 8,979 Delver acting and 10,225 Doomsday acting, 0 undecided.
 * **The fuzz found one bug** (the suite gate's `meta_pair` shard, match 0): the lockstep's pairing spec
   (`Metagame::pair_json`) carried the metagame's forced find into a pairing with no Doomsday deck (the Delver mirror,
   Delver-Sneak, the Sneak mirror), which the engine rightly refuses ("no deck's 75 holds both Doomsday and Thassa's
@@ -46329,17 +46344,17 @@ checks every version's tables through the engine's parser (`check_tables`) befor
   `pair_json_leaves_out_a_forced_find_the_pairing_can_never_apply` (kept for Delver-Doomsday, the Doomsday mirror and
   Sneak-Doomsday, left out for the other three, each fixed spec parses, the kept form refused). Then `meta_pair` 2,000
   games: PASSED (2,000 games, 100 matches + 100 post-sideboard, the lockstep, tables, dealt 60s and forced
-  resolutions seen); every digest unchanged. The suite gate: 223.11.
+  resolutions seen); every digest unchanged. The suite gate: 240.11.
 
-### 223.8 Rows per full best-of-three match (lane 2 sizes an iteration from it)
+### 240.8 Rows per full best-of-three match (lane 2 sizes an iteration from it)
 
-Not measured again here: lane 2 measured decisions per full best-of-three match with the meta3 run's checkpoint against itself (222.3: the Delver mirror 810.5, Delver-Doomsday 689.5, Delver-Sneak 576.4, against 287.2 a best-of-one game of the meta3 mix), and rows follow decisions at fixed run settings, so an iteration of the meta3 run's rows (2,444 games) is 2,444 x 287.2 / d3 matches: 866 / 1,018 / 1,218. `PAIR_GAMES` (the preset's pairing, Delver-Doomsday) = 1,018; the stew sets each pairing's own `games` from the same table (its `pair_settings`).
+Not measured again here: lane 2 measured decisions per full best-of-three match with the meta3 run's checkpoint against itself (239.3: the Delver mirror 810.5, Delver-Doomsday 689.5, Delver-Sneak 576.4, against 287.2 a best-of-one game of the meta3 mix), and rows follow decisions at fixed run settings, so an iteration of the meta3 run's rows (2,444 games) is 2,444 x 287.2 / d3 matches: 866 / 1,018 / 1,218. `PAIR_GAMES` (the preset's pairing, Delver-Doomsday) = 1,018; the stew sets each pairing's own `games` from the same table (its `pair_settings`).
 
-### 223.9 Card support of the stew's 75s
+### 240.9 Card support of the stew's 75s
 
 `test_every_card_of_the_stew_75s_is_supported_in_best_of_three`: every ordered pairing of Delver, Doomsday, Sneak and Show and Legacy Hogaak Tempo (220) - its self-play spec, its evaluation spec and the dealt `pair_spec` - parses in the engine (`mtg_spec_check`): passed.
 
-### 223.10 Open, decisions for the maintainer
+### 240.10 Open, decisions for the maintainer
 
 * forced_find p in the preset is 0.0 (the meta3 run's schedule ended at its iteration 61); the stew's first config drops the
   forced find for its specialists (equivalent at p 0) - a later stew may set it (it works in best of three now).

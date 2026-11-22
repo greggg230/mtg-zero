@@ -1,4 +1,4 @@
-"""pb3's sideboarding for a pairing of two different 75s (docs/ENGINE.md 223, mtgz.az.matchup): the pairing a model is
+"""pb3's sideboarding for a pairing of two different 75s (docs/ENGINE.md 240, mtgz.az.matchup): the pairing a model is
 fit for (a mirror is pb3's, the same code), the non-mirror model (not antisymmetric: the pairing's base rate) and its fit,
 one choice table per deck against the other deck's prior, the tables placed on the decks the engine reads them from
 (a metagame deck's entry, a fixed spec's seat, pb3's one table for a fixed mirror), the self-play hook, the specs and

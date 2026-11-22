@@ -1,4 +1,4 @@
-"""The stew's orchestrator (mtgz.stew, tools/stew.py; docs/ENGINE.md 222.2) on fakes: no process is started, no
+"""The stew's orchestrator (mtgz.stew, tools/stew.py; docs/ENGINE.md 239.2) on fakes: no process is started, no
 network is loaded, no farm is called. FakeOps stands in for mtgz.stew.control.Ops: a training turn writes its
 checkpoints, shards and metrics at once, distill writes its output and an `extra` with per-source rows, the judge
 writes results with the jobs' hashes."""
