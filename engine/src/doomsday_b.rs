@@ -116,11 +116,17 @@ impl CreatureTypes {
 pub struct Allow {
     pub bits: Spend,
     pub types: CreatureTypes,
+    /// No mana may be spent on this payment at all: the spell's own "You
+    /// can't spend mana to cast this spell" (CR 113.6e, 601.2f-h; Hogaak,
+    /// ENGINE.md 220.1). Neither the pool's mana nor a mana ability's pays
+    /// it; only the spell's own alternatives to mana do (convoke's and
+    /// improvise's taps, delve's exiles: CR 702.51a, 702.126a, 702.66a).
+    pub no_mana: bool,
 }
 
 impl From<Spend> for Allow {
     fn from(bits: Spend) -> Allow {
-        Allow { bits, types: CreatureTypes::default() }
+        Allow { bits, types: CreatureTypes::default(), no_mana: false }
     }
 }
 
@@ -132,9 +138,10 @@ impl std::ops::BitOr<Spend> for Allow {
 }
 
 impl Allow {
-    /// Nothing allowed beyond unrestricted mana.
+    /// Nothing allowed beyond unrestricted mana (and unrestricted mana
+    /// allowed: not a payment of no mana, `no_mana`).
     pub fn is_empty(&self) -> bool {
-        self.bits == 0 && self.types.is_empty()
+        self.bits == 0 && self.types.is_empty() && !self.no_mana
     }
 }
 

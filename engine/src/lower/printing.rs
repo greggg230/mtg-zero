@@ -33,6 +33,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             warp_cost_str,
             warp_additional_life_cost,
             warp_castable_from_graveyard,
+            castable_from_graveyard,
+            cant_spend_mana_to_cast,
             impending_cost,
             impending_cost_str,
             impending_count,
@@ -1709,6 +1711,21 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         hand_alt_grants,
         ..Default::default()
     };
+    // Hogaak, Arisen Necropolis (ENGINE.md 220.1): "You may cast this card
+    // from your graveyard", "You can't spend mana to cast this spell". (Dash
+    // and warp are among the alternative costs.)
+    let own_costs = !additional.is_empty()
+        || !alt_costs.is_empty()
+        || kicker.is_some()
+        || perm_kicker.is_some()
+        || buyback
+        || flashback.is_some()
+        || escape.is_some()
+        || miracle.is_some()
+        || bestow.is_some()
+        || times_cost.is_some()
+        || casting.choose_creature_or_warped;
+    super::hogaak_a::casting_rules(l, &mut casting, *castable_from_graveyard, *cant_spend_mana_to_cast, ty, &cost, x_pips, own_costs);
     for r in external_cost_reductions {
         let cats::ExternalCostReduction::ExternalCostReduction(nodes::ExternalCostReduction { amount, condition }) = r;
         match &**condition {

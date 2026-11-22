@@ -1,5 +1,6 @@
 //! Constructed play (ENGINE.md 54): the pinned Izzet Delver 75 and its
-//! provenance (and the Legacy Doomsday 75's, ENGINE.md 124.4), the deck rules
+//! provenance (and the Legacy Doomsday 75's, ENGINE.md 124.4, and the Legacy
+//! Hogaak Tempo 75's, 220), the deck rules
 //! of CR 100.2a / 100.4a, the `"constructed"` spec,
 //! the card table of constructed play kept apart from the cube's (the legacy
 //! cards' identities 546.., the cube's definitions unchanged), and the game
@@ -171,6 +172,90 @@ fn the_sneak_show_75_and_its_provenance() {
     let sb: Vec<String> = d.sideboard.iter().filter(|e| db().id(&e.1).is_some()).flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect();
     let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": d.main_names(), "p0_sideboard": sb}});
     assert!(MtgSpec::parse(&spec.to_string()).is_ok());
+}
+
+/// The Legacy Hogaak Tempo 75 (ENGINE.md 220): its provenance, the export it was read from (MTGGoldfish's export
+/// field, a `sideboard` line before the 15; Brazen Borrower by its front face there), every card of the deck and the
+/// sideboard supported in constructed play, the deck rules over both together (CR 100.2a, 100.4a), and the legacy
+/// cards in it - the deck's seven (ENGINE.md 220.1-220.3) - in the registry's order.
+#[test]
+fn the_hogaak_75_and_its_provenance() {
+    let d = Decklist::legacy_hogaak();
+    assert_eq!(d.name, "Dimir Hogaak");
+    assert_eq!(
+        (d.player.as_str(), d.event.as_str(), d.date.as_str()),
+        ("Jonathan Canfield", "North American Eternal Weekend - Legacy Championship", "2026-10-31")
+    );
+    assert_eq!(d.source, "https://www.mtggoldfish.com/deck/8027954");
+    assert_eq!(d.main.iter().map(|e| e.0).sum::<u32>(), 60);
+    assert_eq!(d.sideboard.iter().map(|e| e.0).sum::<u32>(), 15);
+    let (main, side) = d.parse_export(constructed::LEGACY_HOGAAK_EXPORT).unwrap();
+    assert_eq!(main, d.main);
+    assert_eq!(side, d.sideboard);
+    assert!(constructed::LEGACY_HOGAAK_EXPORT.lines().any(|l| l.trim_end() == "1 Brazen Borrower"));
+    assert!(d.main.contains(&(1, "Brazen Borrower // Petty Theft".to_string())));
+    assert!(d.unsupported_sideboard(db()).is_empty());
+    let (ids, sb) = (Decklist::ids(db(), &d.main).unwrap(), Decklist::ids(db(), &d.sideboard).unwrap());
+    assert_eq!((ids.len(), sb.len()), (60, 15));
+    assert!(ids.len() <= constructed::MAX_DECK);
+    constructed::check(db(), &ids, &sb).unwrap();
+    // Brazen Borrower is one in the deck and one in the sideboard: three more in the sideboard make five over both
+    // (100.4a).
+    let bb = db().expect_id("Brazen Borrower // Petty Theft").unwrap();
+    let mut five = sb.clone();
+    five[..3].fill(bb);
+    assert!(constructed::check(db(), &ids, &five).unwrap_err().contains("5 copies of Brazen Borrower"));
+    let has = |list: &[(u32, String)], n: &str| list.iter().any(|e| e.1 == n);
+    let reg = identity::legacy_registry();
+    let in_main: Vec<&str> = reg.iter().copied().filter(|n| has(&d.main, n)).collect();
+    assert_eq!(in_main, ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor"]);
+    let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
+    assert_eq!(side_only, ["Consign to Memory", "Massacre"]);
+    // The seven new cards are the registry's last lines, in the deck's order (identities 569-575).
+    assert_eq!(
+        reg[reg.len() - 7..],
+        ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor", "Massacre"]
+    );
+}
+
+/// The Hogaak 75 plays: best-of-one games of its main against the Delver, Doomsday and Sneak and Show 60s and
+/// itself, and constructed best-of-three matches with its sideboard against each 75 (ENGINE.md 120: every deck
+/// after sideboarding 60 of the 75), each by random actions to its end; the network's row finite at every decision.
+#[test]
+fn the_hogaak_75_plays_best_of_one_and_best_of_three() {
+    let h = Decklist::legacy_hogaak();
+    let others = [delver(), Decklist::legacy_doomsday(), Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap(), h.clone()];
+    let side = |d: &Decklist| -> Vec<String> { d.sideboard.iter().flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect() };
+    let play = |spec: &MtgSpec, seed: u64| -> (u32, usize) {
+        let mut g = MtgAz::new_game(spec, 2, seed).unwrap();
+        let mut rng = Rng::new(seed ^ 0x4064);
+        let (mut keys, mut steps) = (Vec::new(), 0usize);
+        while g.to_move().is_some() {
+            let l = legal(&g);
+            let p = g.to_move().unwrap();
+            assert!(engine::az::tail_encode::Row::of_az(&g, p).flat().iter().all(|x| x.is_finite()));
+            g.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+            steps += 1;
+            assert!(steps < 200_000, "seed {seed}: no end");
+        }
+        (g.m.game_no as u32, steps)
+    };
+    for (k, o) in others.iter().enumerate() {
+        for seat in 0..2u64 {
+            let (p0, p1) = if seat == 0 { (h.main_names(), o.main_names()) } else { (o.main_names(), h.main_names()) };
+            let bo1 = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": p0, "p1": p1}}).to_string()).unwrap();
+            play(&bo1, 10 * k as u64 + seat);
+            let (s0, s1) = if seat == 0 { (side(&h), side(o)) } else { (side(o), side(&h)) };
+            let bo3 = MtgSpec::parse(
+                &serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",
+                    "decks": {"p0": p0, "p1": p1, "p0_sideboard": s0, "p1_sideboard": s1}})
+                .to_string(),
+            )
+            .unwrap();
+            let (games, _) = play(&bo3, 100 + 10 * k as u64 + seat);
+            assert!((2..=3).contains(&games), "a best-of-three of {games} games");
+        }
+    }
 }
 
 #[test]

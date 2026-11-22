@@ -260,7 +260,13 @@ impl Change {
 fn mod_change(m: &Mod) -> u8 {
     use kind::*;
     match m {
-        Mod::SetPt(..) | Mod::Pt(..) | Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::SwitchPt | Mod::PowerPlusGreatestMv { .. } => PT,
+        Mod::SetPt(..)
+        | Mod::Pt(..)
+        | Mod::PtPer { .. }
+        | Mod::PtPerSourceCounter { .. }
+        | Mod::PtPerGraveyardCards { .. }
+        | Mod::SwitchPt
+        | Mod::PowerPlusGreatestMv { .. } => PT,
         Mod::Types { .. } | Mod::AllCreatureTypes | Mod::BecomeTypes { .. } => TYPES,
         Mod::Colors(_) => COLORS,
         Mod::Keywords(_) | Mod::Protection(_) | Mod::GainSacMana(_) | Mod::GainLatent(_) => ABILITIES,
@@ -576,7 +582,9 @@ impl Game {
     pub(crate) fn mana_writes(&self, pm: &crate::pay::PayMana, delve: bool) -> Writes {
         use crate::pay::{is_sac_slot, IMPROVISE, POL_FOR, SQ_FOR, TAP_FOR};
         let mut w = Writes { zones: delve, life: pm.cost.has_phyrexian() || pm.life_after > 0, ..Writes::default() };
-        for cl in self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke) {
+        // (A payment of no mana: its convoke's and improvise's taps only,
+        // ENGINE.md 220.1.)
+        for cl in self.spell_pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke, pm.keep.allow) {
             if cl.dmg > 0 {
                 w.life = true;
             }
@@ -697,6 +705,10 @@ impl Game {
                         let amount = match m {
                             Mod::PtPer { filter, .. } => !w.leave.is_empty() || reads_w(filter),
                             Mod::PtPerSourceCounter { .. } => w.counters.contains(&s),
+                            // (A card put into or taken from a graveyard, a
+                            // permanent sacrificed into one: Dark Matter
+                            // Manipulator's count.)
+                            Mod::PtPerGraveyardCards { .. } => w.zones || !w.leave.is_empty(),
                             Mod::PowerPlusGreatestMv { .. } => !w.leave.is_empty(),
                             _ => false,
                         };

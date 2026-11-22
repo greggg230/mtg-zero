@@ -1,7 +1,9 @@
 """The farm release tooling (docs/ENGINE.md 196): the package's declared setting classes = the worker's table, the
 builds index and its lookups (mtgz.az.farm_builds), `--pool-build published`, tools/farm_release.py's reuse of a build
 of the same Rust inputs, tools/farm_release_watch.py's choice of head and its no-retry rule, tools/ab.py's
-`"pool_build": "published"`. No build, signature or network: temporary git repositories and indexes."""
+`"pool_build": "published"`; the macOS part of every release (docs/ENGINE.md 216): its switches, the backfill of an
+entry without one, a failure that keeps the published builds (exit 3), the watcher's retries. No build, signature, Mac
+or network: temporary git repositories and indexes, the steps that build or reach the Mac replaced."""
 import json
 import os
 import re
@@ -124,12 +126,13 @@ def test_release_reuses_a_build_of_the_same_rust_inputs(tmp_path, fbx, monkeypat
         json.dump({'cpu_runtime': 'r' * 24}, f)
     built = []
     monkeypatch.setattr(FR.Release, 'checkout', lambda self, sha: built.append(sha))
-    assert FR.main(['release', c2, '--no-slot', '--normal-priority', '--no-cuda']) == 0
+    flags = ['--no-slot', '--normal-priority', '--no-cuda', '--no-mac']      # (the macOS part: the tests below)
+    assert FR.main(['release', c2, *flags]) == 0
     e = FB.load()['builds'][-1]
     assert (e['commit'], e['build_id'], e['reused_from']) == (c2, 'a' * 24, c1) and built == []
-    assert FR.main(['release', c2, '--no-slot', '--normal-priority', '--no-cuda']) == 0
+    assert FR.main(['release', c2, *flags]) == 0
     assert len(FB.load()['builds']) == 2
-    assert FR.main(['release', c3, '--no-slot', '--normal-priority', '--no-cuda']) == 1
+    assert FR.main(['release', c3, *flags]) == 1
     r = json.load(open(os.path.join(FB.builds_dir(), 'releases', c3[:12], 'result.json')))
     assert r['failed'] == 'preflight' and 'reference' in r['error'] and built == []
     assert FR.main(['lookup', c2]) == 0 and FR.main(['lookup', c3]) == 1
@@ -168,3 +171,281 @@ def test_ab_pool_build_published(tmp_path, fbx, monkeypatch):
     assert ab.published_build(s, {'lr': 1}) == {'lr': 1}
     with pytest.raises(SystemExit, match='no published farm build'):
         ab.published_build(s, {'pool_build': f'published:{c3}'})
+
+
+# ------------------------------------------------------------------------------------------------ the macOS part (216)
+
+MAC_RT = 'f' * 24
+FLAGS = ['--no-slot', '--normal-priority', '--no-cuda']
+
+
+def _mac_env(tmp_path, fbx, monkeypatch, release_json=None):
+    """A temporary repository with c1 released (no macOS part), release.json naming a macOS pack (its manifest in the
+    builds directory), the reference files present, and every step that reaches, builds on or publishes for the Mac
+    replaced by a recorder (`fail[name]` makes that step raise) -> (FR, FB, commits, calls, fail, root)."""
+    import farm_release as FR
+    FB = fbx
+    root, cs, _ = _repo(tmp_path)
+    monkeypatch.setattr(FR, 'ROOT', root)
+    monkeypatch.setattr(FB, 'ROOT', root)
+    FB.add(_entry(cs[0], FB.rust_key(cs[0], root), cuda=None))
+    b = FB.builds_dir()
+    with open(os.path.join(b, 'release.json'), 'w') as f:
+        json.dump(dict({'cpu_runtime': 'r' * 24, 'mac_runtime': MAC_RT}, **(release_json or {})), f)
+    os.makedirs(os.path.join(b, MAC_RT))
+    with open(os.path.join(b, MAC_RT, 'manifest.json'), 'w') as f:
+        json.dump({'platform': 'macos-arm64', 'version': 'ort-mac'}, f)
+    os.makedirs(os.path.join(b, 'reference', 'export'))
+    for n in ('config.json', 'checkpoint.pt', os.path.join('export', 'model.onnx'), os.path.join('export', 'reference.npz')):
+        open(os.path.join(b, 'reference', n), 'w').close()
+    calls = {'reach': 0, 'checkout': [], 'build': [], 'gates': 0, 'publish': [], 'plan': 0}
+    fail = {}
+
+    def step(name):
+        if name in fail:
+            raise fail[name]
+
+    def reach(self):
+        calls['reach'] += 1
+        step('reach')
+
+    def build(self, profile):
+        step('build')
+        bid = f'{len(calls["build"])}'.rjust(24, 'm')
+        calls['build'].append((profile, bid))
+        return {'build_id': bid, 'dir': os.path.join(str(tmp_path), 'dist', bid), 'mac_path': f'mtgz-macfarm/builds/{bid}/mtgz-worker',
+                'profile': profile}
+
+    def gates(self, mac, fz):
+        calls['gates'] += 1
+        step('gates')
+        return {'compat': {'passed': True}, 'records': {'passed': True}}
+
+    def publish(self, d):
+        step('publish')
+        calls['publish'].append(os.path.basename(d))
+        return os.path.join(self.builds, os.path.basename(d))
+
+    def plan(self, exe, mac, fz, cuda):
+        calls['plan'] += 1
+        step('plan')
+        return {'runs': [], 'campaigns': [], 'applied': False}
+
+    monkeypatch.setattr(FR.Release, 'mac_reach', reach)
+    monkeypatch.setattr(FR.Release, 'mac_build', build)
+    monkeypatch.setattr(FR.Release, 'mac_gates', gates)
+    monkeypatch.setattr(FR.Release, 'publish', publish)
+    monkeypatch.setattr(FR.Release, 'mac_plan', plan)
+    monkeypatch.setattr(FR.Release, 'checkout', lambda self, sha: calls['checkout'].append(sha))
+    monkeypatch.setattr(FR.Release, 'modules', lambda self: None)
+    return FR, FB, cs, calls, fail, root
+
+
+def test_the_macos_switches():
+    """On by default with its gates and publish, without the fuzz build and the Mac's speed windows; release.json turns
+    each off (or on), a flag wins for one run."""
+    import farm_release as FR
+    s = dict(FR.DEFAULTS)
+    sw = lambda argv, s: (lambda a: (a.mac, a.mac_gates, a.mac_publish, a.mac_fuzz, a.speed_mac))(  # noqa: E731
+        FR.mac_switches(FR.parser().parse_args(['release', 'x', *argv]), s))
+    assert sw([], s) == (True, True, True, False, False)
+    assert sw(['--no-mac-gates', '--speed-mac', '--mac-fuzz'], s) == (True, False, True, True, True)
+    assert sw(['--no-mac'], s)[0] is False and sw(['--no-mac-publish', '--no-speed-mac'], s)[2:] == (False, False, False)
+    off = dict(s, mac=False, mac_speed=True)
+    assert sw([], off) == (False, True, True, False, True) and sw(['--mac'], off)[0] is True
+
+
+def test_when_an_entry_has_its_macos_part():
+    import farm_release as FR
+    s = {'mac_runtime': MAC_RT}
+    rel = {'build_id': 'm' * 24, 'published': 'X:/b/m'}
+    assert FR.mac_complete({'mac': {'release': rel, 'runtime': MAC_RT}}, s)
+    assert not FR.mac_complete({'mac': None}, s) and not FR.mac_complete({}, s)
+    assert not FR.mac_complete({'mac': {'failed': 'mac-reach', 'error': 'x'}}, s), 'a failure is no macOS part'
+    unpub = {'mac': {'release': {'build_id': 'm' * 24}, 'runtime': MAC_RT}}
+    assert not FR.mac_complete(unpub, s) and FR.mac_complete(unpub, s, publish=False)
+    assert not FR.mac_complete({'mac': {'release': rel, 'runtime': 'o' * 24}}, s), 'built for another macOS pack'
+    assert FR.mac_complete({'mac': {'release': rel}}, s), '(an entry from before the runtime was recorded)'
+    assert not FR.mac_complete({'mac': {'release': rel}}, s, fuzz=True)
+    assert FR.mac_complete({'mac': {'release': rel, 'fuzz': {'build_id': 'z' * 24}}}, s, fuzz=True)
+
+
+def test_index_update_and_the_macos_build_in_describe(tmp_path, fbx):
+    FB = fbx
+    FB.add(_entry('1' * 40, 'k'))
+    FB.add(dict(_entry('2' * 40, 'k'), reused_from='1' * 40))
+    FB.add(_entry('3' * 40, 'j', bid='b' * 24))
+    FB.add(dict(_entry('4' * 40, 'k'), published=False))
+    mac = {'release': {'build_id': 'm' * 24, 'published': 'X:/b/m'}}
+    assert FB.update('a' * 24, {'mac': mac}) == 2, 'every published entry of the build, nothing else'
+    ix = FB.load()['builds']
+    assert [bool(e.get('mac')) for e in ix] == [True, True, False, False]
+    assert FB.update('a' * 24, {'mac': {'failed': 'x'}}, only=lambda e: not FB.mac_build(e)) == 0
+    assert FB.mac_build(ix[0]) == 'm' * 24 and FB.mac_build(ix[2]) is None
+    assert 'macOS build ' + 'm' * 24 in FB.describe(ix[1])
+    assert '(signed, not published)' in FB.describe(dict(ix[1], mac={'release': {'build_id': 'm' * 24}}))
+    assert 'NO macOS build (failed at mac-build)' in FB.describe(dict(ix[2], mac={'failed': 'mac-build'}))
+    assert 'macOS' not in FB.describe(ix[2])
+
+
+def test_release_backfills_the_macos_part_of_a_reused_entry_once(tmp_path, fbx, monkeypatch, capsys):
+    """A commit reusing a build whose entry has no macOS part: the entry, then only the macOS part - built at the
+    commit the Windows build was built at, gated, published, recorded on every entry of the build. Run again (or for
+    the other commit): nothing built."""
+    FR, FB, (c1, c2, c3), calls, fail, root = _mac_env(tmp_path, fbx, monkeypatch)
+    assert FR.main(['release', c2, *FLAGS]) == 0
+    ix = FB.load()['builds']
+    assert [e['commit'] for e in ix] == [c1, c2] and ix[1]['reused_from'] == c1
+    assert calls['checkout'] == [c1], 'built at built_at: one engine with the Windows build (its engine_commit)'
+    mid = calls['build'][0][1]
+    assert [p for p, _ in calls['build']] == ['release'] and calls['gates'] == 1 and calls['publish'] == [mid]
+    for e in ix:
+        m = e['mac']
+        assert (m['release']['build_id'], m['runtime'], m['commit']) == (mid, MAC_RT, c1) and m['release']['published']
+        assert m['gates'] == {'compat': {'passed': True}, 'records': {'passed': True}} and 'failed' not in m
+    assert FB.mac_build(FB.lookup(c2, root)) == mid and 'macOS build ' + mid in FB.describe(FB.lookup(c2, root))
+    out = capsys.readouterr().out
+    assert json.dumps({'build_id': mid, 'published': True}) in out and 'MACOS PART FAILED' not in out
+    notes = open(os.path.join(FB.builds_dir(), 'releases', c2[:12], 'notes.txt'), encoding='utf-8').read()
+    assert f'macOS build {mid} published, MAC FARM GATES PASSED (compat, records)' in notes
+    for c in (c2, c1, c2):
+        assert FR.main(['release', c, *FLAGS]) == 0
+    assert len(calls['build']) == 1 and calls['reach'] == 1 and len(FB.load()['builds']) == 2, 'idempotent'
+    # --no-mac: the macOS part left alone (here: nothing to do anyway); --no-mac-publish wants no publish
+    assert FR.main(['release', c2, *FLAGS, '--no-mac']) == 0 and len(calls['build']) == 1
+
+
+def test_an_entry_gets_the_macos_build_another_entry_of_its_build_has(tmp_path, fbx, monkeypatch):
+    """An older entry of the same build without the macOS part (a reuse before its build's own entry got one): the
+    other entry's is copied, nothing reached or built."""
+    FR, FB, (c1, c2, c3), calls, fail, root = _mac_env(tmp_path, fbx, monkeypatch)
+    mac = {'release': {'build_id': 'x' * 24, 'published': 'X:/b/x'}, 'runtime': MAC_RT, 'commit': c1}
+    assert FB.update('a' * 24, {'mac': mac}) == 1
+    FB.add(dict(_entry(c2, FB.rust_key(c2, root), cuda=None), reused_from=c1))
+    assert FB.lookup(c2, root).get('mac') is None
+    assert FR.main(['release', c2, *FLAGS]) == 0
+    assert FB.lookup(c2, root)['mac'] == mac and calls['reach'] == 0 and calls['build'] == []
+
+
+def test_a_failed_macos_part_keeps_the_published_builds_and_a_later_run_backfills_it(tmp_path, fbx, monkeypatch, capsys):
+    """The Mac unreachable, a build that raises, a failing gate: each recorded in the entry (no `release`, the step, the
+    error), result.json and the notes, the last line loud, exit 3 - and the entry's builds stand. The Mac back: the next
+    run builds only the macOS part; a plan that cannot be made is noted, not a failure."""
+    FR, FB, (c1, c2, c3), calls, fail, root = _mac_env(tmp_path, fbx, monkeypatch)
+    fail['reach'] = FR.Failed('mac-reach', 'the Mac does not answer over ssh (exit 255: timed out) - asleep, offline or refused')
+    assert FR.main(['release', c2, *FLAGS]) == FR.EXIT_MAC_FAILED == 3
+    e = FB.lookup(c2, root)
+    assert (e['commit'], e['build_id'], e['published'], e['reused_from']) == (c2, 'a' * 24, True, c1), 'the entry stands'
+    assert e['mac']['failed'] == 'mac-reach' and 'release' not in e['mac'] and 'asleep' in e['mac']['error']
+    assert calls['build'] == [] and calls['checkout'] == []
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out[-1].startswith('farm_release: MACOS PART FAILED at mac-reach: ') and '(exit 3)' in out[-1]
+    assert 'NO macOS build (failed at mac-reach)' in out[-2] and json.loads(out[-3])['mac'] == {'failed': 'mac-reach'}
+    d = os.path.join(FB.builds_dir(), 'releases', c2[:12])
+    r = json.load(open(os.path.join(d, 'result.json'), encoding='utf-8'))
+    assert r['mac_failed']['step'] == 'mac-reach' and r['entry']['build_id'] == 'a' * 24 and 'failed' not in r
+    assert 'MACOS PART FAILED at mac-reach' in open(os.path.join(d, 'notes.txt'), encoding='utf-8').read()
+    # anything a step raises (not a Failed) is the part's failure too, named by the step that ran
+    del fail['reach']
+    fail['build'] = RuntimeError('scp: connection lost')
+    assert FR.main(['release', c2, *FLAGS]) == 3
+    m = FB.lookup(c2, root)['mac']
+    assert m['failed'] == 'mac-build' and 'RuntimeError: scp: connection lost' in m['error']
+    # a failing Mac gate: the build is named, never published
+    del fail['build']
+    fail['gates'] = FR.Failed('mac-gates', 'MAC FARM GATES FAILED: {"compat": false}')
+    assert FR.main(['release', c2, *FLAGS]) == 3
+    m = FB.lookup(c2, root)['mac']
+    assert m['failed'] == 'mac-gates' and m['built'] == {'release': calls['build'][-1][1]} and calls['publish'] == []
+    assert all(e['mac']['failed'] == 'mac-gates' for e in FB.load()['builds']), 'the failure on every entry of the build'
+    # the Mac back: the macOS part only, the failure replaced on every entry; the plan's own failure is only noted
+    del fail['gates']
+    fail['plan'] = RuntimeError('GET /v1/admin/run: 502')
+    assert FR.main(['release', c2, *FLAGS]) == 0
+    for e in FB.load()['builds']:
+        assert e['mac']['release']['published'] and 'failed' not in e['mac'] and '502' in e['mac']['plan']['error']
+    n = len(calls['build'])
+    assert FR.main(['release', c2, *FLAGS]) == 0 and len(calls['build']) == n
+
+
+def test_no_macos_pack_is_a_loud_failure_not_a_silent_skip(tmp_path, fbx, monkeypatch, capsys):
+    FR, FB, (c1, c2, c3), calls, fail, root = _mac_env(tmp_path, fbx, monkeypatch, release_json={'mac_runtime': None})
+    assert FR.main(['release', c2, *FLAGS]) == 3
+    assert FB.lookup(c2, root)['mac']['failed'] == 'mac-build' and 'no mac_runtime' in FB.lookup(c2, root)['mac']['error']
+    assert calls['reach'] == 0 and 'MACOS PART FAILED at mac-build' in capsys.readouterr().out
+    with open(os.path.join(FB.builds_dir(), 'release.json'), 'w') as f:
+        json.dump({'cpu_runtime': 'r' * 24, 'mac': False}, f)
+    assert FR.main(['release', c2, *FLAGS]) == 0, '"mac": false in release.json: no macOS part'
+
+
+def test_a_new_build_is_published_before_its_macos_part(tmp_path, fbx, monkeypatch, capsys):
+    """A commit with new Rust inputs: its index entry (the Windows build) is written before the Mac is reached, so a
+    Mac that does not answer costs only the macOS part (exit 3); the next run backfills it at that commit."""
+    FR, FB, (c1, c2, c3), calls, fail, root = _mac_env(tmp_path, fbx, monkeypatch)
+    real = subprocess.run
+
+    def run(cmd, *a, **k):
+        if isinstance(cmd, list) and str(cmd[0]).endswith('mtgz-worker.exe'):     # (the new worker's `info`)
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({'features': ['rolling'], 'zero_onnx': [1, 2]}), stderr='')
+        return real(cmd, *a, **k)
+    monkeypatch.setattr(FR.subprocess, 'run', run)
+    monkeypatch.setattr(FR, 'preflight', lambda s, cuda=True: None)
+    monkeypatch.setattr(FR.Release, 'farm_build', lambda self, step, *a: ('n' * 24, os.path.join(str(tmp_path), 'dist', 'mtg-new')))
+    monkeypatch.setattr(FR.Release, 'template', lambda self, exe, bid: {'play': 1})
+    monkeypatch.setattr(FR.Release, 'gates', lambda self, exe: {'passed': True, 'line': 'FARM GATES PASSED: test'})
+    seen = []
+
+    def reach(self):
+        seen.append([(e['commit'], e['build_id']) for e in FB.load()['builds']])
+        if 'reach' in fail:
+            raise fail['reach']
+    monkeypatch.setattr(FR.Release, 'mac_reach', reach)
+    fail['reach'] = FR.Failed('mac-reach', 'asleep')
+    assert FR.main(['release', c3, *FLAGS, '--no-speed']) == 3
+    assert seen == [[(c1, 'a' * 24), (c3, 'n' * 24)]], 'the entry is in the index before the Mac is reached'
+    e = FB.lookup(c3, root)
+    assert e['published'] and e['build_id'] == 'n' * 24 and e['mac']['failed'] == 'mac-reach' and calls['publish'] == ['mtg-new']
+    del fail['reach']
+    assert FR.main(['release', c3, *FLAGS]) == 0
+    assert calls['checkout'][-1] == c3 and FB.mac_build(FB.lookup(c3, root)) == calls['build'][-1][1]
+    assert FB.lookup(c1, root).get('mac') is None, 'another build\'s entry untouched'
+
+
+def test_the_watcher_retries_a_failed_macos_part(tmp_path, fbx, monkeypatch):
+    """Exit 3: the head is released (done) with its macOS part pending - retried when due, at most --mac-retries times,
+    then given up (logged); a newer head's release takes over; a retry that succeeds clears it."""
+    import types
+    import farm_release as FR
+    import farm_release_watch as W
+    assert W.MAC_FAILED == FR.EXIT_MAC_FAILED
+    root, (c1, c2, c3), _ = _repo(tmp_path)
+    monkeypatch.setattr(W, 'ROOT', root)
+    P = W.paths()
+    head, rcs, ran = [c1], [], []
+    monkeypatch.setattr(W, 'head', lambda fetch=True, P=None: head[0])
+    monkeypatch.setattr(W, 'release', lambda P, sha, py: (ran.append(sha), (rcs.pop(0), ['farm_release: a line']))[1])
+    a = types.SimpleNamespace(no_fetch=True, python=sys.executable, mac_retry_every=1e9, mac_retries=2)
+    st = {}
+    rcs[:] = [3]
+    W.poll(P, st, a)
+    assert ran == [c1] and st['done'][c1]['mac_failed'] and st['mac_pending']['head'] == c1 and st['last']['ok']
+    assert 'failed' not in st, 'released: the head is not a failed one'
+    W.poll(P, st, a)
+    assert ran == [c1], 'not due yet'
+    a.mac_retry_every = 0
+    rcs[:] = [3, 1]
+    W.poll(P, st, a)
+    W.poll(P, st, a)
+    assert ran == [c1] * 3 and st['mac_pending']['gave_up'] and st['mac_pending']['attempts'] == 3
+    W.poll(P, st, a)
+    assert len(ran) == 3, 'given up: no more retries for this head'
+    log = open(P['log'], encoding='utf-8').read()
+    assert 'released ' + c1[:12] + ' WITHOUT ITS MACOS BUILD' in log and 'FAILED again' in log and 'FAILED (exit 1)' in log
+    assert 'GIVING UP after 2 retries' in log
+    head[0] = c3
+    rcs[:] = [3, 0]
+    W.poll(P, st, a)
+    assert st['mac_pending']['head'] == c3 and st['mac_pending']['attempts'] == 1
+    W.poll(P, st, a)
+    assert 'mac_pending' not in st and st['done'][c3]['mac_failed'] is False and ran[-2:] == [c3, c3]
+    assert 'macOS part of ' + c3[:12] + ' backfilled' in open(P['log'], encoding='utf-8').read()

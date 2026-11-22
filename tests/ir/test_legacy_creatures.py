@@ -35,7 +35,9 @@ def legacy():
 # lane B's three (test_legacy_stack.py), lane C's three
 # (test_doomsday_c_cards.py); then its Legacy Sneak and Show deck's six
 # (ENGINE.md 123; test_legacy_sneak.py); then the Delver 75's five sideboard
-# cards (ENGINE.md 122; test_legacy_delver_sb.py).
+# cards (ENGINE.md 122; test_legacy_delver_sb.py); then the Legacy Hogaak Tempo
+# deck's seven by lane (ENGINE.md 220.1-220.3): lane A's one (test_legacy_hogaak.py),
+# lane B's two (test_legacy_hogaak_b.py), lane C's four (test_legacy_hogaak_c.py).
 LEGACY_CARDS = {
     "Murktide Regent", "Prismari Charm",
     "Doomsday", "Pact of Negation", "Personal Tutor", "Flow State",
@@ -44,7 +46,9 @@ LEGACY_CARDS = {
     "Show and Tell", "Omniscience", "Mistrise Village",
     "Brotherhood's End", "Disruptor Flute", "Magus of the Moon",
     "Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble",
+    "Hogaak, Arisen Necropolis",
     "Mockingbird", "Massacre",
+    "Stitcher's Supplier", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor",
 }
 
 
@@ -95,8 +99,9 @@ def test_prismari_charm(legacy):
     assert type(bounce).__name__ == "Bounce"
 
 
+# (Murktide Regent's "Delve" line is ``legacy_hogaak``'s casting-keyword list
+# since mtg-zero ENGINE.md 220.1: test_legacy_hogaak.py.)
 @pytest.mark.parametrize("line", [
-    "Delve",
     "This creature enters with a +1/+1 counter on it for each instant and sorcery card exiled with it.",
     "Murktide Regent enters with a +1/+1 counter on it for each instant and sorcery card exiled with it.",
     "Whenever an instant or sorcery card leaves your graveyard, put a +1/+1 counter on this creature.",

@@ -59,6 +59,60 @@ def test_match_settings_give_the_local_matchs_seats(tmp_path):
         C.match_settings(a, 64, spec, tilts={}, ckpt_b=Y.model_path(other, 0))
 
 
+def _sides(*argv):
+    import argparse
+    from zero import seat_settings as SS
+    ap = argparse.ArgumentParser()
+    SS.add_side_args(ap, local=False)
+    return ap.parse_args(list(argv))
+
+
+def test_per_side_options_are_the_seats_sets(tmp_path):
+    """zero-core docs/az.md 68, docs/ENGINE.md 214: zero.h2h's per-side options give each seat its set (A against itself:
+    one network, two settings), each checked against the local match's seat of that side; the readout names each side's
+    rule; without options the settings and seats of before; B's run's own cache is still no per-side option."""
+    run, cfg = _run(tmp_path)
+    ys = Y.normalize(Y.DELVER_YARDSTICKS)
+    spec = Y.bo1_spec(cfg, ys)
+    a = Y.model_path(run, 16)
+    s0, r0 = C.match_settings(a, 32, spec, tilts={})
+    assert C.match_settings(a, 32, spec, tilts={}, sides=_sides()) == (s0, r0)
+    assert C.campaign_seats(C.side_sets(s0, _sides()), False) == [{'net': 1}, {'net': 1}]
+    sides = _sides('--a-infoset-merge', '1', '--a-leaf-value-view', 'root', '--b-sims', '16')
+    s, rule = C.match_settings(a, 32, spec, tilts={}, sides=sides)
+    assert (s, rule) == (s0, r0), "the settings are the match's: the options are the seats'"
+    seats = C.campaign_seats(C.side_sets(s, sides), False)
+    assert seats == [{'net': 1, 'set': {'eval_infoset_merge': 1, 'eval_leaf_value_view': 'root'}},
+                     {'net': 1, 'set': {'eval_sims': 16}}]
+    assert C.check_seats(seats, None) == seats
+    got = C.farm_seats(s, seats)
+    assert got[0]['infoset_merge'] and got[0]['leaf_value_view'] == 'root' and got[1]['sims'] == 16
+    with pytest.raises(C.CampaignError, match='samples'):
+        C.check_seats(seats, None, samples=True)
+    with pytest.raises(C.CampaignError):
+        C.check_seats([{'net': 1}, {'net': 3}], 'b.pt')
+    with pytest.raises(C.CampaignError, match='second network'):
+        C.check_seats(seats, 'b.pt')
+    with pytest.raises(C.CampaignError, match='leaf-value-view'):
+        C.match_settings(a, 32, spec, tilts={}, sides=_sides('--a-infoset-merge', '1', '--a-leaf-value-view', 'mover'))
+    other, _ = _run(tmp_path, 'other', cache=1234)
+    with pytest.raises(C.CampaignError, match='eval_cache'):
+        C.match_settings(a, 32, spec, tilts={}, ckpt_b=Y.model_path(other, 0), sides=sides)
+    # the readout: A = seats[0] as a whole, each side's rule and simulations
+    d = str(tmp_path / 'cmp-sides')
+    os.makedirs(d)
+    rows = []
+    for g in range(4):
+        rows.append({'gid': g, 'pair': g // 2, 'seats': FE.seats_of(seats, g), 'result': [1.0, 0.0] if g % 3 else [0.0, 1.0],
+                     'margin': 1.0, 'rounds': 3, 'over': True})
+    C._append_rows(d, rows)
+    st = {'seats': seats, 'paired': True, 'settings': s, 'job': {'kind': 'play', 'trace': True, 'samples': False}}
+    out = C.readout(d, st)
+    assert out['games'] == 4 and out['select_a'].endswith('-ism') and not out['select_b'].endswith('-ism')
+    assert (out['sims_a'], out['sims_b']) == (32, 16)
+    assert C.readout(d, dict(st, seats=[{'net': 1}, {'net': 1}])) is None
+
+
 def test_the_yardsticks_backend_is_the_farm_only_where_it_plays_the_same_match(tmp_path):
     run, cfg = _run(tmp_path)
     other, _ = _run(tmp_path, 'other', cache=1234, pool=False)

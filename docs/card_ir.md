@@ -98,6 +98,22 @@ too (`docs/card_ir_format.md`, "Versioning").
 
 ## Current numbers (in this repo since ENGINE.md 170; before it mtg-bot `feature/eoe-station-ir` 68b62ed3)
 
+ENGINE.md 220.4 (Legacy Hogaak Tempo, the three lanes integrated on `hogaak`): the legacy pool `ir/data/legacy_delver.json`
+holds 30 cards (the union of the lanes' Scryfall records: lane A's Hogaak, Arisen Necropolis, lane B's Mockingbird and
+Massacre, lane C's Stitcher's Supplier, Dark Matter Manipulator, Moonshadow and Dryad Arbor), and `python tools/card_ir.py
+export` from the merged parser writes schema sha256 **`180659137eceef5a707ad7ebcd2ba8ce66fd302aa3f841ea3b67301393915752`**
+(was `693d23a4a259...`), 731 classes: exactly the union of the lanes' additions (lane A two printing fields,
+`cant_spend_mana_to_cast` and `castable_from_graveyard`; lane B `AndCondition`; lane C `CardsInYourGraveyard`,
+`RemoveCountersFromSource`, the `Event` member `CARD_PUT_INTO_GRAVEYARD` and `CardsInYourGraveyard.per`).
+`powerlsv.ir.json` (546 cards, 402,200 bytes, sha256 `3119ab6e427caf38`) and `eoe.ir.json` (320 cards, 214,315 bytes,
+`caee0949bce52b30`) are main's files byte for byte once the schema hash is replaced (compared card by card and as
+bytes); `legacy.ir.json` holds 30 cards (16,978 bytes, `b0fd711f9ec8c95d`), each card's IR equal to its lane's export
+(the 23 others equal to main's); `powerlsv.schema.json` 493,974 bytes (`a0bf3784208d6a65`), `card_ir/src/generated.rs`
+578,472 bytes (`2dbfa3cede8bca1a`). `check`: identical; `roundtrip`: cube 546, legacy 30, eoe 483 cards ok. One IR defect
+fixed at the parser on the way (lane C's 440, Dryad Arbor's land type; docs/ir_defects.md AA).
+
+### Before ENGINE.md 220 (main e9ff0e24)
+
 ENGINE.md 170 moved the pipeline in: `python tools/card_ir.py check` regenerates the five files from `ir/` and
 `ir/data` and finds them identical, byte for byte, to these (schema `693d23a4a259...`).
 

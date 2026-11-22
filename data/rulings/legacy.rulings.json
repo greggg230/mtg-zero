@@ -432,6 +432,57 @@
   ]
  },
  {
+  "name": "Hogaak, Arisen Necropolis",
+  "oracle_id": "97acd977-164d-49d5-b3a1-72e0d75c9016",
+  "rulings": [
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Because delve isn't an alternative cost, it can be used in conjunction with alternative costs, such as flashback. It can also be used to pay for additional costs that include generic mana."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Delve doesn't change a spell's mana cost or mana value. For example, Treasure Cruise's mana value is 8 even if you exiled three cards to cast it."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "You can exile cards to pay only for generic mana, and you can't exile more cards than the generic mana requirement of a spell with delve. For example, you can't exile more than seven cards from your graveyard to cast Treasure Cruise unless an effect has increased its cost."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Because convoke isn't an alternative cost, it can be used in conjunction with alternative costs."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "If a creature you control has a mana ability with {T} in the cost, activating that ability while casting a spell with convoke will result in the creature being tapped before you pay the spell's costs. You won't be able to tap it again for convoke. Similarly, if you sacrifice a creature to activate a mana ability while casting a spell with convoke, that creature won't be on the battlefield when you pay the spell's costs, so you won't be able to tap it for convoke."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Tapping a multicolored creature using convoke will pay for {1} or one mana of your choice of any of that creature's colors."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Tapping an untapped creature that's attacking or blocking to convoke a spell won't cause that creature to stop attacking or blocking."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "When calculating a spell's total cost, include any alternative costs, additional costs, or anything else that increases or reduces the cost to cast the spell. Convoke applies after the total cost is calculated. Convoke doesn't change a spell's mana cost or mana value."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "You can tap any untapped creature you control to convoke a spell, even one you haven't controlled continuously since the beginning of your most recent turn."
+   }
+  ]
+ },
+ {
   "name": "Mockingbird",
   "oracle_id": "b9df2cdf-397c-458d-89cf-911568737ffa",
   "rulings": [
@@ -476,5 +527,61 @@
   "name": "Massacre",
   "oracle_id": "ce1866e9-28de-4bcc-9999-11958e6c13a6",
   "rulings": []
+ },
+ {
+  "name": "Stitcher's Supplier",
+  "oracle_id": "7fd61a18-6e4f-40c5-aa00-3d101ec1ec82",
+  "rulings": []
+ },
+ {
+  "name": "Dark Matter Manipulator",
+  "oracle_id": "6a3862f0-8dfc-4ac9-8eb9-faefcad685d4",
+  "rulings": []
+ },
+ {
+  "name": "Moonshadow",
+  "oracle_id": "a3635b3f-839c-4fe5-83a5-7c70e8630184",
+  "rulings": []
+ },
+ {
+  "name": "Dryad Arbor",
+  "oracle_id": "e996cd67-739c-40f4-b276-0042acf26c71",
+  "rulings": [
+   {
+    "date": "2011-09-22",
+    "source": "wotc",
+    "text": "If Dryad Arbor is changed into another basic land type (such as by Sea's Claim), it continues to be a creature and a Dryad."
+   },
+   {
+    "date": "2013-06-07",
+    "source": "wotc",
+    "text": "Although originally printed with a characteristic-defining ability that defined its color, this card now has a color indicator. This color indicator can't be affected by text-changing effects (such as the one created by Crystal Spray), although color-changing effects can still overwrite it."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Dryad Arbor is played as a land. It doesn't use the stack, it's not a spell, it can't be responded to, it has no mana cost, and it counts as your land play for the turn."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Due to its color indicator (appearing to the left of its type line), Dryad Arbor is green. Color indicators apply in all zones, not just the battlefield."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Forest is a land type and Dryad is a creature type."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If Dryad Arbor is changed into another basic land type, it continues to be a green Dryad creature."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If a Dryad Arbor gains flash, or you have the ability to play Dryad Arbor as though it had flash (due to Teferi, Mage of Zhalfir or Scout's Warning, for example), you can ignore the normal timing rules for when during your turn you can play a land, but not any other restrictions. You can't play Dryad Arbor during another player's turn, and you can't play Dryad Arbor if you don't have any land plays remaining."
+   }
+  ]
  }
 ]

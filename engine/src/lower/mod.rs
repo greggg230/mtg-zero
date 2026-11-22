@@ -37,6 +37,8 @@ pub mod eoe_w2;
 pub mod doomsday_b;
 pub mod filter;
 pub mod graveyard_order;
+pub mod hogaak_a;
+pub mod hogaak_c;
 pub mod printing;
 pub mod statics;
 pub mod support;
@@ -356,6 +358,7 @@ pub(crate) fn lower_card_in(
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;
+    hogaak_a::check_def(&mut l, &def);
     def.gives_basic_land_type = l.gives_basic;
     if l.uses_prepare && def.prepare.is_none() {
         l.unsupported("Effect:SourceBecomesPrepared(without a prepare spell)");
