@@ -536,9 +536,15 @@ fn scan_seeds_for_the_seed_pinned_tests() {
                     }
                     g.apply(x, &mut keys).unwrap();
                 }
+                if std::env::var("SCAN_VERBOSE").is_ok() {
+                    println!("seed {seed}: deep {deep:?} turns {}", p.turns);
+                }
                 deep[0] > 0 && deep[1] > 0
             })
-            .unwrap_or(false),
+            .unwrap_or_else(|e| {
+                println!("seed {seed}: panicked {e:?}");
+                false
+            }),
             other => panic!("SCAN_KIND={other}"),
         };
         if hit {
