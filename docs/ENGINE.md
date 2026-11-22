@@ -44337,3 +44337,32 @@ lands): +1.3% payment decisions, +1.2% options a payment decision.
   to move none).
 * Bug 4 waits for layout v8 (229.4). The loop rule's hash reading twins' raw turn numbers and places is stated in 229.2,
   not changed.
+
+## 230. Campaigns' eval jobs in one group (`EVAL_GROUPS` 1): a GPU lease's batches hold every game in flight (mtgz/az/farm_campaign.py `match_settings`; the user's OK, 2026-11-22)
+
+**Why.** zero-core docs/az.md 71 made a CPU eval job play in one group and left a GPU job its groups: the settings'
+`groups`, which the agent clamps to 1..2 for a GPU lease (zero-farm agent/src/probe.rs `choose`). One group on a CUDA
+lease measured +37% games/h (az.md 71: 556 against 436 on one PC) - but the float16 CUDA graph answers a row by its
+batch's shape (cuBLAS picks kernels by shape), so a GPU lease's games differ from those of the run's own groups. The
+user weighed it (comparability of GPU games with earlier ones against a third more GPU eval) and chose one group.
+
+**What.** `match_settings` - every campaign's eval settings: head-to-heads, cells, yardsticks, `tools/farm_campaign.py
+submit` - sets `groups` = `EVAL_GROUPS` = 1. A CPU lease is unchanged (its worker plays one group whatever the settings
+say); a GPU lease (CUDA, DirectML) gets the template's 1 and the agent sends no `groups`. No agent release: the change
+reaches only campaigns made from this commit on - a campaign keeps the template it was made with, so none mixes layouts.
+A run's own farm evaluation (`eval_remote` pools) is not a campaign and is unchanged. DirectML at one group is not
+measured (the farm's one AMD GPU).
+
+**The check** (farm campaigns cmp-g1check-g2 / -g1, 2026-11-22: legacy-meta3-r1 iter_1040 against iter_1024, bo1, 32
+simulations, seed 11, 256 paired games each, routed CUDA-only - gpu 'required', providers ['cuda'] - through a scratch
+wrapper putting `groups` 2 / 1 over the match settings; build 67ca9553 of main e73e64a6): A's score **0.508 +- 0.031**
+(groups 2) and **0.492 +- 0.031** (groups 1), the paired difference +0.016 +- 0.027 - no shift; 21 of the 256 games
+identical (the batch shape changes the rest, as expected). Spot checks 13 of 13 equal on each. Speed: the one PC that
+played both on CUDA, 385 s (groups 1) against 581 s (groups 2) for a 32-game lease (1.5x); the other groups-2 PC played
+its CUDA alternate's leases on its CPU (the agent's own faster-provider choice; the routing names allowed providers),
+so the farm check confirms "no shift" more than it measures the gain. Found on the way: a collect run from a checkout
+whose `mtgz/_engine.pyd` predates the commit's engine refuses the spot check ("the game's setup differs") - collect
+from a checkout with its own build.
+
+**Tests.** `tests/test_farm_play.py::test_match_settings_give_the_local_matchs_seats` (the settings' groups 1);
+`tests/test_farm_play.py`, `tests/test_h2h_farm.py`, `tests/test_cells_yardstick.py` 40 passed.
