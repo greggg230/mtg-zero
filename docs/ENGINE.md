@@ -43673,6 +43673,290 @@ passed; pytest on the Mac 214 + 114 + 143 + 196 passed and the desktop part 49 (
 rows); the suite evidence of 1115a8bff898; the Mac's full-suite recheck not needed (main's 21 files outside engine/ and
 card_ir/). The next commit adds this paragraph only (docs).
 
+## 224. Metagame runs publish by default; a run or a fork that will not publish says so; a copied setting stays a side run (branch `feat/meta3-publish`, 2026-11-21)
+
+Branch `feat/meta3-publish` from e9ff0e24 (legacy-meta3-r1's pinned commit, so the run can move onto it with Python
+changes only). Why: the user (2026-11-21), after a day of meta3 experiments none of which appeared on the Delver AI
+site: "We did work before to make it so that stuff like this should be published without having to remember to do
+that". 163 (the run-owned publisher; forks of a publishing run publish as side runs) and 193 (tools/ab.py) exist, but:
+
+* the `legacy-meta3` preset set `publish={}` (written 2026-11-17 when the publisher showed Delver-mirror runs only; the
+  metagame view landed days later) and legacy-meta3-r1's launcher passes `--publish {}`; r1 got a hand-started
+  publisher instead, so as far as 163 knows r1 does not publish;
+* so every fork of r1 inherits "off" (163's fork hook publishes only forks of a publishing run), and the experiment
+  launchers copied r1's flags, `--publish {}` included (the games2x data experiment, the mirror-only / lr / shrink-and-
+  perturb forks, the low-simulation arms): none appeared without a hand-started publisher;
+* r1's hand publisher runs with `--combo-every 0`, which the `publish` setting did not accept, so r1 could not move to
+  its own publisher as it was;
+* nothing said that a run or a fork would not publish.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 224.1 What changed (mtgz/az/publish.py, mtgz/az/__init__.py)
+
+* **`combo_every`** is a `publish` option (int >= 0; the publisher's `--combo-every`).
+* **`META3_PUBLISH`** = r1's hand publisher's options: `{side: false, every: 8, games: 9, combo_every: 0, census: 0,
+  device: cpu, threads: 4, forks: []}` (9 games = every pairing once; no fork-record file: the metagame lineage keeps
+  none, a fork's charts start from the metrics it copied). `legacy-meta3` and so `legacy-meta3-ddwheel` set it; the
+  smoke presets stay off. A run that saved `publish` keeps what it saved (r1's `{}` until its launcher passes one).
+* **PUBLISH OFF is loud.** `companion()` (the supervisor's hook, every start) with the setting off writes `PUBLISH OFF:
+  <run> will not appear on the Delver AI site ...` to the run's supervisor.log and stderr and returns None (the run goes
+  on, as 163: publishing never stops training). `on_fork` prints `fork_run: PUBLISH OFF - <fork> will NOT appear ...`
+  for a fork of a run that does not publish.
+* **`for_run`**: the run directory name a setting was made for. A run of another name carrying it - a launcher that
+  copied another run's flags, `--publish` included - publishes as a SIDE run titled after itself (its own state dir,
+  no note), said loudly (`PUBLISH SETTING OF ANOTHER RUN`), instead of posting under the other run's title or taking
+  the site's default run. `on_fork` writes the fork's own name into it (and drops a copied `state_dir`); a launcher
+  that passes a main run's `--publish` should name the run in it.
+* An explicit `forks: []` is deliberate (the metagame presets, ab.py's arms): no "names no forks file" note.
+
+### 224.2 Tests
+
+tests/test_run_publisher.py: the metagame presets carry META3_PUBLISH (smokes off; resolved through `--preset
+legacy-meta3-ddwheel`); `combo_every` reaches the command, bad values refused; PUBLISH OFF on stderr and in
+supervisor.log; a copied setting (for_run another run's) becomes a side run titled after the run without the note or
+state dir, the own run unchanged; a fork of an unpublished run says it will not publish; a fork of a metagame run is a
+side run made for itself, `combo_every` kept, no forks-file note.
+
+### 224.3 Turning it on for legacy-meta3-r1
+
+At the run's next start from a checkout with this change (a re-pin onto this branch's commit: Python only, the worker
+build unchanged): its launcher passes `--publish '{..., "title": "<r1's site title>", "for_run": "legacy-meta3-r1",
+"state_dir": "<the hand publisher's state dir>"}'` over META3_PUBLISH (same site record, same history), and the
+hand-started publisher is stopped first. From then on every fork of r1 publishes as a side run with no step to
+remember.
+
+## 225. Judging publishes by default: reference matches from the cells yardstick, farm campaigns' head-to-heads, ab.py's outside reference (branch `feat/judging-publish`, 2026-11-21)
+
+Branch `feat/judging-publish` from 00cfd372 (`feat/meta3-publish` merged with main: 224's loud PUBLISH OFF is the
+pattern followed here). Why: the user (2026-11-21, after 224): "Experiments should appear on Delver AI without anyone
+remembering to wire it up." 224 made the runs and their forks publish; the measurements of an experiment still did
+not:
+
+* the reference-match chart of a run's page (delverai's record `refmatch.<run>`: the run's checkpoints against a
+  fixed network from outside the run - the metagame runs' Delver mirror against pb1@262) was fed only by a
+  hand-written sidecar per experiment that measured with `run_yardsticks.py one --kind cells --ref LABEL --pair X,X`
+  and ran delverai's tools/upload_refmatch.py from the site's checkout when a file `UPLOAD` existed (none did for the
+  shrink-and-perturb fork: nothing appeared);
+* `tools/farm_campaign.py collect` printed a head-to-head nobody posted;
+* `tools/ab.py` judged arms only against each other and the start: a single-arm experiment (one fork trained on,
+  judged against a fixed network) did not fit it at all.
+
+Publishing and tooling only: no rule, encoding, search or training change; digests untouched.
+
+### 225.1 The reference-match record in this repo (mtgz/az/site_refmatch.py)
+
+The record is built here, not by shelling out to the site's checkout, field for field the one upload_refmatch.py
+builds (`{run: "refmatch.<run>", kind: "refmatch", for_run, updated, series: [{key, label, title, note, ref: {run,
+gen}, deck, deck_label, format, games, sims, rows: [{iter, games, score, se, elo, elo_se, unfinished, note?}]}],
+marks?, iters: []}`; se from the deals' pentanomial, elo / elo_se the cell's): the shrink-and-perturb sidecar's
+upload.json and rows.jsonl give a byte-identical JSON record through both. It is posted with mtgz.az.publish's key and
+POST (`upload_key` / `post` moved there from mtgz.az.replays, which re-exports them: one copy, light enough for the
+yardsticks' watcher). Each post replaces the record whole, so it is rebuilt every time from every row on disk:
+`<run>/yardsticks.jsonl` (the watcher's), `<run>/yardsticks/refmatch_rows.jsonl` (rows measured by hand: the watcher
+stays the only writer of its file) and any `--rows` files. A row counts when it is a 'cells' result of a mirror pair
+X,X against a registered reference with that reference's network (ref_sha); the newest row of a generation wins.
+
+* **An outside reference** is a cells reference that is not the gen-over-gen kind, not frozen from the run
+  (`cells-freeze` entries carry an iteration) and no file under the run directory (generation 0 is not one).
+* **Registration**: <run>/yardsticks/refmatch.json keeps per reference label its network (sha256[:12], at the first
+  measurement; a row of another network under the label is left out and said; a new network needs a new label), the
+  reference's run and generation (default: from its checkpoint's path `<run>/models/iter_N.pt`) and the human fields
+  the flags gave - `--series-label` (default `<run>@<gen>`), `--title`, `--note`, `--deck-label` (default
+  data/decks/<deck>.json's name), `--ref-run`, `--ref-gen`, `--mark ITER=LABEL`, `--row-note ITER=TEXT` - kept for
+  every later post, derived defaults otherwise.
+* **Checked as the site checks** (refmatchProblem: names, lengths, counts, at most 8 series and 2,000 rows, no local
+  path in any string) before the post, and **a record with no row is refused** (RefmatchError, exit 3): a publish
+  that posts nothing is a failure, never a quiet no-op.
+
+### 225.2 Who posts it (tools/run_yardsticks.py; the yardsticks setting `refmatch_publish`)
+
+* **`one RUN --kind cells --ref LABEL --pair X,X --iter N` by hand, against an outside reference: posts by default.**
+  Before any game it checks that the post can work (an upload key; a mirror pair - the record shows mirrors only, a
+  non-mirror pair needs `--no-publish`; the label's network), registers the reference with the flags' fields; after
+  the games it prints the result line as always (stdout; a sidecar parsing it is unchanged), keeps the row in
+  refmatch_rows.jsonl and posts (its lines on stderr). `--no-publish`: a loud `PUBLISH OFF: refmatch.<run> is not
+  posted (--no-publish) ...` with the command that posts later, the row kept. A failed post: `PUBLISH FAILED` with
+  the retry command, exit 3 after the result line. `--publish-dry-run` prints the record.
+* **`watch`**: after each mirror cells result against an outside reference it appended, the watcher posts (the new
+  yardsticks setting `refmatch_publish`, default true; false: `PUBLISH OFF` at each such result and at the watcher's
+  start). A failed post is said (`PUBLISH FAILED`) and the lane goes on; the next result posts again. The watcher's
+  measurement children carry `MTGZ_YARDSTICK_CHILD=1` and never post themselves (their command line is unchanged).
+  At its start the watcher names the outside references it will post for, or says why it cannot (no key).
+* **`refmatch RUN [--ref LABEL --ref-ckpt PATH] [--rows FILE ...] [--dry-run] [fields]`**: the record rebuilt and
+  posted now - after `--no-publish`, to change a field, or to adopt a sidecar's rows (an unregistered label takes its
+  network from `--ref-ckpt` or from the rows' own ref_sha when they agree).
+
+So a sidecar like the shrink-and-perturb fork's (`one` from the run's own worktree) posts on its own once its
+worktree carries this commit, without its `UPLOAD` file or the site's checkout; a run whose yardsticks setting names
+an outside reference in its ladder posts from its watcher.
+
+### 225.3 farm_campaign.py collect posts its head-to-head
+
+After `collect` (or `submit --wait`) printed its result, the campaign's readout (zero.h2h's summary, A = seats[0])
+goes to the Head-to-heads tab through mtgz.az.site_h2h (the site's uploader, as 193) **by default**: experiment
+`--publish`, default the campaign's farm run name (`cmp-<name>`); `--title`, default `Farm campaign <name>`, and a
+derived description (site_h2h.check gained `default_title` / `default_description`: used only for an experiment that
+is not on the site yet, so a later match never trips the uploader's "another title" refusal); the sides by
+`--a-label` / `--b-label`, default each checkpoint's run and generation (one checkpoint with a set per side: each
+side's move-rule tag after the name; the same tag on both sides is refused - give labels); the match key
+`--publish-key`, default the farm run name. The check runs **before any waiting** (no uploader or key: refused, as
+`ab.py go`). `--no-publish`: `PUBLISH OFF` on stderr. A self-play or samples campaign, or an unpaired one, has
+nothing the tab can show: `PUBLISH SKIPPED` with the reason. No readout after a collect, or a failed post:
+`PUBLISH FAILED`, exit 3 after the result (a collected campaign returns its result at once, so `collect NAME` again
+retries the post).
+
+### 225.4 ab.py: an outside reference and single-arm experiments
+
+The spec's optional `"reference": {"path": CKPT, "label": "pb1@262"}` (label default: the checkpoint's run and
+generation), or `--ref CKPT [--ref-label L]` on judge / go / check / publish (kept in ab_state.json, so a later
+`publish` rebuilds the same manifest): every arm's last checkpoint is also judged against it with the cells
+(`<arm>_vs_ref.json`, cells-match `--ref-label ref`), published as each arm's overall match against the reference
+(key rank 7) and one match per cell (rank 3) - the tab lists treatments vs control (9), arms vs the reference (7),
+arms vs the start (5), then the cells. With a reference **one arm is enough**: it is the control, there are no
+treatments. The judge was already publishing by default (193); its opt-outs are now loud: `--no-publish` or
+`"publish": {"h2h": false}` print `PUBLISH OFF: h2h.<id> ... post them later: python tools/ab.py publish SPEC` at the
+judge and at the start of `go`. report.json names the reference's label.
+
+### 225.5 Tests
+
+tests/test_site_refmatch.py: outside vs own references (generation 0, a file of the run, frozen, gen over gen); the
+record from every mirror row of the registered network (the newest row of a generation; non-mirror, foreign-network,
+unregistered and failed rows left out; upload_refmatch.py's field order; derived and given fields; marks and row
+notes); no row, a local path and a re-used label refused; the POST faked (url, key, the whole record; dry run posts
+nothing); `one` by hand posting by default, the fields kept for the next post, `--no-publish` loud with the row kept,
+the watcher's child not posting; refusals before any game (a non-mirror pair, no key), a failed post exit 3 with the
+row kept, an own reference silent; the watcher posting after a mirror result, not after a non-mirror or own one,
+PUBLISH OFF / FAILED said and never raised; `refmatch` adopting a sidecar's rows. tests/test_judging_publish.py:
+ab.py's single-arm experiment with a reference (matches, manifest keys and labels, no path sent), the command line's
+reference kept for a later publish, the judge's PUBLISH OFF; farm_campaign.py collect's default post through a fake
+uploader (experiment, title, labels, key, the saved result), PUBLISH OFF / SKIPPED / FAILED, the per-side labels, no
+key refused before waiting. The site is never contacted.
+
+## 226. Last-known mana value of a departed copy; last known power of a slot that left twice (branch `fix/eoe-copy-mv`, 2026-11-21)
+
+**Why.** Bug 6 of the pre-existing engine gaps the Hogaak lanes found (220.2, 220.4's follow-ups): EoE W3's
+`DamageEachSourceMv` (Terminal Velocity's granted "When this permanent leaves the battlefield, it deals damage equal to
+its mana value to each creature") did not know that a departed source was a copy, so it missed the copy's mana value
+(lane B's 202.3b fix, 220.2). The audit of every last-known-information read found a second defect (`lki_power`).
+From hogaak-b c273ef11, merged with main 45dbf2e1. No layout change, no zero-core change, no docs/shortcuts.md entry.
+
+### 226.1 Root cause
+
+The last known information of a permanent that left the battlefield stored only its **copiable values**
+(`Game::lki_copy`: definition, exceptions, double-faced). Mana value isn't a function of copiable values alone: being a
+copy isn't copiable (CR 707.2), yet 202.3b gives a copy of a nonmodal back face mana value 0, and a copy exception "no
+mana cost" gives 0 (202.3a). `DamageEachSourceMv` recomputed the mana value as the definition's, which gives the front
+face's value for a departed copy of a back face and ignores `no_cost`; with nothing recorded it read the card in its new
+zone. A token copy created back face up (707.8a) has **the same copiable values** as the transformed original, so
+nothing in the record could tell them apart. `Amount::EventSpellMv` (Thor, God of Thunder's "that spell's mana value",
+cascade) made the same mistake for a spell that left the stack (`def mv + x * x_pips` from `spell_lki`), missing a spell
+that is a copy of a back face.
+
+`Game::lki_power` kept one departure per slot: a card that left the battlefield, returned (a new object, 400.7) and left
+again in the same turn overwrote the first object's power, and an ability about the first (Jacked Rabbit's attack
+trigger, `Amount::SourcePower`) fell back to the printed power.
+
+### 226.2 The fix
+
+* `cast.rs`: `mana_value_of` split. `mana_value_with_x(c, x)` is the one rule (no mana cost 0; a copy or copy slot of a
+  face with `front_mv` 0; else the face's mana value + x * X pips); `mana_value_of` passes the stack's X.
+* `game.rs`: `lki_copy: Vec<(ObjRef, CopyVals, u64)>`; `move_card` records `mana_value_of` as the permanent leaves,
+  before its copy effects end. `spell_lki: Vec<(ObjRef, DefId, StackItem, u64)>`.
+* `copies.rs`: `Game::mana_value_lki(r)` (now, or as it last existed on the battlefield); `note_spell_lki` records
+  `mana_value_with_x(card, item.x)`; `Game::spell_mana_value_lki(r)`.
+* `eoe_w3.rs` `DamageEachSourceMv`: a live source gives its current qualities and mana value; a departed one the
+  recorded `lki_damage` and `mana_value_lki`, each `expect`ed (the old fallback read the card in its new zone; it can't
+  be reached, because this op sets `SEEN_LKI_DAMAGE` through `seen_bits`, which scans every trigger, delayed included).
+* `resolve.rs` `Amount::EventSpellMv` reads `spell_mana_value_lki`.
+* `loops.rs` (`loop_lki`): the loop hash includes the recorded mana values (equality unchanged: the value is fixed per
+  departed object).
+* `lki_power`: every departure of the turn stays, keyed by slot and incarnation (`set_lki_power`, `lki_power_of`); as a
+  turn begins (`flow.rs`, with the other last known information) `prune_lki_power` keeps each slot's latest departure
+  (the old behaviour across turns) and any earlier one a reference of the public state still names
+  (`for_each_public_ref`: a delayed trigger about that object reads its power in a later turn too).
+
+### 226.3 The audit: every last-known-information read
+
+| Record / read | Verdict |
+|---|---|
+| `lki_copy` -> `copiable_of` (a token copy of it, `CopyOf::Source/Target` LKI) | correct: copiable values are exactly what a copy takes; the new copy's own mana value is computed live |
+| `lki_copy` -> `DamageEachSourceMv`'s mana value | **fixed** |
+| `spell_lki` -> `Amount::EventSpellMv` (Thor, cascade) | **fixed** |
+| `spell_lki` -> `spell_now_or_lki` (copy that spell), `event_spell_times` | correct (copiable values, times) |
+| `lki_damage` (from `damage_source_of`, layered) -> the W3 ops, `Ext::DamageFrom` | correct; `DamageEachSourceMv`'s dead fallback made loud |
+| `lki_toughness`, `lki_counters`, `lki_attached`, `w3.lki_host` / `lki_loss`, `triggers::Lki.def` (the copy's face) | correct |
+| `ev.amount` at a sacrifice (`CostMvPlus`), transmute, Mana Drain's `RememberSpellMv`, emerge | read live before the move: correct |
+| `def_of(..).mana_value()` of cards in graveyards, libraries, exile, hands (`FromGraveyard`, linked exiled cards, cascade's exiled cards, transmute's found card) | not copies, no X there: equal to `mana_value_of` |
+| `lki_power` (one entry per slot) | **fixed** (above) |
+| `lki_source` (eoe_w3) fallback `damage_source_of(card now)` | unreachable (the same seen bit); left as is |
+
+### 226.4 Tests
+
+`engine/tests/rules_lki_mana_value.rs` (rules_suite, 6; the table is the cube + the legacy cards + Terminal Velocity):
+Phyrexian Metamorph as a transformed Ulvenwald Oddity deals 0; a real transformed Concealing Curtains deals 1 (its front
+face's mana value); Metamorph as Curtains deals 1, not its card's 4; Mockingbird (put by Terminal Velocity, no mana
+spent) copying the Metamorph-as-Behemoth deals 0; Metamorph as Jacked Rabbit (an X creature) deals 2; Thor and a
+countered Green Sun's Zenith with X 2 deals 3. `copies.rs` `lki_mana_value_tests` (lib, 4; built states): a token copy
+back face up deals 0 against the original's 4, their copiable values equal; a copy with the no-cost exception deals 0; a
+spell made a copy of Jace, Telepath Unbound, countered under Thor's trigger: 0 against 2 for the card;
+`cr_608_2h_400_7_last_known_power_of_a_slot_that_left_twice_is_the_first_objects` (Jacked Rabbit with three counters
+attacks; with its trigger waiting it is exiled, returned and put into the graveyard: 4 tokens, the old record 1; the
+pruning keeps the first object's power while the trigger names it, drops it after, and the latest stays across the
+turn). The creature that takes the damage is a 6/7 in every damage test that expects 0, asserted still on the
+battlefield, so a 0 is the damage dealt and not a dead creature's.
+
+**Toggle check** (the old reads restored on a scratch commit, the new tests run on the Mac): 6 of the 10 fail - the
+token copy, the no-cost copy, the Thor copy spell, the Jacked Rabbit power (lib), the Metamorph copying a back face and
+the Mockingbird (rules) - and the 4 that don't are the cases whose value the old reads already gave (a real back face 1,
+Metamorph as Curtains 1, the X creature 2, the Thor X spell 3).
+
+Full engine suite on the Mac at the merged code (`cargo test --release -p engine -p card_ir --no-fail-fast`, az
+included): **2,882 passed, 0 failed, 37 ignored** (main's 2,872 + the 10 here; `cards_suite` 1,533, `rules_suite` 459,
+`rulings_suite` 397, `misc_suite` 212, lib 99, `az` 57, `hidden` 28, `fuzz` 19, `limits` 13). The public-state gate in
+`az`: no new gap.
+
+### 226.5 Digests
+
+**No digest moves; none re-recorded.** On the Mac at the merged code (a4fea0e1, bit-identical to the desktop, ENGINE.md
+44): the cube `--test digest` **44372545881ef768** (all 2,500 games equal to `tests/data/digests.txt`); `--test
+digest_formats` constructed **91b6cf60576961a7**, metagame **be3766d1f943c95c**, EoE **c3a9c786030f42eb**, driver
+**6a03572828250b86**; dealt **f0bfffd26a70a753**; dealt per seat **c67b186ba7d00e51** - each equal to main 45dbf2e1's
+recorded file (220.4.7). Expected: the changed reads matter only for a departed copy of a back face or a departed copy
+with no mana cost under Terminal Velocity's granted trigger, a spell copy of a back face under Thor or cascade, and a
+slot that leaves the battlefield twice in a turn with an ability about its first object waiting; no digest game reaches
+one (Terminal Velocity is in the EoE table only, which holds no card that enters as a copy).
+
+The constructed and metagame numbers in 220.2's Limits stand as history: 16441662701e233d / 56ff52ffef1b1913 there are
+main's files of that day, which lane B's branch (two cards added to the table) did not match - it measured
+2d00d87dc223dcc9 / 1213d7d29aad1f11, and this branch before the merge (6151d155) gave the same. 220.4.7 re-recorded the family once
+for all seven cards (91b6cf60576961a7 / be3766d1f943c95c, the values above), so 220.2's text needs no change.
+
+### 226.6 Fuzz
+
+On the Mac at a4fea0e1 (`tools/fuzz_shards.py`, 12 shards): `FUZZ_POOL=eoe` **20,000 games** (the pool this touches;
+games only), the default cube pool 2,000 games + 100 matches, `hogaak_b` 2,000, `hogaak` 2,000 + 100 matches + 100
+post-sideboard, `delver` 2,000 + 100 + 100, `doomsday` 2,000, `sneak_show` 2,000, `cross` 2,000 + 100 + 100 - **all
+PASSED**; the test binary directly (fuzz_shards strips `FUZZ_*`): the `fuzz` profile 1,000 games, `FUZZ_CHANCE=10` 600,
+`FUZZ_BELIEF=2` 600 - all ok. No search impact to measure: the fix adds no options (no decision point changes).
+
+### 226.7 Encoding
+
+No layout change. A pre-existing gap was found: a stale reference (`tail_encode::rf`) shows its own card without copy
+effects (ENGINE.md 156), so a departed copy's copied identity, last known mana value and power are not in the input
+while an ability about it waits on the stack (the public-state gate classes the LKI fields Derived). The fix doesn't
+widen it (before, the network was equally blind to the copied face; the rules now compute 0 instead of the front
+face's). The maintainer's decision: one additive layout v8 (a stale-object LKI block in `rf`, the LKI fields Public in
+the gate) built by a later encoding change, not here.
+
+### 226.8 Shared-file functions changed
+
+`cast.rs`: `mana_value_of` (now passes the stack's X), `mana_value_with_x` (new, next to it). `game.rs`: the `lki_copy`,
+`spell_lki`, `lki_power` fields, `lki_power_of`, `set_lki_power`, `prune_lki_power` (new), `move_card_ctl`'s LKI record.
+`copies.rs`: `mana_value_lki`, `spell_mana_value_lki` (new), `note_spell_lki`. `eoe_w3.rs`: `DamageEachSourceMv`.
+`resolve.rs`: `Amount::EventSpellMv`. `loops.rs`: `loop_lki`. `flow.rs`: `start_turn` (one line). No payment code
+(`pay.rs`, `cost_order.rs`, `hogaak_a.rs`) is touched.
+
 ## 227. Near-tie branches, the game side: the merge key and the alternative check (`SearchGame::merge_key`, `branch_alt_ok`; zero-core pin 84bb5e1 -> 92568b5; branch `feat/neartie-merge-key`, 2026-11-21)
 
 **Why.** zero-core's near-tie branch rule (its docs/search.md 2.11, built on a zero-core branch of its own) replays a

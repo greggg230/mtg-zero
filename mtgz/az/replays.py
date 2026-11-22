@@ -41,18 +41,18 @@ import gzip
 import json
 import os
 import random
-import urllib.request
 
 import numpy as np
 
 import mtgz.az  # noqa: F401  (registers the game package)
 from mtgz.az import belief
+from mtgz.az import publish as P
 from mtgz.az.evaldecks import undealt
 from zero import replay as core
 
 SITE = 'https://delverai.greggg230.com'
-KEY_ENV = 'MTGZ_DELVERAI_KEY'
-KEY_FILE = os.path.join(os.path.expanduser('~'), 'delverai', '.upload_key')
+KEY_ENV = P.KEY_ENV
+KEY_FILE = os.path.expanduser(P.KEY_FILE)
 
 
 def spec_with_log(spec):
@@ -442,25 +442,9 @@ def upload(rep, url, key, timeout=60, meta=None):
     return post(url.rstrip('/') + '/api/replays/upload', body, key, timeout)
 
 
-def post(url, body, key, timeout=60):
-    req = urllib.request.Request(url, data=body, method='POST',
-                                 headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {key}',
-                                          'User-Agent': 'mtgz-delverai/1'})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode('utf-8'))
-
-
-def upload_key(key_file=None):
-    """The site's upload key: `key_file`, else $MTGZ_DELVERAI_KEY, else ~/delverai/.upload_key."""
-    if key_file:
-        with open(key_file) as f:
-            return f.read().strip()
-    if os.environ.get(KEY_ENV):
-        return os.environ[KEY_ENV].strip()
-    if os.path.exists(KEY_FILE):
-        with open(KEY_FILE) as f:
-            return f.read().strip()
-    raise SystemExit(f'no upload key: --key-file, ${KEY_ENV} or {KEY_FILE}')
+# the site's POST and its upload key: mtgz.az.publish's (light: the yardsticks' watcher posts with them too)
+post = P.post
+upload_key = P.upload_key
 
 
 def main(argv=None):
