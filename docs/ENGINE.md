@@ -43508,3 +43508,33 @@ this branch changes no Python. So formally GATE FAILED (a pre-existing timing fl
 section conflicts only at the end of this file). Left: merge main, the optin-core gate on the merged commit (baseline
 main), then main. The pin 0dd8a1f differs from f1b5a8c by zero-core docs only. zero-core's `feat/farm-guards` also
 takes docs/az.md 70: this branch's section should become 71 at the integration.
+
+## 222. The farm integration: 217 + 218 + 219 + 221 on main together, zero-core pin -> 84bb5e1 (the merge of zero-core `feat/h2h-backend`, `feat/farm-guards`, `feat/eval-speed`; docs/az.md 69, 70, 71; 2026-11-21)
+
+**What merged.** Four branches made beside each other from main 1e7416c5, onto main 45dbf2e1 (the Hogaak lanes, 220):
+`feat/h2h-backend` 32955e7d (217: `--backend auto | farm | local`, `job_class` folded in), `feat/farm-guards` 0c6f972e
+(218), `feat/backfill` d369b948 (219: the Macs fuzz) and `feat/eval-speed` 366518b4 (221). Their zero-core halves
+(each from c850a5d) are one zero-core branch, `integrate/t2-farm` = 84bb5e1: `feat/h2h-backend` 1e26188
+(fast-forward from zero-core main d499716), then `feat/farm-guards` d32f6f8 (59dc7fe: `GamePackage` gets both
+`h2h_backend` and `farm_build` - the docstring, the keyword and the attribute kept both; az.md 69 then 70), then
+`feat/eval-speed` 0dd8a1f (84bb5e1). The pin moves to 84bb5e1, which replaces 221.1's WIP pin to 0dd8a1f; 84bb5e1
+differs from 1e26188 / d32f6f8 / 0dd8a1f by their merges only (no code written at the merge).
+
+**Numbers.** zero-core: eval-speed's section was az.md 70 on its branch, the same number as the guards' - it is
+**docs/az.md 71** now, and its references follow (crates/worker `evaljob.rs`, `job.rs`, `proto.rs`, `tests/evaljob.rs`;
+this file's 221, but for 221.1's historical note). This file: 217, 218, 219 and 221 were free on main (each branch had
+taken its number before 220 landed), so they keep their numbers and every reference to them stays right; the sections
+stand in number order (217-219 before 220). Conflicts, all keep-both: the end of this file (217 / 218 / 219 / 221
+against 220), the end of `tests/test_ab.py` (the judge's backend test and the farm guards' tests) and the gitlink.
+AGENTS.md, `tools/ab.py`, `mtgz/az/farm_campaign.py`, `mtgz/az/__init__.py` and `farm_builds.py` merged by themselves.
+
+**`auto` is the default** (zero.h2h, `cells-match`, `tools/ab.py judge`, as 217 built it). The user had said not
+before the farm's priority lane is live; the lane is live on the coordinator's canary machines only, and asked on
+2026-11-21 the user answered that canary counts.
+
+**What a user meets after this commit.** (1) A FRESH desktop-only start - or a fork's first start - from a commit with
+a published farm build is refused (exit 78) without `selfplay_local_reason` (`--selfplay-local-reason "<why>"`, env
+`ZERO_SELFPLAY_LOCAL_REASON`); a resume only warns (218). Scratch launchers that start such runs need the reason. (2)
+Head-to-heads go to the farm when they can and say so in one line (217). (3) The fuzz steward is restarted with the
+Macs' fuzz build on (219, approved by the user on 2026-11-21) right after main moves. (4) Eval jobs on CPUs play in one
+group on lanes per seat once a release built from this commit reaches the farm (221).
