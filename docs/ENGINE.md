@@ -46171,7 +46171,10 @@ Integration branch `feat/stew-int`: lane 1 (`feat/stew-distill`), lane 2 (`feat/
 240) merged onto main and kept merged with it as main moved (217-238), the stew moved onto layout v8 (239.2's last
 bullet), the sections numbered at the merge (239, 240; zero-core docs/az.md 76). The zero-core pin -> 324b2b7 = zero-core
 `feat/multi-distill-int`: `feat/multi-distill` merged onto zero-core main 61341a7 (conflicts: docs/az.md, and
-`GamePackage`'s hooks - game_aliases and row_selectors both kept), fast-forwarded as zero-core main with this merge.
+`GamePackage`'s hooks - game_aliases and row_selectors both kept). zero-core main had moved on meanwhile (bf3c4cf,
+its own docs/az.md 76: the eager evaluator's priors on CUDA), so zero-core main is the merge 1b87ff9 of the two, where
+multi-distill's section is docs/az.md **77**; this pin stays the gated 324b2b7 (whose docs still call it 76) until the next
+pin move.
 
 Fixes found while integrating: the fuzz pool meta_pair's pairing spec carrying a forced find a pairing can never apply
 (240.7); `test_deck_tilt`'s preset list (the pair presets are constructed best-of-three presets with the tilt);
