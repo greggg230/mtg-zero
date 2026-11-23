@@ -1117,6 +1117,10 @@ impl Game {
     /// did not know is that player's private entry (as `scramble`, ENGINE.md
     /// 192).
     pub(crate) fn forget_order(&mut self, owner: PlayerId, cards: &[CardIdx]) {
+        // (ENGINE.md 236's group fact, 248.4: cards in an order nobody knows are a domain as a private
+        // rearrangement's is - a find or a group's member among them is somewhere among all of them now, so they
+        // and every group they touch are one group. Counted before the told finds go, as `scramble` does.)
+        self.group_scramble(owner, cards, &[]);
         for &c in cards {
             self.untrack_found(c);
         }
@@ -2375,5 +2379,47 @@ mod queue_1123_tests {
             assert_eq!(x.0, seen[0].0, "world {s}: the keys");
             assert_eq!(x.1, seen[0].1, "world {s}: P0's view");
         }
+    }
+
+    /// ENGINE.md 248.4 (queue entry ea73c6338e3f, hidden-decklist game 100153769: Vampiric Tutor's
+    /// find, then Lim-Dul's Vault). Cards put on the bottom of a library in a random order
+    /// (`put_on_bottom_randomly`) that hold a find group's members are one group with them
+    /// afterwards: the find is somewhere among all of them. Before, the group kept its members, whose
+    /// places the random order had spread: the other player's view (and layout v8's `find_groups`
+    /// tokens) showed where the order had put them.
+    #[test]
+    fn cr_701_20_cards_put_on_the_bottom_in_a_random_order_join_the_find_group_they_hold() {
+        let mut g = Scenario::new(db())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Blood Crypt", "Plains", "Swamp", "Island", "Forest", "Mountain", "Taiga", "Bayou"])
+            .library(1, &["Island"; 8])
+            .at(Step::Main1, 0)
+            .start();
+        let from_top: Vec<CardIdx> = g.players[0].library.iter().rev().copied().collect();
+        let sorted = |v: &[CardIdx]| {
+            let mut v = v.to_vec();
+            v.sort_unstable();
+            v
+        };
+        // A find on top that everyone tells apart (a tutor's), then its owner looks at the top three cards and puts
+        // them back in an order of its own: a group of three places holding one find (ENGINE.md 236).
+        g.finds_told.push(from_top[0]);
+        g.scramble(0, &from_top[..3], false, false);
+        assert_eq!(g.find_groups.len(), 1);
+        assert_eq!((g.find_groups[0].members.clone(), g.find_groups[0].finds), (sorted(&from_top[..3]), 1));
+        // The top five go to the bottom in a random order.
+        let mut views = Vec::new();
+        for s in 0..16 {
+            let mut w = g.clone();
+            w.reseed_rng(s);
+            w.put_on_bottom_randomly(0, from_top[..5].to_vec());
+            assert_eq!(w.find_groups.len(), 1, "seed {s}");
+            assert_eq!((w.find_groups[0].members.clone(), w.find_groups[0].finds), (sorted(&from_top[..5]), 1), "seed {s}: the five cards, one find");
+            let (runs, whole) = crate::az::tail_v8::group_runs(&w, &w.find_groups[0]);
+            assert_eq!((runs, whole), (vec![(0, 3, 5)], false), "seed {s}: the bottom five places");
+            views.push((w.players[0].library.clone(), w.view_of(1)));
+        }
+        assert!(views.iter().any(|x| x.0 != views[0].0), "the random orders differ");
+        assert!(views.iter().all(|x| x.1 == views[0].1), "P1's view is the same whatever the order");
     }
 }
