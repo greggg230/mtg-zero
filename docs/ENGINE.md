@@ -46944,3 +46944,20 @@ collapse of a search); 247.2-247.5 change what a cast offers only in the positio
 a sacrifice cost and a self-sacrificing source, an additional cost's choice castability counted through the step,
 delve beside an escape with a source to delve) and what a world dealt for the other player keeps (247.4), none of
 which the digests' games hold. No layout, encoding or decision-kind change; no `RULES_EPOCH` bump.
+
+### 247.8 Gates and the fresh-seed fuzz (on 57c6932a9212; docs only after it)
+
+* `python tools/gate.py suite --throttle on`: **GATE PASSED suite 57c6932a9212 in 485s** - the full engine suite
+  2,948 passed (24 binaries); the sharded fuzz, 2,000 games each from seed 0: the default pool (with 100 matches),
+  the default pool with hidden decklists, `delver_dealt` (with 100 matches and 100 post-sideboard), every merged
+  check passed.
+* `python tools/gate.py engine --tested-sha 57c6932a9212 --expect-digest c2b04fed925eed67 --expect-digest0
+  d3c144b6cc2977e5 --throttle on`: **GATE PASSED engine 57c6932a9212 in 944s**, no skip - both digests equal the
+  expected ones, the formats' digests (constructed, EoE, driver, metagame, pair 80562a6aa452b765) and the dealt
+  digest cc0d138ac5c80402 equal the recorded ones, `az` 58, `limits` 13, `hidden` 28 passed, pytest in four shards
+  and the desktop part all passed, the search smoke passed, farm compat identical (gate 2: 6 games, 2,468 rows; gate
+  3: 6 games, 2,598 rows). The card-IR tests and the Mac recheck were not needed (no pipeline file changed; the tested
+  sha is the gated one). The gate placed its pure-CPU steps off the desktop, beside the live run (166).
+* Fresh seeds, release, `tools/fuzz_shards.py`, through the slot throttle: the default pool, 4,000 games and 200
+  matches from seed 247,100,000 - passed; the default pool with hidden decklists, 4,000 games from seed 247,200,000 -
+  passed. No stop of any kind in either.
