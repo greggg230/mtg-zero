@@ -45248,7 +45248,8 @@ Phyrexian life, the cost, `vm`, the flags, the class, the life after, a forced s
 `which`, an actor and `actor_for`, the pools, the search floor, `delve_late`, the step's permanent and `again`), 9 of
 last known information (mana value, copiable values, power, toughness, deathtouch, a +1/+1 counter, attached, a spell's
 X, a spell's item recorded), 4 of find groups (a group made, one more find, ended, one more place). Every one changes
-both views and both v8 rows; on layout v7 all but "a payment's cost has one more generic mana" (the context's cost floats
+both views and both v8 rows - but the two of what the payer's search of its own sources says (`vm`, the class), which
+since 253 reach only the viewers of the payer's hand (`public_state::PAYER_ONLY`) -; on layout v7 all but "a payment's cost has one more generic mana" (the context's cost floats
 show the innermost payment's) leave the row as it was - a new known gap scoped to layout v7, "layout v7 lacks layout
 v8's facts", checked alone by the single pass (layout v6's entry for v7's facts lists them too).
 
@@ -47515,6 +47516,120 @@ fenced (live runs on the desktop); the flaky retry: the core's
 `test_remoteplay.py::test_a_worker_slower_than_a_phase_is_capped_at_its_floor` (a timing floor, beside live runs; it
 passed alone, as at section 244's gate). Then merged with main 42f02b8a (the stew's stall rule took 251, Python only,
 no file in common but this one: this section renumbered 251 -> 252) and the python tier run on the merge.
+
+## 253. A payment's search of its payer's sources is the payer's own: `vm`, the class, and the options it leaves, blank for the other player (248.2's open entries; branch `fix/payer-seen-1123`, 2026-11-23)
+
+Branch from main e687031c. The number is provisional. The maintainer decided 248.2: the fuzz steward's entries
+467b098e2037, ddfc59e36d7e and f1eebdfda0a1's game 100445205 are fixed here. All four seeds still fail on main e687031c
+(replayed under the `fuzz` profile before the change) and pass with it.
+
+### 253.1 The change
+
+`tail_v8::payer_seen(g, viewer, pm)`: the payer, or the player deciding for it (CR 722.3). For any other viewer the
+`payment` segment's state token and `payment_view` leave blank what the payment's search of the payer's sources says:
+
+* `PayMana::vm` (present, squashed, 32 bits) and `PayMana::min_class` (32 bits): 248.2's two;
+* the number of productions of the source the payer is asked about (`now`: `NOW_N` and its 16 bits; the view's hash of
+  the list) and the number of sources the permanent it is asked about stands for (`which` / `card_slots`: `WHICH_N` and
+  its 16 bits; the view's hash): 253.3's two, the same kind.
+
+The source and the permanent asked about, the picks, the cost, the flags, the lives and the pools are public and shown
+to both as before. **No width, offset, segment or token count changes**: layout v8 stays v8, a checkpoint loads as it
+did (253.5), and the payer's own rows - every row with options - are bit for bit as before. **Layout v7** (`mtg_v7`)
+never held any of it: its row has no `payment` segment (the gate's "v7 known gap" lines for both perturbations, as
+before), so the compatibility game neither leaked these nor changes.
+
+**Who saw the leak.** 248.2 left open how far it reached a network. It did reach one: a run with value-only samples
+(`selfplay_view_samples`, 0.5 in the stew's runs) encodes the row of the player **not** deciding at a share of the
+other player's decisions, payments included, and trains the value head on it; and the format digests hash "the other
+player's encoding" in their worlds, which is where 253.4's digests move.
+
+### 253.2 The gate's contract (236.4 amended)
+
+236.4 said of its 35 perturbations "every one changes both views and both v8 rows". Two of them now reach only the
+viewers of the payer's hand: "a payment spends one more mana of its pool" and "a payment's last pick was of a later
+class" (`public_state::PAYER_ONLY`). `public_state_reaches_the_encoding` checks exactly that for them
+(`public_state::payment_seen_by`): the view and the v8 row change for those viewers and for no other, else the
+perturbation is listed as a leak ("payments: 58 perturbations of what the payer's search says reached only the
+viewers of its hand", 29 positions each). The counts are otherwise 236.4's: 266 perturbations encoded, 2 deliberate
+limits, 0 known gaps; hidden decklists 120; the pairwise pass 151,118 states and 72,856 pairs under the known gaps,
+unchanged (a perturbation that leaves a viewer's view alone is no collision for that viewer). No perturbation changes
+only `now`'s or `card_slots`' lists, so 253.3's two fields need no entry.
+
+### 253.3 The same class, looked for once
+
+Read: every field of `state_fields` / `payment_view` and of the 601.2g step's token, and `view_state`'s decision part,
+for values computed from the decider's sources rather than from what was done in public.
+
+* **Found and blanked (253.1)**: `now`'s productions are `feasible_prods` - those "that leave the rest payable by the
+  sources of the classes from `ci` on", the hand's included - and `card_slots` holds only the sources whose pick leaves
+  the payment payable (`ok_of`). Both are the payer's options, which no view shows another player anywhere else
+  (`view_of` lists a decision's options to its decider only). By reading the code; no seed or scenario showed either
+  apart, and none was built.
+* **Read and left** (functions of the picks, the cost and the pool, all public): `spend` (`pool_rems`: the pool and the
+  picked sources' classes), `pooled`, `convert`, `improvise`, `waterbend`, `convoke`, `phyrexian_life`, `life_after`,
+  `forced`, `actors` / `actor_for`, `now_taken` / `now_min` (the mana the payer chose so far), `delve_late`, the step's
+  permanent and `again`.
+* **Not settled**: `oracle.is_some()` (whether the payment completes by its search) is set by the payment-search code
+  this lane stays out of; it reads the cost's shape, but whether it can also depend on a hand source was not traced.
+  For the payment-search lane.
+* `view_state`: the decision's options are the decider's only; its kind goes through `kind_seen_by` (160). Nothing else
+  of the decider's hidden cards was found there.
+
+### 253.4 Tests and digests
+
+* `az::tail_v8::payer_seen_tests::a_payment_shows_its_search_of_the_payers_sources_only_to_viewers_of_the_payers_hand`
+  (lib): P0 casts Lightning Greaves with {G} floating and an Ancient Tomb, holding a Simian Spirit Guide in one game and
+  an Island in the other (the Guide in the library there: one information set for P1). `vm` differs (`Some` / `None`);
+  P1's view and whole v8 row are equal, P0's views differ; with `vm` and the class set by hand the other player's token
+  is blank and the payer's is not.
+* `tests/fuzz.rs` `a_payments_search_facts_are_the_payers_seeds_of_253`: default 100069409, 100148623, 100445205 and
+  hidden-decklist 100200461 at the `fuzz` profile's denominator.
+* `tests/az.rs`: 253.2.
+
+**Digests.** The cube's full 5a09242cf4f2cbab and encoding-free be0626d4b97cebae, EoE d754f4eef3c8adae, driver
+cab97c01912f7e3f and dealt cc0d138ac5c80402 are main's (they hash the decider's rows; no key or action changes). The
+format digests that hash the other player's row in a world are re-recorded: **constructed 47a8989dcc1a8a6a ->
+68e6d9334d2fdfdf** (184 of 570 lines), **metagame 41f7580b3553e1c3 -> e2884dfcccf49ebe** (60 of 288), **pair
+b41f691fd2583bf3 -> 60e0d7de900cef7e** (24 of 70).
+
+### 253.5 What a live run sees at its next pin
+
+A copy of the stew's main net (`gen_001`, layout v8; never the run's own file) on the CPU, with the stew's spec:
+
+* **It loads and plays**: the encoding gate's checkpoint-load step (253.6).
+* **How far its answers move**: 40 games of random play in the stew's metagame spec, every state with a payment in
+  progress whose payer decides - 287 rows of the other player, each one altered by the change. The same row with the
+  blanked fields put back (from the payer's own row, where they are the same numbers) against the row as it is now,
+  both through the net: **value |diff| at most 0.0158** (mean 0.0011, 99th percentile 0.0066), margin at most 0.0079
+  (mean 0.0012). A row without options has no policy; the rows with options are unchanged. The net's `payment` gate is
+  0.070 (a net widened onto v8 starts at 0), so it had begun to read the segment.
+
+A run re-pinned to this commit feeds its value head those rows for its value-only samples; its window still holds rows
+with the fields shown. No fork or widening is needed.
+
+### 253.6 Gates and the fresh-seed fuzz
+
+On 08e0078b (in this branch's checkout; the pure-CPU steps on the Mac beside the live run, the rest on the desktop
+through the slot throttle):
+* `python tools/gate.py suite` - **GATE PASSED suite 08e0078bcb8d in 406s**: privacy 0 findings; the full engine suite
+  2,965 passed (24 binaries); the sharded 2,000-game fuzz of the default pool (100 matches), the default pool with
+  hidden decklists, and delver_dealt (100 matches + 100 post-sideboard).
+* `python tools/gate.py engine --tested-sha 08e0078bcb8d --expect-digest 5a09242cf4f2cbab --expect-digest0
+  be0626d4b97cebae` - **GATE PASSED WITH SKIPS engine 08e0078bcb8d in 662s** (skipped: one live-run-hazard pytest test of
+  the desktop part, fenced by the live run): both digests as expected, the format and dealt digests the checkout's
+  files; `az` 58, `limits` 13, `hidden` 28 passed; pytest 119 + 272 + 224 + 140 (Mac) + 49 (desktop); the search smoke;
+  **farm compat identical** (`delver-mirror-bo3-dealt`: gate 2 6 games, 2,468 rows, 150 batches).
+* `python tools/gate.py encoding --expect-digest 5a09242cf4f2cbab --expect-digest0 be0626d4b97cebae --checkpoint <the
+  copy of the stew's main net> --checkpoint-spec <the stew's spec>` - **GATE PASSED WITH SKIPS encoding 08e0078bcb8d in
+  709s** (skipped: the same fenced pytest test only): **checkpoint-load performed** - "checkpoint loads and plays (8
+  games, 0 unfinished)", on the CPU; the digests, `az` 58, pytest 103 + 134 + 238 + 280 (Mac) + 49 (desktop), farm
+  compat identical.
+
+**Fresh seeds** (the desktop through the slot throttle, the `fuzz` profile, thirty shards of 100 a mode, at 08e0078b):
+the default pool's games 251,100,000..251,102,999 with 150 matches **passed** (666,354 open-decklist walks, 3,679,910
+states compared); hidden decklists, games 251,600,000..251,602,999, **passed** (657,382 hidden-decklist worlds,
+2,567,316 information-set steps). No stop.
 
 ## 254. The payment lane's corners: the Tinker search the farm reported as a hang, castability at the least X with mana, escalate's modes, the announcements still to come, a mana ability's return cost (the fuzz steward's 988792dc2dde; 249's "left" items; branch `fix/payment-corners-1123`, 2026-11-23)
 

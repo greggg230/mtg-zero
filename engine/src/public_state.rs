@@ -2430,6 +2430,21 @@ pub fn limits() -> Vec<Limit> {
     ]
 }
 
+/// The perturbations of a payment that reach only the viewers who see its payer's hand (ENGINE.md 253;
+/// `tail_v8::payer_seen`): what the payer's search of its own sources says, a function of the mana sources in its
+/// hand. The gate requires each to change those viewers' view and layout v8 row and neither of the other
+/// player's (`tests/az.rs`, `public_state_reaches_the_encoding`).
+pub const PAYER_ONLY: [&str; 2] = ["a payment spends one more mana of its pool", "a payment's last pick was of a later class"];
+
+/// Which players see the hand of the payer of `g`'s innermost payment (the one `PAYER_ONLY`'s perturbations
+/// change), if a payment is in progress.
+pub fn payment_seen_by(g: &Game) -> Option<[bool; 2]> {
+    g.agenda.iter().rev().find_map(|t| match t {
+        crate::flow::Task::PayMana(pm) => Some([0u8, 1].map(|v| crate::az::tail_v8::payer_seen(g, v, pm))),
+        _ => None,
+    })
+}
+
 /// The perturbations of fields hidden decklists hide from the other player
 /// (ENGINE.md 102: public in every other format): with hidden decklists the
 /// gate requires each to reach its owner's view and encoding and neither of

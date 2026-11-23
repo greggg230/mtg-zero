@@ -409,9 +409,25 @@ fn pick_fields(cx: &Cx, x: &mut [f32], pm: &PayMana, s: &Src, rank: usize, prod:
     }
 }
 
+/// Does `viewer` see what payment `pm`'s payer sees of its own sources (ENGINE.md 248.2, 253): the payer, or the
+/// player deciding for it (CR 722.3)? What the payment's search of the payer's sources says reads the payer's
+/// hand, whose mana sources (a Spirit Guide) are classes too (`Game::payment_classes`): `PayMana::vm` and
+/// `PayMana::min_class`, and the options that search leaves the payer - the productions of the source it is asked
+/// about (`now`: `feasible_prods`) and the sources the permanent it is asked about stands for (`card_slots`: each
+/// one's pick must leave the payment payable). Another player's row and view show none of them (in that player's
+/// worlds the payer's hand, and so each of them, is dealt again); what was picked, the cost, the flags and the
+/// objects asked about are public and shown to both.
+pub(crate) fn payer_seen(g: &Game, viewer: PlayerId, pm: &PayMana) -> bool {
+    pm.payer == viewer || g.decider_of(pm.payer) == viewer
+}
+
 fn state_fields(cx: &Cx, s: &mut [f32], pm: &PayMana) {
     s[if pm.payer == cx.me { pm::PAYER_ME } else { pm::PAYER_OPP }] = 1.0;
-    if let Some(v) = pm.vm {
+    // (What the payer's search of its own sources says - how much of the virtual pool the payment spends, the
+    // class of the last pick, how many productions or sources it leaves to choose from - reads the payer's hand.
+    // Only a viewer who sees that hand is shown them: `payer_seen`, ENGINE.md 253.)
+    let sees = payer_seen(cx.g, cx.knower, pm);
+    if let Some(v) = pm.vm.filter(|_| sees) {
         s[pm::VM] = 1.0;
         s[pm::VM_V] = squash(v as f32 / 4.0);
         bits(&mut s[pm::VM_BITS..pm::VM_BITS + 32], v as u64);
@@ -431,13 +447,17 @@ fn state_fields(cx: &Cx, s: &mut [f32], pm: &PayMana) {
     bits(&mut s[pm::PHY_BITS..pm::PHY_BITS + 64], pm.phyrexian_life);
     s[pm::LIFE_AFTER] = squash(pm.life_after as f32 / 8.0);
     bits(&mut s[pm::LIFE_AFTER_BITS..pm::LIFE_AFTER_BITS + 32], pm.life_after as u64);
-    bits(&mut s[pm::MIN_CLASS_BITS..pm::MIN_CLASS_BITS + 32], pm.min_class as u64);
+    if sees {
+        bits(&mut s[pm::MIN_CLASS_BITS..pm::MIN_CLASS_BITS + 32], pm.min_class as u64);
+    }
     if let Some((src0, prods)) = &pm.now {
         s[pm::NOW] = 1.0;
         write_src_obj(cx, &mut s[pm::NOW_OBJ..pm::NOW_OBJ + rf::W], src0.card);
         write_src(&mut s[pm::NOW_SRC..pm::NOW_SRC + src::W], src0.slot, src0.g);
-        s[pm::NOW_N] = squash(prods.len() as f32 / 8.0);
-        bits(&mut s[pm::NOW_N_BITS..pm::NOW_N_BITS + 16], prods.len() as u64);
+        if sees {
+            s[pm::NOW_N] = squash(prods.len() as f32 / 8.0);
+            bits(&mut s[pm::NOW_N_BITS..pm::NOW_N_BITS + 16], prods.len() as u64);
+        }
     }
     for t in 0..6 {
         s[pm::NOW_TAKEN + t] = pm.now_taken[t] as f32 / 4.0;
@@ -448,9 +468,11 @@ fn state_fields(cx: &Cx, s: &mut [f32], pm: &PayMana) {
     if let Some(c) = pm.which {
         s[pm::WHICH] = 1.0;
         cx.write_obj(&mut s[pm::WHICH_OBJ..pm::WHICH_OBJ + rf::W], c);
-        let n = pm.card_slots.iter().find(|(x, _)| *x == c).map_or(0, |(_, v)| v.len());
-        s[pm::WHICH_N] = squash(n as f32 / 8.0);
-        bits(&mut s[pm::WHICH_N_BITS..pm::WHICH_N_BITS + 16], n as u64);
+        if sees {
+            let n = pm.card_slots.iter().find(|(x, _)| *x == c).map_or(0, |(_, v)| v.len());
+            s[pm::WHICH_N] = squash(n as f32 / 8.0);
+            bits(&mut s[pm::WHICH_N_BITS..pm::WHICH_N_BITS + 16], n as u64);
+        }
     }
     if let Some(a) = &pm.actor_for {
         s[pm::ACTOR_FOR] = 1.0;
@@ -858,12 +880,15 @@ pub(crate) fn payment_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
                     v.push(*dl as u64);
                 }
                 v.push(u64::MAX - 3);
-                v.extend([h64(&pm.cost), h64(&pm.vm), pm.pooled as u64, pm.convert as u64, pm.improvise as u64, pm.waterbend as u64, pm.convoke as u64]);
-                v.extend([pm.oracle.is_some() as u64, pm.phyrexian_life, pm.life_after as u64, pm.min_class as u64, pm.delve_late.len() as u64]);
+                // (`vm`, `min_class`, the productions asked about and the sources a permanent stands for: the
+                // payer's own, `payer_seen`.)
+                let sees = payer_seen(g, viewer, pm);
+                v.extend([h64(&pm.cost), h64(&sees.then_some(pm.vm)), pm.pooled as u64, pm.convert as u64, pm.improvise as u64, pm.waterbend as u64, pm.convoke as u64]);
+                v.extend([pm.oracle.is_some() as u64, pm.phyrexian_life, pm.life_after as u64, if sees { pm.min_class as u64 } else { u64::MAX }, pm.delve_late.len() as u64]);
                 match &pm.now {
                     Some((s, prods)) => {
                         v.extend(src(s));
-                        v.push(h64(prods));
+                        v.push(if sees { h64(prods) } else { u64::MAX - 8 });
                     }
                     None => v.push(u64::MAX - 4),
                 }
@@ -871,7 +896,7 @@ pub(crate) fn payment_view(g: &Game, viewer: PlayerId, v: &mut Vec<u64>) {
                 match pm.which {
                     Some(c) => {
                         v.push(place(c));
-                        v.push(h64(&pm.card_slots.iter().find(|(x, _)| *x == c).map(|(_, s)| s.clone())));
+                        v.push(if sees { h64(&pm.card_slots.iter().find(|(x, _)| *x == c).map(|(_, s)| s.clone())) } else { u64::MAX - 8 });
                     }
                     None => v.push(u64::MAX - 5),
                 }
@@ -975,5 +1000,78 @@ pub(crate) fn find_groups_view(g: &Game, v: &mut Vec<u64>) {
     for e in out {
         v.push(u64::MAX - 140);
         v.extend(e);
+    }
+}
+
+#[cfg(test)]
+mod payer_seen_tests {
+    //! ENGINE.md 253: what a payment's search of its payer's sources says is shown only to the viewers of the
+    //! payer's hand.
+    use super::*;
+    use crate::az::tail_encode::Row;
+    use crate::decision::Choice;
+    use crate::fuzz::cards::db;
+    use crate::game::Step;
+    use crate::testkit::Scenario;
+
+    /// P0 casts Lightning Greaves ({2}) with {G} floating and an Ancient Tomb to tap, holding `other` beside it,
+    /// `library` its library: cards P1 doesn't know (the decklists are open: the two together are the same cards
+    /// in both games). The game at the payment's decision, and its payment.
+    fn paying(other: &str, library: &[&str]) -> (Game, PayMana) {
+        let mut g = Scenario::new(db())
+            .spec(|s| s.auto_single = false)
+            .battlefield(0, &["Ancient Tomb"])
+            .hand(0, &["Lightning Greaves", other])
+            .library(0, library)
+            .library(1, &["Island"; 4])
+            .pool(0, [0, 0, 0, 0, 1, 0], 0)
+            .at(Step::Main1, 0)
+            .start();
+        let greaves = g.card(0, "Lightning Greaves", Zone::Hand);
+        g.choose(Choice::Cast(greaves));
+        while g.kind() == Some(DecisionKind::CastMana) {
+            g.choose(Choice::Pass);
+        }
+        assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", g.log_lines().join("\n"));
+        let pm = g.agenda.iter().rev().find_map(|t| match t {
+            Task::PayMana(pm) => Some((**pm).clone()),
+            _ => None,
+        });
+        (g, pm.expect("the payment in progress"))
+    }
+
+    /// The fuzz steward's queue entries 467b098e2037 and ddfc59e36d7e (ENGINE.md 248.2, 253): two games the other
+    /// player cannot tell apart - the payer holds a Simian Spirit Guide in one and an Island in the other - give that
+    /// player one view and one layout v8 row while the payment is in progress. With the Guide the {G} floating and
+    /// the Guide's {R} pay the {2} (`vm` known); without it the Ancient Tomb, a several-mana source, must be picked
+    /// first (`vm` not yet known). The payer's own view and row show the difference.
+    #[test]
+    fn a_payment_shows_its_search_of_the_payers_sources_only_to_viewers_of_the_payers_hand() {
+        let (a, pa) = paying("Simian Spirit Guide", &["Island", "Island", "Island", "Island"]);
+        let (b, pb) = paying("Island", &["Island", "Simian Spirit Guide", "Island", "Island"]);
+        assert_ne!(pa.vm, pb.vm, "the payment's pool spending reads the Spirit Guide in hand: {:?} / {:?}", pa.vm, pb.vm);
+        assert!(payer_seen(&a, 0, &pa) && !payer_seen(&a, 1, &pa));
+        let bits = |r: &Row| (r.head.iter().map(|f| f.to_bits()).collect::<Vec<_>>(), r.tail.iter().map(|t| (t.0, t.1, t.2.iter().map(|f| f.to_bits()).collect::<Vec<_>>())).collect::<Vec<_>>(), r.ov.clone());
+        assert_eq!(a.view_of(1), b.view_of(1), "the other player's view");
+        assert!(bits(&Row::of_v8(&a, 1)) == bits(&Row::of_v8(&b, 1)), "the other player's layout v8 row");
+        assert_ne!(a.view_of(0), b.view_of(0), "the payer's view");
+        // (`vm` and the class of the last pick in the other player's row: blank, whatever they are.)
+        let state = |g: &Game, v: PlayerId| {
+            let row = Row::of_v8(g, v);
+            let t = row.tail.iter().find(|t| t.0 == seg::PAYMENT && t.2[CODE + pm::KIND + pm::K_STATE] == 1.0).expect("the payment's state token").2.clone();
+            (t[CODE + pm::VM], t[CODE + pm::VM_BITS..CODE + pm::VM_BITS + 32].to_vec(), t[CODE + pm::MIN_CLASS_BITS..CODE + pm::MIN_CLASS_BITS + 32].to_vec())
+        };
+        let mut c = a.clone();
+        for t in c.agenda.iter_mut() {
+            if let Task::PayMana(pm) = t {
+                pm.vm = Some(5);
+                pm.min_class = 3;
+            }
+        }
+        assert_eq!(state(&c, 1), (0.0, vec![0.0; 32], vec![0.0; 32]), "blank for the other player");
+        assert_eq!(state(&c, 0).0, 1.0, "shown to the payer");
+        assert_ne!(state(&c, 0).2, vec![0.0; 32], "the class shown to the payer");
+        assert_eq!(c.view_of(1), a.view_of(1));
+        assert_ne!(c.view_of(0), a.view_of(0));
     }
 }
