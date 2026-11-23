@@ -1446,6 +1446,24 @@ mod tests {
         assert!(!at_step(&["Tolarian Academy", "Chromatic Star"]), "the Star may leave: the Academy's count changes");
     }
 
+    /// ENGINE.md 252.5: no supported card has a mana ability whose cost returns a permanent to its owner's hand (the
+    /// lowering refuses one), in any pool - so the payment search's "its own mana ability first, then taken by the
+    /// feeding ability's cost" (249.1) has the sacrifice alone to serve, and `mana_now_costs` asserts it.
+    #[test]
+    fn no_mana_ability_returns_a_permanent_as_a_cost() {
+        for (name, db) in [("cube", CardDb::cube()), ("constructed", CardDb::constructed()), ("eoe", CardDb::eoe()), ("fuzz", crate::fuzz::cards::db())] {
+            let mut abilities = 0;
+            for i in 0..db.len() {
+                let def = db.def(i as crate::ids::DefId);
+                for ad in def.activated.iter().chain(def.hand_abilities.iter()).filter(|ad| ad.mana().is_some()) {
+                    abilities += 1;
+                    assert!(ad.cost.bounce.is_none(), "{name}: {} has a mana ability with a return cost", def.name);
+                }
+            }
+            assert!(abilities > 0, "{name}: no mana ability looked at");
+        }
+    }
+
     /// CR 601.2f-g (ENGINE.md 231): the total cost is locked as the step's first mana ability is activated, so a cost
     /// reducer the ability sacrifices (Emry's "costs {1} less for each artifact you control": Chromatic Star) doesn't
     /// raise it; the lock is gone once the spell is cast.
