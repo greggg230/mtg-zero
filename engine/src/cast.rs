@@ -1026,11 +1026,12 @@ impl Game {
         // 100.4.8).
         // (Or with mana abilities activated while it is cast that feed its graveyard cost, CR 601.2g: the 601.2g
         // step searched with that X, as castability searches it with the least, `feed_completes`; ENGINE.md 249.2.)
+        // (The additional cost option is announced after X: with some option, `feed_completes_ahead`, 252.4.)
         let pays = |x: u64| {
             let mut tmp = item.clone();
             tmp.x = x as u32;
             let cost = self.total_mana(card, &tmp);
-            self.can_pay_spell(card, &tmp, &cost) || self.feed_completes(card, &tmp)
+            self.can_pay_spell(card, &tmp, &cost) || self.feed_completes_ahead(card, &tmp, false)
         };
         if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             // Kicker {X} (CR 601.2b): announced only if kicked, at least
@@ -1059,7 +1060,7 @@ impl Game {
                     // (As a mana X above: ENGINE.md 249.2.)
                     let mut tmp = item.clone();
                     tmp.x = life;
-                    self.feed_completes(card, &tmp)
+                    self.feed_completes_ahead(card, &tmp, false)
                 }
             })
         } else if !free {
@@ -1067,22 +1068,42 @@ impl Game {
             // with a permission for a mana value n or less (Lurrus, Serra
             // Paragon), no more than keeps the spell's mana value n (202.3e:
             // X counts on the stack; ruling 90a8974d).
-            let r = self.obj_ref(card);
-            let limit = match self.marks.iter().find_map(|&(o, m)| match m {
-                crate::game::Mark::MvCap(n) if o == r => Some(n),
-                _ => None,
-            }) {
-                Some(n) => {
-                    let d = self.def_of(card);
-                    (n.saturating_sub(d.mana_value()) / d.x_pips.max(1)) as u64
+            let limit = self.x_limit(card, item);
+            // The least X (CR 107.3, 601.2b, 601.2g): 0 - or, when the cast can't be paid at X = 0 and its total cost
+            // there has no mana (so no 601.2g step and no feeding ability), the least X whose total cost has some:
+            // the X castability counted (`feed_castable`, ENGINE.md 252.2). X = 0 is then no option.
+            let mut lo = 0u64;
+            if !pays(0) {
+                if let Some(x) = self.first_x_with_mana(card, item).filter(|&x| pays(x as u64)) {
+                    lo = x as u64;
                 }
-                None => u32::MAX as u64,
-            };
-            crate::decision::most_allowed(0, limit, pays)
+            }
+            return Some((lo, crate::decision::most_allowed(lo, limit, pays)));
         } else {
             0
         };
         Some((0, most))
+    }
+
+    /// The most X spell `card` (on the stack as `item`) may announce in its mana cost besides what can be paid: cast
+    /// with a permission for a mana value n or less (Lurrus, Serra Paragon), no more than keeps the spell's mana
+    /// value n (CR 202.3e: X counts on the stack; ruling 90a8974d); 0 for a cast whose X is 0 (107.3b: without
+    /// paying its mana cost, for a granted alternative cost).
+    pub(crate) fn x_limit(&self, card: CardIdx, item: &StackItem) -> u64 {
+        if matches!(item.from, crate::game::CastFrom::Permission { free: true, .. } | crate::game::CastFrom::LibraryTop) || self.cast_for_granted_alt(card, item) {
+            return 0;
+        }
+        let r = self.obj_ref(card);
+        match self.marks.iter().find_map(|&(o, m)| match m {
+            crate::game::Mark::MvCap(n) if o == r => Some(n),
+            _ => None,
+        }) {
+            Some(n) => {
+                let d = self.def_of(card);
+                (n.saturating_sub(d.mana_value()) / d.x_pips.max(1)) as u64
+            }
+            None => u32::MAX as u64,
+        }
     }
 
     /// Mana value (CR 202.3), with X on the stack (202.3e): exact (a card's
@@ -2063,11 +2084,11 @@ impl Game {
                     let cost = self.announced_cost(card, item, &m.costs[k]);
                     *a = *a
                         && (self.can_pay_spell(card, item, &cost) || {
-                            // (Or with the 601.2g step's feeding abilities, the mode announced: the item with it has
-                            // this total cost, so its step's search asks this question; ENGINE.md 249.2.)
+                            // (Or with the 601.2g step's feeding abilities, the mode announced and some value of
+                            // each announcement still to come; ENGINE.md 249.2, 252.4.)
                             let mut tmp = item.clone();
                             tmp.modes.push(k as u8);
-                            self.total_mana(card, &tmp) == cost && self.feed_completes(card, &tmp)
+                            self.feed_completes_ahead(card, &tmp, true)
                         });
                 }
             }
@@ -2333,14 +2354,14 @@ impl Game {
             more.generic = more.generic.saturating_add(x_min.saturating_mul(n));
             let cost = self.announced_cost(card, &self.stack[pos], &more);
             self.can_pay_spell(card, &self.stack[pos], &cost) || {
-                // (Or with the 601.2g step's feeding abilities, the times announced - kicker {X}'s least X with them:
-                // the item so has this total cost, so its step's search asks this question; ENGINE.md 249.2.)
+                // (Or with the 601.2g step's feeding abilities, the times announced - kicker {X}'s least X with them
+                // - and some value of each announcement still to come; ENGINE.md 249.2, 252.4.)
                 let mut tmp = self.stack[pos].clone();
                 tmp.times = u32::try_from(n).unwrap_or(u32::MAX);
                 if tc.x {
                     tmp.x = x_min as u32;
                 }
-                self.total_mana(card, &tmp) == cost && self.feed_completes(card, &tmp)
+                self.feed_completes_ahead(card, &tmp, !tc.x)
             }
         };
         let most = crate::decision::most_allowed(0, tc.max as u64, pays);

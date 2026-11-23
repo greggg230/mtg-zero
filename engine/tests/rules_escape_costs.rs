@@ -240,3 +240,39 @@ fn cr_601_2b_702_172a_sprees_modes_count_the_steps_feeding_abilities() {
     assert!(most_of(&ends, tsa, &|it| it.modes.len() as u32) >= 1, "a mode chosen");
     assert!(ends.iter().any(|e| spell_item(e, tsa).modes.contains(&2)), "the draw mode, + {{R}}");
 }
+
+/// CR 107.3, 601.2b, 601.2g, 702.138a (ENGINE.md 252.2): Walking Ballista ({X}{X}) escaped by Underworld Breach with two
+/// other graveyard cards and a Chromatic Star. At X = 0 the total cost has no mana, so there is no 601.2g step ("if the
+/// total cost includes a mana payment") and no Star: two cards, not payable. At X = 1 ({2}) the Star is sacrificed
+/// in the step, the third card. Castability asked the least X alone and said no; it asks the least X with mana too,
+/// and the choice of X starts there - X = 0 is no option. With three other cards there, X is 0 or 1.
+#[test]
+fn cr_107_3_601_2g_castability_and_x_start_at_the_least_x_whose_cost_has_mana() {
+    let scen = |gy: &[&str], star: bool| {
+        let mut b = vec!["Underworld Breach", "Swamp", "Swamp", "Swamp"];
+        if star {
+            b.push("Chromatic Star");
+        }
+        cube().battlefield(0, &b).graveyard(0, gy).at(Step::Main1, 0).start()
+    };
+    let short = ["Walking Ballista", "Ponder", "Brainstorm"];
+    let g = scen(&short, false);
+    let wb = g.card(0, "Walking Ballista", Zone::Graveyard);
+    assert!(!g.has_option(Choice::Cast(wb)), "two cards, no Star: {}", opts(&g));
+    let g = scen(&short, true);
+    let wb = g.card(0, "Walking Ballista", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(wb)), "X = 1 through the Star: {}", opts(&g));
+    let mut h = g.clone();
+    h.choose(Choice::Cast(wb));
+    let ends = every_way(&h, 4000);
+    assert_eq!(most_of(&ends, wb, &|it| it.x), 1, "three Swamps: the Star's {{1}} and {{2}}");
+    assert!(ends.iter().all(|e| spell_item(e, wb).x == 1), "X = 0 is not offered");
+    let g = scen(&["Walking Ballista", "Ponder", "Brainstorm", "Preordain"], false);
+    let wb = g.card(0, "Walking Ballista", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(wb)), "{}", opts(&g));
+    let mut h = g.clone();
+    h.choose(Choice::Cast(wb));
+    let ends = every_way(&h, 4000);
+    assert_eq!(most_of(&ends, wb, &|it| it.x), 1);
+    assert!(ends.iter().any(|e| spell_item(e, wb).x == 0), "X = 0 with the three cards there");
+}

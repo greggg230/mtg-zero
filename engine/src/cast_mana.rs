@@ -46,6 +46,11 @@ pub(crate) fn subsets(v: &[CardIdx], k: usize) -> Vec<Vec<CardIdx>> {
     out
 }
 
+/// The most values of X castability looks through for the least X whose total cost has mana (`feed_castable`,
+/// `Game::first_x_with_mana`; ENGINE.md 252.2): each X is one more generic mana an {X}, so the scan ends as soon as X
+/// passes what the cost's reductions take off - a count of objects. Past this it fails loudly.
+const FEED_X_SCAN: u32 = 4096;
+
 /// `Task::CastMana::after`'s mark of a decision of the payment search's step node (its answers' activations order
 /// the next ones, ENGINE.md 231.4).
 const SEARCH_ORDER: u32 = 1 << 31;
@@ -1080,16 +1085,113 @@ impl Game {
                 noted = self.sacrifice_candidates(p, card, &s).into_iter().map(|x| vec![self.obj_ref(x)]).collect();
             }
         }
+        // X (CR 601.2b, 107.3): its least; and, when the total cost at the least X has no mana - no 601.2g step then
+        // ("if the total cost includes a mana payment"), so no feeding ability - the least X whose total cost has
+        // some, if X may be that much (ENGINE.md 252.2: Walking Ballista escaped at X = 1 with a Chromatic Star the
+        // third graveyard card). A larger X only costs more, so no other X can complete where these don't.
+        let x_min = def.x_min as u32;
+        let cap = self.feed_x_cap(p, card, from, alt);
         for &option in &options {
             for m in &modes {
                 for n in &noted {
-                    if self.feed_search(p, card, from, alt, option, m, n) {
+                    let (ok, mut zero) = self.feed_search(p, card, from, alt, option, m, n, x_min);
+                    if ok {
+                        return true;
+                    }
+                    let mut x = x_min;
+                    while zero && (x as u64) < cap {
+                        x += 1;
+                        assert!(x - x_min <= FEED_X_SCAN, "no X up to {x} gives {} a total cost with mana", self.name(card));
+                        let (ok, z) = self.feed_search(p, card, from, alt, option, m, n, x);
+                        if ok {
+                            return true;
+                        }
+                        zero = z;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// The most X castability may announce beyond the least for spell `card` cast the way `from` and `alt` say
+    /// (`feed_castable`; as `x_range` bounds the announced X): none beyond it for a card with no {X} in its mana
+    /// cost, a cast without paying its mana cost or for a granted alternative cost (CR 107.3b: X is 0); what keeps
+    /// the mana value within Serra Paragon's or Lurrus's permission (202.3e); else any.
+    fn feed_x_cap(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, alt: u8) -> u64 {
+        use crate::game::CastFrom;
+        let def = self.def_of(card);
+        let x_min = def.x_min as u64;
+        if def.x_pips == 0 || alt as usize > def.alt_costs.len() || matches!(from, CastFrom::Permission { free: true, .. } | CastFrom::LibraryTop) {
+            return x_min;
+        }
+        if from == CastFrom::Paragon {
+            return match self.paragon(p, def.mana_value(), false) {
+                Some(src) => (self.abilities(src).gy_play_mv.saturating_sub(def.mana_value()) / def.x_pips.max(1)) as u64,
+                None => x_min,
+            };
+        }
+        u32::MAX as u64
+    }
+
+    /// `feed_completes` for a decision of the cast asked before its later announcements (ENGINE.md 252.2-252.4; the
+    /// order is alternative cost, modes, times, X, additional cost option: `begin_cast`): can the payment be
+    /// completed through the 601.2g step's feeding abilities with `item` as announced so far and **some** value of
+    /// each announcement still to come? The additional cost option: each the cast may choose (`cast_option`'s). X,
+    /// when `x_open`: its least, and the least X whose total cost has mana when the least has none
+    /// (`feed_castable`'s two). The times, when still open, are `item`'s (none): more only costs more.
+    pub(crate) fn feed_completes_ahead(&self, card: CardIdx, item: &crate::game::StackItem, x_open: bool) -> bool {
+        let p = item.controller;
+        if item.from == crate::eoe_c::FREE_CAST || !self.feed_gap(p, card, item.from, item.alt) {
+            return false;
+        }
+        let def = self.def_of(card);
+        let src = Some(self.obj_ref(card));
+        let options: Vec<u8> = if item.alt > 0 || def.additional.len() < 2 {
+            vec![item.cost_option]
+        } else {
+            (0..def.additional.len() as u8)
+                .filter(|&k| self.route_extra(card, item.from, k).is_some())
+                .filter(|&k| !def.kicker || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| self.targets_available(&m.list[k as usize], p, src)))
+                .collect()
+        };
+        for k in options {
+            let mut tmp = item.clone();
+            tmp.cost_option = k;
+            if def.kicker {
+                tmp.modes = vec![k];
+            }
+            if self.feed_completes(card, &tmp) {
+                return true;
+            }
+            if x_open && def.x_pips > 0 {
+                if let Some(x) = self.first_x_with_mana(card, &tmp) {
+                    tmp.x = x;
+                    if self.feed_completes(card, &tmp) {
                         return true;
                     }
                 }
             }
         }
         false
+    }
+
+    /// The least X above `item`'s whose total cost for spell `card` (on the stack as `item`) has mana, when the total
+    /// cost at `item`'s X has none and X may be that much (`Game::x_limit`); `None` otherwise (ENGINE.md 252.2).
+    pub(crate) fn first_x_with_mana(&self, card: CardIdx, item: &crate::game::StackItem) -> Option<u32> {
+        if !self.total_mana(card, item).is_zero() {
+            return None;
+        }
+        let limit = self.x_limit(card, item);
+        let mut tmp = item.clone();
+        while (tmp.x as u64) < limit {
+            tmp.x += 1;
+            assert!(tmp.x - item.x <= FEED_X_SCAN, "no X up to {} gives {} a total cost with mana", tmp.x, self.name(card));
+            if !self.total_mana(card, &tmp).is_zero() {
+                return Some(tmp.x);
+            }
+        }
+        None
     }
 
     /// `feed_castable`'s question of a spell being cast (ENGINE.md 247.3): can the payment of spell `card`, on the stack
@@ -1150,13 +1252,12 @@ impl Game {
     /// there while its alternative cost is chosen) with alternative cost `alt`, additional cost option `option`,
     /// modes `modes`, emerge's permanent `noted` and its least X; its 601.2g step searched.
     #[allow(clippy::too_many_arguments)]
-    fn feed_search(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, alt: u8, option: u8, modes: &[u8], noted: &[crate::ids::ObjRef]) -> bool {
+    fn feed_search(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, alt: u8, option: u8, modes: &[u8], noted: &[crate::ids::ObjRef], x: u32) -> (bool, bool) {
         let mut g = self.clone();
         g.pending = None;
         g.answer = None;
         g.page = None;
         let def = self.def_of(card);
-        let x = def.x_min as u32;
         let granter = (alt as usize > def.alt_costs.len()).then(|| self.granted_alts(card)[alt as usize - 1 - def.alt_costs.len()].0);
         let id = match g.stack.iter().position(|s| s.kind == StackKind::Spell { card }) {
             Some(pos) => {
@@ -1198,9 +1299,10 @@ impl Game {
         if let Some(gr) = granter {
             g.note_granted_alt(card, gr);
         }
+        let zero = g.item_index(id).is_some_and(|pos| g.total_mana(card, &g.stack[pos]).is_zero());
         let floor = g.agenda.len();
         g.agenda.push(Task::CastMana { id, card: None, again: false, after: 0, sac: None });
-        g.payment_completes(floor, p)
+        (g.payment_completes(floor, p), zero)
     }
 }
 
