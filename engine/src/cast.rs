@@ -1026,7 +1026,7 @@ impl Game {
         // 100.4.8).
         // (Or with mana abilities activated while it is cast that feed its graveyard cost, CR 601.2g: the 601.2g
         // step searched with that X, as castability searches it with the least, `feed_completes`; ENGINE.md 249.2.)
-        // (The additional cost option is announced after X: with some option, `feed_completes_ahead`, 252.4.)
+        // (The additional cost option is announced after X: with some option, `feed_completes_ahead`, 254.4.)
         let pays = |x: u64| {
             let mut tmp = item.clone();
             tmp.x = x as u32;
@@ -1071,7 +1071,7 @@ impl Game {
             let limit = self.x_limit(card, item);
             // The least X (CR 107.3, 601.2b, 601.2g): 0 - or, when the cast can't be paid at X = 0 and its total cost
             // there has no mana (so no 601.2g step and no feeding ability), the least X whose total cost has some:
-            // the X castability counted (`feed_castable`, ENGINE.md 252.2). X = 0 is then no option.
+            // the X castability counted (`feed_castable`, ENGINE.md 254.2). X = 0 is then no option.
             let mut lo = 0u64;
             if !pays(0) {
                 if let Some(x) = self.first_x_with_mana(card, item).filter(|&x| pays(x as u64)) {
@@ -2071,7 +2071,7 @@ impl Game {
             }
             g.escalated_payable(card, item, n.saturating_sub(1)) || {
                 // (Or with the 601.2g step's feeding abilities, `n` modes announced - which ones changes no cost:
-                // the discards are one a mode beyond the first, CR 702.120a; ENGINE.md 252.3.)
+                // the discards are one a mode beyond the first, CR 702.120a; ENGINE.md 254.3.)
                 let mut tmp = item.clone();
                 tmp.modes.resize(n.max(tmp.modes.len()), 0);
                 n >= item.modes.len() && g.feed_completes_ahead(card, &tmp, true)
@@ -2091,7 +2091,7 @@ impl Game {
                     *a = *a
                         && (self.can_pay_spell(card, item, &cost) || {
                             // (Or with the 601.2g step's feeding abilities, the mode announced and some value of
-                            // each announcement still to come; ENGINE.md 249.2, 252.4.)
+                            // each announcement still to come; ENGINE.md 249.2, 254.4.)
                             let mut tmp = item.clone();
                             tmp.modes.push(k as u8);
                             self.feed_completes_ahead(card, &tmp, true)
@@ -2361,7 +2361,7 @@ impl Game {
             let cost = self.announced_cost(card, &self.stack[pos], &more);
             self.can_pay_spell(card, &self.stack[pos], &cost) || {
                 // (Or with the 601.2g step's feeding abilities, the times announced - kicker {X}'s least X with them
-                // - and some value of each announcement still to come; ENGINE.md 249.2, 252.4.)
+                // - and some value of each announcement still to come; ENGINE.md 249.2, 254.4.)
                 let mut tmp = self.stack[pos].clone();
                 tmp.times = u32::try_from(n).unwrap_or(u32::MAX);
                 if tc.x {

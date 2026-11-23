@@ -47,7 +47,7 @@ pub(crate) fn subsets(v: &[CardIdx], k: usize) -> Vec<Vec<CardIdx>> {
 }
 
 /// The most values of X castability looks through for the least X whose total cost has mana (`feed_castable`,
-/// `Game::first_x_with_mana`; ENGINE.md 252.2): each X is one more generic mana an {X}, so the scan ends as soon as X
+/// `Game::first_x_with_mana`; ENGINE.md 254.2): each X is one more generic mana an {X}, so the scan ends as soon as X
 /// passes what the cost's reductions take off - a count of objects. Past this it fails loudly.
 const FEED_X_SCAN: u32 = 4096;
 
@@ -266,7 +266,7 @@ impl Game {
         }
         // (In the payment search: an ability that removes its own permanent when the spell's cost sacrifices
         // permanents and, without this one, has too few - a dead end before any of the ability's own cost is chosen,
-        // ENGINE.md 252.1.)
+        // ENGINE.md 254.1.)
         if self.oracle && self.takes_the_costs_sacrifice(id, p, c, slot) {
             self.oracle_dead = true;
             return;
@@ -401,7 +401,7 @@ impl Game {
     }
 
     /// Would activating mana ability `slot` of permanent `c` in spell `id`'s 601.2g step leave the spell's cost fewer
-    /// permanents than its "sacrifice n <permanents>" needs (ENGINE.md 252.1)? The ability's cost removes `c` itself
+    /// permanents than its "sacrifice n <permanents>" needs (ENGINE.md 254.1)? The ability's cost removes `c` itself
     /// (a sacrifice or exile of its source, Rain of Filth's granted slot), `c` is one the spell's cost may sacrifice,
     /// and the others are fewer than n. No mana ability puts a permanent onto the battlefield (a mana ability's
     /// effect adds mana, CR 605.1a; the IR's `ManaDef` has no such part), so from then on the payment can't be
@@ -1087,7 +1087,7 @@ impl Game {
         }
         // X (CR 601.2b, 107.3): its least; and, when the total cost at the least X has no mana - no 601.2g step then
         // ("if the total cost includes a mana payment"), so no feeding ability - the least X whose total cost has
-        // some, if X may be that much (ENGINE.md 252.2: Walking Ballista escaped at X = 1 with a Chromatic Star the
+        // some, if X may be that much (ENGINE.md 254.2: Walking Ballista escaped at X = 1 with a Chromatic Star the
         // third graveyard card). A larger X only costs more, so no other X can complete where these don't.
         let x_min = def.x_min as u32;
         let cap = self.feed_x_cap(p, card, from, alt);
@@ -1134,7 +1134,7 @@ impl Game {
         u32::MAX as u64
     }
 
-    /// `feed_completes` for a decision of the cast asked before its later announcements (ENGINE.md 252.2-252.4; the
+    /// `feed_completes` for a decision of the cast asked before its later announcements (ENGINE.md 254.2-254.4; the
     /// order is alternative cost, modes, times, X, additional cost option: `begin_cast`): can the payment be
     /// completed through the 601.2g step's feeding abilities with `item` as announced so far and **some** value of
     /// each announcement still to come? The additional cost option: each the cast may choose (`cast_option`'s). X,
@@ -1177,7 +1177,7 @@ impl Game {
     }
 
     /// The least X above `item`'s whose total cost for spell `card` (on the stack as `item`) has mana, when the total
-    /// cost at `item`'s X has none and X may be that much (`Game::x_limit`); `None` otherwise (ENGINE.md 252.2).
+    /// cost at `item`'s X has none and X may be that much (`Game::x_limit`); `None` otherwise (ENGINE.md 254.2).
     pub(crate) fn first_x_with_mana(&self, card: CardIdx, item: &crate::game::StackItem) -> Option<u32> {
         if !self.total_mana(card, item).is_zero() {
             return None;
@@ -1446,7 +1446,7 @@ mod tests {
         assert!(!at_step(&["Tolarian Academy", "Chromatic Star"]), "the Star may leave: the Academy's count changes");
     }
 
-    /// ENGINE.md 252.5: no supported card has a mana ability whose cost returns a permanent to its owner's hand (the
+    /// ENGINE.md 254.5: no supported card has a mana ability whose cost returns a permanent to its owner's hand (the
     /// lowering refuses one), in any pool - so the payment search's "its own mana ability first, then taken by the
     /// feeding ability's cost" (249.1) has the sacrifice alone to serve, and `mana_now_costs` asserts it.
     #[test]

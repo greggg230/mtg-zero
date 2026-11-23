@@ -1481,7 +1481,7 @@ thread_local! {
     static SEARCH_COPIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// A test hook (ENGINE.md 252.1; per thread): the copies of the game the payment searches made on this thread since
+/// A test hook (ENGINE.md 254.1; per thread): the copies of the game the payment searches made on this thread since
 /// the last call (every `payment_completes` search: castability's, the 601.2g step's options', a cost's order), and
 /// the count set back to 0 - what a test bounds a board's searches by, where the cap (`ORACLE_NODES`) only stops a
 /// single search of millions.

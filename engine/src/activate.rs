@@ -1724,7 +1724,7 @@ impl Game {
         let ad = self.src_ability(src.card, src.slot);
         // (No mana ability returns a permanent to its owner's hand as a cost: the lowering refuses one,
         // `lower/activated.rs` "ManaAbility.cost(counters, crew, exile or bounce)" - so the payment search's "its own
-        // mana ability first" below has the sacrifice alone to serve, ENGINE.md 252.5. Loud if that ever changes.)
+        // mana ability first" below has the sacrifice alone to serve, ENGINE.md 254.5. Loud if that ever changes.)
         assert!(ad.cost.bounce.is_none(), "a mana ability with a return cost: {}", self.name(src.card));
         if let Some(s) = &ad.cost.sacrifice {
             // (The payment search's "its mana ability first, then sacrificed" below: the permanent must still be one

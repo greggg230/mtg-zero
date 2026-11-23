@@ -95,12 +95,12 @@ fn payment_and_cost_stops_of_247_hidden_decklist_seeds() {
     }
 }
 
-/// ENGINE.md 252.1 (the fuzz steward's 988792dc2dde): hidden-decklist seed 100122141 ran 818 s under the `fuzz` profile
+/// ENGINE.md 254.1 (the fuzz steward's 988792dc2dde): hidden-decklist seed 100122141 ran 818 s under the `fuzz` profile
 /// on main 66288d93 and was reported as a hang at the farm's 300 s a seed - the 601.2g step's payment search of a
-/// Tinker whose only artifact was a Wizard's Rockets. A second or two since 247.1 and 252.1; every check of
+/// Tinker whose only artifact was a Wizard's Rockets. A second or two since 247.1 and 254.1; every check of
 /// `play_hidden`, the copies of all its payment searches bounded (79,096 in one search on main e687031c under the `fuzz` profile, whose debug checks play the world that casts Tinker; 22 in release).
 #[test]
-fn the_tinker_payment_search_of_252_hidden_decklist_seed_100122141() {
+fn the_tinker_payment_search_of_254_hidden_decklist_seed_100122141() {
     if pool_mode() != PoolMode::Default || !hidden_decks_mode() {
         return;
     }

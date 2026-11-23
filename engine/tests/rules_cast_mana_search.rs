@@ -389,7 +389,7 @@ fn cr_601_2g_601_2h_an_ability_that_takes_the_costs_only_sacrifice_is_refused_wi
     // (the fuzz steward's 988792dc2dde: hidden-decklist seed 100122141, 79,096 copies in one search on main e687031c;
     // before 247.1 each end also tried every combination of the Rockets' colors, minutes in all). An ability that
     // removes its own permanent when the cost's sacrifice has no other is a dead end before its cost is chosen
-    // (`takes_the_costs_sacrifice`, ENGINE.md 252.1): the whole cast, every option of every decision, stays small.
+    // (`takes_the_costs_sacrifice`, ENGINE.md 254.1): the whole cast, every option of every decision, stays small.
     let lands = ["Volcanic Island", "Underground Sea", "Tundra", "Tropical Island", "Steam Vents", "Watery Grave", "Hallowed Fountain", "Breeding Pool", "Island", "Seachrome Coast"];
     let mut b = vec!["Wizard's Rockets", "Birds of Paradise"];
     b.extend(lands);
