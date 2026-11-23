@@ -671,7 +671,7 @@ fn engine_223_doomsday_mirror_post_board_match_163_information_set() {
 /// 100,153,769 (ea73c6338e3f: Lim-Dul's Vault's random bottom order over a tutor's find group), 100,085,630
 /// (d4639eb826ec: a graveyard target's list slot after the loop rule withheld an option) and 100,096,300 and
 /// 100,237,234 (a3c8e29c2e3e: Tamiyo's +1 with a Blightsteel Colossus among the revealed cards). The payment entries
-/// of the same queue (467b098e2037, ddfc59e36d7e and f1eebdfda0a1's game 100,445,205): 251's test below.
+/// of the same queue (467b098e2037, ddfc59e36d7e and f1eebdfda0a1's game 100,445,205): 253's test below.
 #[test]
 fn info_set_walk_seeds_of_248() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
@@ -696,13 +696,13 @@ fn info_set_walk_seeds_of_248() {
     r.unwrap_or_else(|e| std::panic::resume_unwind(e));
 }
 
-/// ENGINE.md 251 (248.2's open entries of the fuzz steward's queue): a payment's `vm` and `min_class` are shown only to
+/// ENGINE.md 253 (248.2's open entries of the fuzz steward's queue): a payment's `vm` and `min_class` are shown only to
 /// the viewers of the payer's hand. Default-pool games 100,069,409 and 100,148,623 (ddfc59e36d7e: "determinize changed
 /// the view" of the player not paying - the world dealt the payer a Spirit Guide, `vm` `None` / `Some`) and 100,445,205
 /// (f1eebdfda0a1: "same keys, different views", `min_class` 4 / 3); hidden-decklist game 100,200,461 (467b098e2037: "a
 /// hidden-decklist world ...: the view"). Replayed at the `fuzz` profile's denominator (4) in every profile.
 #[test]
-fn a_payments_search_facts_are_the_payers_seeds_of_251() {
+fn a_payments_search_facts_are_the_payers_seeds_of_253() {
     use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     if pool_mode() != PoolMode::Default || sealed_mode() || hidden_decks_mode() {
         return;

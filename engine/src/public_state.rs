@@ -2430,7 +2430,7 @@ pub fn limits() -> Vec<Limit> {
     ]
 }
 
-/// The perturbations of a payment that reach only the viewers who see its payer's hand (ENGINE.md 251;
+/// The perturbations of a payment that reach only the viewers who see its payer's hand (ENGINE.md 253;
 /// `tail_v8::payer_seen`): what the payer's search of its own sources says, a function of the mana sources in its
 /// hand. The gate requires each to change those viewers' view and layout v8 row and neither of the other
 /// player's (`tests/az.rs`, `public_state_reaches_the_encoding`).

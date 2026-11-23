@@ -1618,7 +1618,7 @@ fn public_state_reaches_the_encoding() {
     // from the other player: such a perturbation must change its owner's view and encoding and
     // neither of the other player's.
     let (mut hidden_ok, mut leaks) = (0, Vec::new());
-    // What a payment's search of its payer's sources says (`PAYER_ONLY`, ENGINE.md 251) reads the payer's hand:
+    // What a payment's search of its payer's sources says (`PAYER_ONLY`, ENGINE.md 253) reads the payer's hand:
     // such a perturbation must change the view and the row of the viewers who see that hand, and neither of the
     // other player's.
     let (mut payer_ok, mut payer_leaks) = (0, Vec::new());
@@ -1786,7 +1786,7 @@ fn public_state_reaches_the_encoding() {
     println!("hidden decklists: {hidden_ok} perturbations of fields they hide reached only their owner");
     assert!(leaks.is_empty(), "hidden decklists: {} perturbations of hidden fields reached the other player:\n{}", leaks.len(), leaks.join("\n"));
     assert!(hidden_ok > 0, "hidden decklists: no perturbation of a field they hide applied");
-    println!("payments: {payer_ok} perturbations of what the payer's search says reached only the viewers of its hand (ENGINE.md 251)");
+    println!("payments: {payer_ok} perturbations of what the payer's search says reached only the viewers of its hand (ENGINE.md 253)");
     assert!(payer_leaks.is_empty(), "payments: {} perturbations of the payer's own facts reached the wrong viewers:\n{}", payer_leaks.len(), payer_leaks.join("\n"));
     assert!(payer_ok > 0, "payments: no perturbation of the payer's own facts applied");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));

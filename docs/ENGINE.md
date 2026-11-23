@@ -45249,7 +45249,7 @@ Phyrexian life, the cost, `vm`, the flags, the class, the life after, a forced s
 last known information (mana value, copiable values, power, toughness, deathtouch, a +1/+1 counter, attached, a spell's
 X, a spell's item recorded), 4 of find groups (a group made, one more find, ended, one more place). Every one changes
 both views and both v8 rows - but the two of what the payer's search of its own sources says (`vm`, the class), which
-since 251 reach only the viewers of the payer's hand (`public_state::PAYER_ONLY`) -; on layout v7 all but "a payment's cost has one more generic mana" (the context's cost floats
+since 253 reach only the viewers of the payer's hand (`public_state::PAYER_ONLY`) -; on layout v7 all but "a payment's cost has one more generic mana" (the context's cost floats
 show the innermost payment's) leave the row as it was - a new known gap scoped to layout v7, "layout v7 lacks layout
 v8's facts", checked alone by the single pass (layout v6's entry for v7's facts lists them too).
 
@@ -47418,13 +47418,112 @@ and `::test_judge_records_is_a_boolean_of_the_recipe`.
 **To turn it on in a live stew.** At a pause before a judge phase: move the stew's worktree to a commit with this section
 and set `"records": true` in the stew's stew.json `recipe.judge`. Disk: a few MB a generation.
 
-## 251. A payment's search of its payer's sources is the payer's own: `vm`, the class, and the options it leaves, blank for the other player (248.2's open entries; branch `fix/payer-seen-1123`, 2026-11-23)
+## 251. The stew's stall rule: a specialist with no significant gain over its last turns sits out, an overrideable recommendation (`recipe.stall`, `tools/stew.py specialist`; 2026-11-23)
+
+**Why** (the user, 2026-11-23, after the first stew's generation 0: Delver-Doomsday +104 and Delver-Sneak +156 Elo in
+their first turn, the Delver mirror -24 +- 22): every specialist trained a fixed 32 iterations every generation and the
+stew never stopped - nothing measured whether a specialist had plateaued or what another turn was worth. The user's
+rule: "an overrideable recommendation from an algorithm: if we see no statistical gain in Elo over ~40 iterations, mark
+it as stalled, but I want to be able to manually specify that we should unpause it if we see other metrics that are
+improving". Turns are the judging grain, so the window is 2 turns (64 iterations, the nearest to 40); a stalled
+specialist sits out on its own (the user's choice) and the override brings it back.
+
+**The test** (each `judge_deck_gap@g`, for each specialist that trained in round g): its new version against its version
+`window` TRAINED turns before (a round it sat out is not a turn), paired (both seats on common deals), `matches` matches
+(`W.<a>-<b>.0`, its own deals: `seed_of('stew-window', ...)`); while the score is above 1/2 but its one-sided z = (score -
+1/2) / se is below `z`, another part of `matches` (`.1`, `.2`, ...) up to `max_matches` (sequential: a clear result costs
+one part, an ambiguous one is resolved before it decides). The decision: **stalled** when z < `z` (no significant gain;
+z capped at +-99 when every pair scored alike - JSON has no infinity), else improving. Stored per specialist in
+state.json (`nets.<spec>.stall`, the history in `stall_log`) and shown in the report ("Specialists: the stall rule": mode,
+versions tested, score, Elo, z, matches, recommendation, whether it trains next round) and in `status`.
+
+**What happens to a stalled specialist** (mode `auto`, the default): at the next train phase it sits out - its version
+g + 1 is version g (`skipped`), its deck stews distil from its last turn's rows again (`rows/<gen>` reused, recorded as
+`reused_from`), no gen-over-gen or stall test of it (nothing changed); its other judge jobs still run - a job identical
+to one judged in an earlier round (same nets, deals and spec: the same hash, e.g. arm B of a specialist that sat out)
+takes that result instead of replaying it (`reuse_judged`). A specialist that is not tested (fewer than `window` trained
+turns) keeps training. If no specialist would train in a round, the stew writes its PAUSE and stops ("the stall rule: no
+specialist trains").
+
+**The override**: `python tools/stew.py specialist DIR 'A|B' --train | --stall | --auto` (deck names, aliases or
+`spec:A|B`): `--train` (mode `on`) trains it every round whatever the rule says (its test still runs and is reported),
+`--stall` (mode `off`) sits it out, `--auto` hands it back to the rule. Applied at once when no run of the stew is live,
+else written to `requests/` and taken at the run's next train phase; every change logged in state.json `overrides`.
+
+**Config**: `recipe.stall` = `{"window": 2, "matches": 200, "max_matches": 600, "z": 1.645}` (the default; `null`: no
+test, every specialist trains every round). The first stew sets it in its stew.json at the re-pin that brings this.
+
+**Tests** (`tests/test_stew.py`, on the fakes): a round-0 test (window 1) where one specialist's new version only splits
+pairs (stalled), one wins every pair (improving at the first part), one alternates 1 / 0.5 (extended once, then
+improving); generation 1 - the stalled one sits out (v2 = v1, rows reused, no G or W job, arm A still judged), the
+window of the others their last two trained versions; the override on / auto / off by name, alias or net name, refused
+for an unknown pairing; the override while a run is live (a request file the run takes); every specialist off pauses the
+stew before any turn; the config's refusals and `null`.
+
+## 252. zero-core pin c6b4e9d -> a39a8c1: the pool's rolling check of a torch alternate, no rows made for a finished game in the torch worker, one CUDA graph capture at a time (zero-core `fix/torch-worker-1123`, docs/az.md 81, docs/search.md 2.22; 2026-11-23)
+
+**Why.** Three problems of the first live runs played through the farm by the torch worker of section 244 (a test run,
+then the first stew's specialists). zero-core's docs/az.md 81 has the measurements; this section says what the pin
+brings here. No setting is added, and no run or stew is moved by this commit.
+
+**What changes here.** Only the pin (the torch worker build ships the pinned core's `python/zero/`, section 244.2, so
+the release of this commit carries the fixes to the machines that play through torch).
+
+* **The pool's rolling check runs a torch alternate from its runtime pack** (az.md 81.1; `zero/farm_pool.py`,
+  `zero/farm_h2h.py`). With `pool_rolling` set, the pool's first publish asks each alternate build whose executable is
+  on the machine for the feature `rolling` (`<exe> info`). A torch alternate's executable is `zf-pyshim.exe`, which
+  answers nothing without `ZEROFARM_RUNTIME_DIR` (exit 3); the pool took that for the alternate's own refusal, stopped,
+  and the run went on without the farm. Now the check gives the alternate its pack (the manifest's `requires_runtime`,
+  the pack's directory next to the worker builds) in the child's environment for that one call; a pack that is not on
+  the machine leaves the alternate unchecked (logged, as an alternate whose executable is not here) and the pool goes
+  on. A torch worker that answers without `rolling`, or fails for another reason, is refused as before. A native
+  alternate with a pack that is here (CUDA, DirectML) is now asked with the variable set too, as on a farm PC.
+* **The torch worker makes no rows for a finished game** (az.md 81.2, docs/search.md 2.22; zero-core `crates/search`
+  and `crates/py`: `Driver::set_sample_rows`, the binding's `SearchDriver.set_sample_rows(False)`;
+  `zero/farm_torch_worker.py`). A finished game's samples were unpacked dense and copied into one array of which the
+  worker read `net` alone (one best-of-three: 67 to 241 MB, 25 to 116 ms on the thread that drives the search). The
+  worker now asks for none: the same result rows and record texts, so the rows the pool driver replays are unchanged.
+  **Rows are on by default** - the trainer, the Python remote worker, the native worker and every digest never call it.
+  The ~8 MB per game in flight that remains is the driver's own state (measured there on the CPU at 64 games; the
+  worker at its full size on a GPU is not measured).
+* **One CUDA graph capture at a time** (az.md 81.3; `zero/infer.py` `CAPTURE_MU`, a process-wide lock around the
+  `torch.cuda.graph` block of both graph runners). A rolling job builds and self-tests the next generation's evaluator
+  on its own thread while the games go on; in a lease's first seconds both threads capture, on the one stream every
+  capture of a process shares, and CUDA invalidated the capture (the first torch lease died that way). With one
+  capturing thread - every run before the torch worker - nothing changes. **Not yet verified on a GPU**: the cause is
+  read from the traceback, the timing and torch's source, and the test stands in for torch.cuda (two runners on two
+  threads never capture at once; it fails without the lock). To check on a GPU: a rolling job sent a checkpoint within
+  its first seconds, repeatedly, with and without the lock.
+
+**The first stew's workaround can go.** The stew playing its specialists through the farm sets `ZEROFARM_RUNTIME_DIR`
+in its `recipe.env` so the pool's check of the torch alternate can answer (the first item above). Once that stew is
+re-pinned to a commit with this pin, the entry can be removed: the pool finds the pack itself. Until then it stays (it
+is harmless with the fix: the check sets the same variable for the call).
+
+**Tests** (zero-core's, run by the gate's core pytest and cargo steps): tests/test_farm_pool.py
+`test_rolling_check_runs_a_torch_alternate_from_its_runtime_pack`; tests/test_farm_torch_worker.py
+`test_the_worker_makes_no_sample_rows`, `test_a_driver_without_sample_rows_gives_the_same_records_and_no_rows`,
+`test_cuda_graph_captures_never_overlap`; the driver's `samples_without_rows_give_the_same_games_and_records` and
+`chain::contests_without_sample_rows_give_the_same_records`. Here: farm compat check 4 (the torch worker's records
+replay to the trainer's rows, section 244.4) runs the worker without its rows.
+
+**Gates.** optin-core on e25d0d16 (this pin and section on main e687031c; `--baseline-root` a warm worktree of main
+e687031c, its module from the artifact cache): **GATE PASSED WITH SKIPS AND FLAKY RETRIES optin-core e25d0d1689d0 in
+1336s** - checkpoint_compat byte identity vs main (3,554 samples), every digest = the recorded one (constructed, EoE,
+driver cab97c01912f7e3f, metagame, pair, dealt), farm compat identical (gates 2 and 3, the torch worker's check 4), the
+other games built, core tests 225 passed, core pytest in 6 shards; the skips: 17 live-run-hazard tests of the core,
+fenced (live runs on the desktop); the flaky retry: the core's
+`test_remoteplay.py::test_a_worker_slower_than_a_phase_is_capped_at_its_floor` (a timing floor, beside live runs; it
+passed alone, as at section 244's gate). Then merged with main 42f02b8a (the stew's stall rule took 251, Python only,
+no file in common but this one: this section renumbered 251 -> 252) and the python tier run on the merge.
+
+## 253. A payment's search of its payer's sources is the payer's own: `vm`, the class, and the options it leaves, blank for the other player (248.2's open entries; branch `fix/payer-seen-1123`, 2026-11-23)
 
 Branch from main e687031c. The number is provisional. The maintainer decided 248.2: the fuzz steward's entries
 467b098e2037, ddfc59e36d7e and f1eebdfda0a1's game 100445205 are fixed here. All four seeds still fail on main e687031c
 (replayed under the `fuzz` profile before the change) and pass with it.
 
-### 251.1 The change
+### 253.1 The change
 
 `tail_v8::payer_seen(g, viewer, pm)`: the payer, or the player deciding for it (CR 722.3). For any other viewer the
 `payment` segment's state token and `payment_view` leave blank what the payment's search of the payer's sources says:
@@ -47432,20 +47531,20 @@ Branch from main e687031c. The number is provisional. The maintainer decided 248
 * `PayMana::vm` (present, squashed, 32 bits) and `PayMana::min_class` (32 bits): 248.2's two;
 * the number of productions of the source the payer is asked about (`now`: `NOW_N` and its 16 bits; the view's hash of
   the list) and the number of sources the permanent it is asked about stands for (`which` / `card_slots`: `WHICH_N` and
-  its 16 bits; the view's hash): 251.3's two, the same kind.
+  its 16 bits; the view's hash): 253.3's two, the same kind.
 
 The source and the permanent asked about, the picks, the cost, the flags, the lives and the pools are public and shown
 to both as before. **No width, offset, segment or token count changes**: layout v8 stays v8, a checkpoint loads as it
-did (251.5), and the payer's own rows - every row with options - are bit for bit as before. **Layout v7** (`mtg_v7`)
+did (253.5), and the payer's own rows - every row with options - are bit for bit as before. **Layout v7** (`mtg_v7`)
 never held any of it: its row has no `payment` segment (the gate's "v7 known gap" lines for both perturbations, as
 before), so the compatibility game neither leaked these nor changes.
 
 **Who saw the leak.** 248.2 left open how far it reached a network. It did reach one: a run with value-only samples
 (`selfplay_view_samples`, 0.5 in the stew's runs) encodes the row of the player **not** deciding at a share of the
 other player's decisions, payments included, and trains the value head on it; and the format digests hash "the other
-player's encoding" in their worlds, which is where 251.4's digests move.
+player's encoding" in their worlds, which is where 253.4's digests move.
 
-### 251.2 The gate's contract (236.4 amended)
+### 253.2 The gate's contract (236.4 amended)
 
 236.4 said of its 35 perturbations "every one changes both views and both v8 rows". Two of them now reach only the
 viewers of the payer's hand: "a payment spends one more mana of its pool" and "a payment's last pick was of a later
@@ -47455,14 +47554,14 @@ perturbation is listed as a leak ("payments: 58 perturbations of what the payer'
 viewers of its hand", 29 positions each). The counts are otherwise 236.4's: 266 perturbations encoded, 2 deliberate
 limits, 0 known gaps; hidden decklists 120; the pairwise pass 151,118 states and 72,856 pairs under the known gaps,
 unchanged (a perturbation that leaves a viewer's view alone is no collision for that viewer). No perturbation changes
-only `now`'s or `card_slots`' lists, so 251.3's two fields need no entry.
+only `now`'s or `card_slots`' lists, so 253.3's two fields need no entry.
 
-### 251.3 The same class, looked for once
+### 253.3 The same class, looked for once
 
 Read: every field of `state_fields` / `payment_view` and of the 601.2g step's token, and `view_state`'s decision part,
 for values computed from the decider's sources rather than from what was done in public.
 
-* **Found and blanked (251.1)**: `now`'s productions are `feasible_prods` - those "that leave the rest payable by the
+* **Found and blanked (253.1)**: `now`'s productions are `feasible_prods` - those "that leave the rest payable by the
   sources of the classes from `ci` on", the hand's included - and `card_slots` holds only the sources whose pick leaves
   the payment payable (`ok_of`). Both are the payer's options, which no view shows another player anywhere else
   (`view_of` lists a decision's options to its decider only). By reading the code; no seed or scenario showed either
@@ -47477,16 +47576,16 @@ for values computed from the decider's sources rather than from what was done in
 * `view_state`: the decision's options are the decider's only; its kind goes through `kind_seen_by` (160). Nothing else
   of the decider's hidden cards was found there.
 
-### 251.4 Tests and digests
+### 253.4 Tests and digests
 
 * `az::tail_v8::payer_seen_tests::a_payment_shows_its_search_of_the_payers_sources_only_to_viewers_of_the_payers_hand`
   (lib): P0 casts Lightning Greaves with {G} floating and an Ancient Tomb, holding a Simian Spirit Guide in one game and
   an Island in the other (the Guide in the library there: one information set for P1). `vm` differs (`Some` / `None`);
   P1's view and whole v8 row are equal, P0's views differ; with `vm` and the class set by hand the other player's token
   is blank and the payer's is not.
-* `tests/fuzz.rs` `a_payments_search_facts_are_the_payers_seeds_of_251`: default 100069409, 100148623, 100445205 and
+* `tests/fuzz.rs` `a_payments_search_facts_are_the_payers_seeds_of_253`: default 100069409, 100148623, 100445205 and
   hidden-decklist 100200461 at the `fuzz` profile's denominator.
-* `tests/az.rs`: 251.2.
+* `tests/az.rs`: 253.2.
 
 **Digests.** The cube's full 5a09242cf4f2cbab and encoding-free be0626d4b97cebae, EoE d754f4eef3c8adae, driver
 cab97c01912f7e3f and dealt cc0d138ac5c80402 are main's (they hash the decider's rows; no key or action changes). The
@@ -47494,11 +47593,11 @@ format digests that hash the other player's row in a world are re-recorded: **co
 68e6d9334d2fdfdf** (184 of 570 lines), **metagame 41f7580b3553e1c3 -> e2884dfcccf49ebe** (60 of 288), **pair
 b41f691fd2583bf3 -> 60e0d7de900cef7e** (24 of 70).
 
-### 251.5 What a live run sees at its next pin
+### 253.5 What a live run sees at its next pin
 
 A copy of the stew's main net (`gen_001`, layout v8; never the run's own file) on the CPU, with the stew's spec:
 
-* **It loads and plays**: the encoding gate's checkpoint-load step (251.6).
+* **It loads and plays**: the encoding gate's checkpoint-load step (253.6).
 * **How far its answers move**: 40 games of random play in the stew's metagame spec, every state with a payment in
   progress whose payer decides - 287 rows of the other player, each one altered by the change. The same row with the
   blanked fields put back (from the payer's own row, where they are the same numbers) against the row as it is now,
@@ -47509,7 +47608,7 @@ A copy of the stew's main net (`gen_001`, layout v8; never the run's own file) o
 A run re-pinned to this commit feeds its value head those rows for its value-only samples; its window still holds rows
 with the fields shown. No fork or widening is needed.
 
-### 251.6 Gates and the fresh-seed fuzz
+### 253.6 Gates and the fresh-seed fuzz
 
 On 08e0078b (in this branch's checkout; the pure-CPU steps on the Mac beside the live run, the rest on the desktop
 through the slot throttle):

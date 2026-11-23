@@ -409,7 +409,7 @@ fn pick_fields(cx: &Cx, x: &mut [f32], pm: &PayMana, s: &Src, rank: usize, prod:
     }
 }
 
-/// Does `viewer` see what payment `pm`'s payer sees of its own sources (ENGINE.md 248.2, 251): the payer, or the
+/// Does `viewer` see what payment `pm`'s payer sees of its own sources (ENGINE.md 248.2, 253): the payer, or the
 /// player deciding for it (CR 722.3)? What the payment's search of the payer's sources says reads the payer's
 /// hand, whose mana sources (a Spirit Guide) are classes too (`Game::payment_classes`): `PayMana::vm` and
 /// `PayMana::min_class`, and the options that search leaves the payer - the productions of the source it is asked
@@ -425,7 +425,7 @@ fn state_fields(cx: &Cx, s: &mut [f32], pm: &PayMana) {
     s[if pm.payer == cx.me { pm::PAYER_ME } else { pm::PAYER_OPP }] = 1.0;
     // (What the payer's search of its own sources says - how much of the virtual pool the payment spends, the
     // class of the last pick, how many productions or sources it leaves to choose from - reads the payer's hand.
-    // Only a viewer who sees that hand is shown them: `payer_seen`, ENGINE.md 251.)
+    // Only a viewer who sees that hand is shown them: `payer_seen`, ENGINE.md 253.)
     let sees = payer_seen(cx.g, cx.knower, pm);
     if let Some(v) = pm.vm.filter(|_| sees) {
         s[pm::VM] = 1.0;
@@ -1005,7 +1005,7 @@ pub(crate) fn find_groups_view(g: &Game, v: &mut Vec<u64>) {
 
 #[cfg(test)]
 mod payer_seen_tests {
-    //! ENGINE.md 251: what a payment's search of its payer's sources says is shown only to the viewers of the
+    //! ENGINE.md 253: what a payment's search of its payer's sources says is shown only to the viewers of the
     //! payer's hand.
     use super::*;
     use crate::az::tail_encode::Row;
@@ -1040,7 +1040,7 @@ mod payer_seen_tests {
         (g, pm.expect("the payment in progress"))
     }
 
-    /// The fuzz steward's queue entries 467b098e2037 and ddfc59e36d7e (ENGINE.md 248.2, 251): two games the other
+    /// The fuzz steward's queue entries 467b098e2037 and ddfc59e36d7e (ENGINE.md 248.2, 253): two games the other
     /// player cannot tell apart - the payer holds a Simian Spirit Guide in one and an Island in the other - give that
     /// player one view and one layout v8 row while the payment is in progress. With the Guide the {G} floating and
     /// the Guide's {R} pay the {2} (`vm` known); without it the Ancient Tomb, a several-mana source, must be picked

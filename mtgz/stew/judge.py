@@ -132,10 +132,45 @@ def gen_job(new, old, a, b, alias, jcfg, spec_fn, play, label, nets=None):
                 seed_of('stew-gen', jcfg['seed'], a, b), spec_fn(a, b, None), play, label, nets=nets)
 
 
-def plan_jobs(phase, st, g, jcfg, spec_fn, play, records=None):
-    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arms B and A; 'judge': arm M) of round `g`.
-    `records`: the directory of the jobs' game records (`recipe.judge.records`; None: none kept)."""
-    return with_records(_plan_jobs(phase, st, g, jcfg, spec_fn, play), records, g)
+def window_job(new, old, a, b, alias, scfg, seed, k, spec_fn, play, label, nets=None):
+    """Part `k` of a specialist's stall test (docs/ENGINE.md 251): its new version against its version `window`
+    trained turns before, paired (`scfg['matches']` matches); each part its own deals."""
+    return _job(f'W.{alias[a]}-{alias[b]}.{k}', 'gen', new, old, (a, b), None, 'paired', scfg['matches'],
+                seed_of('stew-window', seed, a, b, k), spec_fn(a, b, None), play, label, nets=nets)
+
+
+def trained_versions(st, sn):
+    """A specialist's versions where it trained (its first included; a round it sat out - `skipped` - is not a turn)."""
+    return [v for v in sorted(st.net(sn)['versions'], key=lambda v: v['gen']) if not v.get('skipped')]
+
+
+def window_base(st, sn, g, window):
+    """The stall test of round g's turn: (new version, base version) - the base `window` trained turns before the
+    new one - or None (the specialist sat round g out, or has not trained `window` turns yet)."""
+    tv = trained_versions(st, sn)
+    if not tv or tv[-1]['gen'] != g + 1 or len(tv) < window + 1:
+        return None
+    return tv[-1], tv[-1 - window]
+
+
+def plan_jobs(phase, st, g, jcfg, spec_fn, play, records=None, stall=None, parts=None):
+    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arms B and A, and the stall tests; 'judge': arm M)
+    of round `g`. `records`: the directory of the jobs' game records (`recipe.judge.records`; None: none kept).
+    `stall`: recipe.stall (None: no stall test); `parts`: {specialist: parts of its stall test} (default 1 each)."""
+    jobs = _plan_jobs(phase, st, g, jcfg, spec_fn, play)
+    if phase == 'judge_deck_gap' and stall is not None:
+        al = {d['name']: d['alias'] for d in st.decks()}
+        for a, b in C.pairings(st.decks(), st.candidates()):
+            sn = C.spec_name(a, b)
+            wb = window_base(st, sn, g, stall['window'])
+            if wb is None:
+                continue
+            new, old = wb
+            for k in range((parts or {}).get(sn, 1)):
+                jobs.append(window_job(st.abs(new['path']), st.abs(old['path']), a, b, al, stall, jcfg['seed'], k,
+                                       spec_fn, play, f"{sn} v{new['gen']} vs v{old['gen']} (stall test, part {k})",
+                                       nets=(f"{sn} v{new['gen']}", f"{sn} v{old['gen']}")))
+    return with_records(jobs, records, g)
 
 
 def _plan_jobs(phase, st, g, jcfg, spec_fn, play):
@@ -148,7 +183,8 @@ def _plan_jobs(phase, st, g, jcfg, spec_fn, play):
         new = st.ckpt(sn, g + 1)
         if phase == 'judge_deck_gap':
             old = st.version(sn, g)
-            if jcfg['gen_over_gen'] and old is not None:
+            sat_out = bool((st.version(sn, g + 1) or {}).get('skipped'))     # (the same net as v{g}: nothing to compare)
+            if jcfg['gen_over_gen'] and old is not None and not sat_out:
                 out.append(gen_job(new, st.abs(old['path']), a, b, al, jcfg, spec_fn, play,
                                    f'{sn} v{g + 1} vs v{g}', nets=(f'{sn} v{g + 1}', f'{sn} v{g}')))
             if a != b:
@@ -318,6 +354,26 @@ def gen_stats(res):
             'pentanomial': [sum(1 for x in ps if int(round(4 * x)) == k) for k in range(5)], 'clamped': c != m}
 
 
+def window_stats(res, al, a, b):
+    """A specialist's stall test over its parts present (W.<a>-<b>.0, .1, ... in order, up to the first missing) ->
+    gen_stats of their matches together + 'z' (the gain's one-sided z: (score - 1/2) / se) + 'parts', or None."""
+    rows, k = [], 0
+    while f'W.{al[a]}-{al[b]}.{k}' in res:
+        rows += res[f'W.{al[a]}-{al[b]}.{k}']['rows']
+        k += 1
+    if not k:
+        return None
+    s = gen_stats({'rows': rows})
+    if s is None:
+        return None
+    s['parts'] = k
+    if s['se'] > 0:
+        s['z'] = round((s['score'] - 0.5) / s['se'], 3)
+    else:                                   # (every pair the same score: no spread; JSON has no infinity)
+        s['z'], s['se_zero'] = (99.0 if s['score'] > 0.5 else -99.0 if s['score'] < 0.5 else 0.0), True
+    return s
+
+
 def field_rate(rates, sh, cand, decks):
     """sum_Y share(Y) P(C beats Y), se in quadrature -> {'p', 'se'} or None when a cell is missing."""
     p, v = 0.0, 0.0
@@ -352,6 +408,9 @@ def summarize(st, g, res, jobs_meta=None):
         gid = f'G.{al[a]}-{al[b]}'
         if gid in res:
             out['gen_over_gen'][C.spec_name(a, b)] = gen_stats(res[gid])
+        w = window_stats(res, al, a, b)
+        if w is not None:
+            out.setdefault('window', {})[C.spec_name(a, b)] = w
     rates = {k: {} for k in ARMS}
     for a, b in pairs:
         for x, y in ([(a, b), (b, a)] if a != b else [(a, a)]):
@@ -439,6 +498,18 @@ def report_md(rep):
             if s:
                 L.append(f"| {_c(k)} | {100 * s['score']:.1f}% +- {100 * s['se']:.1f} | {s['elo']:+.1f} +- {s['elo_se']:.1f} | "
                          f"{s['matches']} |")
+        L.append('')
+    st_rows = rep.get('stall') or {}
+    if st_rows:
+        L += ['## Specialists: the stall rule (docs/ENGINE.md 251)', '',
+              '| specialist | mode | test (new vs base) | score | Elo | z | matches | recommendation | next round |',
+              '|---|---|---|---|---|---|---|---|---|']
+        for k, s in st_rows.items():
+            t = s.get('test') or {}
+            L.append(f"| {_c(k)} | {s.get('mode')} | {t.get('versions', '')} | "
+                     + (f"{100 * t['score']:.1f}% +- {100 * t['se']:.1f} | {t['elo']:+.1f} +- {t['elo_se']:.1f} | "
+                        f"{t['z']:+.2f} | {t['matches']} | " if t.get('score') is not None else '|  |  |  | ')
+                     + f"{s.get('recommendation', '')} | {'trains' if s.get('trains') else 'sits out'} |")
         L.append('')
     if j.get('cells'):
         L += ['## Cells (X|Y: the net piloting X against the specialist piloting Y)', '',

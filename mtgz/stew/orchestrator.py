@@ -460,12 +460,94 @@ class Stew:
         return getattr(self, 'phase_' + ph)(g)
 
     # ---------------------------------------------------------------- 1. train
+    # ---------------------------------------------------------------- the stall rule (docs/ENGINE.md 251)
+    def train_mode(self, sn):
+        """'auto' (the stall rule decides; the default), 'on' (trains whatever the rule says), 'off' (sits out)."""
+        return self.st.net(sn).get('train', 'auto')
+
+    def stall_of(self, sn):
+        """The specialist's latest stall test decision (state.json nets.<sn>.stall) or None."""
+        return self.st.net(sn).get('stall')
+
+    def trains(self, sn):
+        """Does the specialist get its turn: its override, else (auto) not while the stall rule says stalled."""
+        m = self.train_mode(sn)
+        if m in ('on', 'off'):
+            return m == 'on'
+        return not (self.cfg['recipe'].get('stall') is not None and (self.stall_of(sn) or {}).get('stalled'))
+
+    def sit_out(self, sn, g, why):
+        """Round g without a turn: version g + 1 = version g (marked `skipped`), its deck stews' rows reused."""
+        st = self.st
+        v = st.version(sn, g)
+        st.add_version(sn, {'gen': g + 1, 'iter': v['iter'], 'path': v['path'], 'sha256': v['sha256'], 'time': now(),
+                            'parents': [f'{sn}@{g}'], 'skipped': why})
+        st.save()
+        self.say(f'{sn}: sits out generation {g} ({why}); version {g + 1} = version {g}')
+
+    def set_train_mode(self, pair, mode):
+        """`tools/stew.py specialist DIR PAIR --train|--stall|--auto`: the override, applied now - or, while a run of
+        the stew is live, as a file in requests/ that the run takes at its next train phase -> the specialist's name."""
+        if mode not in ('on', 'off', 'auto'):
+            raise Refused(f'specialist: mode {mode!r} (on / off / auto)')
+        sn = self.specialist_named(pair)
+        req = {'op': 'specialist', 'spec': sn, 'mode': mode, 'asked': now()}
+        if self.lock_holder() is not None:
+            jsave(self.p('requests', f"specialist-{int(time.time() * 1000)}.json"), req)
+            self.say(f'{sn}: train mode {mode} requested (the live run takes it at its next train phase)')
+        else:
+            self.apply_train_mode(req)
+        return sn
+
+    def apply_train_mode(self, req):
+        st = self.st
+        n = st.net(req['spec'])
+        old = n.get('train', 'auto')
+        n['train'] = req['mode']
+        st.d.setdefault('overrides', []).append(dict(req, old=old, applied=now(), round=st.d['round']))
+        st.save()
+        self.say(f"{req['spec']}: train mode {old} -> {req['mode']}")
+
+    def specialist_named(self, pair):
+        """A specialist by 'A|B' / 'B|A' (deck names or aliases) or its net name 'spec:A|B'."""
+        al = {d['alias']: d['name'] for d in self.st.decks()}
+        txt = pair[5:] if pair.startswith('spec:') else pair
+        parts = [al.get(x, x) for x in txt.split('|')]
+        for a, b, sn in self._pairs_named():
+            if len(parts) == 2 and sorted(parts) == sorted([a, b]):
+                return sn
+        raise Refused(f"specialist {pair!r}: one of {[f'{a}|{b}' for a, b, _ in self._pairs_named()]} (or aliases)")
+
+    def stall_summary(self, g):
+        """Per specialist: mode, the latest test, the recommendation and whether it trains next round (the report)."""
+        out = {}
+        if self.cfg['recipe'].get('stall') is None:
+            return out
+        for _, _, sn in self._pairs_named():
+            s = self.stall_of(sn) or {}
+            rec = ('stalled' if s.get('stalled') else 'improving') if s else 'not tested yet'
+            out[sn] = {'mode': self.train_mode(sn), 'test': s or None, 'recommendation': rec, 'trains': self.trains(sn)}
+        return out
+
+    # ---------------------------------------------------------------- 1. train
     def phase_train(self, g):
         out = {}
-        for a, b, sn in self.specialists(g):
+        sp = self.specialists(g)
+        if not any(self.st.version(sn, g + 1) is not None or self.trains(sn) for _, _, sn in sp):
+            jsave(self.p('PAUSE'), {'time': time.time(), 'by': 'the stall rule: no specialist trains',
+                                    'tag': self.st.tag()})
+            raise Halt(f'generation {g}: every specialist is stalled or off (tools/stew.py specialist ... --train to '
+                       f'go on); the stew paused itself')
+        for a, b, sn in sp:
             if self.st.version(sn, g + 1) is None:
-                self.turn(sn, g)
-            out[sn] = self.st.version(sn, g + 1).get('train')
+                if self.trains(sn):
+                    self.turn(sn, g)
+                else:
+                    m = self.train_mode(sn)
+                    self.sit_out(sn, g, 'off (override)' if m == 'off' else
+                                 f"stalled: {(self.stall_of(sn) or {}).get('versions', '')}")
+            v = self.st.version(sn, g + 1)
+            out[sn] = v.get('train') or {'skipped': v.get('skipped')}
         return out
 
     def farm_gate(self, sn, run):
@@ -597,6 +679,15 @@ class Stew:
         out = {}
         for a, b, sn in self.specialists(g):
             k = C.pair_key(a, b)
+            if k not in rec and st.version(sn, g + 1).get('skipped'):
+                for r in range(g - 1, -1, -1):
+                    old = (st.d['rows'].get(str(r)) or {}).get(k)
+                    if old and all(os.path.isdir(st.abs(d)) for d in old['dirs']):
+                        rec[k] = dict(old, reused_from=r)
+                        st.save()
+                        break
+                else:
+                    raise Refused(f"{sn}: sat out generation {g} and no earlier turn's rows are left to distil from")
             if k not in rec or not all(os.path.isdir(st.abs(d)) for d in rec[k]['dirs']):
                 run = st.abs(st.net(sn)['run'])
                 lo, hi = st.version(sn, g)['iter'], st.version(sn, g + 1)['iter']
@@ -675,8 +766,83 @@ class Stew:
 
     def judge_phase(self, phase, g):
         jcfg = self.cfg['recipe']['judge']
+        stall = self.cfg['recipe'].get('stall') if phase == 'judge_deck_gap' else None
+        parts = self.st.d.setdefault('stall_parts', {}).setdefault(str(g), {}) if stall is not None else None
+        while True:
+            out = self._judge_once(phase, g, jcfg, stall, parts)
+            if stall is None:
+                return out
+            more = self.extend_stall_tests(g, stall, parts)
+            if not more:
+                self.decide_stall(g, stall)
+                self.write_report(g)
+                return out
+            self.st.save()
+            self.say(f'{phase}@{g}: stall test extended: '
+                     + ', '.join(f"{k} -> {parts[k] * stall['matches']} matches" for k in more))
+
+    def judge_results(self, g):
+        res = {}
+        jd = self.judge_dir(g)
+        if os.path.isdir(jd):
+            for f in os.listdir(jd):
+                if f.endswith('.json') and not f.endswith('.job.json'):
+                    r = jload(os.path.join(jd, f))
+                    if isinstance(r, dict) and 'rows' in r:
+                        res[r['id']] = r
+        return res
+
+    def extend_stall_tests(self, g, stall, parts):
+        """The specialists whose stall test is positive but not significant yet, below max_matches: one more part each."""
+        w = J.summarize(self.st, g, self.judge_results(g)).get('window') or {}
+        more = []
+        for sn, s in w.items():
+            k = parts.get(sn, 1)
+            if s['score'] > 0.5 and s['z'] < stall['z'] and (k + 1) * stall['matches'] <= stall['max_matches']:
+                parts[sn] = k + 1
+                more.append(sn)
+        return more
+
+    def decide_stall(self, g, stall):
+        """Round g's stall decisions (each tested specialist): stalled = its gain is not significant at z."""
+        st = self.st
+        w = J.summarize(st, g, self.judge_results(g)).get('window') or {}
+        for sn, s in w.items():
+            new, old = J.window_base(st, sn, g, stall['window'])
+            d = {'round': g, 'versions': f"v{new['gen']} vs v{old['gen']}", 'iters': [old['iter'], new['iter']],
+                 'score': s['score'], 'se': s['se'], 'elo': s['elo'], 'elo_se': s['elo_se'], 'z': s['z'],
+                 'matches': s['matches'], 'stalled': not s['z'] >= stall['z'], 'time': now()}
+            n = st.net(sn)
+            was = (n.get('stall') or {}).get('stalled')
+            n['stall'] = d
+            n.setdefault('stall_log', []).append(d)
+            if d['stalled'] != bool(was):
+                self.say(f"{sn}: the stall rule says {'STALLED' if d['stalled'] else 'improving'} ({d['versions']}: "
+                         f"{d['elo']:+.1f} +- {d['elo_se']:.1f} Elo, z {d['z']:+.2f}, {d['matches']} matches)"
+                         + (f"; its override '{self.train_mode(sn)}' stands" if self.train_mode(sn) != 'auto' else ''))
+        st.save()
+
+    def reuse_judged(self, jobs, g):
+        """A job identical to one judged in an earlier round (same nets, deals, spec: the same hash - e.g. arm B of a
+        specialist that sat out) takes that result instead of replaying it."""
+        jd = self.judge_dir(g)
+        n = 0
+        for j in jobs:
+            out = os.path.join(jd, j['id'] + '.json')
+            if J.valid_result(j, jload(out)):
+                continue
+            for r in range(g - 1, -1, -1):
+                prev = jload(os.path.join(self.judge_dir(r), j['id'] + '.json'))
+                if J.valid_result(j, prev):
+                    os.makedirs(jd, exist_ok=True)
+                    jsave(out, dict(prev, reused_from=r))
+                    n += 1
+                    break
+        return n
+
+    def _judge_once(self, phase, g, jcfg, stall, parts):
         jobs = J.plan_jobs(phase, self.st, g, jcfg, self.pair_spec_json, self.judge_play(),
-                           records=self.p('judge', 'records') if jcfg['records'] else None)
+                           records=self.p('judge', 'records') if jcfg['records'] else None, stall=stall, parts=parts)
         if not jobs:
             if phase == 'judge' and not jcfg['main_arms']:
                 self.write_report(g)
@@ -684,6 +850,9 @@ class Stew:
             raise Refused(f'{phase}@{g}: no judge job (nothing to measure)')
         if self.stop_requested():
             raise Halt(f'STOP / PAUSE before {phase}@{g}')
+        reused = self.reuse_judged(jobs, g)
+        if reused:
+            self.say(f"{phase}@{g}: {reused} job(s) identical to an earlier round's: their results reused")
         self.check_supervisors()
         self.yield_machine()
         from .control import Interrupted
@@ -782,7 +951,9 @@ class Stew:
         for f in sorted(os.listdir(d)):
             if f.endswith('.json'):
                 req = jload(os.path.join(d, f))
-                if req and not any(p['name'] == req['name'] for p in self.st.d['pending']):
+                if req and req.get('op') == 'specialist':
+                    self.apply_train_mode(req)
+                elif req and not any(p['name'] == req['name'] for p in self.st.d['pending']):
                     self.st.d['pending'].append(req)
                 self.st.save()
                 os.replace(os.path.join(d, f), os.path.join(d, f + '.taken'))
@@ -865,23 +1036,19 @@ class Stew:
     # ---------------------------------------------------------------- reports
     def write_report(self, g):
         st = self.st
-        res = {}
-        jd = self.judge_dir(g)
-        if os.path.isdir(jd):
-            for f in os.listdir(jd):
-                if f.endswith('.json') and not f.endswith('.job.json'):
-                    r = jload(os.path.join(jd, f))
-                    if isinstance(r, dict) and 'rows' in r:
-                        res[r['id']] = r
+        res = self.judge_results(g)
         rep = {'name': self.cfg['name'], 'round': g, 'phase': st.tag(), 'written': stamp(),
                'held': bool(st.d.get('held')), 'field': st.d['field'],
                'nets': {k: {'v%d' % v['gen']: {'path': v['path'], 'sha256': v['sha256'][:16]}
                             for v in n['versions'] if v['gen'] in (g, g + 1)} for k, n in st.d['nets'].items()},
-               'training': {}, 'distill': {}, 'judge': J.summarize(st, g, res) if res else {}, 'notes': []}
+               'training': {}, 'distill': {}, 'judge': J.summarize(st, g, res) if res else {}, 'notes': [],
+               'stall': self.stall_summary(g)}
         for k, n in st.d['nets'].items():
             v = st.version(k, g + 1)
             if v and v.get('train'):
                 rep['training'][k] = v['train']
+            if v and v.get('skipped'):
+                rep['notes'].append(f"{k}: sat out generation {g} ({v['skipped']})")
             if v and v.get('distill'):
                 rep['distill'][k] = v['distill']
             if v and v.get('note'):
@@ -914,6 +1081,12 @@ class Stew:
                 run = st.abs(n['run'])
                 sup, alive = self.ops.supervisor(run)
                 line += f" (run newest {self.ops.newest(run)}, supervisor {sup.get('state')!r}{' LIVE' if alive else ''})"
+                if self.cfg['recipe'].get('stall') is not None:
+                    s = n.get('stall')
+                    line += (f"; train {self.train_mode(k)}, "
+                             + (f"stall test {s['versions']} {s['elo']:+.1f} +- {s['elo_se']:.1f} Elo z {s['z']:+.2f}"
+                                f" -> {'STALLED' if s['stalled'] else 'improving'}" if s else 'not tested yet')
+                             + f", {'trains' if self.trains(k) else 'sits out'} next")
             L.append(line)
         if st.d.get('turn'):
             L.append(f"  turn: {st.d['turn']}")
@@ -948,6 +1121,10 @@ class Stew:
                 sn = C.spec_name(a, b)
                 v = st.version(sn, g)
                 if v is None or st.version(sn, g + 1) is not None:
+                    continue
+                if not self.trains(sn):
+                    L.append(f"{sn}: sits out ({'off: override' if self.train_mode(sn) == 'off' else 'stalled: the stall rule'}"
+                             f"; tools/stew.py specialist ... --train to train it)")
                     continue
                 run = st.abs(st.net(sn)['run'])
                 t = st.d.get('turn') or {}
