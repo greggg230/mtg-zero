@@ -276,3 +276,26 @@ fn cr_107_3_601_2g_castability_and_x_start_at_the_least_x_whose_cost_has_mana() 
     assert_eq!(most_of(&ends, wb, &|it| it.x), 1);
     assert!(ends.iter().any(|e| spell_item(e, wb).x == 0), "X = 0 with the three cards there");
 }
+
+/// CR 702.120a (escalate), 601.2b, 601.2g-h, 702.138a (ENGINE.md 252.3): Collective Brutality ({1}{B}; escalate -
+/// discard a card) escaped by Underworld Breach with one other graveyard card: a card discarded for a second mode and
+/// a Chromatic Star sacrificed while casting are the second and third. Castability counted both (its search
+/// announces escalate's modes); the choice of modes asked the payment alone whether one more mode could be paid.
+#[test]
+fn cr_702_120a_escalates_modes_count_the_steps_feeding_abilities() {
+    let g = cube()
+        .battlefield(0, &["Underworld Breach", "Chromatic Star", "Swamp", "Swamp", "Swamp", "Swamp"])
+        .battlefield(1, &["Llanowar Elves"])
+        .hand(0, &["Island"])
+        .hand(1, &["Island", "Lightning Bolt"])
+        .graveyard(0, &["Collective Brutality", "Ponder"])
+        .at(Step::Main1, 0)
+        .start();
+    let cb = g.card(0, "Collective Brutality", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(cb)), "{}", opts(&g));
+    let mut h = g.clone();
+    h.choose(Choice::Cast(cb));
+    let ends = every_way(&h, 6000);
+    assert_eq!(most_of(&ends, cb, &|it| it.modes.len() as u32), 2, "a second mode, its discard the escape's card");
+    assert!(ends.iter().all(|e| spell_item(e, cb).modes.len() == 2), "one mode leaves the graveyard a card short");
+}

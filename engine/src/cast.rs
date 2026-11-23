@@ -2069,7 +2069,13 @@ impl Game {
             if !m.escalate_discard {
                 return true;
             }
-            g.escalated_payable(card, item, n.saturating_sub(1))
+            g.escalated_payable(card, item, n.saturating_sub(1)) || {
+                // (Or with the 601.2g step's feeding abilities, `n` modes announced - which ones changes no cost:
+                // the discards are one a mode beyond the first, CR 702.120a; ENGINE.md 252.3.)
+                let mut tmp = item.clone();
+                tmp.modes.resize(n.max(tmp.modes.len()), 0);
+                n >= item.modes.len() && g.feed_completes_ahead(card, &tmp, true)
+            }
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
         // (Not the ability itself, already on the stack: CR 115.5.)
