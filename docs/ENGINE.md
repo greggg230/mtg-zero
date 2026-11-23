@@ -47641,3 +47641,44 @@ be0626d4b97cebae -> be0626d4b97cebae, constructed 47a8989dcc1a8a6a, EoE d754f4ee
 metagame 41f7580b3553e1c3, pair b41f691fd2583bf3, dealt cc0d138ac5c80402 (main e687031c's). 254.1 changes no option
 (the same answer sooner); 254.2-254.4 add options (a cast at a larger least X, modes and X through a feeding
 ability) in positions no recorded game holds. No `RULES_EPOCH` bump (none re-recorded).
+
+### 254.8 Gates and the fresh-seed fuzz (on af682bd24bcb, main d17b1ec3 merged in; docs only after it)
+
+* `python tools/gate.py suite --throttle on`: **GATE PASSED suite af682bd24bcb in 757s** - the full engine suite
+  2,968 passed (24 binaries); the sharded fuzz, 2,000 games each from seed 0: the default pool (with 100 matches), the
+  default pool with hidden decklists, `delver_dealt` (with 100 matches and 100 post-sideboard), every merged check
+  passed.
+* `python tools/gate.py engine --tested-sha af682bd24bcb --expect-digest 5a09242cf4f2cbab --expect-digest0
+  be0626d4b97cebae --throttle on`: **GATE PASSED WITH SKIPS engine af682bd24bcb in 735s - skipped: pytest-desktop: 1
+  live-run-hazard test(s) (fenced: a live run on this machine)**. Both digests equal the expected ones, the formats'
+  and the dealt digest equal the recorded ones, farm compat identical (gate 2: 6 games, 2,468 rows; gate 3: 6 games,
+  2,598 rows). (Before the merge, on 8b258f497891: GATE PASSED suite in 416s, GATE PASSED WITH SKIPS engine in 792s,
+  the same skip.)
+* Fresh seeds, release, `tools/fuzz_shards.py`, through the slot throttle, on af682bd2: the default pool, 4,000 games
+  and 200 matches from seed 254,100,000 - passed; hidden decklists, 4,000 games from seed 254,200,000 - passed. (And
+  before the merge: 4,000 and 4,000 from seeds 252,100,000 and 252,200,000 - passed.) No stop of any kind.
+
+### 254.9 A finding for the payer-seen lane: what `PayMana::oracle` reads (not changed here)
+
+Asked by the lane that settles what a non-payer's v8 row shows of a payment (`tail_v8.rs` writes
+`pm.oracle.is_some()`): does that bit depend on the payer's hidden cards? By the code, **it can**, in narrow
+positions; no position was built that shows it (a probe - Bitter Triumph's discard with and without a Simian Spirit
+Guide in hand - gave `None` both ways).
+
+* `oracle` is set in four places: an activation's and a cast's payment whose cost's parts' order can matter
+  (`activate.rs`, `cast.rs` twice: `!order_free_with(&o, || mana_writes(&pm, ..))`), and a payment with shared
+  activations whose actors a pick may sacrifice (`pay.rs`: `actor_kills(&classes)`, classes of permanents with
+  actors - public).
+* `mana_writes` walks every source of the payment (`spell_pay_classes`), the payer's **hand mana sources** among
+  them: a source not on the battlefield sets `Writes::zones` (a Spirit Guide exiled from the hand). `order_free_with`
+  reads that flag in one way: `chars_may_change`, where a characteristic-defining power and toughness that counts
+  graveyard types or the cards its owner has in exile (`PtCda::GraveyardTypes`, `OwnedInExile`) may change when
+  `zones` is set - so with such a permanent and a cost part that reads power or toughness (crew, a filter), the
+  order is "not free", and `oracle` set, when the payer holds a hand mana source and battlefield sources alone would
+  not set `zones`.
+* `chars_may_change(.., hand = true)` reads the characteristic-defining abilities of the cards in the payer's own
+  hand, for a part that takes hand cards by a filter reading them (its doc: "`p`'s, whose cards the cost may take
+  (no other hidden card is read)").
+
+So the bit is a function of the public state except through the payer's hand in those two ways. Whether the row
+should show it to the non-payer is that lane's decision.
