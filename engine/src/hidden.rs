@@ -2453,4 +2453,50 @@ mod queue_1123_tests {
         let one = d(vec![opt(0, g0[0]), opt(2, g0[2])]);
         assert_eq!(g.decision_graveyard_list(0, &one), vec![Some(g0[0]), Some(g0[1]), Some(g0[2])]);
     }
+
+    /// ENGINE.md 248.6 (queue entry 88ef40b06b03, default game 100690719). "During any turn you
+    /// attacked with a Rogue" reads a gone attacker as it left the battlefield (`attacker_def`), not
+    /// the card at its slot now: Robber of the Rich attacks and exiles P1's Preordain, then is
+    /// shuffled into P0's library (as Timetwister did). In P0's worlds its slot is dealt another
+    /// card of the library; P0 may cast the Preordain in every one. Before, the worlds that dealt the
+    /// slot a card that is no Rogue withdrew the cast: the viewer's own options changed with its deal
+    /// ("determinize changed the viewer's decision").
+    #[test]
+    fn cr_400_7_a_gone_attackers_subtypes_are_those_of_the_card_that_left() {
+        let mut g = Scenario::new(db())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 5])
+            .library(1, &["Preordain", "Forest", "Forest"])
+            .hand(1, &["Forest", "Forest"])
+            .battlefield(0, &["Robber of the Rich", "Mountain", "Mountain"])
+            .at(Step::DeclareAttackers, 0)
+            .start();
+        let robber = g.card(0, "Robber of the Rich", Zone::Battlefield);
+        let rogue = g.objs[robber.i()].def;
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+        g.choose(Choice::Card(robber));
+        if g.kind() == Some(DecisionKind::AttackTarget) {
+            g.choose(Choice::Target(Target::Player(1)));
+        }
+        g.choose(Choice::Pass);
+        g.drive_until(|g| g.exile.len() == 1);
+        let pre = g.card(1, "Preordain", Zone::Exile);
+        g.move_card(robber, Zone::Library, Pos::Top);
+        g.shuffle_library(0);
+        g.refresh_pending();
+        g.drive_until(|g| g.turn.step == Step::Main2 && g.kind() == Some(DecisionKind::Priority) && g.stack.is_empty());
+        assert_eq!((g.turn.step, g.turn.active), (Step::Main2, 0), "{}", g.log_lines().join("\n"));
+        assert!(g.has_option(Choice::Cast(pre)), "a turn P0 attacked with a Rogue: {:?}", g.options_desc());
+        let mut other = 0;
+        for s in 0..32 {
+            let mut w = g.clone();
+            w.determinize(0, &mut Rng::new(s));
+            other += (w.objs[robber.i()].def != rogue) as u32;
+            // (Asked again in the world: a viewer's own decision is kept as it is by `determinize`, whose check of
+            // exactly this runs in debug builds only.)
+            w.refresh_pending();
+            assert_eq!(w.pending, g.pending, "world {s}: P0's own decision");
+        }
+        assert!(other > 0, "worlds that deal the Robber's slot another card");
+    }
 }

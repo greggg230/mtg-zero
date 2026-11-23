@@ -481,12 +481,24 @@ impl Game {
                     if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
                         self.has_subtype(r.idx, s)
                     } else {
-                        self.def_of(r.idx).subtypes.contains(&s)
+                        self.db.def(self.attacker_def(r)).subtypes.contains(&s)
                     }
                 })
             }
             _ => true,
         }
+    }
+
+    /// The card a creature declared as an attacker this turn (`Player::attacked_with`) is, or was as it left the
+    /// battlefield (`Game::ref_lki`: recorded at every departure, kept through the turn - the attackers and the
+    /// records both go as the next turn begins). Never the card at its slot now: a gone attacker's card is a new
+    /// object (CR 400.7), and once in a library or a hand a world deals that slot another card - "you attacked with
+    /// a Rogue" then read the dealt card (ENGINE.md 248.6).
+    pub(crate) fn attacker_def(&self, r: crate::ids::ObjRef) -> crate::ids::DefId {
+        if self.live(r) {
+            return self.objs[r.idx.i()].def;
+        }
+        self.ref_lki.iter().rev().find(|x| x.0 == r).map(|x| x.1).expect("an attacker that left the battlefield this turn has its departure recorded (Game::ref_lki)")
     }
 
     /// The permission that lets `p` play `card` from exile now, if any.

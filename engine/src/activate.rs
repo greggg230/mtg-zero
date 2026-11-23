@@ -86,7 +86,8 @@ impl Game {
                     .count();
                 count >= *n as usize
             }
-            Cond::AttackedWithSubtype(k) => pl.attacked_with.iter().any(|r| self.db.def(self.objs[r.idx.i()].def).subtypes.contains(k)),
+            // (A gone attacker's card as it left, not its slot's now: ENGINE.md 248.6.)
+            Cond::AttackedWithSubtype(k) => pl.attacked_with.iter().any(|&r| self.db.def(self.attacker_def(r)).subtypes.contains(k)),
         }
     }
 
