@@ -1406,10 +1406,15 @@ impl Game {
         // there: not counted.)
         let card_at = |i: usize| !self.is_token(gy[i]);
         let n_cards = (0..gy.len()).filter(|&i| card_at(i)).count().saturating_sub((item.delved as usize).saturating_sub(committed.len() + promised.len()));
+        // (And leaving the cards an escape cost exiles, CR 702.138a, after the picks still needed, not after this
+        // one alone: once a graveyard card is picked no source or hand card is delved any more, so a pick while the
+        // graveyard can't give all of them is a dead end - Dig Through Time escaped with seven cards there, three
+        // of them the escape's, and a Black Lotus to delve: four cards picked first left {2}{U}{U} and the Lotus's
+        // three mana. ENGINE.md 247.5.)
         let mut opts: Vec<Opt> = gy
             .iter()
             .enumerate()
-            .filter(|&(i, _)| card_at(i) && i >= floor && (i..gy.len()).filter(|&j| card_at(j)).count() >= need && n_cards > keep)
+            .filter(|&(i, _)| card_at(i) && i >= floor && (i..gy.len()).filter(|&j| card_at(j)).count() >= need && n_cards >= keep + need.max(1))
             .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
             .collect();
         // Mana sources that sacrifice themselves (Lotus Petal), first and
