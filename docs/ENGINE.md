@@ -47289,7 +47289,7 @@ number of cards the graveyard is short. 247.1.4's comparison test (160 boards, n
 paths) runs in 18 s, from 4 s: Tolarian Academy's and Gaea's Cradle's boards explore every order. The seeds of 247
 replay as fast as before.
 
-**Left** (closed in 252.5). A feeding ability whose cost *returns* a permanent to its owner's hand ("return a land you control") gets no
+**Left** (closed in 254.5). A feeding ability whose cost *returns* a permanent to its owner's hand ("return a land you control") gets no
 "ability first" choice (a return feeds no graveyard, so such an ability is a feeding ability only through another part of its
 cost; the pools were not searched for one; the sacrifice path is the only one changed).
 
@@ -47313,7 +47313,7 @@ an additional cost option that adds mana, whose option is announced later - the 
 is as before). The search is gated as castability's (`feed_gap`): a cast with no graveyard cost or no feeding ability
 asks what it asked.
 
-**Left** (closed in 252.2-252.4). (a) A spell whose least X has no mana in its total cost has no 601.2g step at that X (601.2g: "if the
+**Left** (closed in 254.2-254.4). (a) A spell whose least X has no mana in its total cost has no 601.2g step at that X (601.2g: "if the
 total cost includes a mana payment"), so castability's search at the least X finds no feeding ability and says no,
 though X = 1 would have a step and could be castable through it (Walking Ballista escaped with a Star as the third
 card). Fixing it means castability trying a second X and the choice of X having a least value above 0: left, with
@@ -47417,16 +47417,115 @@ and `::test_judge_records_is_a_boolean_of_the_recipe`.
 **To turn it on in a live stew.** At a pause before a judge phase: move the stew's worktree to a commit with this section
 and set `"records": true` in the stew's stew.json `recipe.judge`. Disk: a few MB a generation.
 
-## 252. The payment lane's corners: the Tinker search the farm reported as a hang, castability at the least X with mana, escalate's modes, the announcements still to come, a mana ability's return cost (the fuzz steward's 988792dc2dde; 249's "left" items; branch `fix/payment-corners-1123`, 2026-11-23)
+## 251. The stew's stall rule: a specialist with no significant gain over its last turns sits out, an overrideable recommendation (`recipe.stall`, `tools/stew.py specialist`; 2026-11-23)
 
-(The number is provisional: 251 is another branch's next section; the merge assigns the final one.)
+**Why** (the user, 2026-11-23, after the first stew's generation 0: Delver-Doomsday +104 and Delver-Sneak +156 Elo in
+their first turn, the Delver mirror -24 +- 22): every specialist trained a fixed 32 iterations every generation and the
+stew never stopped - nothing measured whether a specialist had plateaued or what another turn was worth. The user's
+rule: "an overrideable recommendation from an algorithm: if we see no statistical gain in Elo over ~40 iterations, mark
+it as stalled, but I want to be able to manually specify that we should unpause it if we see other metrics that are
+improving". Turns are the judging grain, so the window is 2 turns (64 iterations, the nearest to 40); a stalled
+specialist sits out on its own (the user's choice) and the override brings it back.
+
+**The test** (each `judge_deck_gap@g`, for each specialist that trained in round g): its new version against its version
+`window` TRAINED turns before (a round it sat out is not a turn), paired (both seats on common deals), `matches` matches
+(`W.<a>-<b>.0`, its own deals: `seed_of('stew-window', ...)`); while the score is above 1/2 but its one-sided z = (score -
+1/2) / se is below `z`, another part of `matches` (`.1`, `.2`, ...) up to `max_matches` (sequential: a clear result costs
+one part, an ambiguous one is resolved before it decides). The decision: **stalled** when z < `z` (no significant gain;
+z capped at +-99 when every pair scored alike - JSON has no infinity), else improving. Stored per specialist in
+state.json (`nets.<spec>.stall`, the history in `stall_log`) and shown in the report ("Specialists: the stall rule": mode,
+versions tested, score, Elo, z, matches, recommendation, whether it trains next round) and in `status`.
+
+**What happens to a stalled specialist** (mode `auto`, the default): at the next train phase it sits out - its version
+g + 1 is version g (`skipped`), its deck stews distil from its last turn's rows again (`rows/<gen>` reused, recorded as
+`reused_from`), no gen-over-gen or stall test of it (nothing changed); its other judge jobs still run - a job identical
+to one judged in an earlier round (same nets, deals and spec: the same hash, e.g. arm B of a specialist that sat out)
+takes that result instead of replaying it (`reuse_judged`). A specialist that is not tested (fewer than `window` trained
+turns) keeps training. If no specialist would train in a round, the stew writes its PAUSE and stops ("the stall rule: no
+specialist trains").
+
+**The override**: `python tools/stew.py specialist DIR 'A|B' --train | --stall | --auto` (deck names, aliases or
+`spec:A|B`): `--train` (mode `on`) trains it every round whatever the rule says (its test still runs and is reported),
+`--stall` (mode `off`) sits it out, `--auto` hands it back to the rule. Applied at once when no run of the stew is live,
+else written to `requests/` and taken at the run's next train phase; every change logged in state.json `overrides`.
+
+**Config**: `recipe.stall` = `{"window": 2, "matches": 200, "max_matches": 600, "z": 1.645}` (the default; `null`: no
+test, every specialist trains every round). The first stew sets it in its stew.json at the re-pin that brings this.
+
+**Tests** (`tests/test_stew.py`, on the fakes): a round-0 test (window 1) where one specialist's new version only splits
+pairs (stalled), one wins every pair (improving at the first part), one alternates 1 / 0.5 (extended once, then
+improving); generation 1 - the stalled one sits out (v2 = v1, rows reused, no G or W job, arm A still judged), the
+window of the others their last two trained versions; the override on / auto / off by name, alias or net name, refused
+for an unknown pairing; the override while a run is live (a request file the run takes); every specialist off pauses the
+stew before any turn; the config's refusals and `null`.
+
+## 252. zero-core pin c6b4e9d -> a39a8c1: the pool's rolling check of a torch alternate, no rows made for a finished game in the torch worker, one CUDA graph capture at a time (zero-core `fix/torch-worker-1123`, docs/az.md 81, docs/search.md 2.22; 2026-11-23)
+
+**Why.** Three problems of the first live runs played through the farm by the torch worker of section 244 (a test run,
+then the first stew's specialists). zero-core's docs/az.md 81 has the measurements; this section says what the pin
+brings here. No setting is added, and no run or stew is moved by this commit.
+
+**What changes here.** Only the pin (the torch worker build ships the pinned core's `python/zero/`, section 244.2, so
+the release of this commit carries the fixes to the machines that play through torch).
+
+* **The pool's rolling check runs a torch alternate from its runtime pack** (az.md 81.1; `zero/farm_pool.py`,
+  `zero/farm_h2h.py`). With `pool_rolling` set, the pool's first publish asks each alternate build whose executable is
+  on the machine for the feature `rolling` (`<exe> info`). A torch alternate's executable is `zf-pyshim.exe`, which
+  answers nothing without `ZEROFARM_RUNTIME_DIR` (exit 3); the pool took that for the alternate's own refusal, stopped,
+  and the run went on without the farm. Now the check gives the alternate its pack (the manifest's `requires_runtime`,
+  the pack's directory next to the worker builds) in the child's environment for that one call; a pack that is not on
+  the machine leaves the alternate unchecked (logged, as an alternate whose executable is not here) and the pool goes
+  on. A torch worker that answers without `rolling`, or fails for another reason, is refused as before. A native
+  alternate with a pack that is here (CUDA, DirectML) is now asked with the variable set too, as on a farm PC.
+* **The torch worker makes no rows for a finished game** (az.md 81.2, docs/search.md 2.22; zero-core `crates/search`
+  and `crates/py`: `Driver::set_sample_rows`, the binding's `SearchDriver.set_sample_rows(False)`;
+  `zero/farm_torch_worker.py`). A finished game's samples were unpacked dense and copied into one array of which the
+  worker read `net` alone (one best-of-three: 67 to 241 MB, 25 to 116 ms on the thread that drives the search). The
+  worker now asks for none: the same result rows and record texts, so the rows the pool driver replays are unchanged.
+  **Rows are on by default** - the trainer, the Python remote worker, the native worker and every digest never call it.
+  The ~8 MB per game in flight that remains is the driver's own state (measured there on the CPU at 64 games; the
+  worker at its full size on a GPU is not measured).
+* **One CUDA graph capture at a time** (az.md 81.3; `zero/infer.py` `CAPTURE_MU`, a process-wide lock around the
+  `torch.cuda.graph` block of both graph runners). A rolling job builds and self-tests the next generation's evaluator
+  on its own thread while the games go on; in a lease's first seconds both threads capture, on the one stream every
+  capture of a process shares, and CUDA invalidated the capture (the first torch lease died that way). With one
+  capturing thread - every run before the torch worker - nothing changes. **Not yet verified on a GPU**: the cause is
+  read from the traceback, the timing and torch's source, and the test stands in for torch.cuda (two runners on two
+  threads never capture at once; it fails without the lock). To check on a GPU: a rolling job sent a checkpoint within
+  its first seconds, repeatedly, with and without the lock.
+
+**The first stew's workaround can go.** The stew playing its specialists through the farm sets `ZEROFARM_RUNTIME_DIR`
+in its `recipe.env` so the pool's check of the torch alternate can answer (the first item above). Once that stew is
+re-pinned to a commit with this pin, the entry can be removed: the pool finds the pack itself. Until then it stays (it
+is harmless with the fix: the check sets the same variable for the call).
+
+**Tests** (zero-core's, run by the gate's core pytest and cargo steps): tests/test_farm_pool.py
+`test_rolling_check_runs_a_torch_alternate_from_its_runtime_pack`; tests/test_farm_torch_worker.py
+`test_the_worker_makes_no_sample_rows`, `test_a_driver_without_sample_rows_gives_the_same_records_and_no_rows`,
+`test_cuda_graph_captures_never_overlap`; the driver's `samples_without_rows_give_the_same_games_and_records` and
+`chain::contests_without_sample_rows_give_the_same_records`. Here: farm compat check 4 (the torch worker's records
+replay to the trainer's rows, section 244.4) runs the worker without its rows.
+
+**Gates.** optin-core on e25d0d16 (this pin and section on main e687031c; `--baseline-root` a warm worktree of main
+e687031c, its module from the artifact cache): **GATE PASSED WITH SKIPS AND FLAKY RETRIES optin-core e25d0d1689d0 in
+1336s** - checkpoint_compat byte identity vs main (3,554 samples), every digest = the recorded one (constructed, EoE,
+driver cab97c01912f7e3f, metagame, pair, dealt), farm compat identical (gates 2 and 3, the torch worker's check 4), the
+other games built, core tests 225 passed, core pytest in 6 shards; the skips: 17 live-run-hazard tests of the core,
+fenced (live runs on the desktop); the flaky retry: the core's
+`test_remoteplay.py::test_a_worker_slower_than_a_phase_is_capped_at_its_floor` (a timing floor, beside live runs; it
+passed alone, as at section 244's gate). Then merged with main 42f02b8a (the stew's stall rule took 251, Python only,
+no file in common but this one: this section renumbered 251 -> 252) and the python tier run on the merge.
+
+## 254. The payment lane's corners: the Tinker search the farm reported as a hang, castability at the least X with mana, escalate's modes, the announcements still to come, a mana ability's return cost (the fuzz steward's 988792dc2dde; 249's "left" items; branch `fix/payment-corners-1123`, 2026-11-23)
+
+(The number is provisional: 253 is another branch's section; the merge assigns the final one.)
 
 **Why.** 248.9 handed the payment lane one queue entry (a hidden-decklist seed that passes after eleven minutes, a
 hang by the farm's 300 s limit), and 249 wrote down four things it left. All five are closed here, one commit each
 but (a) and (c), which share a helper. No layout, encoding, decision kind or action id changes; the search's cap is
 untouched.
 
-### 252.1 The Tinker search (988792dc2dde)
+### 254.1 The Tinker search (988792dc2dde)
 
 **Measured** (`FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST=100122141 FUZZ_GAMES=1`, the `fuzz` profile, the desktop beside a live
 run): **818 s** on main 66288d93 (before 247; 248.9 measured 693 s), **5-8 s** on main e687031c, **under 2 s** here.
@@ -47464,7 +47563,7 @@ ability's own mana cost when the answer depends on which are used; this check re
 depend on them. A board whose answer is "no" for a reason that only shows at the ends can still cost 2^n copies for
 n sources of such a cost; the copies counter is there to pin one when the farm finds it.
 
-### 252.2 Castability at the least X whose total cost has mana (249.2's (a))
+### 254.2 Castability at the least X whose total cost has mana (249.2's (a))
 
 CR 601.2g: "if the total cost includes a mana payment, the player then has a chance to activate mana abilities". A
 total cost with no mana has no step. Walking Ballista ({X}{X}) escaped through Underworld Breach with two other
@@ -47481,15 +47580,15 @@ said no; the choice of X started at 0.
 * `x_range` (the choice of X): when X = 0 can't be paid and its total cost has no mana, the range starts at that X
   (`first_x_with_mana`, `x_limit` split out of `x_range`): X = 0 is no option then. Otherwise as before.
 
-### 252.3 Escalate's modes (249.2's (b))
+### 254.3 Escalate's modes (249.2's (b))
 
 `choose_modes`' `escalate_ok` (can the cost be paid with n modes: n - 1 discards, CR 702.120a) asked the payment
 alone. It was a dead end, not a narrower choice: Collective Brutality escaped with one other graveyard card, one
 card in hand and a Chromatic Star - castability counted the discard and the Star (its search announces escalate's
-modes), the choice of modes found no number of modes payable: "ChooseMode with no options" (252.6's test without the
+modes), the choice of modes found no number of modes payable: "ChooseMode with no options" (254.6's test without the
 fix). It now also asks the step's search with n modes announced.
 
-### 252.4 The announcements still to come (249.2's (c))
+### 254.4 The announcements still to come (249.2's (c))
 
 249.2 asked the step's search for the times and for a spree mode only when the item so announced had exactly the
 total cost the payment's check used, and was silently narrower otherwise. The two differ only when a later
@@ -47502,10 +47601,10 @@ announcement adds mana: the additional cost option (announced last) or X.
 * **The guard is gone anyway**, replaced by the exact question (`Game::feed_completes_ahead`): does the step's
   search complete with the value announced and **some** value of each announcement still to come (`begin_cast`'s
   order: alternative cost, modes, times, X, additional cost option) - each option the cast may choose; for X its
-  least and the least with mana (252.2); the times not yet announced none (more only costs more). The choices of
+  least and the least with mana (254.2); the times not yet announced none (more only costs more). The choices of
   modes (spree's and escalate's), times and X all ask it; the option's own choice asks `feed_completes` (247.3).
 
-### 252.5 A mana ability's return cost (249.1's left item)
+### 254.5 A mana ability's return cost (249.1's left item)
 
 249.1's "own mana ability first" serves a feeding ability's *sacrifice*; a cost that returns a permanent to its
 owner's hand would need the same. No such mana ability exists or can: the lowering refuses one
@@ -47513,32 +47612,32 @@ owner's hand would need the same. No such mana ability exists or can: the loweri
 return). So the path is unreachable, and now loud: `mana_now_costs` asserts the ability has no return cost, and a
 unit test checks every definition of every pool.
 
-### 252.6 Tests
+### 254.6 Tests
 
 * `rules_cast_mana_search::cr_601_2g_601_2h_an_ability_that_takes_the_costs_only_sacrifice_is_refused_without_searching_its_payment`
-  (252.1): Tinker, Wizard's Rockets, Birds of Paradise and ten different lands - the Rockets is never an option of
+  (254.1): Tinker, Wizard's Rockets, Birds of Paradise and ten different lands - the Rockets is never an option of
   the step, Tinker is cast with it sacrificed, and the cast's payment searches make fewer than 100 copies (2; 4,097
   without the check); with a Mind Stone too the Rockets is offered.
-* `fuzz::the_tinker_payment_search_of_252_hidden_decklist_seed_100122141`: the seed, every check of `play_hidden`,
+* `fuzz::the_tinker_payment_search_of_254_hidden_decklist_seed_100122141`: the seed, every check of `play_hidden`,
   its payment searches under 50,000 copies in all (1,308 under the `fuzz` profile, 22 in release, where the debug
   check that plays the Tinker world doesn't run; 79,096 in one search on e687031c).
-* `rules_escape_costs::cr_107_3_601_2g_castability_and_x_start_at_the_least_x_whose_cost_has_mana` (252.2): the
+* `rules_escape_costs::cr_107_3_601_2g_castability_and_x_start_at_the_least_x_whose_cost_has_mana` (254.2): the
   Ballista board - not castable without the Star; with it castable and every line has X = 1; with three other
   graveyard cards X is 0 or 1.
-* `rules_escape_costs::cr_702_120a_escalates_modes_count_the_steps_feeding_abilities` (252.3): the Collective
+* `rules_escape_costs::cr_702_120a_escalates_modes_count_the_steps_feeding_abilities` (254.3): the Collective
   Brutality board, every line with two modes.
-* `cast_mana::tests::no_mana_ability_returns_a_permanent_as_a_cost` (252.5): the cube, constructed, EoE and fuzz
+* `cast_mana::tests::no_mana_ability_returns_a_permanent_as_a_cost` (254.5): the cube, constructed, EoE and fuzz
   pools.
-* 249.3's tests of X, times and spree pass with `feed_completes_ahead` in place of the guard (252.4: no card to
+* 249.3's tests of X, times and spree pass with `feed_completes_ahead` in place of the guard (254.4: no card to
   build a test of the difference from).
 
 The Tinker test fails its count, and the Ballista and escalate tests fail outright, with their source changes taken
 out (4,097 copies; the escape not offered; "ChooseMode with no options").
 
-### 252.7 Digests
+### 254.7 Digests
 
 None moves, nothing re-recorded: the cube 5a09242cf4f2cbab -> 5a09242cf4f2cbab, `DIGEST_ENCODING=0`
 be0626d4b97cebae -> be0626d4b97cebae, constructed 47a8989dcc1a8a6a, EoE d754f4eef3c8adae, driver cab97c01912f7e3f,
-metagame 41f7580b3553e1c3, pair b41f691fd2583bf3, dealt cc0d138ac5c80402 (main e687031c's). 252.1 changes no option
-(the same answer sooner); 252.2-252.4 add options (a cast at a larger least X, modes and X through a feeding
+metagame 41f7580b3553e1c3, pair b41f691fd2583bf3, dealt cc0d138ac5c80402 (main e687031c's). 254.1 changes no option
+(the same answer sooner); 254.2-254.4 add options (a cast at a larger least X, modes and X through a feeding
 ability) in positions no recorded game holds. No `RULES_EPOCH` bump (none re-recorded).
