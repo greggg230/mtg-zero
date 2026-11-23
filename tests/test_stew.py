@@ -578,3 +578,130 @@ def test_main_sources_with_a_deck_outside_the_archive(stew):
     # 16 cells: 7 covered, 9 uncovered of which 4 served (no Hogaak rows): retention 4 / (16 - 5)
     assert by['retention']['weight'] == pytest.approx(4 / 11, abs=1e-5)
     assert sum(s['weight'] for s in doc['sources']) == pytest.approx(1.0, abs=1e-4)
+
+
+# ------------------------------------------------------------------ the stall rule (docs/ENGINE.md 251)
+WIN = {'window': 1, 'matches': 4, 'max_matches': 12, 'z': 1.645}
+PAIR_ROWS = {1: ([1.0, 0.0], [0.0, 1.0]), 0.5: ([1.0, 0.0], [1.0, 0.0]), 0: ([0.0, 1.0], [1.0, 0.0])}
+
+
+def stall_stew(tmp_path, monkeypatch, stall=WIN, outcomes=None):
+    """A stew with a stall test after every turn (window 1: from round 0) whose W jobs' matches go as `outcomes`
+    says: {'<alias>-<alias>': per-pair scores to cycle through} (1: the new version wins both matches of a pair, 0.5:
+    one each, 0: none; a paired job's match 2k has the new version in seat 0, 2k + 1 in seat 1)."""
+    src = make_source(tmp_path)
+    cfgp = make_cfg(tmp_path, src, stall=stall)
+    ops = FakeOps(tmp_path)
+    ops.farm.update({'src': 'active', 'src-eval': 'active'})
+    monkeypatch.setattr(Stew, 'judge_play', lambda self: {'seat': {}, 'sims': 4})
+    plain = ops.judge_jobs
+
+    def judge_jobs(jobs, jdir, procs, stop=None):
+        out = plain(jobs, jdir, procs, stop)
+        for j in jobs:
+            if j['id'].startswith('W.'):
+                _, pair, k = j['id'].split('.')
+                cyc = (outcomes or {}).get(pair, [0.5])
+                npair = j['games'] // 2
+                rows = []
+                for i in range(npair):
+                    first, second = PAIR_ROWS[cyc[(int(k) * npair + i) % len(cyc)]]
+                    rows += [{'gid': 2 * i, 'result': first, 'over': True, 'games': 2},
+                             {'gid': 2 * i + 1, 'result': second, 'over': True, 'games': 2}]
+                r = dict(out[j['id']], rows=rows)
+                jsave(os.path.join(jdir, j['id'] + '.json'), r)
+                out[j['id']] = r
+        return out
+
+    ops.judge_jobs = judge_jobs
+    s = Stew.init(os.path.join(str(tmp_path), 'stew'), cfgp, ops=ops, log=lambda m: None)
+    s.poll_s = 0.0
+    return s
+
+
+def test_the_stall_test_recommends_and_extends_until_decided(tmp_path, monkeypatch):
+    # the mirror's new version is no better (every pair split), Delver-Doomsday's wins every pair, Delver-Sneak's
+    # alternates 1 / 0.5: positive but not significant at 4 matches -> extended to 8, where it is
+    s = stall_stew(tmp_path, monkeypatch,
+                   outcomes={'izzet-izzet': [0.5], 'izzet-doomsday': [1], 'izzet-sneak': [1, 0.5]})
+    assert s.run() == 'held'
+    st = s.st
+    mir, dd, sns = C.spec_name(DEL, DEL), C.spec_name(DEL, DD), C.spec_name(DEL, SNS)
+    assert st.net(mir)['stall']['stalled'] is True and st.net(mir)['stall']['versions'] == 'v1 vs v0'
+    assert st.net(dd)['stall']['stalled'] is False and st.net(dd)['stall']['matches'] == 4
+    assert st.net(sns)['stall']['stalled'] is False and st.net(sns)['stall']['matches'] == 8
+    assert st.d['stall_parts']['0'][sns] == 2 and st.d['stall_parts']['0'].get(mir, 1) == 1
+    rep = jload(s.p('reports', 'gen_000.json'))
+    assert rep['stall'][mir]['recommendation'] == 'stalled' and rep['stall'][mir]['trains'] is False
+    assert rep['stall'][dd]['trains'] is True and rep['judge']['window'][sns]['parts'] == 2
+    assert 'the stall rule' in open(s.p('reports', 'gen_000.md'), encoding='utf-8').read()
+    assert 'sits out' in s.status() and 'STALLED' in s.status()
+    assert 'sits out' in s.plan() or s.st.tag() != 'train@1'
+    # generation 1: the mirror sits out (v2 = v1, its rows reused), the others train; no gen-over-gen of the mirror
+    os.remove(s.p('PAUSE'))
+    assert s.run(max_phases=4) == 'done'
+    assert st.tag() == 'judge_deck_gap@1'
+    v2 = st.version(mir, 2)
+    assert v2['skipped'].startswith('stalled') and v2['path'] == st.version(mir, 1)['path']
+    assert st.d['rows']['1'][C.pair_key(DEL, DEL)]['reused_from'] == 0
+    assert [c for c in s.ops.calls if c[0] == 'launch'][-2:] == [
+        ('launch', C.spec_dir(DEL, DD), 4), ('launch', C.spec_dir(DEL, SNS), 4)]
+    s.run(max_phases=1)
+    jobs = os.listdir(s.judge_dir(1))
+    assert not any(f.startswith('G.izzet-izzet') or f.startswith('W.izzet-izzet') for f in jobs)
+    assert any(f.startswith('A.izzet-izzet') for f in jobs)
+    # each tested specialist's window: its last two trained versions
+    assert st.net(dd)['stall']['versions'] == 'v2 vs v1'
+    assert st.net(mir)['stall']['versions'] == 'v1 vs v0'           # (not re-tested: it did not train)
+
+
+def test_the_override_trains_a_stalled_specialist_and_auto_gives_it_back(tmp_path, monkeypatch):
+    s = stall_stew(tmp_path, monkeypatch, outcomes={'izzet-izzet': [0.5], 'izzet-doomsday': [1], 'izzet-sneak': [1]})
+    assert s.run() == 'held'
+    mir = C.spec_name(DEL, DEL)
+    assert not s.trains(mir)
+    assert s.set_train_mode('izzet|izzet', 'on') == mir           # (a deck's alias or its name)
+    assert s.trains(mir) and s.st.net(mir)['train'] == 'on'
+    assert s.st.d['overrides'][-1]['old'] == 'auto'
+    os.remove(s.p('PAUSE'))
+    assert s.run(max_phases=3) == 'done'
+    assert not s.st.version(mir, 2).get('skipped')                # trained though the rule says stalled
+    s.set_train_mode(f'{DEL}|{DEL}', 'auto')
+    assert not s.trains(mir)
+    s.set_train_mode(f'spec:{DEL}|{DEL}', 'off')
+    assert not s.trains(mir) and s.st.net(mir)['train'] == 'off'
+    with pytest.raises(Refused):
+        s.set_train_mode('izzet|nope', 'on')
+
+
+def test_an_override_while_the_run_is_live_is_a_request_the_run_takes(tmp_path, monkeypatch):
+    s = stall_stew(tmp_path, monkeypatch)
+    mir = C.spec_name(DEL, DEL)
+    monkeypatch.setattr(Stew, 'lock_holder', lambda self: {'pid': 1})
+    s.set_train_mode('izzet|izzet', 'off')
+    assert s.st.net(mir).get('train', 'auto') == 'auto'
+    reqs = [f for f in os.listdir(s.p('requests')) if f.endswith('.json')]
+    assert len(reqs) == 1 and jload(s.p('requests', reqs[0]))['op'] == 'specialist'
+    s.read_requests()
+    assert s.st.net(mir)['train'] == 'off'
+    assert not [f for f in os.listdir(s.p('requests')) if f.endswith('.json')]
+
+
+def test_every_specialist_off_pauses_the_stew(tmp_path, monkeypatch):
+    s = stall_stew(tmp_path, monkeypatch)
+    for p in ('izzet|izzet', 'izzet|doomsday', 'izzet|sneak'):
+        s.set_train_mode(p, 'off')
+    assert s.run() == 'paused'
+    assert jload(s.p('PAUSE'))['by'] == 'the stall rule: no specialist trains'
+    assert s.st.tag() == 'train@0' and s.st.version(C.spec_name(DEL, DD), 1) is None
+
+
+def test_the_stall_config():
+    base = {'name': 'x', 'decks': [{'name': d, 'share': 1} for d in META3], 'candidates': [DEL],
+            'source': {'run': 'r'}}
+    assert C.normalize(base, check_lists=False)['recipe']['stall'] == C.DEFAULT_STALL
+    assert C.normalize(dict(base, recipe={'stall': None}), check_lists=False)['recipe']['stall'] is None
+    for bad in ({'window': 0}, {'matches': 3}, {'matches': 200, 'max_matches': 300}, {'z': 0}, {'nope': 1},
+                {'window': True}):
+        with pytest.raises(C.ConfigError):
+            C.normalize(dict(base, recipe={'stall': bad}), check_lists=False)
