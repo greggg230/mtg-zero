@@ -33,6 +33,12 @@ stew as the candidate's pilot (arms A and M) beside it.
 
 The match process: `python -m mtgz.stew.judge play JOB.json OUT.json` (a job's matches, its result written
 atomically; the orchestrator runs `judge.procs` of them at once and reuses a result whose job hash matches).
+
+**Game records** (`recipe.judge.records`, docs/ENGINE.md 250; off by default): a job that carries `records`
+({records: the directory, kind, it, labels {a, b}, meta}) writes its matches' game records (seed + moves,
+zero.gamerec: one file a job under `<records>/<kind>/iter_NNNN/`, each record's `players` the two nets per seat by
+their stew names and versions) and names the file in its result (`records`). The driver's game log changes no game
+(zero-core docs/az.md 59.3), so `records` is no part of the job's hash: a result played without it stays valid.
 """
 import hashlib
 import json
@@ -44,6 +50,7 @@ from . import config as C
 
 JOB_V = 1
 ARMS = ('B', 'A', 'M')
+RECORDS_KIND = 'stew_judge'
 
 
 # ------------------------------------------------------------------ the jobs
@@ -64,13 +71,34 @@ def cell_seed(base, p, q, xs):
 
 
 def job_hash(job):
-    j = {k: v for k, v in job.items() if k not in ('label',)}
+    j = {k: v for k, v in job.items() if k not in ('label', 'records')}
     return hashlib.sha256(json.dumps(j, sort_keys=True, separators=(',', ':')).encode()).hexdigest()[:16]
 
 
-def _job(jid, kind, a, b, decks, chooser, layout, games, seed, spec, play, label):
-    return {'v': JOB_V, 'id': jid, 'kind': kind, 'a': a, 'b': b, 'decks': list(decks), 'chooser': chooser,
-            'layout': layout, 'games': int(games), 'seed': int(seed), 'spec': spec, 'play': play, 'label': label}
+def _job(jid, kind, a, b, decks, chooser, layout, games, seed, spec, play, label, nets=None):
+    """`nets`: the stew names and versions of sides a and b (('deck:X v2', 'spec:X|Y v2')): the players' labels of
+    the job's game records (`with_records` moves them into the job's `records` block, or drops them)."""
+    job = {'v': JOB_V, 'id': jid, 'kind': kind, 'a': a, 'b': b, 'decks': list(decks), 'chooser': chooser,
+           'layout': layout, 'games': int(games), 'seed': int(seed), 'spec': spec, 'play': play, 'label': label}
+    if nets is not None:
+        job['nets'] = list(nets)
+    return job
+
+
+def with_records(jobs, records, g):
+    """The jobs with their game records on (`recipe.judge.records`): each job's `records` block - where
+    (`<records>/stew_judge/iter_<g>/`), the two nets' labels, the job's place in the judging (meta) - in place of its
+    `nets`. `records` None: the jobs without (`nets` dropped: the jobs of before, key for key)."""
+    out = []
+    for j in jobs:
+        j = dict(j)
+        nets = j.pop('nets')
+        if records is not None:
+            j['records'] = {'records': records, 'kind': RECORDS_KIND, 'it': int(g), 'labels': {'a': nets[0], 'b': nets[1]},
+                            'meta': {'tool': 'stew_judge', 'job': j['id'], 'arm': j['id'][0], 'decks': list(j['decks']),
+                                     'chooser': j['chooser'], 'layout': j['layout'], 'round': int(g)}}
+        out.append(j)
+    return out
 
 
 def arm_jobs(arm, pilot, spec_ckpt, x, y, alias, jcfg, spec_fn, play, labels):
@@ -82,7 +110,8 @@ def arm_jobs(arm, pilot, spec_ckpt, x, y, alias, jcfg, spec_fn, play, labels):
         for c in (0, 1):
             jid = f'{arm}.{alias[p]}-{alias[q]}.s{xs}.c{c}'
             out.append(_job(jid, 'cell', pilot, spec_ckpt, (p, q), c, f'a{xs}', n, cell_seed(jcfg['seed'], p, q, xs),
-                            spec_fn(p, q, c), play, f"{labels[0]} as {x} vs {labels[1]} as {y} (chooser seat {c})"))
+                            spec_fn(p, q, c), play, f"{labels[0]} as {x} vs {labels[1]} as {y} (chooser seat {c})",
+                            nets=labels))
     return out
 
 
@@ -94,17 +123,22 @@ def pair_b_jobs(spec_ckpt, x, y, alias, jcfg, spec_fn, play, label):
         for c in (0, 1):
             out.append(_job(f'B.{alias[p]}-{alias[q]}.c{c}', 'cell', spec_ckpt, spec_ckpt, (p, q), c, 'a0', n,
                             cell_seed(jcfg['seed'], p, q, None), spec_fn(p, q, c), play,
-                            f'{label} vs itself, {p} vs {q} (chooser seat {c})'))
+                            f'{label} vs itself, {p} vs {q} (chooser seat {c})', nets=(label, label)))
     return out
 
 
-def gen_job(new, old, a, b, alias, jcfg, spec_fn, play, label):
+def gen_job(new, old, a, b, alias, jcfg, spec_fn, play, label, nets=None):
     return _job(f'G.{alias[a]}-{alias[b]}', 'gen', new, old, (a, b), None, 'paired', jcfg['gen_matches'],
-                seed_of('stew-gen', jcfg['seed'], a, b), spec_fn(a, b, None), play, label)
+                seed_of('stew-gen', jcfg['seed'], a, b), spec_fn(a, b, None), play, label, nets=nets)
 
 
-def plan_jobs(phase, st, g, jcfg, spec_fn, play):
-    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arms B and A; 'judge': arm M) of round `g`."""
+def plan_jobs(phase, st, g, jcfg, spec_fn, play, records=None):
+    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arms B and A; 'judge': arm M) of round `g`.
+    `records`: the directory of the jobs' game records (`recipe.judge.records`; None: none kept)."""
+    return with_records(_plan_jobs(phase, st, g, jcfg, spec_fn, play), records, g)
+
+
+def _plan_jobs(phase, st, g, jcfg, spec_fn, play):
     decks = st.decks()
     al = {d['name']: d['alias'] for d in decks}
     pairs = C.pairings(decks, st.candidates())
@@ -116,7 +150,7 @@ def plan_jobs(phase, st, g, jcfg, spec_fn, play):
             old = st.version(sn, g)
             if jcfg['gen_over_gen'] and old is not None:
                 out.append(gen_job(new, st.abs(old['path']), a, b, al, jcfg, spec_fn, play,
-                                   f'{sn} v{g + 1} vs v{g}'))
+                                   f'{sn} v{g + 1} vs v{g}', nets=(f'{sn} v{g + 1}', f'{sn} v{g}')))
             if a != b:
                 out += pair_b_jobs(new, a, b, al, jcfg, spec_fn, play, f'{sn} v{g + 1}')
         for x, y in ([(a, b), (b, a)] if a != b else [(a, a)]):
@@ -177,6 +211,9 @@ def play_job(job):
     t0 = time.time()
     drv = G.Driver(game, sl, spec=job['spec'], concurrency=min(n, 1024), seed=int(job['seed']),
                    threads=int(p['threads']), groups=int(p['groups']), max_steps=int(p['max_steps']), **dkw)
+    rc = job.get('records')
+    if rc:
+        drv.set_game_log(True)                 # (game records, zero-core docs/az.md 59.3: the games unchanged)
     drive(drv, evs)
     rows = sorted(drv.take_results(), key=lambda r: r['gid'])
     if [r['gid'] for r in rows] != list(range(n)):
@@ -186,11 +223,29 @@ def play_job(job):
         sel = _tag(sa)
     except Exception:                          # noqa: BLE001 - a name only
         sel = None
-    return {'v': JOB_V, 'id': job['id'], 'hash': job_hash(job), 'seconds': round(time.time() - t0, 1),
-            'select': sel, 'unfinished': sum(1 for r in rows if not r.get('over')),
-            'rows': [{'gid': int(r['gid']), 'result': [float(v) for v in r['result']], 'over': bool(r.get('over')),
-                      'games': len(r.get('episodes') or []) or 1, 'decisions': int(r.get('decisions') or 0)}
-                     for r in rows]}
+    out = {'v': JOB_V, 'id': job['id'], 'hash': job_hash(job), 'seconds': round(time.time() - t0, 1),
+           'select': sel, 'unfinished': sum(1 for r in rows if not r.get('over'))}
+    if rc:
+        out['records'] = write_records(job, rows, sl, sa, sb, sel)
+    out['rows'] = [{'gid': int(r['gid']), 'result': [float(v) for v in r['result']], 'over': bool(r.get('over')),
+                    'games': len(r.get('episodes') or []) or 1, 'decisions': int(r.get('decisions') or 0)}
+                   for r in rows]
+    return out
+
+
+def write_records(job, rows, sl, sa, sb, sel):
+    """The job's matches as game records, one file (zero.gamerec.MatchSink): each record's `players` its two nets in
+    the match's seat order (`sl`: the seats per match, each `sa` or `sb`), labelled by their stew names and versions.
+    -> {file (its name), dir (kind/iter_NNNN under the records directory), games}."""
+    import os
+
+    from zero import gamerec as GR
+    rc = job['records']
+    sink = GR.MatchSink(rc['records'], rc['kind'], it=rc['it'], src='local', meta=rc['meta'], labels=rc['labels'])
+    pa = GR.net_player(job['a'], rc['labels']['a'], sa, sel)
+    pb = GR.net_player(job['b'], rc['labels']['b'], sb, sel)
+    path = sink.add_rows(rows, lambda g: [pa if s is sa else pb for s in sl[g]], {'driver_seed': int(job['seed'])})
+    return {'file': os.path.basename(path), 'dir': f"{rc['kind']}/iter_{int(rc['it']):04d}", 'games': len(rows)}
 
 
 def valid_result(job, res):

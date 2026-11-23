@@ -675,7 +675,8 @@ class Stew:
 
     def judge_phase(self, phase, g):
         jcfg = self.cfg['recipe']['judge']
-        jobs = J.plan_jobs(phase, self.st, g, jcfg, self.pair_spec_json, self.judge_play())
+        jobs = J.plan_jobs(phase, self.st, g, jcfg, self.pair_spec_json, self.judge_play(),
+                           records=self.p('judge', 'records') if jcfg['records'] else None)
         if not jobs:
             if phase == 'judge' and not jcfg['main_arms']:
                 self.write_report(g)

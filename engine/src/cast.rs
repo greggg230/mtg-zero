@@ -1024,11 +1024,13 @@ impl Game {
             || self.cast_for_granted_alt(card, item);
         // A spell's X with its cost: payable (any amount, ENGINE.md
         // 100.4.8).
+        // (Or with mana abilities activated while it is cast that feed its graveyard cost, CR 601.2g: the 601.2g
+        // step searched with that X, as castability searches it with the least, `feed_completes`; ENGINE.md 249.2.)
         let pays = |x: u64| {
             let mut tmp = item.clone();
             tmp.x = x as u32;
             let cost = self.total_mana(card, &tmp);
-            self.can_pay_spell(card, &tmp, &cost)
+            self.can_pay_spell(card, &tmp, &cost) || self.feed_completes(card, &tmp)
         };
         if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             // Kicker {X} (CR 601.2b): announced only if kicked, at least
@@ -1053,7 +1055,12 @@ impl Game {
             let classes = self.spell_pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke, allow);
             crate::decision::most_allowed(0, life, |v| {
                 let life = u32::try_from(v).expect("X life within the life total");
-                self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life, allow, ..Default::default() })
+                self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life, allow, ..Default::default() }) || {
+                    // (As a mana X above: ENGINE.md 249.2.)
+                    let mut tmp = item.clone();
+                    tmp.x = life;
+                    self.feed_completes(card, &tmp)
+                }
             })
         } else if !free {
             // CR 601.2f: X is part of the mana cost, before reductions. Cast
@@ -1418,10 +1425,15 @@ impl Game {
         // there: not counted.)
         let card_at = |i: usize| !self.is_token(gy[i]);
         let n_cards = (0..gy.len()).filter(|&i| card_at(i)).count().saturating_sub((item.delved as usize).saturating_sub(committed.len() + promised.len()));
+        // (And leaving the cards an escape cost exiles, CR 702.138a, after the picks still needed, not after this
+        // one alone: once a graveyard card is picked no source or hand card is delved any more, so a pick while the
+        // graveyard can't give all of them is a dead end - Dig Through Time escaped with seven cards there, three
+        // of them the escape's, and a Black Lotus to delve: four cards picked first left {2}{U}{U} and the Lotus's
+        // three mana. ENGINE.md 247.5.)
         let mut opts: Vec<Opt> = gy
             .iter()
             .enumerate()
-            .filter(|&(i, _)| card_at(i) && i >= floor && (i..gy.len()).filter(|&j| card_at(j)).count() >= need && n_cards > keep)
+            .filter(|&(i, _)| card_at(i) && i >= floor && (i..gy.len()).filter(|&j| card_at(j)).count() >= need && n_cards >= keep + need.max(1))
             .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
             .collect();
         // Mana sources that sacrifice themselves (Lotus Petal), first and
@@ -2048,7 +2060,15 @@ impl Game {
         if !m.costs.is_empty() {
             if let StackKind::Spell { card } = item.kind {
                 for (k, a) in avail.iter_mut().enumerate() {
-                    *a = *a && self.can_pay_spell(card, item, &self.announced_cost(card, item, &m.costs[k]));
+                    let cost = self.announced_cost(card, item, &m.costs[k]);
+                    *a = *a
+                        && (self.can_pay_spell(card, item, &cost) || {
+                            // (Or with the 601.2g step's feeding abilities, the mode announced: the item with it has
+                            // this total cost, so its step's search asks this question; ENGINE.md 249.2.)
+                            let mut tmp = item.clone();
+                            tmp.modes.push(k as u8);
+                            self.total_mana(card, &tmp) == cost && self.feed_completes(card, &tmp)
+                        });
                 }
             }
         }
@@ -2185,6 +2205,22 @@ impl Game {
         std::borrow::Cow::Owned(c)
     }
 
+    /// Does spell `card`'s castability (`spell_payable` of its total cost, `item` as cast) read the pool through the
+    /// class model alone, once (`can_pay_with`'s candidates, `add_pool`)? When its total cost has no part besides its
+    /// mana, or its other parts are not emerge's nor teamwork's (whose checks read the mana again) and their order is free
+    /// with its mana (`cost_order_free`: else a search of the payment, reading the pool's types). The payment search's
+    /// mana of no chosen type is then exactly a unit of its types (ENGINE.md 247.1, `Game::wild_any`).
+    pub(crate) fn spell_rest_free(&self, card: CardIdx, item: &StackItem) -> bool {
+        let Some(rest) = self.spell_rest(card, item) else { return true };
+        if rest.crew > 0 || item.alt > 0 && self.item_alt(card, item).is_some_and(|(a, _)| a.emerge.is_some()) {
+            return false;
+        }
+        let p = item.controller;
+        let cost = Self::with_life(&rest, self.life_later(card, item));
+        let reduced = self.delve_reduced_with(card, p, self.total_mana(card, item), self.escape_exiles(card, item.from), Some(&rest));
+        self.cost_order_free(p, card, &cost, &reduced, None, self.spend_allow_from(card, item.from), 0, true, None)
+    }
+
     /// Can the caster of `item` pay spell `card`'s total cost with `cost`
     /// its mana (an X, a mode's or the times' mana announced: CR 601.2b-f)?
     /// The whole cost as `cast_pay` pays it (`spell_payable`).
@@ -2296,7 +2332,16 @@ impl Game {
             let mut more = tc.mana.times(n);
             more.generic = more.generic.saturating_add(x_min.saturating_mul(n));
             let cost = self.announced_cost(card, &self.stack[pos], &more);
-            self.can_pay_spell(card, &self.stack[pos], &cost)
+            self.can_pay_spell(card, &self.stack[pos], &cost) || {
+                // (Or with the 601.2g step's feeding abilities, the times announced - kicker {X}'s least X with them:
+                // the item so has this total cost, so its step's search asks this question; ENGINE.md 249.2.)
+                let mut tmp = self.stack[pos].clone();
+                tmp.times = u32::try_from(n).unwrap_or(u32::MAX);
+                if tc.x {
+                    tmp.x = x_min as u32;
+                }
+                self.total_mana(card, &tmp) == cost && self.feed_completes(card, &tmp)
+            }
         };
         let most = crate::decision::most_allowed(0, tc.max as u64, pays);
         match self.answer.take() {
@@ -2739,7 +2784,7 @@ impl Game {
         // pushed after this one), the caster may activate mana abilities
         // before it is paid (delve's cards, the cost's parts, the mana:
         // 601.2h); `cast_mana.rs`, ENGINE.md 231.
-        self.agenda.push(Task::CastMana { id, card: None, again: false, after: 0 });
+        self.agenda.push(Task::CastMana { id, card: None, again: false, after: 0, sac: None });
 
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
             self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST }); // CR 601.2d
@@ -2823,11 +2868,15 @@ impl Game {
                 // payment's sources, improvise's and convoke's too, its
                 // spending restrictions, emerge's permanent to choose;
                 // ENGINE.md 100.4.11.)
+                // (Or with mana abilities activated while it is cast that feed its graveyard cost, CR 601.2g: the
+                // option castability counted, `feed_castable`; ENGINE.md 231.4, 247.3.)
                 let mut base = item.clone();
                 let opts: Vec<Opt> = (0..def.additional.len())
                     .filter(|&k| {
                         base.cost_option = k as u8;
-                        kicker_ok(k) && self.route_extra(card, item.from, k as u8).is_some() && self.can_pay_spell(card, &base, &self.total_mana(card, &base))
+                        kicker_ok(k)
+                            && self.route_extra(card, item.from, k as u8).is_some()
+                            && (self.can_pay_spell(card, &base, &self.total_mana(card, &base)) || self.feed_completes(card, &base))
                     })
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();

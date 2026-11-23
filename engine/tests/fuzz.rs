@@ -63,6 +63,38 @@ fn forced_answers_naming_a_hidden_place_are_masked_default_seeds() {
     }
 }
 
+/// ENGINE.md 247: the farm fuzz's payment and cost stops, default pool, each passing every check of `play`. The
+/// payment search's 2,000,000-copy cap (247.1: Rain of Filth's granted sacrifices and Squandered Resources' searched
+/// for an escape whose graveyard cards were there; 100004730 ran past the farm's 300 s a seed before the cap):
+/// 100002232, 100004730, 100014288, 4235003677. "picks within the budget" (247.2: a mana source activated first for
+/// an escape's exile though the cost's own sacrifice fed it): 100061712. "PayMana: no way to pay" (247.5: delve's
+/// graveyard picks took the cards its Black Lotus had to make up for): 100353550. "DiscardCost with no options" (247.4:
+/// retrace's land card not pinned at a face choice): 100654376.
+#[test]
+fn payment_and_cost_stops_of_247_default_seeds() {
+    if pool_mode() != PoolMode::Default || hidden_decks_mode() {
+        return;
+    }
+    for seed in [100002232u64, 100004730, 100014288, 4235003677, 100061712, 100353550, 100654376] {
+        let p = play(seed, true);
+        assert!(!p.actions.is_empty(), "seed {seed}");
+    }
+}
+
+/// ENGINE.md 247, hidden decklists (`FUZZ_HIDDEN_DECKS=1`; the default pool's games): "ChooseCost with no options"
+/// (247.3: an additional cost's choice that castability counted through the 601.2g step's feeding abilities):
+/// 100438064; the payment search's cap (247.1): 232013638, 100004138.
+#[test]
+fn payment_and_cost_stops_of_247_hidden_decklist_seeds() {
+    if pool_mode() != PoolMode::Default || !hidden_decks_mode() {
+        return;
+    }
+    for seed in [100438064u64, 232013638, 100004138] {
+        let p = play_hidden(seed);
+        assert!(!p.actions.is_empty(), "seed {seed}");
+    }
+}
+
 /// ENGINE.md 140.10: the hidden-decklist games whose checks compared the deck's objects alone (a companion put into
 /// the hand and shuffled away traded identities with a deck card in a world: "the viewer's own cards", "the match's
 /// deck of the opponent", "the sampled deck lacks a shown ..."), replayed with every check of `play_hidden`: seed 331

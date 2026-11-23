@@ -580,6 +580,51 @@ impl Game {
         cast: bool,
         granter: Option<CardIdx>,
     ) -> Option<bool> {
+        // (The sources the payment itself will have: `PayMana` is begun only
+        // when they pay the mana.)
+        let _ = classes;
+        let (o, pm) = self.cost_order_split(p, card, cost, mana, exclude, allow, loyalty, cast, granter)?;
+        if let Some(pm) = &pm {
+            if !mana.is_zero() && !self.can_pay_with(p, mana, &self.payment_classes(pm), &pm.keep) {
+                return Some(false);
+            }
+        }
+        Some(self.payable_in_some_order(o, pm, cast))
+    }
+
+    /// Is the order of `cost`'s parts free with its mana (`order_free_with`), so that its castability is the fixed
+    /// order's checks (`cost_payable_with`) and not a search of the payment (`cost_payable_order`)? ENGINE.md 247.1.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cost_order_free(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        cost: &Cost,
+        mana: &crate::mana::ManaCost,
+        exclude: Option<CardIdx>,
+        allow: crate::doomsday_b::Allow,
+        loyalty: i32,
+        cast: bool,
+        granter: Option<CardIdx>,
+    ) -> bool {
+        self.cost_order_split(p, card, cost, mana, exclude, allow, loyalty, cast, granter).is_none()
+    }
+
+    /// `cost_payable_order`'s order and mana payment: `None` when the order of `cost`'s parts is free with its mana,
+    /// else the order and the payment of the mana (if any) that comes first.
+    #[allow(clippy::too_many_arguments)]
+    fn cost_order_split(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        cost: &Cost,
+        mana: &crate::mana::ManaCost,
+        exclude: Option<CardIdx>,
+        allow: crate::doomsday_b::Allow,
+        loyalty: i32,
+        cast: bool,
+        granter: Option<CardIdx>,
+    ) -> Option<(crate::cost_order::Order, Option<PayMana>)> {
         let o = crate::cost_order::Order::new(p, card, cost, 0, loyalty, 0).with_moves(None, granter);
         let keep = Keep { exclude, allow, spell: cast.then_some(card), ..Keep::default() };
         let new_pm = |forced: Vec<(crate::pay::Src, bool)>| {
@@ -603,19 +648,7 @@ impl Game {
         if self.order_free_with(&o, || if paying || delve { self.mana_writes(&new_pm(Vec::new()), delve) } else { Default::default() }) {
             return None;
         }
-        let pm = if !paying {
-            None
-        } else {
-            let pm = new_pm(forced);
-            // (The sources the payment itself will have: `PayMana` is begun
-            // only when they pay the mana.)
-            let _ = classes;
-            if !mana.is_zero() && !self.can_pay_with(p, mana, &self.payment_classes(&pm), &pm.keep) {
-                return Some(false);
-            }
-            Some(pm)
-        };
-        Some(self.payable_in_some_order(o, pm, cast))
+        Some((o, paying.then(|| new_pm(forced))))
     }
 
     /// [`cost_payable`](Self::cost_payable). A "tap n untapped <permanent>"
@@ -1071,19 +1104,36 @@ impl Game {
         if mana.is_zero() {
             return Vec::new();
         }
-        // (The cost's own discards are graveyard cards by then: ruling
-        // bea302d9.)
-        let short = self.exile_short(p, card, cost).saturating_sub(self.discards_feed(p, card, cost));
+        // (The cost's own discards and the nontoken permanents it sacrifices are graveyard cards by then: ruling
+        // bea302d9, CR 601.2h; `cost_feeds_graveyard`, as castability counts them, `cost_payable_with`.)
+        let short = self.exile_short(p, card, cost);
         // (A spell whose mana can't be spent activates no mana source: ENGINE.md
         // 220.1.)
-        if short == 0 || self.def_of(card).casting.no_mana {
+        if short <= self.cost_feeds_graveyard(p, card, cost, &[]) || self.def_of(card).casting.no_mana {
             return Vec::new();
         }
+        // The fewest sources, in canonical order, that with the cost's own cards fill the graveyard: a source is
+        // activated first only if it adds a card (not one the cost's sacrifice would put there anyway) and leaves
+        // the cost's sacrifice its permanents (ENGINE.md 247.2: before, as many sources as the graveyard was short
+        // by after the discards alone - Lotus Petal activated for mana although it was the only artifact the cost
+        // could sacrifice, and its sacrifice the card the exile needed).
+        let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n as usize);
+        let cands = cost.sacrifice.as_ref().map_or(Vec::new(), |s| self.sacrifice_candidates(p, card, s));
+        let mut first: Vec<CardIdx> = Vec::new();
+        for c in self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c)) {
+            let fed = first.len() + self.cost_feeds_graveyard(p, card, cost, &first);
+            if fed >= short {
+                break;
+            }
+            first.push(c);
+            let left = cands.iter().filter(|x| !first.contains(x)).count();
+            if left < n_sac || first.len() + self.cost_feeds_graveyard(p, card, cost, &first) <= fed {
+                first.pop();
+            }
+        }
         let classes = self.mana_classes(p, exclude);
-        self.delve_sources(p)
+        first
             .into_iter()
-            .filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c))
-            .take(short)
             .filter_map(|c| classes.iter().find_map(|cl| cl.members.iter().find(|s| s.card == c && cl.sac_self).copied()))
             .map(|s| (s, false))
             .collect()
@@ -1673,16 +1723,56 @@ impl Game {
         let p = self.objs[src.card.i()].controller;
         let ad = self.src_ability(src.card, src.slot);
         if let Some(s) = &ad.cost.sacrifice {
+            // (The payment search's "its mana ability first, then sacrificed" below: the permanent must still be one
+            // the cost may sacrifice once that ability's costs are paid.)
+            if let Some(c) = sac.filter(|_| self.oracle) {
+                if !self.sacrifice_candidates(p, src.card, s).contains(&c) {
+                    self.oracle_dead = true;
+                    return;
+                }
+            }
             if sac.is_none() {
                 match self.answer.take() {
-                    Some(Choice::Card(c)) => sac = Some(c),
+                    Some(Choice::Card(c)) => {
+                        sac = Some(c);
+                        if self.oracle {
+                            self.search_sac_record(src.card, c);
+                        }
+                    }
+                    // (In the payment search's 601.2g step: the permanent's own mana ability first, CR 601.2g - any
+                    // mana abilities, in any order - then it is sacrificed for this one; ENGINE.md 249.1.)
+                    Some(Choice::Ability(c, slot)) if self.oracle => {
+                        self.search_sac_record(src.card, c);
+                        self.agenda.push(Task::ManaNowCosts { src, sac: Some(c), x, taps });
+                        self.begin_activate(p, c, slot);
+                        return;
+                    }
                     Some(other) => unreachable!("sacrifice answer {other:?}"),
                     None => {
-                        let opts: Vec<Opt> = self
+                        // (In the payment search's 601.2g step, a later permanent than the one this card's activation
+                        // there sacrificed last, when that node's activations commute: ENGINE.md 247.1.)
+                        let floor = if self.oracle { self.search_sac_floor(src.card) } else { None };
+                        let mut opts: Vec<Opt> = self
                             .sacrifice_candidates(p, src.card, s)
                             .into_iter()
+                            .filter(|c| floor.is_none_or(|f| c.get() > f.get()))
                             .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                             .collect();
+                        // (And each with a mana ability of its own activated first: a land tapped for mana, then
+                        // sacrificed - what the step lets the player do and the payment after it can't, the land
+                        // gone; ENGINE.md 249.1.)
+                        if self.oracle {
+                            let cards: Vec<CardIdx> = opts.iter().filter_map(|o| if let Choice::Card(c) = o.choice { Some(c) } else { None }).collect();
+                            for c in cards {
+                                for slot in self.search_pretaps(c) {
+                                    opts.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+                                }
+                            }
+                        }
+                        if opts.is_empty() && floor.is_some() {
+                            self.oracle_dead = true;
+                            return;
+                        }
                         self.ask(Task::ManaNowCosts { src, sac, x, taps }, p, DecisionKind::Sacrifice, opts);
                         return;
                     }
@@ -1796,15 +1886,16 @@ impl Game {
             let k = unit_mask.count_ones();
             let combos = (1..=per as u64).fold(1u64, |c, i| c * (k as u64 + i - 1) / i);
             let units = per >= 1 && prods.iter().all(|v| v.iter().map(|&n| n as u32).sum::<u32>() == per) && (per == 1 || prods.len() as u64 == combos);
-            let (wn, wm) = self.pool_wild[p as usize];
+            let wn = self.pool_wild[p as usize][unit_mask as usize];
             // (Only for the step's own activation: its next task is the step, the search's leaf or a feeding ability, which
             // read the pool through castability or choose its types first.)
             let step_next = matches!(self.agenda.last(), Some(Task::CastMana { card: None, .. }));
-            if self.oracle && step_next && picks > 0 && only == 0 && units && (wn == 0 || wm == unit_mask) && wn as u32 + picks * per <= u8::MAX as u32 {
+            if self.oracle && step_next && picks > 0 && only == 0 && units && wn as u32 + picks * per <= u8::MAX as u32 && crate::cast_mana::search_collapse() {
                 // (In the payment search, the mana's types not chosen yet: each one mana of a type of the mask, as the
                 // payment's castability counts it, `Game::pool_wild` - the search asks whether some combination
-                // completes the payment; ENGINE.md 231.4.)
-                self.pool_wild[p as usize] = (wn + (picks * per) as u8, unit_mask);
+                // completes the payment; ENGINE.md 231.4; mana of different masks kept apart, each unit its own mask,
+                // 247.1.)
+                self.pool_wild[p as usize][unit_mask as usize] = wn + (picks * per) as u8;
             } else if self.oracle && picks > 1 {
                 // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order
                 // the mana was chosen in, so every order of one combination reaches one state - each combination once,

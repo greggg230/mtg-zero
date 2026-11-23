@@ -50,6 +50,32 @@ pub(crate) fn subsets(v: &[CardIdx], k: usize) -> Vec<Vec<CardIdx>> {
 /// the next ones, ENGINE.md 231.4).
 const SEARCH_ORDER: u32 = 1 << 31;
 
+/// `Task::CastMana::after`'s mark of an activation the payment search made from one of its own step nodes (ordered or
+/// not), not the option of the game's decision the search starts from: the sacrifice such an activation chooses may
+/// activate the permanent's own mana ability first (`Game::search_pretaps`, ENGINE.md 249.1) - the game's own
+/// sacrifice decision offers no such thing, so its player taps the permanent in the step before.
+const SEARCH_NODE: u32 = 1 << 30;
+
+/// The card index of `Task::CastMana::after` (its raw index + 1; 0: none).
+const SEARCH_IDX: u32 = !(SEARCH_ORDER | SEARCH_NODE);
+
+thread_local! {
+    static SEARCH_COLLAPSE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// A test hook (ENGINE.md 247.1; per thread): with `false` the payment search's 601.2g step explores every order of the
+/// feeding abilities it activates and chooses the types of their mana as each is made (no `Game::pool_wild`) - the
+/// search without 231.4's order and 247.1's collapses, whose answers the collapsed search's are compared with.
+#[doc(hidden)]
+pub fn set_payment_search_collapse(on: bool) {
+    SEARCH_COLLAPSE.with(|c| c.set(on));
+}
+
+/// The payment search's collapses on (`set_payment_search_collapse`; always, but in that comparison).
+pub(crate) fn search_collapse() -> bool {
+    SEARCH_COLLAPSE.with(|c| c.get())
+}
+
 /// What the collapse of a pure mana ability reads once per step (`Game::cast_mana_collapsed`).
 struct Collapse {
     /// The checks that do not depend on the ability's permanent: the caster receives priority right after the cast,
@@ -104,7 +130,7 @@ impl Game {
     /// the total cost has no mana (601.2g: "if the total cost includes a mana payment") or nothing may be activated
     /// but `PASS`. In the payment search (`Game::oracle`) it asks only the abilities that may feed the graveyard a
     /// payment reads, and `PASS` asks the payment's castability.
-    pub(crate) fn cast_mana(&mut self, id: u32, card: Option<CardIdx>, again: bool, after: u32) {
+    pub(crate) fn cast_mana(&mut self, id: u32, card: Option<CardIdx>, again: bool, after: u32, sac: Option<CardIdx>) {
         let Some(pos) = self.item_index(id) else { return };
         let StackKind::Spell { card: spell } = self.stack[pos].kind else { return };
         let p = self.stack[pos].controller;
@@ -136,24 +162,24 @@ impl Game {
             Some(Choice::Card(c)) => {
                 let slots = slots_of(c);
                 if slots.len() == 1 {
-                    self.cast_mana_run(id, p, c, slots[0], after);
+                    self.cast_mana_run(id, p, c, slots[0], after, sac);
                 } else {
                     let opts = (0..slots.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
-                    self.ask(Task::CastMana { id, card: Some(c), again, after }, p, DecisionKind::ChooseMode, opts);
+                    self.ask(Task::CastMana { id, card: Some(c), again, after, sac }, p, DecisionKind::ChooseMode, opts);
                 }
             }
             Some(Choice::Number(k)) => {
                 let c = card.expect("the permanent picked");
                 let slot = slots_of(c)[k as usize];
-                self.cast_mana_run(id, p, c, slot, after);
+                self.cast_mana_run(id, p, c, slot, after, sac);
             }
-            Some(Choice::Ability(c, slot)) => self.cast_mana_run(id, p, c, slot, after),
+            Some(Choice::Ability(c, slot)) => self.cast_mana_run(id, p, c, slot, after, sac),
             Some(other) => unreachable!("CastMana answer {other:?}"),
             // (A refreshed decision, ENGINE.md 10: the permanent's question again.)
             None if card.is_some() => {
                 let slots = slots_of(card.expect("the permanent"));
                 let opts = (0..slots.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
-                self.ask(Task::CastMana { id, card, again, after }, p, DecisionKind::ChooseMode, opts);
+                self.ask(Task::CastMana { id, card, again, after, sac }, p, DecisionKind::ChooseMode, opts);
             }
             None => {
                 if self.oracle {
@@ -165,29 +191,39 @@ impl Game {
                         return;
                     }
                     // (A feeding ability may pay its cost with the pool: the types of its mana chosen first, each
-                    // combination once.)
-                    if self.pool_wild[p as usize].0 > 0 {
+                    // combination once - when one offered has a mana cost to pay; else nothing before the leaf reads
+                    // the pool's types, ENGINE.md 247.1.)
+                    if self.wild_total(p) > 0 && (self.feeders_pay_mana(p, &sources) || !search_collapse()) {
                         let prods = self.wild_combos(p);
-                        self.pool_wild[p as usize] = (0, 0);
-                        self.agenda.push(Task::CastMana { id, card: None, again, after });
+                        self.pool_wild[p as usize] = [0; 64];
+                        self.agenda.push(Task::CastMana { id, card: None, again, after, sac });
                         self.agenda.push(Task::ManaNowPick { p, prods, only: 0, page: crate::decision::Page::FIRST });
                         return;
                     }
-                    // The feeding abilities in increasing card order (each set of them once, not each order) when none
-                    // has a condition: their activations commute for the search's question (ENGINE.md 231.4).
-                    let conditional = sources.iter().any(|(c, slots)| {
-                        slots.iter().any(|&s| matches!(s, AbilitySlot::Activated(_) | AbilitySlot::Hand(_)) && self.src_ability(*c, s).only_if.is_some())
-                    });
+                    // The feeding abilities in increasing order of their card, then of the permanent each sacrifices (each
+                    // set of them once, not each order) when their activations commute for the search's question
+                    // (`feeders_commute`, ENGINE.md 231.4, 247.1); else every order, and no order carried on from this
+                    // node (its activations mark nothing).
+                    // (A permanent a feeding ability may sacrifice whose own mana ability does not make the same
+                    // mana whenever it is activated: that ability at any time - the node's activations in every
+                    // order; ENGINE.md 249.1.)
+                    let loose = self.search_loose_taps(id, p, spell, &sources);
+                    let ordered = loose.is_empty() && search_collapse() && self.feeders_commute(id, p, spell);
+                    let (after, sac) = if ordered { (after, sac) } else { (0, None) };
                     let mut opts: Vec<Opt> = sources
                         .iter()
-                        .filter(|(c, _)| conditional || c.get() + 1 >= after & !SEARCH_ORDER)
+                        .filter(|(c, _)| !ordered || c.get() + 1 >= after & SEARCH_IDX)
                         .map(|(c, slots)| match slots[0] {
                             AbilitySlot::Hand(_) => Opt { action: self.ability_action(p, *c, slots[0]), choice: Choice::Ability(*c, slots[0]) },
                             _ => Opt { action: self.perm_action(p, *c), choice: Choice::Card(*c) },
                         })
                         .collect();
+                    for &(c, slot) in &loose {
+                        opts.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+                    }
                     opts.push(Opt { action: act::YES, choice: Choice::Yes });
-                    self.ask_completed(Task::CastMana { id, card: None, again, after: after | SEARCH_ORDER }, p, DecisionKind::CastMana, opts);
+                    let after = if ordered { (after & SEARCH_IDX) | SEARCH_ORDER | SEARCH_NODE } else { SEARCH_NODE };
+                    self.ask_completed(Task::CastMana { id, card: None, again, after, sac }, p, DecisionKind::CastMana, opts);
                     return;
                 }
                 if sources.is_empty() {
@@ -202,7 +238,7 @@ impl Game {
                     })
                     .collect();
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                let task = Task::CastMana { id, card: None, again, after };
+                let task = Task::CastMana { id, card: None, again, after, sac };
                 // (The options that leave the payment completable, once; only `PASS`: no decision.)
                 let opts = self.completing(&task, opts);
                 if !self.oracle && opts.iter().all(|o| o.choice == Choice::Pass) {
@@ -216,16 +252,19 @@ impl Game {
     /// Activate source `slot` of `c` in spell `id`'s 601.2g step: its total cost locked first (601.2f), the step asked
     /// again after the ability's choices and costs (no state-based actions, no triggered ability put on the stack: no
     /// player receives priority while a spell is cast, CR 601.2, 117.5).
-    fn cast_mana_run(&mut self, id: u32, p: PlayerId, c: CardIdx, slot: AbilitySlot, after: u32) {
+    fn cast_mana_run(&mut self, id: u32, p: PlayerId, c: CardIdx, slot: AbilitySlot, after: u32, sac: Option<CardIdx>) {
         if self.locked_cost(id).is_none() {
             let pos = self.item_index(id).expect("the spell being cast");
             let StackKind::Spell { card } = self.stack[pos].kind else { unreachable!("a spell") };
             let cost = self.total_mana(card, &self.stack[pos]);
             self.cast_lock.push((id, cost));
         }
-        // (Activated from a node of the search: the next ones from this card on, ENGINE.md 231.4.)
-        let after = if after & SEARCH_ORDER != 0 { (c.get() + 1) | SEARCH_ORDER } else { 0 };
-        self.agenda.push(Task::CastMana { id, card: None, again: true, after });
+        // (Activated from an ordered node of the search: the next ones from this card on, ENGINE.md 231.4; this card's
+        // next sacrifice after the last one its activations made, kept across those that sacrifice nothing, 247.1.)
+        let ordered = after & SEARCH_ORDER != 0;
+        let sac = if ordered && after & SEARCH_IDX == c.get() + 1 { sac } else { None };
+        let after = if ordered { (c.get() + 1) | SEARCH_ORDER } else { 0 } | (after & SEARCH_NODE);
+        self.agenda.push(Task::CastMana { id, card: None, again: true, after, sac });
         if slot == crate::pay::SAC_FOR {
             // A granted "sacrifice this: add <mana>" (Rain of Filth).
             let mask = self.sac_mana_of(c);
@@ -234,6 +273,254 @@ impl Game {
             self.agenda.push(Task::ManaNowPick { p, prods, only: 0, page: crate::decision::Page::FIRST });
         } else {
             self.begin_activate(p, c, slot);
+        }
+    }
+
+    /// The mana abilities of permanent `c` the payment search may activate right before a feeding ability of the
+    /// 601.2g step sacrifices `c` (ENGINE.md 249.1; CR 601.2g: the player activates mana abilities in any order, so a
+    /// land may be tapped for mana and then sacrificed to Squandered Resources - two mana and a card, where the
+    /// payment after the step has the card but no land to tap): those the step itself offers for `c`
+    /// (`cast_mana_sources`: may be activated now, not left to the priority after the cast) that leave `c` on the
+    /// battlefield. Asked while that feeding ability's sacrifice is chosen (the step's task waiting under it); none
+    /// outside the search's step.
+    pub(crate) fn search_pretaps(&self, c: CardIdx) -> Vec<AbilitySlot> {
+        if !self.oracle {
+            return Vec::new();
+        }
+        let Some(Task::CastMana { id, card: None, after, .. }) = self.agenda.last() else { return Vec::new() };
+        if after & SEARCH_NODE == 0 {
+            return Vec::new();
+        }
+        let Some(pos) = self.item_index(*id) else { return Vec::new() };
+        let StackKind::Spell { card: spell } = self.stack[pos].kind else { return Vec::new() };
+        let p = self.stack[pos].controller;
+        self.pretaps_among(&self.cast_mana_sources(*id, p, spell, false), c)
+    }
+
+    /// `search_pretaps` from the step's sources `all` (every ability the step offers).
+    fn pretaps_among(&self, all: &[(CardIdx, Vec<AbilitySlot>)], c: CardIdx) -> Vec<AbilitySlot> {
+        let Some((_, slots)) = all.iter().find(|(x, _)| *x == c) else { return Vec::new() };
+        slots
+            .iter()
+            .copied()
+            .filter(|&s| match s {
+                AbilitySlot::Activated(_) if s != crate::pay::SAC_FOR => {
+                    let ad = self.src_ability(c, s);
+                    let k = &ad.cost;
+                    !(k.sac_self || k.exile_self) && k.bounce.is_none() && ad.mana().is_some_and(|m| m.sac_if_no.is_none())
+                }
+                _ => false,
+            })
+            .collect()
+    }
+
+    /// The mana abilities the payment search's step node offers on their own, at any time (ENGINE.md 249.1): those of a
+    /// permanent a feeding ability the node offers may sacrifice (`search_pretaps`) which "right before the sacrifice"
+    /// does not cover - an ability that is not a plain "{T}: add <fixed mana>" with nothing added by its tap
+    /// (`plain_tap_mana`: what it makes, or whether it may be activated, can depend on when - Tolarian Academy's
+    /// count before another artifact is sacrificed), or any of them when a mana ability's sacrifice or return cost
+    /// reads whether a permanent is tapped (tapped earlier, it could be chosen or not). For a plain one the time
+    /// changes nothing but that the permanent is tapped, which until its sacrifice only takes options away: activated
+    /// right before the sacrifice it reaches every state an earlier activation reaches, or one with more left.
+    fn search_loose_taps(&self, id: u32, p: PlayerId, spell: CardIdx, sources: &[(CardIdx, Vec<AbilitySlot>)]) -> Vec<(CardIdx, AbilitySlot)> {
+        let mut cands: Vec<CardIdx> = Vec::new();
+        for (fc, slots) in sources {
+            for &s in slots {
+                if !matches!(s, AbilitySlot::Activated(_) | AbilitySlot::Hand(_)) || s == crate::pay::SAC_FOR {
+                    continue;
+                }
+                if let Some(sc) = &self.src_ability(*fc, s).cost.sacrifice {
+                    for x in self.sacrifice_candidates(p, *fc, sc) {
+                        if !cands.contains(&x) {
+                            cands.push(x);
+                        }
+                    }
+                }
+            }
+        }
+        if cands.is_empty() {
+            return Vec::new();
+        }
+        let reads_tapped = |ad: &ActivatedDef| ad.mana().is_some() && ad.cost.sacrifice.iter().chain(ad.cost.bounce.iter()).any(|s| crate::cost_order::filter_reads_tapped(&s.filter));
+        let any_reads = self.permanents_of(p).any(|c| {
+            self.abilities(c).activated.iter().any(reads_tapped) || self.granted_activated(c).iter().any(|g| reads_tapped(self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot))))
+        }) || self.players[p as usize].hand.iter().any(|&c| self.def_of(c).hand_abilities.iter().any(reads_tapped));
+        let all = self.cast_mana_sources(id, p, spell, false);
+        let mut out = Vec::new();
+        cands.sort_unstable();
+        for x in cands {
+            for s in self.pretaps_among(&all, x) {
+                if any_reads || !self.plain_tap_mana(x, self.src_ability(x, s)) {
+                    out.push((x, s));
+                }
+            }
+        }
+        out
+    }
+
+    /// Is permanent `c`'s mana ability `ad` a plain "{T}: add <fixed mana>": its cost {T} alone, a fixed production
+    /// (what it makes reads nothing of the game), no damage, life, sacrifice or condition, and nothing added by its tap
+    /// ("whenever you tap ... for mana")? (The collapse's checks 1 and 2 of the ability itself, `cast_mana_collapsed`.)
+    fn plain_tap_mana(&self, c: CardIdx, ad: &ActivatedDef) -> bool {
+        let Some(m) = ad.mana() else { return false };
+        let k = &ad.cost;
+        let tap_only = k.tap
+            && k.mana.is_zero()
+            && !ad.x
+            && k.life == 0
+            && !(k.sac_self || k.exile_self || k.discard_self || k.discard_hand || k.exert || k.waterbend)
+            && k.sacrifice.is_none()
+            && k.bounce.is_none()
+            && k.discard == 0
+            && k.discard_also.is_none()
+            && k.exile_from_hand.is_none()
+            && k.exile_graveyard == 0
+            && k.remove_counters.is_none()
+            && k.remove_counter_from.is_none()
+            && k.tap_untapped.is_none()
+            && k.tap_x.is_none()
+            && k.crew == 0;
+        let plain = ad.special.is_none() && ad.only_if.is_none() && !ad.your_turn && ad.loyalty.is_none() && !ad.sorcery && !ad.instant_only;
+        let fixed = matches!(
+            m.prod,
+            ManaProd::One(_) | ManaProd::Fixed(_) | ManaProd::SameType { .. } | ManaProd::Combo { .. } | ManaProd::OneOf(_) | ManaProd::Chosen | ManaProd::ChosenN(_)
+        );
+        tap_only && plain && fixed && m.damage_to_you == 0 && m.sac_if_no.is_none() && m.opp_life == 0 && self.tap_bonus_wide(c, true) == [0; 6]
+    }
+
+    /// The payment search's bound on the permanent the next activation of card `c`'s ability in the 601.2g step
+    /// sacrifices (ENGINE.md 247.1): when the step's node it was activated from is ordered (`SEARCH_ORDER`) and that
+    /// node's last activations were `c`'s, the last permanent they sacrificed - the next one is a later card. Read from
+    /// the step's task waiting under the activation (the topmost `Task::CastMana`).
+    pub(crate) fn search_sac_floor(&self, c: CardIdx) -> Option<CardIdx> {
+        match self.agenda.iter().rev().find(|t| matches!(t, Task::CastMana { .. }))? {
+            Task::CastMana { card: None, again: true, after, sac, .. } if after & SEARCH_ORDER != 0 && after & SEARCH_IDX == c.get() + 1 => *sac,
+            _ => None,
+        }
+    }
+
+    /// Record in the step's task waiting under it that the activation of card `c`'s ability from an ordered node of the
+    /// payment search sacrificed `x` (`search_sac_floor`; ENGINE.md 247.1).
+    pub(crate) fn search_sac_record(&mut self, c: CardIdx, x: CardIdx) {
+        if let Some(Task::CastMana { card: None, again: true, after, sac, .. }) = self.agenda.iter_mut().rev().find(|t| matches!(t, Task::CastMana { .. })) {
+            if *after & SEARCH_ORDER != 0 && *after & SEARCH_IDX == c.get() + 1 {
+                *sac = Some(x);
+            }
+        }
+    }
+
+    /// Do the activations of the feeding abilities a node of the payment search of spell `id`'s 601.2g step may make,
+    /// now or later, commute for the search's question (ENGINE.md 231.4, 247.1)? Then the search activates them in
+    /// increasing order of their card and, for one card's, of the permanent each sacrifices: each set once, not each
+    /// order. They commute when no activation can change what another may do but by taking objects (a permanent
+    /// tapped or sacrificed, a card discarded: each object one activation's), so in any order each has the same choices
+    /// and they reach states equal but for the graveyard's order and the waiting triggers' order, which the question
+    /// (can the payment be completed: delve's and the exile's cards are sets, the triggers wait) never reads. Over
+    /// everything the rest of the cast may change (`cast_rest_reach`, a superset of every activation's writes, so the
+    /// answer holds at every later node too):
+    /// * no ability has a condition ("only if": another activation could make it true or false) or a life cost (a
+    ///   payable life cost can become unpayable after another's life or damage, CR 119.4);
+    /// * no permanent's types or abilities may change (`RestReach::chars`: a feeder's own abilities, what its
+    ///   sacrifice's filter reads, what a sacrificed land could produce) and no lock on activating may leave;
+    /// * each sacrifice, return or tap cost's filter reads nothing else that may change (`filter_settled`);
+    /// * each production reads nothing that may change (`prod_settled`) - for "one mana of any type the sacrificed land
+    ///   could produce" (Squandered Resources, CR 106.7) the productions of every land it may sacrifice - and an
+    ///   ability with {T} adds no bonus a leaving permanent gives ("whenever you tap ... for mana").
+    /// A mana cost one activation pays with another's mana is paid in the other order by activating that ability
+    /// within its own payment (CR 605.3a), as 231.4 argues.
+    fn feeders_commute(&self, id: u32, p: PlayerId, spell: CardIdx) -> bool {
+        let Some(pos) = self.item_index(id) else { return false };
+        // (Every feeding ability the search may activate from here on, whether it may be activated now or not - one whose
+        // cost another's mana pays later, Chromatic Star's {1}: a superset of every later node's.)
+        let exile = self.spell_rest(spell, &self.stack[pos]).is_some_and(|r| r.exile_graveyard > 0);
+        let (delve, no_mana) = (self.def_of(spell).delve, self.def_of(spell).casting.no_mana);
+        let gap = |ad: &ActivatedDef, slot: AbilitySlot| ad.mana().is_some() && !ad.instant_only && Self::gap_feeder(delve, no_mana, exile, ad, slot);
+        let mut ads: Vec<(CardIdx, &ActivatedDef)> = Vec::new();
+        for c in self.permanents_of(p) {
+            for (i, ad) in self.abilities(c).activated.iter().enumerate() {
+                if gap(ad, AbilitySlot::Activated(i as u8)) {
+                    ads.push((c, ad));
+                }
+            }
+            for g in self.granted_activated(c) {
+                let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
+                if gap(ad, AbilitySlot::Activated(g.slot)) {
+                    ads.push((c, ad));
+                }
+            }
+        }
+        for &c in &self.players[p as usize].hand {
+            for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
+                if gap(ad, AbilitySlot::Hand(i as u8)) {
+                    ads.push((c, ad));
+                }
+            }
+        }
+        if ads.iter().any(|(_, ad)| ad.only_if.is_some() || ad.cost.life > 0) {
+            return false;
+        }
+        let reach = self.cast_rest_reach(p, spell, &self.stack[pos]);
+        if reach.chars || reach.leave.iter().any(|&x| self.abilities(x).locks_activated != 0) {
+            return false;
+        }
+        let bonus_leaves = || reach.leave.iter().any(|&x| !self.abilities(x).extra_mana_on_tap.is_empty() || self.abilities(x).extra_mana_creature != [0; 6]);
+        for &(c, ad) in &ads {
+            let k = &ad.cost;
+            if k.sacrifice.iter().chain(k.bounce.iter()).chain(k.tap_untapped.iter()).any(|s| !crate::cost_order::filter_settled(&s.filter, reach.unsettled)) {
+                return false;
+            }
+            if k.tap && bonus_leaves() {
+                return false;
+            }
+            let Some(m) = ad.mana() else { continue };
+            if matches!(m.prod, ManaProd::SacrificedLand) {
+                // (What each land it may sacrifice could produce, read as it is sacrificed: CR 106.7.)
+                let Some(s) = &k.sacrifice else { return false };
+                if !self.sacrifice_candidates(p, c, s).into_iter().all(|x| self.mana_prods_settled(p, x, &reach)) {
+                    return false;
+                }
+            } else if !self.prod_settled(p, &m.prod, c, &reach) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Does every production of permanent `x`'s mana abilities (its own and those granted to it, as `could_produce`
+    /// reads them) read nothing the rest of the cast may change (`prod_settled`)?
+    fn mana_prods_settled(&self, p: PlayerId, x: CardIdx, reach: &crate::cost_order::RestReach) -> bool {
+        let granted = if self.grants_activated_now() { self.granted_activated(x) } else { Vec::new() };
+        self.abilities(x)
+            .activated
+            .iter()
+            .chain(granted.iter().map(|g| self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot))))
+            .filter_map(|a| a.mana())
+            .all(|m| self.prod_settled(p, &m.prod, x, reach))
+    }
+
+    /// Does production `prod` of source `src` (`pay::productions`) read nothing the rest of the cast may change
+    /// (`reach`)? Fixed types and amounts, or what the source alone keeps (its chosen colour or type, its linked cards,
+    /// its counters unless something may remove some); a count of `p`'s permanents (Tolarian Academy's artifacts) when
+    /// none that may leave matches its filter and the filter reads nothing else that may change. Not: the colours among
+    /// permanents, what lands could produce (Reflecting Pool), a condition, another sacrificed land's (exhaustive: a new
+    /// production says).
+    fn prod_settled(&self, p: PlayerId, prod: &ManaProd, src: CardIdx, reach: &crate::cost_order::RestReach) -> bool {
+        match prod {
+            ManaProd::One(_)
+            | ManaProd::Fixed(_)
+            | ManaProd::SameType { .. }
+            | ManaProd::Combo { .. }
+            | ManaProd::ComboX { .. }
+            | ManaProd::OneOf(_)
+            | ManaProd::Chosen
+            | ManaProd::ChosenN(_)
+            | ManaProd::Linked => true,
+            ManaProd::IfCounter { .. } | ManaProd::SameTypeCounters { .. } => !reach.counters.contains(&src),
+            ManaProd::PerPermanent { filter, .. } => {
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(src)) };
+                crate::cost_order::filter_settled(filter, reach.unsettled) && !reach.leave.iter().any(|&x| self.card_matches(filter, x, &ctx))
+            }
+            ManaProd::ColorAmong(_) | ManaProd::LandsCouldProduce | ManaProd::IfElse { .. } | ManaProd::SacrificedLand => false,
         }
     }
 
@@ -264,6 +551,11 @@ impl Game {
             }
             let exile = self.spell_rest(spell, &self.stack[pos]).is_some_and(|r| r.exile_graveyard > 0);
             reads = (self.def_of(spell).delve, self.def_of(spell).casting.no_mana, exile);
+            // (The graveyard already holds the cards the cost exiles and nothing else of the payment reads it: no
+            // feeding ability can make the payment completable that isn't - the leaf alone, ENGINE.md 247.1.)
+            if search_collapse() && self.graveyard_fed(p, spell, &self.stack[pos]) {
+                return out;
+            }
         }
         let gap = |ad: &ActivatedDef, slot: AbilitySlot, _own: bool| Self::gap_feeder(reads.0, reads.1, reads.2, ad, slot);
         let classes = self.mana_classes(p, None);
@@ -381,6 +673,31 @@ impl Game {
         self.def_of(card).delve || self.spell_rest(card, item).is_some_and(|r| r.exile_graveyard > 0)
     }
 
+    /// Can no card put into `p`'s graveyard from here on change whether the payment of spell `card` (`item`, in its
+    /// 601.2g step) can be completed (ENGINE.md 247.1)? The payment reads the graveyard for delve's cards (CR 702.66a:
+    /// each more card may pay one more generic mana - not settled here) and for its cost's "exile n cards from your
+    /// graveyard" (702.138a), which reads only whether n cards the cost may exile are there: once they are
+    /// (`exile_short` is 0; a card never leaves the graveyard in the step but as a mana ability's own cost), a further
+    /// card changes nothing of it. And nothing else may read the graveyard: no mana ability `p` has (its permanents',
+    /// those granted to them, its hand's) exiles cards from it as a cost, has a condition ("activate only if") or
+    /// produces by a condition. A feeding ability's other effect, its mana, is the payment's own to make (the
+    /// payment's castability counts every mana ability as a source: CR 601.2g-h, 605.3a; ENGINE.md 231.4), so the
+    /// payment search's step node has nothing to activate: its answer is the payment's castability.
+    pub(crate) fn graveyard_fed(&self, p: PlayerId, card: CardIdx, item: &crate::game::StackItem) -> bool {
+        if self.def_of(card).delve {
+            return false;
+        }
+        let Some(rest) = self.spell_rest(card, item) else { return false };
+        if rest.exile_graveyard == 0 || self.exile_short(p, card, &rest) > 0 {
+            return false;
+        }
+        let reads = |ad: &ActivatedDef| ad.mana().is_some_and(|m| ad.cost.exile_graveyard > 0 || ad.only_if.is_some() || matches!(m.prod, ManaProd::IfElse { .. }));
+        let perms = self.permanents_of(p).any(|c| {
+            self.abilities(c).activated.iter().any(reads) || self.granted_activated(c).iter().any(|g| reads(self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot))))
+        });
+        !perms && !self.players[p as usize].hand.iter().any(|&c| self.def_of(c).hand_abilities.iter().any(reads))
+    }
+
     /// The delve fuel of a spell whose mana can't be spent (CR 113.6e) from the mana abilities its 601.2g step may
     /// activate (castability, `Game::delve_classes`; ENGINE.md 231.4): each `p`'s mana source that sacrifices its card
     /// (itself; a land for another's ability, Squandered Resources', Rain of Filth's) with no mana cost to pay (no
@@ -449,44 +766,67 @@ impl Game {
         self.can_pay_with(p, cost, &classes, &crate::pay::Keep { allow, ..Default::default() })
     }
 
+    /// How much of the payment search's mana of no chosen type (`Game::pool_wild`) `p` has.
+    pub(crate) fn wild_total(&self, p: PlayerId) -> u32 {
+        self.pool_wild[p as usize].iter().map(|&n| n as u32).sum()
+    }
+
+    /// Does activating one of `sources` (the feeding abilities a node of the payment search offers) read the pool's
+    /// mana by its types: a mana cost to pay, or an X announced as much as can be paid (ENGINE.md 247.1)? Nothing else of
+    /// an activation does (its sacrifice, discard and tap costs and its production read no mana).
+    fn feeders_pay_mana(&self, p: PlayerId, sources: &[(CardIdx, Vec<AbilitySlot>)]) -> bool {
+        sources.iter().any(|(c, slots)| {
+            slots.iter().any(|&s| match s {
+                AbilitySlot::Activated(_) | AbilitySlot::Hand(_) => {
+                    let ad = self.src_ability(*c, s);
+                    ad.x || !self.act_mana(p, *c, ad).is_zero()
+                }
+                _ => false,
+            })
+        })
+    }
+
     /// The combinations of the payment search's mana of no chosen type (`Game::pool_wild`) of `p`: each production of
-    /// that many mana, each of a type of the mask, once.
+    /// that much mana, each unit of a type of its mask, once.
     fn wild_combos(&self, p: PlayerId) -> Vec<[u8; 6]> {
-        let (n, mask) = self.pool_wild[p as usize];
         let mut combos: Vec<[u8; 6]> = vec![[0; 6]];
-        for _ in 0..n {
-            let mut next: Vec<[u8; 6]> = Vec::new();
-            for c in &combos {
-                for t in (0..6).filter(|&t| mask & (1 << t) != 0) {
-                    let mut s = *c;
-                    s[t] += 1;
-                    if !next.contains(&s) {
-                        next.push(s);
+        for (mask, &n) in self.pool_wild[p as usize].iter().enumerate() {
+            for _ in 0..n {
+                let mut next: Vec<[u8; 6]> = Vec::new();
+                for c in &combos {
+                    for t in (0..6).filter(|&t| mask & (1 << t) != 0) {
+                        let mut s = *c;
+                        s[t] += 1;
+                        if !next.contains(&s) {
+                            next.push(s);
+                        }
                     }
                 }
+                combos = next;
             }
-            combos = next;
         }
         combos
     }
 
     /// Does `check` (the payment's castability for spell `id`, a leaf of the search) hold for some choice of the types of
-    /// the payment search's mana of no chosen type (`Game::pool_wild`)? A spell whose cost has no part besides its mana
-    /// is paid as castability counts the pool, each such mana a unit of the mask's types (`add_pool`): exact at once.
-    /// Otherwise (a part whose order with the mana can matter, its castability a search of its own reading the pool's
-    /// types) each combination is tried.
+    /// the payment search's mana of no chosen type (`Game::pool_wild`)? A spell whose castability reads the pool once,
+    /// through the class model (`can_pay_with`'s candidates, each such mana a unit of its mask's types, `add_pool`), is
+    /// exact at once: a spell whose cost has no part besides its mana, or whose other parts' order is free with its mana
+    /// (`Game::spell_rest_free`, ENGINE.md 247.1). Otherwise (a part whose order with the mana can matter, its
+    /// castability a search of its own reading the pool's types; emerge's; teamwork's taps and mana) each combination is
+    /// tried.
     fn wild_any(&self, p: PlayerId, id: u32, check: &dyn Fn(&Game) -> bool) -> bool {
-        if self.pool_wild[p as usize].0 == 0 {
+        if self.wild_total(p) == 0 {
             return check(self);
         }
         let Some(pos) = self.item_index(id) else { return check(self) };
         let StackKind::Spell { card } = self.stack[pos].kind else { return check(self) };
-        if self.spell_rest(card, &self.stack[pos]).is_none() {
+        if self.spell_rest_free(card, &self.stack[pos]) {
             return check(self);
         }
         self.wild_combos(p).into_iter().any(|v| {
             let mut g = self.clone();
-            g.pool_wild[p as usize] = (0, 0);
+            g.pool_wild[p as usize] = [0; 64];
             g.add_mana(p, &v);
             check(&g)
         })
@@ -497,7 +837,7 @@ impl Game {
     /// is open, `before_cast_mana`), then the cost paid? (On a copy with the step's task waiting.)
     fn cast_mana_open_ok(&self, id: u32) -> bool {
         let mut g = self.clone();
-        g.agenda.push(Task::CastMana { id, card: None, again: true, after: 0 });
+        g.agenda.push(Task::CastMana { id, card: None, again: true, after: 0, sac: None });
         g.cast_mana_pass_ok(id)
     }
 
@@ -529,33 +869,7 @@ impl Game {
     /// 5. nothing the rest of the cast may do removes `c`, changes a permanent's types or abilities (a static ability's
     ///    source leaving, its condition), removes counters or changes a toughness (`cast_rest_reach`).
     fn cast_mana_collapsed(&self, ctx: &mut Option<Collapse>, id: u32, p: PlayerId, spell: CardIdx, c: CardIdx, ad: &ActivatedDef) -> bool {
-        let Some(m) = ad.mana() else { return false };
-        let k = &ad.cost;
-        let tap_only = k.tap
-            && k.mana.is_zero()
-            && !ad.x
-            && k.life == 0
-            && !(k.sac_self || k.exile_self || k.discard_self || k.discard_hand || k.exert || k.waterbend)
-            && k.sacrifice.is_none()
-            && k.bounce.is_none()
-            && k.discard == 0
-            && k.discard_also.is_none()
-            && k.exile_from_hand.is_none()
-            && k.exile_graveyard == 0
-            && k.remove_counters.is_none()
-            && k.remove_counter_from.is_none()
-            && k.tap_untapped.is_none()
-            && k.tap_x.is_none()
-            && k.crew == 0;
-        let plain = ad.special.is_none() && ad.only_if.is_none() && !ad.your_turn && ad.loyalty.is_none() && !ad.sorcery && !ad.instant_only;
-        let fixed = matches!(
-            m.prod,
-            ManaProd::One(_) | ManaProd::Fixed(_) | ManaProd::SameType { .. } | ManaProd::Combo { .. } | ManaProd::OneOf(_) | ManaProd::Chosen | ManaProd::ChosenN(_)
-        );
-        if !(tap_only && plain && fixed && m.damage_to_you == 0 && m.sac_if_no.is_none() && m.opp_life == 0) {
-            return false;
-        }
-        if self.tap_bonus_wide(c, true) != [0; 6] {
+        if !self.plain_tap_mana(c, ad) {
             return false;
         }
         let ctx = ctx.get_or_insert_with(|| Collapse { global: self.collapse_global(id, p, spell), reach: None });
@@ -747,6 +1061,27 @@ impl Game {
         false
     }
 
+    /// `feed_castable`'s question of a spell being cast (ENGINE.md 247.3): can the payment of spell `card`, on the stack
+    /// as `item` says (what is announced so far, with the announcement a decision of the cast is asking about: its
+    /// additional cost option), be completed with the help of mana abilities activated in its 601.2g step that feed
+    /// its graveyard cost? The step searched on a copy with the item so, as `feed_search` does for castability - so a
+    /// decision of the cast offers what castability counted (CR 601.2b: the option is announced, then 601.2g-h pay it).
+    pub(crate) fn feed_completes(&self, card: CardIdx, item: &crate::game::StackItem) -> bool {
+        let p = item.controller;
+        if item.from == crate::eoe_c::FREE_CAST || !self.feed_gap(p, card, item.from, item.alt) {
+            return false;
+        }
+        let Some(pos) = self.item_index(item.id) else { return false };
+        let mut g = self.clone();
+        g.pending = None;
+        g.answer = None;
+        g.page = None;
+        g.stack[pos] = item.clone();
+        let floor = g.agenda.len();
+        g.agenda.push(Task::CastMana { id: item.id, card: None, again: false, after: 0, sac: None });
+        g.payment_completes(floor, p)
+    }
+
     /// Is there a mana ability the 601.2g step may activate that puts a card into `p`'s graveyard which spell `card`'s
     /// payment (cast the way `from` and `alt` say) reads and its castability does not count (`feed_castable`)? Its
     /// cost reads the graveyard (delve, an exile from it); `p` has such an ability (whether it may be activated now is
@@ -833,7 +1168,7 @@ impl Game {
             g.note_granted_alt(card, gr);
         }
         let floor = g.agenda.len();
-        g.agenda.push(Task::CastMana { id, card: None, again: false, after: 0 });
+        g.agenda.push(Task::CastMana { id, card: None, again: false, after: 0, sac: None });
         g.payment_completes(floor, p)
     }
 }
@@ -907,7 +1242,7 @@ mod tests {
             // Path 1: the Mountain in the step, then everything else.
             let mut a = g.clone();
             a.pending = None;
-            a.cast_mana_run(id, 0, m, AbilitySlot::Activated(0), 0);
+            a.cast_mana_run(id, 0, m, AbilitySlot::Activated(0), 0, None);
             a.advance();
             let mut one = Vec::new();
             ends(&a, &no_star, &mut one);
@@ -939,6 +1274,43 @@ mod tests {
 {:#?}
 {:#?}", desc(&one), desc(&two));
         }
+    }
+
+    #[test]
+    fn sacrifices_commute_unless_a_count_they_change_is_read() {
+        // ENGINE.md 247.1: Lightning Bolt escaped by Underworld Breach, Squandered Resources' sacrifices searched as sets
+        // (`feeders_commute`) - unless what a land could produce counts permanents another feeding ability may remove:
+        // Tolarian Academy's artifacts and Chromatic Star (an artifact it sacrifices), whose order then matters.
+        let at_step = |extra: &[&str]| {
+            let mut b = vec!["Underworld Breach", "Squandered Resources", "Mountain", "Island"];
+            b.extend(extra);
+            let mut g = Scenario::new(CardDb::cube())
+                .spec(|s| s.auto_single = false)
+                .library(0, &["Island"; 8])
+                .library(1, &["Island"; 8])
+                .battlefield(0, &b)
+                .graveyard(0, &["Lightning Bolt", "Ponder", "Brainstorm"])
+                .at(Step::Main1, 0)
+                .start();
+            let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+            g.choose(Choice::Cast(bolt));
+            for _ in 0..20 {
+                match g.kind() {
+                    Some(DecisionKind::CastMana) => break,
+                    Some(DecisionKind::Target) => g.choose(Choice::Target(Target::Player(1))),
+                    _ => g.choose(g.offered()[0]),
+                };
+            }
+            assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{:?}", g.options_desc());
+            let id = g.stack().last().expect("the Bolt").id;
+            let sources = g.cast_mana_sources(id, 0, bolt, true);
+            assert!(!sources.is_empty(), "Squandered Resources feeds escape's exile");
+            g.feeders_commute(id, 0, bolt)
+        };
+        assert!(at_step(&[]), "basic lands");
+        assert!(at_step(&["Gaea's Cradle", "Llanowar Elves"]), "the Cradle's creatures: none may leave");
+        assert!(at_step(&["Tolarian Academy", "Mind Stone"]), "the Academy's artifacts: none may leave");
+        assert!(!at_step(&["Tolarian Academy", "Chromatic Star"]), "the Star may leave: the Academy's count changes");
     }
 
     /// CR 601.2f-g (ENGINE.md 231): the total cost is locked as the step's first mana ability is activated, so a cost

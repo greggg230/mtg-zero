@@ -44956,7 +44956,7 @@ tests then passed.
 
 * **Seed 232,013,638 (hidden decklists, release)**: the payment search's 2,000,000-copy cap in an option completion
   of "cast or play from the graveyard" (Kaldra Compleat and Minsc & Boo in P0's hand) - for the payment-search lanes
-  (231's step, 100.4.9).
+  (231's step, 100.4.9); fixed in 247.1: Squandered Resources' sacrifices for Underworld Breach's escape.
 
 ## 235. A reference to a library card its viewer lost track of shows what a gone object's shows: a shuffled-in card's draw out of the rows (the fuzz steward's queue entry 32da3af07aa6; branch `fix/infoset-keys-1122`, 2026-11-22)
 
@@ -46610,6 +46610,360 @@ this one's: the same Rust inputs, `farm_builds.lookup`).
 **Tests.** `tests/test_stew_control.py::test_farm_set_puts_the_whole_body_with_only_the_state_changed` (an alternate with
 `when.opt_in`, `model` and all four notes: the notes cut, the rest kept) and `tests/test_ab.py` (a `variant_notes` cut).
 
+## 247. The farm fuzz's payment and cost stops: the 601.2g step's search past its cap, a mana source activated for an exile the cost's own sacrifice fed, an additional cost's choice, retrace's land at a face choice, delve beside an escape (the fuzz steward's queue entries 02f15750f477, 9a40cd0d7010, 60b665322ccb, c6bad933c07e, d344f1e3c7be, d058bca9ef29; branch `fix/payment-search-cap`, 2026-11-22/23)
+
+(The number is provisional: 246 belongs to a branch not merged yet; the merge assigns the final one.)
+
+**Why.** Six entries of the fuzz steward's queue, all in the payment of a cost that reads the graveyard, each replayed
+on main 66288d93 (the engine of df29ea38) under the `fuzz` profile before anything was changed:
+
+| Queue id | Mode, seed | Stop on main | Section |
+|---|---|---|---|
+| 02f15750f477 (335 stops) | games 100,002,232 (and 100,014,288, 100,009,444, 100,019,097, 100,032,008, ...; hidden 100,004,138, ...) | "the payment search passed 2000000 copies (ENGINE.md 100.4.9)" after 113 s | 247.1 |
+| 9a40cd0d7010 | games 100,004,730 | the same panic, after 563 s (the farm's limit is 300 s of CPU a seed: its "HANG") | 247.1 |
+| 60b665322ccb | games 100,061,712 | `pay.rs` "picks within the budget" | 247.2 |
+| d344f1e3c7be | hidden games 100,438,064 | `flow.rs` "ChooseCost with no options" | 247.3 |
+| d058bca9ef29 | games 100,654,376 | `flow.rs` "DiscardCost with no options" | 247.4 |
+| c6bad933c07e | games 100,353,550 | `pay.rs` "PayMana: no way to pay {2}{U}{U} for P0" | 247.5 |
+
+Seed 100,061,919, the older engine's hang under 9a40cd0d7010 (engine 9476f53c), no longer reproduces: it passes on main
+in a second (its game changed with 231's step, as the ignored test of `engine/tests/fuzz.rs` for it says), so nothing
+was changed for it. All the others fail on main as the queue says and pass here.
+
+One fix a failure, each its own commit, each exact: no cap raised, no check removed, no option dropped that a rule
+allows.
+
+### 247.1 The payment search's cap (02f15750f477, 9a40cd0d7010): two causes
+
+The 601.2g step's search (231.4) asks, for a spell whose payment reads the graveyard (delve, an escape's "exile n
+other cards"), whether mana abilities activated while it is cast can put the cards there. Two trees passed the cap.
+The first is an earlier session's unfinished work on this branch (its commits dea3acd6 and aa1e7790, written as
+"ENGINE.md 236", a number main has since used: renumbered 247.1 here and in the code; reviewed and kept, 247.1.1-4,
+247.1.6); the second is new (247.1.5) and is the cause of the queue's seeds.
+
+**The first cause's seeds.** Fresh-seed fuzz stopped on 100.4.9's cap, "the payment search passed 2000000 copies (ENGINE.md 100.4.9)"
+(`cost_order::complete_from`; it panics in release too): default pool, release, seeds 4,235,003,677 and 4,235,009,397;
+the `fuzz` profile, seed 4,236,000,644 (default) and 4,237,001,606 (hidden decklists) (all four 235.7's); hidden
+decklists, release, seed 232,013,638 ("option 404 (cast or play from the graveyard) can't be completed", 234.1). All
+five reproduce on main c6ba3909 (the payment code of e445ba27). The user asked for an exact fix: no larger cap, no
+sampling, no heuristic, no depth limit, no dropped option; the cap stays as the backstop.
+
+#### 247.1.1 The cause (one, in all five seeds)
+
+A trace of each search past the cap (a per-depth census of the copies' decisions, not committed) shows the same
+tree: Underworld Breach's escape of a card from the graveyard (its cost "exile three other cards from your graveyard")
+with Squandered Resources ("Sacrifice a land: Add one mana of any type that land could produce") and 8-10 lands on the
+battlefield. Squandered is a feeding ability castability doesn't count for an exile (231.4's `gap_feeder`: only a
+need-free self-sacrifice is counted), so the step's search activates it: node `CastMana` (Squandered or the leaf
+`YES`), then `Sacrifice` (any land), then `ChooseMana` (the types that land could produce), and again. 231.4's order
+(feeding abilities in increasing card order) let the same card be activated again with **any** land, so the search
+made every *sequence* of sacrifices - sum over k of n!/(n-k)! - times every product of their types; and the mana of
+"no chosen type" (`Game::pool_wild`, one mask) held one mask only, while each land's mana has its own (CR 106.7), so
+every type was chosen at once. Ten lands: about 10^7 sequences before the types. Seed by seed, the exploding decision
+and its lands (castability's search of the escape at priority, `feed_castable`, unless said): 4,235,003,677 (default) P0, ten lands (Darkslick Shores, Boseiju, Gemstone Caverns,
+Abandoned Air Temple, Underground Sea, Tolarian Academy, Seachrome Coast, Mountain, Steam Vents, Raffine's Tower); 4,235,009,397 (default) P1, ten lands (Sacred Foundry, Plains, Mishra's Workshop, Godless
+Shrine, two Mountains, Ketria Triome, Stomping Ground, Blackcleave Cliffs, Urza's Saga); 232,013,638 (hidden) P0, the
+completion check of the step's option "Squandered Resources" once the cast began, nine lands (Seachrome Coast, Starting Town, two Elegant Parlors, Watery
+Grave, Tolarian Academy, Mishra's Workshop, Hedge Maze, Karakas); 4,236,000,644 (`fuzz` profile, default) eight lands
+(Tolarian Academy, Seachrome Coast, Hallowed Fountain, Scrubland, Bleachbone Verge, Multiversal Passage, Bayou,
+Prismatic Vista); 4,237,001,606 (`fuzz` profile, hidden) nine lands (Darkslick Shores, Restless Vinestalk, Horizon
+Canopy, Spirebluff Canal, Boseiju, Underground Mortuary, Forest, Island, Scrubland).
+
+**231 caused it.** At e9ff0e24 (just before 231) the seeds pass, but as other games (the step draws from the game's
+random stream, 231.7); the direct reconstruction (247.1.4's first test) passes its no-green half at once there (no step,
+no search) and fails at the cap on main c6ba3909 after 19 s. Before 231 nothing searched Squandered's sacrifices.
+
+#### 247.1.2 The fix
+
+Three parts, in `cast_mana.rs` (the step), `activate.rs` (`mana_now_costs`, the activation's sacrifice), `pay.rs`
+(`add_pool`, `might_pay`), `cast.rs` (`spell_rest_free`), `game.rs` (`Game::pool_wild`), `flow.rs`
+(`Task::CastMana::sac`), `cost_order.rs` (`filter_settled`, `RestReach::counters`).
+
+* **Sacrifices in order** (`Task::CastMana::sac`; `search_sac_floor`, `search_sac_record`): at an ordered node of the
+  search, an activation of the card the node's last activations were (231.4's `after`) sacrifices a later permanent
+  (by card index) than the last one that card's activations sacrificed; the mark is kept across that card's
+  activations that sacrifice nothing. So each set of (card, permanent sacrificed) activations is made once, in
+  increasing order. A sacrifice with no later candidate is a dead end of the copy (`oracle_dead`).
+* **The order only where activations commute** (`feeders_commute`, replacing 231.4's "no feeding ability has an
+  'only if'"): over every feeding ability the search may activate from the node on (whether it may be activated now or
+  only after another's mana: Chromatic Star's {1}) and over everything the rest of the cast may change
+  (`cast_rest_reach`, 231.3: a superset of every activation's writes, so the answer holds at every later node):
+  no condition and no life cost on any of them; no permanent's types or abilities may change (`RestReach::chars`) and
+  no lock on activating leaves; each sacrifice, return or tap cost's filter reads nothing else that may change
+  (`filter_settled`: no tapped status, counters, counts or colours; power and toughness only while settled); each
+  production reads nothing that may change (`prod_settled`, exhaustive over `ManaProd`: fixed productions and what the
+  source alone keeps; a count of permanents when none that may leave matches its filter - Tolarian Academy's
+  artifacts; not the colours among permanents, what lands could produce, a condition) and, for Squandered's
+  `SacrificedLand`, the productions of every land it may sacrifice (`mana_prods_settled`, own and granted abilities);
+  an ability with {T} gets no bonus from a permanent that may leave. Else the node explores every order **and marks
+  nothing** (its activations' `after` is 0): 231.4 carried its card order on from a node that explored every order
+  (a conditional one) into the next, which the proof below doesn't allow.
+* **Mana of different masks unchosen** (`Game::pool_wild: [[u8; 64]; 2]`, by mask): a step activation whose mana is
+  one unit of a mask (231.4's condition, now for any mask beside others: Squandered's one mana of its land's types)
+  adds a unit of that mask; the node chooses the pool's types first (`wild_combos`, every combination once) only when an
+  ability it offers reads the pool - a mana cost to pay or an X (`feeders_pay_mana`; before: whenever it offered any);
+  the leaf (`wild_any`) asks the payment's castability once, the units as `add_pool` counts them, when that castability
+  reads the pool once through the class model: no part besides the mana, or parts whose order is free with the mana
+  (`spell_rest_free`, `cost_order_free`: the same test `cost_payable_order` makes, split out as `cost_order_split`) and
+  not emerge's or teamwork's (which read the mana twice); otherwise every combination, as before.
+
+#### 247.1.3 Why it is exact
+
+**The order.** Claim: at a node S whose feeding activations commute (`feeders_commute`), with floor f (the key of
+the last activation, made at an ordered node, or none), if some sequence of activations with keys at least f and then
+the payment completes, the search finds one. Keys are (card, permanent sacrificed or none), compared
+lexicographically; sequences differing only in the order of activations reach states equal but for the graveyard's
+order and the waiting triggers' order, which the search's question never reads (delve's and the exile's cards are
+sets; the triggers wait, 231.4). Two activations a, b in either order: each takes its own objects (a permanent
+sacrificed, tapped, a card discarded; disjoint in any legal sequence), and nothing else of b's legality or choices
+reads what a writes - its filter's reads (`filter_settled` against the writes), its production's (`prod_settled`;
+Squandered's: what its land could produce, CR 106.7, read from that land's abilities and productions, unchanged), its
+activatability (no condition, no life cost that another's life loss could make unpayable, CR 119.4; no lock leaving;
+its {T} source untapped is taking), a mana cost paid from the other's mana paid in the other order by activating that
+ability within its own payment (CR 605.3a, 231.4's argument, unchanged). So any completing sequence sorts by key
+(adjacent swaps, each legal by the conditions at S, which hold at every later state since the writes only shrink),
+its first activation a1 has the least key, at least f: offered (card order) and its sacrifice allowed (the floor). If
+the node after a1 is ordered, induction with floor key(a1); if not, it explores every activation and marks none, so
+the claim holds there with no floor. A node that doesn't commute explores everything (the search as it was without
+231.4's order). Exhaustiveness: `prod_settled` matches every `ManaProd` (a new production fails to compile).
+
+**The types.** A unit of mask m in `add_pool` pays as "some type of m" (229, 231.4's single mask): the class model
+assigns each unit a type when it pays, so one castability check over units of different masks holds exactly when some
+choice of every unit's type pays - the existential choices of different units are independent. Exact while the
+check reads the pool once: a conjunction of two pool-reading checks could choose a unit's type twice (teamwork's crew
+check and its payment; emerge's), and an order search (`payable_in_some_order`) pays from the concrete pool - for
+those `wild_any` tries every combination as before. Before the leaf, nothing reads the types but an ability's payment
+or X: chosen first exactly then.
+
+**Brute force.** A test hook (`set_payment_search_collapse(false)`, per thread) runs the search with none of this -
+no order at all (not 231.4's either), every type chosen as made - and 247.1.4's comparison test finds the same options
+everywhere.
+
+#### 247.1.4 Tests
+
+`engine/tests/rules_cast_mana_search.rs` (rules_suite):
+* `cr_601_2g_702_138a_squandered_resources_sacrifices_are_searched_as_sets` (the regression, seed-independent):
+  Breach, Squandered and ten lands that can't make {G}; Llanowar Elves escaping needs {G}: not offered (on main
+  c6ba3909 the castability search panics at the cap after 19 s; here at once). With a Bayou among them: offered, cast,
+  the Bayou sacrificed and exiled by escape.
+* `cr_601_2g_the_collapsed_payment_search_answers_as_the_full_one_on_random_boards`: 160 random boards around Breach
+  (Squandered, Orcish Lumberjack, Chromatic Star, Wizard's Rockets, Lotus Petal, Mind Stone, Llanowar Elves, 0-4 lands
+  among basics, duals, Tolarian Academy, Gaea's Cradle, Gemstone Caverns, Ancient Tomb, Mishra's Workshop; a floating
+  mana; graveyard cards from Lightning Bolt to Tinker's sacrifice and Fiery Confluence): the priority's options with
+  and without the collapses equal, and every decision of each castable escape walked in both (up to 60 paths a card):
+  134 castable escapes, 7,016 paths, every option list equal.
+* `cr_605_3a_the_lands_mana_floated_first_then_sacrificed_while_casting`: Fiery Confluence escaped with two Mountains'
+  mana floated first, both then sacrificed to Squandered.
+* `cr_601_2g_a_land_tapped_for_mana_then_sacrificed_while_casting`, **ignored** (247.1.6).
+
+`cast_mana.rs` unit test `sacrifices_commute_unless_a_count_they_change_is_read`: the predicate on a Bolt escape -
+basics, Gaea's Cradle with Llanowar Elves, Tolarian Academy with Mind Stone commute; Tolarian Academy with Chromatic
+Star (an artifact a feeding ability sacrifices: the Academy's count, so what Squandered's sacrifice of it makes,
+depends on the order) doesn't.
+
+The five seeds pass (release and `fuzz` profile as found); their largest searches are now below 5,000 copies (the
+order alone, before the types were left unchosen: up to 37,242 copies, 0.37 s).
+
+#### 247.1.5 The second cause: a graveyard that already holds the cost's cards (`Game::graveyard_fed`)
+
+With 247.1.2 the seeds above passed, and the queue's 100,002,232 still took 33 s: two searches of 281,829 copies each,
+answering no. A census of the copies' decisions: Phlage, Titan of Fire's Fury escaped ({R}{R}{W}{W}, five other cards
+exiled) with more than five other cards in the graveyard already, Rain of Filth resolved ("lands you control gain 'Sacrifice
+this land: Add {B}'") and eight lands, not enough of them making red or white. Rain's granted ability is a feeding ability
+castability doesn't count for an exile (231.4's `gap_feeder`), so the step's search offered each land; a land picked
+is asked which of its abilities (its own {T} ability or the granted sacrifice: the question reads every ability, as
+the real step's does), and may be picked again. So each land is not activated, tapped, sacrificed, or tapped then
+sacrificed: 4^8 leaves, 281,829 copies in all, every one ending in the same answer - the payment can't make the mana. A few more lands
+pass the cap (main: 100,002,232 after 113 s, 100,004,730 after 563 s; with main's every-type choice of each mana the
+tree is larger still). No order collapse helps: the sets themselves are exponential.
+
+**The cause is that the search was asked at all.** It exists to feed the graveyard (231.4: "the only [abilities] that
+can make a payment completable that wasn't: delve's and the exile's cards; any other ability's mana the payment's own
+sources make"). An escape's "exile n other cards from your graveyard" (CR 702.138a) reads one thing of the graveyard:
+whether n cards the cost may exile are there. Once they are, one more card changes nothing of it.
+
+**The fix** (`cast_mana.rs`): `Game::graveyard_fed(p, card, item)` - true when no card put into `p`'s graveyard from
+here on can change whether the payment completes:
+
+* the spell has no delve (each more card may pay one more generic mana, CR 702.66a: never settled here);
+* its cost exiles graveyard cards and the graveyard holds them (`exile_short` is 0: the cards the cost may exile,
+  `gy_cost_card`, without the spell's own card and the cards delve is exiling);
+* nothing else of the payment reads the graveyard: no mana ability `p` has (its permanents', those granted to them,
+  its hand's) exiles graveyard cards as a cost, has a condition ("activate only if": threshold-like) or produces by a
+  condition (`ManaProd::IfElse`). (The total cost is locked before the first activation, 601.2f, so no activation
+  changes it.)
+
+Then the search's step node offers no feeding ability (`cast_mana_sources` with `feed_only` returns none): it is the
+leaf, the payment's castability from the state as it is. The node is asked again after every activation, so a search
+that does need cards (247.1.1's Squandered Resources with two cards of three) stops activating as soon as they are
+there.
+
+**Why it is exact.** Claim: when `graveyard_fed` holds at a node, some sequence of feeding activations followed by a
+completable payment exists only if the payment is completable with none. An activation does three things. (a) It puts
+a card into the graveyard: by the conditions nothing reads it (the exile has its cards, and cards only leave the
+graveyard in the step as a mana ability's own cost, which no ability of `p`'s has). (b) It takes objects (a land
+sacrificed, a permanent tapped, a card discarded): that only removes what the payment could use. (c) It adds mana: the
+payment's castability counts every mana ability `p` may activate as a source of its own (the class model: a
+sacrifice slot, a land's {T} ability and the granted sacrifice of the same land both, `rules_payment`'s 31.7.2; an
+ability's mana cost paid by another's mana, CR 605.3a), because 601.2g-h let the player activate it for the payment -
+231.4's premise, and the reason no search runs at all for a spell whose payment doesn't read the graveyard. So the
+activation's mana is mana the payment's castability already counts. This is the search's own premise applied at the
+node, not a new assumption: a spell with no graveyard cost has always been answered by the payment's castability
+alone, and a spell whose graveyard cost is already met is in the same position. `set_payment_search_collapse(false)`
+turns this off with the other collapses, so 247.1.4's comparison (the collapsed search against the brute-force one on
+160 random boards, 7,016 paths) covers it: boards with three or more graveyard cards are answered by the leaf on one
+side and by the full tree on the other, every option list equal.
+
+Measured: 100,002,232 from 33 s (281,829 copies twice) to under 2 s; 100,004,730 from 563 s on main to under 2 s;
+no search of any seed in this section passes 20,000 copies.
+
+**The limit.** A search that needs cards is still a tree over sets of feeding activations, cut off when the cards are
+there: with n lands and k cards short about sum over j <= k of C(n, j) times the lands' tap states, not 4^n. A board
+that needs many cards from many feeders can still be large; the cap stays the loud backstop.
+
+#### 247.1.6 Found, not fixed (the first cause's)
+
+(Fixed in 249.1.)
+
+* **A land tapped for mana, then sacrificed by a feeding ability, in the step.** The step's search offers only the
+  feeding abilities castability doesn't count (231.4); a land's own mana ability, which must be activated before a
+  feeding ability sacrifices that land, is never activated there. 231.4's argument (b) - a non-feeder's mana is a
+  payment source the payment activates itself - misses it: once sacrificed in the step, the land can't be tapped by the
+  payment. So castability says no where a cast exists: two Mountains, each tapped for {R} and then sacrificed to
+  Squandered Resources for {R}, escape Fiery Confluence ({2}{R}{R}) with one other graveyard card (pinned by the ignored
+  test above). Floating the lands' mana with priority first reaches the same cast (tested), so no outcome is lost to
+  the player, but the cast isn't offered directly: a castability disagreement, pre-existing since 231 and not this
+  section's (main's search answers the same). The exact fix: let the search activate, before any feeding activation,
+  the mana abilities of permanents a feeding ability may sacrifice (they commute among themselves and come first in
+  any order: a canonical phase before the feeders), their mana left unchosen as above; more branching (one more option
+  per such land), measured against the cap. For the 601.2g lane.
+
+### 247.2 "picks within the budget" (60b665322ccb): a mana source activated first for an exile the cost's own sacrifice fed
+
+Seed 100,061,712: P0 escapes a spell with "as an additional cost to cast this spell, sacrifice an artifact" (the fuzz
+pool's test card; Tinker's cost) through Underworld Breach, {1} and three other graveyard cards, two there, one {W}
+floating, and a Lotus Petal - its only artifact. Castability says yes, rightly: the Petal sacrificed for the cost is in
+the graveyard before the cards are exiled (CR 601.2h: the costs in any order; ruling bea302d9), the third card.
+
+`exile_sources` (the mana sources a payment activates first "so that they are in the graveyard" for the exile) counted
+how short the graveyard was after the cost's **discards** only: one short, so it forced the first self-sacrificing
+source - the Petal - as a mana pick. The payment's budget keeps the Petal for the cost's sacrifice (`Keep::reserves`),
+so the forced pick is outside it: `recount`'s `after_picks(...).expect("picks within the budget")`.
+
+**The fix** (`activate.rs`, `exile_sources`): the cost's own cards are its discards and the nontoken permanents its
+sacrifice can put there (`cost_feeds_graveyard`, what castability's `cost_payable_with` counts). Sources are forced
+only while the graveyard with those is short, the fewest in canonical order, and a source only if it adds a card (not
+one the cost's sacrifice would put there anyway) and leaves the sacrifice its permanents. A cost with no sacrifice
+forces exactly the sources it did before.
+
+### 247.3 "ChooseCost with no options" (d344f1e3c7be): the additional cost's choice asked the payment alone
+
+Hidden seed 100,438,064: P1 escapes Bitter Triumph ("as an additional cost to cast this spell, discard a card or pay
+3 life"; three other graveyard cards exiled) with one other card in the graveyard and a Chromatic Star on the
+battlefield. Castability says yes through 231.4's search (`feed_castable`: for each additional cost option, the spell
+put on the stack of a copy and its 601.2g step searched): discard a card (the second card), sacrifice the Star for
+mana while casting (the third). Then `cast_option`, the decision of the additional cost (CR 601.2b), filtered its
+options by the payment's castability alone (`can_pay_spell`): neither passes without the Star's card, no option.
+
+**The fix** (`cast.rs` `cast_option`, `cast_mana.rs` `Game::feed_completes`): an option is offered when the payment
+can be paid with it, or when the step's search completes with it - `feed_completes(card, item)`, the search
+`feed_castable` makes, on the stack item as announced so far with that option (the alternative cost, modes, times and
+X are announced before the option: `begin_cast`'s order). Gated like `feed_castable` (`feed_gap`: a graveyard-reading
+cost and a feeding ability castability doesn't count), so every other cast asks what it asked.
+
+**Not changed** (fixed in 249.2) (the same shape, no failing game): X's range (`pays` in `choose_x`), the number of times
+(`choose_times`) and a spree mode's cost ask the payment alone. Castability's search announces the least X, so the
+least X is always offered and the cast completes; a larger X, more times or a mode that only the step's feeding
+abilities make payable is not offered - a narrower choice than the rules give in a rare corner, no dead end. For the
+601.2g lane.
+
+### 247.4 "DiscardCost with no options" (d058bca9ef29): retrace's land card not pinned at a face choice
+
+Seed 100,654,376, in a world determinized for P1 while P0 decides: Six gives Norman Osborn // Green Goblin in P0's
+graveyard retrace (CR 702.81a: cast by discarding a land card); P0 chose to cast it and is asked which face (712.11b).
+A world dealt for the other player keeps the cards a cast in progress counted on (ENGINE.md 10, 71.4: the pinned
+cards) - `exile_filters_in_progress` lists retrace's land card at "which graveyard card?" (`Task::GraveyardCast`)
+and once the spell is on the stack (`Task::CastDone`), but at the face choice between them (`Task::ChooseFace`) only
+the faces' alternative costs' "exile a card from your hand". So P1's world dealt P0 a hand with no land, the face
+was chosen, and the cost had nothing to discard.
+
+**The fix** (`hidden.rs`): at a face choice of a graveyard card, a face offered to cast whose routes include retrace
+(`gy_routes(p, card, Some(face))`) pins the land cards, as the two neighbouring tasks do. No new information reaches
+the other player: the pin is the one 10 already gives a cast that counted on a hand card.
+
+### 247.5 "PayMana: no way to pay {2}{U}{U}" (c6bad933c07e): delve's graveyard picks took the cards its source had to make up for
+
+Seed 100,353,550: P0 escapes Dig Through Time ({6}{U}{U}, delve) through Underworld Breach with seven other cards in
+the graveyard and a Black Lotus, no other mana. Three cards are the escape's (CR 702.138a), so delve (702.66a) has
+four, and the Lotus: sacrificed for {U}{U}{U} while casting (601.2g), its card delved as the fifth - {1}{U}{U} left,
+paid. `Task::Delve` asks delve's sources first, then hand cards a cost discards, then graveyard cards (each set once);
+once a graveyard card is picked no source is offered. Its graveyard options required "a card is left besides the
+escape's" (`n_cards > keep`) for the pick at hand, not for the picks still needed: `need` (the fewest more cards that
+leave the rest payable, five here) was compared with the cards above the pick only. So graveyard cards were offered
+with the Lotus undelved, four were picked, the fifth pick had no card, `PASS` was the only option and the payment had
+{2}{U}{U} and three mana.
+
+**The fix** (`cast.rs`, `delve`): a graveyard card is offered only while the graveyard holds the escape's cards and
+every pick still needed (`n_cards >= keep + max(need, 1)`). With the Lotus undelved the only options are the Lotus
+(then four graveyard cards, exactly) and, with the Lotus's mana floated in the step, five cards.
+
+### 247.6 Tests
+
+`engine/tests/rules_cast_mana_search.rs` (rules_suite; 247.1.4's and):
+* `cr_601_2g_702_138a_a_graveyard_that_holds_the_escapes_cards_asks_the_payment_alone`: Rain of Filth resolved,
+  twelve lands that make no red or white mana, Phlage and six other cards in the graveyard: not castable, at once
+  (without 247.1.5: the cap, after about half a minute in release). With two Plateaus and two Sacred Foundries: offered and cast.
+
+`engine/tests/rules_escape_costs.rs` (rules_suite, new; each cast walked through every decision every way to the next
+priority, every end with the spell on the stack):
+* `cr_601_2h_702_138a_the_costs_own_sacrifice_feeds_the_escape_not_a_mana_source_first` (247.2): Tinker escaped, two
+  other graveyard cards, a Lotus Petal the only artifact, three Islands: the Petal sacrificed for Tinker and exiled.
+* `cr_601_2b_702_138a_the_additional_cost_choice_counts_the_steps_feeding_abilities` (247.3): Bitter Triumph, one
+  other graveyard card, a card in hand, a Chromatic Star: `ChooseCost` offers the discard alone; the Star ends exiled.
+* `cr_702_81a_retraces_land_card_is_pinned_at_the_face_choice` (247.4): Six, Norman Osborn // Green Goblin in the
+  graveyard, an Island and two Lightning Bolts in hand, a library of Bolts: at `ChooseFace` the Island is pinned for
+  P1 (`pinned_for`), and in 40 worlds dealt for P1 every way of the cast completes.
+* `cr_702_66a_702_138a_delves_graveyard_picks_leave_the_escapes_cards` (247.5): Dig Through Time, seven other
+  graveyard cards, a Black Lotus: every way completes with the Lotus used.
+
+Each of the five fails without its fix at the queue's site (the cap; "picks within the budget"; "ChooseCost with no
+options"; the Island not pinned; "PayMana: no way to pay"), checked on this branch with the source changes of
+247.1.5-247.5 taken out.
+
+`engine/tests/fuzz.rs`: `payment_and_cost_stops_of_247_default_seeds` (100,002,232, 100,004,730, 100,014,288,
+4,235,003,677, 100,061,712, 100,353,550, 100,654,376) and `payment_and_cost_stops_of_247_hidden_decklist_seeds`
+(100,438,064, 232,013,638, 100,004,138), every check of `play` / `play_hidden`. Replayed under the `fuzz` profile
+too, with the queue's other seeds of 02f15750f477 (100,009,444, 100,019,097, 100,032,008, 100,041,569, 100,054,680,
+100,044,829, 100,048,922, 100,046,996; hidden 100,015,968, 100,019,360, 100,018,640, 100,016,686, 100,023,109,
+100,025,136, 100,025,473) and 247.1's (4,235,009,397, 4,236,000,644; hidden 4,237,001,606): all pass, a second or two
+each.
+
+### 247.7 Digests
+
+No digest moves: the cube c2b04fed925eed67, `DIGEST_ENCODING=0` d3c144b6cc2977e5, constructed 38ef93512e0a7259, EoE
+5ffb850dd963bad0, driver cab97c01912f7e3f, metagame ed86a2f5ed21c436 (main's). 247.1 changes no option (an exact
+collapse of a search); 247.2-247.5 change what a cast offers only in the positions that stopped before (an escape with
+a sacrifice cost and a self-sacrificing source, an additional cost's choice castability counted through the step,
+delve beside an escape with a source to delve) and what a world dealt for the other player keeps (247.4), none of
+which the digests' games hold. No layout, encoding or decision-kind change; no `RULES_EPOCH` bump.
+
+### 247.8 Gates and the fresh-seed fuzz (on 57c6932a9212; docs only after it)
+
+* `python tools/gate.py suite --throttle on`: **GATE PASSED suite 57c6932a9212 in 485s** - the full engine suite
+  2,948 passed (24 binaries); the sharded fuzz, 2,000 games each from seed 0: the default pool (with 100 matches),
+  the default pool with hidden decklists, `delver_dealt` (with 100 matches and 100 post-sideboard), every merged
+  check passed.
+* `python tools/gate.py engine --tested-sha 57c6932a9212 --expect-digest c2b04fed925eed67 --expect-digest0
+  d3c144b6cc2977e5 --throttle on`: **GATE PASSED engine 57c6932a9212 in 944s**, no skip - both digests equal the
+  expected ones, the formats' digests (constructed, EoE, driver, metagame, pair 80562a6aa452b765) and the dealt
+  digest cc0d138ac5c80402 equal the recorded ones, `az` 58, `limits` 13, `hidden` 28 passed, pytest in four shards
+  and the desktop part all passed, the search smoke passed, farm compat identical (gate 2: 6 games, 2,468 rows; gate
+  3: 6 games, 2,598 rows). The card-IR tests and the Mac recheck were not needed (no pipeline file changed; the tested
+  sha is the gated one). The gate placed its pure-CPU steps off the desktop, beside the live run (166).
+* Fresh seeds, release, `tools/fuzz_shards.py`, through the slot throttle: the default pool, 4,000 games and 200
+  matches from seed 247,100,000 - passed; the default pool with hidden decklists, 4,000 games from seed 247,200,000 -
+  passed. No stop of any kind in either.
+
 ## 248. The fuzz steward's hidden-information queue of 2026-11-23: a miracle card among twins, a gone source's card slot, a random bottom order over a find group, a withheld graveyard option, a gone attacker's card, forced picks in two orders, Tamiyo's reveal around a shuffle; a payment's `vm` and class left open (branch `fix/infoset-queue-1123`, 2026-11-23)
 
 Branch from main 66288d93 (engine = df29ea38's). The number is provisional (246 and 247 are open branches'). Ten
@@ -46873,3 +47227,192 @@ payment-search cap, and `check_knowledge`'s new hand check held at every step.
   who does not see the payer's hand, and the gate's third class of perturbation). Three queue entries stay open on it.
 * **988792dc2dde** and every other cost of the 601.2g completability search: the payment-search lane.
 * "Attacked with a <subtype>" by the creature's characteristics when it was declared (248.6): the rules lanes.
+
+## 249. The two items 247 left open: a land tapped for mana and then sacrificed in the 601.2g step's search, and the choices of X, times and spree modes counting the step's feeding abilities (branch `fix/payment-followups-1123`, 2026-11-23)
+
+(The number is provisional: 246 and 248 belong to branches not merged yet; the merge assigns the final one.)
+
+**Why.** 247 fixed the farm fuzz's payment stops and wrote down two things it found and left: 247.1.6 (the step's
+search never taps a land a feeding ability then sacrifices, so castability says no where a cast exists) and 247.3's
+"not changed" (the choices of X, of the times an additional cost is paid and of a spree mode ask the payment alone,
+though castability and the additional cost's choice count the step's feeding abilities). Both are fixed here, one
+commit each. No layout, encoding, decision kind or action id changes; the cap is untouched.
+
+### 249.1 A permanent's own mana ability, then its sacrifice (247.1.6)
+
+**The rule.** CR 601.2g: "the player then has a chance to activate mana abilities", any of them, in any order. Two
+Mountains, each tapped for {R} and then sacrificed to Squandered Resources for {R} (106.7: a type the land could
+produce), make four mana and two graveyard cards: Fiery Confluence ({2}{R}{R}) escapes through Underworld Breach with
+one other card in the graveyard. The game's own step already allowed the line (a land a feeding ability may sacrifice
+is not collapsed, 231.3's check 5, so the step offers its {T} ability); the **search** did not make it - it activates
+only the feeding abilities castability doesn't count (231.4), and 231.4's argument that any other ability's mana is
+the payment's own to make misses a land that is gone when the payment begins. So the escape was not offered at
+priority, and `PASS` and other options of a step could be judged wrongly.
+
+**The fix** (`activate.rs` `mana_now_costs`, `cast_mana.rs`). In the search only:
+
+* **Right before the sacrifice** (`Game::search_pretaps`): where an activation the search made from one of its own
+  step nodes chooses the permanent a feeding ability sacrifices, each candidate is offered as it is and once for each
+  mana ability of its own that the step offers and that leaves it on the battlefield (not a self-sacrifice, an exile
+  or return of itself, Rain of Filth's granted slot): that ability is activated first (`Choice::Ability`, its own
+  costs and choices as ever), then the permanent is sacrificed. If it is no longer one the cost may sacrifice once
+  that ability's costs are paid, the copy is a dead end.
+* **At any time, for the abilities "right before" doesn't cover** (`Game::search_loose_taps`): an ability that is
+  not a plain "{T}: add <fixed mana>" with nothing added by its tap (`Game::plain_tap_mana`, the collapse's checks 1
+  and 2 split out: Tolarian Academy's count, Gaea's Cradle's, an ability with a mana cost or a condition), or any of
+  them when some mana ability's sacrifice or return cost reads whether a permanent is tapped. Those are options of
+  the step node itself, and a node with one explores every order and marks none (as a node whose feeders don't
+  commute, 247.1.2).
+* **Only from the search's own nodes** (`SEARCH_NODE`, a second mark bit of `Task::CastMana::after`): the game's own
+  `Sacrifice` decision of a mana ability offers the permanents and nothing else, so an activation that is the option
+  of the game's decision the search starts from gets no "ability first" choice - else the search would call
+  "Squandered Resources" completable from untapped Mountains and the player, having picked it, would have no
+  Mountain whose sacrifice completes ("Sacrifice with no options", seen while writing this). The player taps the land
+  in the step first; the step offers that, and the search from there finds the rest.
+
+**Why it is exact.** Any line of the step in which a permanent L is tapped for mana by its own ability a and later
+sacrificed by a feeding activation F can have a moved to right before F when a is plain: what a makes and whether it
+may be activated read nothing of the game but L untapped, and L being tapped between the two times can only take
+options away from what happens there (a tap cost that would take L, an untapped-permanent filter) - unless a
+sacrifice or return cost reads the tapped status, which sends every such ability to the node's own options. Mana a
+makes earlier that an activation in between spends is mana that activation's own payment makes by tapping L itself
+(CR 605.3a), after which F sacrifices the tapped L, a line the search already made. A non-plain a is offered at
+every node, so every time of its activation is made. A permanent tapped in the step and never sacrificed is the
+payment's own source (231.4). With the abilities at their canonical time, 247.1.3's order argument is unchanged (the
+key of an activation is still its card and the permanent it sacrifices; a plain ability's mana doesn't depend on the
+order), and a node with a loose ability is unordered.
+
+**Bounded.** A sacrifice has one more option for each such ability of the permanent and, for a land of several
+types, one branch a type (the mana of the land's own ability is chosen as it is made: the feeding ability's costs
+follow it); the tree is still cut off where the graveyard holds the cost's cards (247.1.5), so its depth is the
+number of cards the graveyard is short. 247.1.4's comparison test (160 boards, now 136 castable escapes and 7,136
+paths) runs in 18 s, from 4 s: Tolarian Academy's and Gaea's Cradle's boards explore every order. The seeds of 247
+replay as fast as before.
+
+**Left.** A feeding ability whose cost *returns* a permanent to its owner's hand ("return a land you control") gets no
+"ability first" choice (a return feeds no graveyard, so such an ability is a feeding ability only through another part of its
+cost; the pools were not searched for one; the sacrifice path is the only one changed).
+
+### 249.2 The choices of X, of the times and of spree's modes (247.3)
+
+`cast.rs`: each of these announcements (CR 601.2b) filtered its values by the payment's castability alone
+(`can_pay_spell`); each now also accepts a value with which the 601.2g step's search completes
+(`Game::feed_completes`, 247.3: the search castability makes, on the stack item with that value announced):
+
+* **X** (`pays` of a spell's X, mana or "pay X life"): the item with that X. Mind Twist escaped with a Chromatic Star
+  as the third graveyard card was offered X = 0 only (castability's least X); now every X the lands pay.
+* **The times an additional cost is paid** (`choose_times`: replicate, squad, offspring; kicker {X}'s least X each
+  time): the item with those times.
+* **A spree mode** (`choose_modes`): the item with the mode added. This one was a dead end, not a narrower choice:
+  castability counted the Star with one mode, the choice of modes found none payable - "ChooseMode with no options"
+  (249.3's test without the fix).
+
+For the times and the modes the search is asked only when the item so announced has exactly the total cost the
+payment's check was asked about (`total_mana(item') == cost`; they differ only for a card with both such a cost and
+an additional cost option that adds mana, whose option is announced later - the pools were not searched for one; then the choice
+is as before). The search is gated as castability's (`feed_gap`): a cast with no graveyard cost or no feeding ability
+asks what it asked.
+
+**Left.** (a) A spell whose least X has no mana in its total cost has no 601.2g step at that X (601.2g: "if the
+total cost includes a mana payment"), so castability's search at the least X finds no feeding ability and says no,
+though X = 1 would have a step and could be castable through it (Walking Ballista escaped with a Star as the third
+card). Fixing it means castability trying a second X and the choice of X having a least value above 0: left, with
+this note. (b) Escalate's count of modes (`escalate_ok`) still asks the payment alone: castability's search counts
+its discards, the choice of one more mode doesn't - a narrower choice, no dead end (the first mode is the one
+castability counted).
+
+### 249.3 Tests
+
+`engine/tests/rules_cast_mana_search.rs`:
+* `cr_601_2g_a_land_tapped_for_mana_then_sacrificed_while_casting`: 247.1.6's ignored test, now run - two Mountains,
+  Fiery Confluence and Ponder in the graveyard: the escape is offered.
+* `cr_601_2g_605_3a_an_escape_castable_with_lands_mana_floated_first_is_castable_without` (new): 120 random boards
+  around Breach and Squandered Resources (one to three lands among basics, duals, Tolarian Academy, Gaea's Cradle,
+  Ancient Tomb; Chromatic Star, Mind Stone, Llanowar Elves; a spell and up to two other graveyard cards). A land
+  tapped with priority (605.3a) and then sacrificed while casting does what the land tapped in the step does, so:
+  whenever some set of lands floated first (every set, every choice of their mana: 774 states) makes the escape
+  castable, it is castable with none floated. An independent check of the search's completeness: the floated lines
+  use no "ability first" choice. 35 boards castable, all with the graveyard short. Without 249.1 it fails at once
+  (Badlands, Volcanic Island, Tolarian Academy and Frantic Search alone in the graveyard).
+* 247.1.4's comparison (the collapsed search against the brute-force one) passes with the new options on both sides.
+
+`engine/tests/rules_escape_costs.rs` (each cast walked every way to the next priority, every end with the spell on
+the stack):
+* `cr_601_2b_107_3_the_choice_of_x_counts_the_steps_feeding_abilities`: Mind Twist, a Star, three Swamps: X up to 2.
+* `cr_601_2b_702_175a_the_times_an_additional_cost_is_paid_count_the_steps_feeding_abilities`: Thundertrap Trainer
+  (offspring {4}), a Star, six Islands: the offspring cost paid in some line.
+* `cr_601_2b_702_172a_sprees_modes_count_the_steps_feeding_abilities`: Three Steps Ahead, a Star, two Islands and two
+  Mountains: a mode is chosen in every line, the + {R} mode in some.
+
+All five new or un-ignored tests fail with the source changes taken out (the escape not offered; the Academy board;
+X = 0 only; the offspring cost never; "ChooseMode with no options").
+
+### 249.4 Digests
+
+Both changes add options (an escape castable through a tapped-then-sacrificed land; larger X, times and spree modes
+through a feeding ability), so the digests could have moved. They did not: no game of theirs holds such a position.
+The cube c2b04fed925eed67 -> c2b04fed925eed67, `DIGEST_ENCODING=0` d3c144b6cc2977e5 -> d3c144b6cc2977e5,
+constructed 38ef93512e0a7259, EoE 5ffb850dd963bad0, driver cab97c01912f7e3f, metagame ed86a2f5ed21c436, pair
+80562a6aa452b765, dealt cc0d138ac5c80402: all main's (88cb474e), nothing re-recorded. A game that does hold one plays
+differently from here on (the new options are the rules'): a behaviour change, though not one the recorded games show.
+No `RULES_EPOCH` bump: it moves with a re-recorded digest (`tools/position_lab.py`), and none was re-recorded.
+
+### 249.5 Gates and the fresh-seed fuzz (on 27dadf4d8df7; docs only after it)
+
+* `python tools/gate.py suite --throttle on`: **GATE PASSED suite 27dadf4d8df7 in 480s** - the full engine suite
+  2,953 passed (24 binaries); the sharded fuzz, 2,000 games each from seed 0: the default pool (with 100 matches), the
+  default pool with hidden decklists, `delver_dealt` (with 100 matches and 100 post-sideboard), every merged check
+  passed.
+* `python tools/gate.py engine --tested-sha 27dadf4d8df7 --expect-digest c2b04fed925eed67 --expect-digest0
+  d3c144b6cc2977e5 --throttle on`: **GATE PASSED WITH SKIPS engine 27dadf4d8df7 in 886s - skipped: pytest-desktop: 1
+  live-run-hazard test(s) (fenced: a live run on this machine)**. Both digests equal the expected ones, the formats'
+  and the dealt digest equal the recorded ones, `az` 58, `limits` 13, `hidden` 28 passed, every pytest shard passed,
+  the search smoke passed, farm compat identical (gate 2: 6 games, 2,468 rows; gate 3: 6 games, 2,598 rows). The
+  card-IR tests and the Mac recheck were not needed.
+* Fresh seeds, release, `tools/fuzz_shards.py`, through the slot throttle: the default pool, 4,000 games and 200
+  matches from seed 249,100,000 - passed; the default pool with hidden decklists, 4,000 games from seed 249,200,000 -
+  passed. No stop of any kind in either.
+
+## 250. The stew's judged matches as game records: `recipe.judge.records` (branch `feat/stew-judge-records`, 2026-11-23)
+
+**Why.** The user's stew dashboard (stew.greggg230.com; its own repository, a read-only publisher beside the stew) has to
+show how each network sideboards. A specialist's self-play does not say: 85% of its seats take a dealt deck and the rest
+follow the matchup model's choice table as teacher decisions (240), so its records hold the taught line. A network's own
+sideboarding happens only in judging (the plain evaluation spec: no dealt decks, no tables, 239.3) - and the judge kept
+each match's result, never its moves. `mtgz.az.sideboard_census` (132) refuses a specialist (it needs `start_game` 2) and
+the game database skips best-of-three matches (a chained contest), so neither could stand in.
+
+**What.** `recipe.judge.records` (bool, default false: the jobs of before, key for key). With it on, each local judge job
+carries a `records` block - {records: `<stew>/judge/records`, kind `stew_judge`, it: the round, labels {a, b}: its two
+nets' stew names and versions ('deck:X v2', 'spec:X|Y v2', 'main v2'), meta {tool, job, arm, decks, chooser, layout,
+round}} - and its match process turns the driver's game log on and writes the job's matches as one records file
+(`zero.gamerec.MatchSink.add_rows`: `<stew>/judge/records/stew_judge/iter_<round>/local-<pid>-<ms>-<n>.jsonl.gz`, the build
+line, the spec, one record a match: seed, steps with the episode boundaries, `players` per seat in the match's seat order,
+`meta` with the job's and the driver seed). The result file names it (`records`: {file, dir, games}): a reader goes by the
+results, so a file of a job that died between the two writes is never counted and a job played again is counted once.
+
+* `mtgz/stew/judge.py`: `_job(..., nets=)`, `with_records(jobs, records, g)` (the block in place of `nets`; without
+  records `nets` is dropped), `plan_jobs(..., records=None)`, `play_job` (`set_game_log` + `write_records`). `job_hash`
+  leaves `records` out as it leaves `label` out: the game log changes no game (zero-core docs/az.md 59.3), so a result
+  played without records stays valid when the setting is turned on in the middle of a round (its matches then have no
+  record: the reader sees fewer matches, never wrong ones).
+* `mtgz/stew/config.py`: `DEFAULT_JUDGE['records']` false, a boolean. `mtgz/stew/orchestrator.py`: `judge_phase` passes the
+  directory when the recipe says so. The farm backend of 249 is not on main yet: its campaign rows carry each match's
+  trace (`rec`), which `zero.gamerec.from_trace` turns into the same records - a follow-up once 249 lands.
+
+Python only: no engine, encoding, search or worker change; the published farm build of the commit before is this one's
+(`farm_builds.lookup`: the same Rust inputs).
+
+**Checked.** A real judge job of the first stew's generation 0 (arm A, the Doomsday deck stew against the Delver-Doomsday
+specialist, 4 best-of-three matches at 64 simulations on CUDA) played without and with `records`: the same rows match for
+match (results, games a match, decisions), the same job hash; the records file holds its 4 matches with the players in
+seat order, and replaying them through the engine gives each seat's 60 for games 2 and 3 (the dashboard's reader:
+the deck stew took out 2 Street Wraith, Pact of Negation and Lion's Eye Diamond for 2 Fatal Push and 2 Murktide Regent in
+all 4; the specialist's Delver seat kept its 60).
+
+**Tests.** `tests/test_stew_judge.py::test_game_records_ride_on_the_jobs_without_changing_them` (every job of both judge
+phases with and without records: equal but for `records`, equal hashes, no `nets` left, the labels of arms G, B, A, M)
+and `::test_judge_records_is_a_boolean_of_the_recipe`.
+
+**To turn it on in a live stew.** At a pause before a judge phase: move the stew's worktree to a commit with this section
+and set `"records": true` in the stew's stew.json `recipe.judge`. Disk: a few MB a generation.

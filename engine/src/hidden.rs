@@ -2085,6 +2085,13 @@ impl Game {
                             out.push((f.clone(), ctx));
                         }
                     }
+                    // (A graveyard card's face offered for its retrace, CR 702.81a: found castable counting a land
+                    // card in hand to discard, as "which graveyard card?" above and the cast below; ENGINE.md 247.4.)
+                    if self.gy_routes(p, card, Some(face)).iter().any(|r| r.code == crate::cast::route::RETRACE) {
+                        if let Some(f) = &crate::cast::retrace_cost().discard_filter {
+                            out.push((f.clone(), ctx));
+                        }
+                    }
                 }
                 continue;
             }
