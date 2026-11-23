@@ -47289,7 +47289,7 @@ number of cards the graveyard is short. 247.1.4's comparison test (160 boards, n
 paths) runs in 18 s, from 4 s: Tolarian Academy's and Gaea's Cradle's boards explore every order. The seeds of 247
 replay as fast as before.
 
-**Left.** A feeding ability whose cost *returns* a permanent to its owner's hand ("return a land you control") gets no
+**Left** (closed in 252.5). A feeding ability whose cost *returns* a permanent to its owner's hand ("return a land you control") gets no
 "ability first" choice (a return feeds no graveyard, so such an ability is a feeding ability only through another part of its
 cost; the pools were not searched for one; the sacrifice path is the only one changed).
 
@@ -47313,7 +47313,7 @@ an additional cost option that adds mana, whose option is announced later - the 
 is as before). The search is gated as castability's (`feed_gap`): a cast with no graveyard cost or no feeding ability
 asks what it asked.
 
-**Left.** (a) A spell whose least X has no mana in its total cost has no 601.2g step at that X (601.2g: "if the
+**Left** (closed in 252.2-252.4). (a) A spell whose least X has no mana in its total cost has no 601.2g step at that X (601.2g: "if the
 total cost includes a mana payment"), so castability's search at the least X finds no feeding ability and says no,
 though X = 1 would have a step and could be castable through it (Walking Ballista escaped with a Star as the third
 card). Fixing it means castability trying a second X and the choice of X having a least value above 0: left, with
@@ -47416,3 +47416,129 @@ and `::test_judge_records_is_a_boolean_of_the_recipe`.
 
 **To turn it on in a live stew.** At a pause before a judge phase: move the stew's worktree to a commit with this section
 and set `"records": true` in the stew's stew.json `recipe.judge`. Disk: a few MB a generation.
+
+## 252. The payment lane's corners: the Tinker search the farm reported as a hang, castability at the least X with mana, escalate's modes, the announcements still to come, a mana ability's return cost (the fuzz steward's 988792dc2dde; 249's "left" items; branch `fix/payment-corners-1123`, 2026-11-23)
+
+(The number is provisional: 251 is another branch's next section; the merge assigns the final one.)
+
+**Why.** 248.9 handed the payment lane one queue entry (a hidden-decklist seed that passes after eleven minutes, a
+hang by the farm's 300 s limit), and 249 wrote down four things it left. All five are closed here, one commit each
+but (a) and (c), which share a helper. No layout, encoding, decision kind or action id changes; the search's cap is
+untouched.
+
+### 252.1 The Tinker search (988792dc2dde)
+
+**Measured** (`FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST=100122141 FUZZ_GAMES=1`, the `fuzz` profile, the desktop beside a live
+run): **818 s** on main 66288d93 (before 247; 248.9 measured 693 s), **5-8 s** on main e687031c, **under 2 s** here.
+
+**What it was.** In a world the fuzz's debug check plays, P1 casts Tinker ("as an additional cost to cast this spell,
+sacrifice an artifact") with Birds of Paradise, lands and a Wizard's Rockets ("{X}, {T}, sacrifice: add X mana in
+any combination of colors") - its only artifact. The 601.2g step offers only the options that leave the payment
+completable (CR 601.2h; `completing`), and the Rockets never does: sacrificed for mana, Tinker has no artifact. To
+find that out the search of the option walked every X of the Rockets and, for each X, every set of sources paying
+it - 2^n sets for n sources - and asked the payment's castability at each end.
+
+* **Before 247** each end also tried every combination of the Rockets' X mana over five colours (`wild_any`, for a
+  spell with a cost besides its mana): C(X + 4, 4) copies an end, up to 1,820. That product is the eleven minutes.
+  247.1.2's unchosen types (the earlier session's dea3acd6: the leaf asks castability once when the cost's parts'
+  order is free with its mana, `spell_rest_free`) took that factor away: the seed's time on the build of dea3acd6
+  and aa1e7790 alone is 7 s. So it was 247 that made it better; 249 changed nothing for it (no escape, no feeding
+  ability the search reaches).
+* **What was left** on e687031c: one search of 79,096 copies (2.9 s under the profile), every one a dead end for
+  the same reason.
+
+**The fix** (`cast_mana.rs`, `Game::takes_the_costs_sacrifice`, asked in `cast_mana_run` in the search): an ability
+that removes its own permanent (a sacrifice or exile of its source; Rain of Filth's granted slot) when that
+permanent is one the spell's cost may sacrifice and the others are fewer than the cost needs is a dead end before
+any of its own cost is chosen. Exact: from there the spell's sacrifice has too few permanents whatever the
+ability's cost is paid with, and nothing in the step can add one - only mana abilities are activated (601.2g) and a
+mana ability's effect adds mana (605.1a; the IR's `ManaDef` has no part that puts a permanent onto the
+battlefield). The answer is the one the walk reached at every end.
+
+**A count to bound a board by** (`engine::take_payment_search_copies`, a per-thread test hook beside
+`set_payment_search_collapse`): the copies every payment search made since the last call. The cap stops one search
+of two million; a test can now say "this cast's searches are small".
+
+**The limit, said plainly.** The step's option search still walks the sets of sources that pay an activated
+ability's own mana cost when the answer depends on which are used; this check removes the case where it cannot
+depend on them. A board whose answer is "no" for a reason that only shows at the ends can still cost 2^n copies for
+n sources of such a cost; the copies counter is there to pin one when the farm finds it.
+
+### 252.2 Castability at the least X whose total cost has mana (249.2's (a))
+
+CR 601.2g: "if the total cost includes a mana payment, the player then has a chance to activate mana abilities". A
+total cost with no mana has no step. Walking Ballista ({X}{X}) escaped through Underworld Breach with two other
+graveyard cards and a Chromatic Star: at X = 0 there is no step, no Star and two cards - not payable; at X = 1 ({2})
+the Star is sacrificed in the step, the third card. Castability's search announced the least X only (231.4) and
+said no; the choice of X started at 0.
+
+* `feed_castable`: when the search at the least X fails and the total cost there has no mana, the least X whose
+  total cost has some is searched too (each X in between has no mana either and the same answer; a larger X only
+  costs more), within the X the cast may announce (`feed_x_cap`: none beyond the least without {X} in the mana
+  cost, for a cast without paying the mana cost or for a granted alternative cost, CR 107.3b; Serra Paragon's and
+  Lurrus's mana value limit, 202.3e). The scan is bounded by what the cost's reductions take off and fails loudly
+  past 4,096 (`FEED_X_SCAN`).
+* `x_range` (the choice of X): when X = 0 can't be paid and its total cost has no mana, the range starts at that X
+  (`first_x_with_mana`, `x_limit` split out of `x_range`): X = 0 is no option then. Otherwise as before.
+
+### 252.3 Escalate's modes (249.2's (b))
+
+`choose_modes`' `escalate_ok` (can the cost be paid with n modes: n - 1 discards, CR 702.120a) asked the payment
+alone. It was a dead end, not a narrower choice: Collective Brutality escaped with one other graveyard card, one
+card in hand and a Chromatic Star - castability counted the discard and the Star (its search announces escalate's
+modes), the choice of modes found no number of modes payable: "ChooseMode with no options" (252.6's test without the
+fix). It now also asks the step's search with n modes announced.
+
+### 252.4 The announcements still to come (249.2's (c))
+
+249.2 asked the step's search for the times and for a spree mode only when the item so announced had exactly the
+total cost the payment's check used, and was silently narrower otherwise. The two differ only when a later
+announcement adds mana: the additional cost option (announced last) or X.
+
+* **The pools were searched**: every card of `data/cards/*.ir.json` with replicate, squad, offspring, multikicker,
+  spree or escalate (Consign to Memory, Batroc the Leaper, Collective Brutality, Lose Focus, Sicarian Infiltrator,
+  Three Steps Ahead, Thundertrap Trainer) - none has an additional cost option or an {X}. No card reaches the
+  difference.
+* **The guard is gone anyway**, replaced by the exact question (`Game::feed_completes_ahead`): does the step's
+  search complete with the value announced and **some** value of each announcement still to come (`begin_cast`'s
+  order: alternative cost, modes, times, X, additional cost option) - each option the cast may choose; for X its
+  least and the least with mana (252.2); the times not yet announced none (more only costs more). The choices of
+  modes (spree's and escalate's), times and X all ask it; the option's own choice asks `feed_completes` (247.3).
+
+### 252.5 A mana ability's return cost (249.1's left item)
+
+249.1's "own mana ability first" serves a feeding ability's *sacrifice*; a cost that returns a permanent to its
+owner's hand would need the same. No such mana ability exists or can: the lowering refuses one
+(`lower/activated.rs`, "ManaAbility.cost(counters, crew, exile or bounce)" - the mana-ability payment path pays no
+return). So the path is unreachable, and now loud: `mana_now_costs` asserts the ability has no return cost, and a
+unit test checks every definition of every pool.
+
+### 252.6 Tests
+
+* `rules_cast_mana_search::cr_601_2g_601_2h_an_ability_that_takes_the_costs_only_sacrifice_is_refused_without_searching_its_payment`
+  (252.1): Tinker, Wizard's Rockets, Birds of Paradise and ten different lands - the Rockets is never an option of
+  the step, Tinker is cast with it sacrificed, and the cast's payment searches make fewer than 100 copies (2; 4,097
+  without the check); with a Mind Stone too the Rockets is offered.
+* `fuzz::the_tinker_payment_search_of_252_hidden_decklist_seed_100122141`: the seed, every check of `play_hidden`,
+  its payment searches under 50,000 copies in all (1,308 under the `fuzz` profile, 22 in release, where the debug
+  check that plays the Tinker world doesn't run; 79,096 in one search on e687031c).
+* `rules_escape_costs::cr_107_3_601_2g_castability_and_x_start_at_the_least_x_whose_cost_has_mana` (252.2): the
+  Ballista board - not castable without the Star; with it castable and every line has X = 1; with three other
+  graveyard cards X is 0 or 1.
+* `rules_escape_costs::cr_702_120a_escalates_modes_count_the_steps_feeding_abilities` (252.3): the Collective
+  Brutality board, every line with two modes.
+* `cast_mana::tests::no_mana_ability_returns_a_permanent_as_a_cost` (252.5): the cube, constructed, EoE and fuzz
+  pools.
+* 249.3's tests of X, times and spree pass with `feed_completes_ahead` in place of the guard (252.4: no card to
+  build a test of the difference from).
+
+The Tinker test fails its count, and the Ballista and escalate tests fail outright, with their source changes taken
+out (4,097 copies; the escape not offered; "ChooseMode with no options").
+
+### 252.7 Digests
+
+None moves, nothing re-recorded: the cube 5a09242cf4f2cbab -> 5a09242cf4f2cbab, `DIGEST_ENCODING=0`
+be0626d4b97cebae -> be0626d4b97cebae, constructed 47a8989dcc1a8a6a, EoE d754f4eef3c8adae, driver cab97c01912f7e3f,
+metagame 41f7580b3553e1c3, pair b41f691fd2583bf3, dealt cc0d138ac5c80402 (main e687031c's). 252.1 changes no option
+(the same answer sooner); 252.2-252.4 add options (a cast at a larger least X, modes and X through a feeding
+ability) in positions no recorded game holds. No `RULES_EPOCH` bump (none re-recorded).
