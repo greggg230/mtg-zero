@@ -254,11 +254,8 @@ class Ops:
         old = body.get('state')
         if old == state:
             return old
-        body = dict(body)
-        body['state'] = state
-        if body.get('alternates'):
-            body['alternates'] = [{k: v for k, v in x.items() if k != 'problems'} for x in body['alternates']]
-        cl.call('PUT', f'/v1/admin/run/{name}', body=body)
+        from mtgz.az.farm_admin import put_body      # (GET's read-only notes cut: PUT refuses them)
+        cl.call('PUT', f'/v1/admin/run/{name}', body=put_body(body, state=state))
         return old
 
     def farm_gates(self, run_dir, ckpt, out_dir, log_path):

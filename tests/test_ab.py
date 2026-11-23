@@ -198,7 +198,7 @@ def test_farm_arms(tmp_path):
         def call(self, method, path, body=None):
             self.calls.append((method, path, body))
             return {'id': 'meta3-x-adapt', 'state': 'active', 'build': 'b1',
-                    'alternates': [{'build_id': 'b2', 'problems': ['x'], 'when': {'vendor': 'nvidia'}}]}
+                    'alternates': [{'build_id': 'b2', 'problems': ['x'], 'variant_notes': ['y'], 'when': {'vendor': 'nvidia'}}]}
 
     c = Client()
     assert ab.farm_pause(s, 'adapt', client=c) == 'meta3-x-adapt'

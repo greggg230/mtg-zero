@@ -46446,3 +46446,25 @@ included. This repo's `tests/test_mac_remote.py` wrote mirror configs from DEFAU
 the old worker read the name as `mtg` and passed, the resolving one refused them (the engine gate's pytest: the
 remote evaluation of a resolver mirror and of an eval-net mirror, the worker in both modes). They now write the
 config as a run's first start does (`resolve_run_game`: `mtg` with layout 8), as every real mirror is written.
+
+## 245. A farm run's PUT body from its GET: every read-only note of an alternate cut (`mtgz.az.farm_admin.put_body`; 2026-11-22)
+
+(On the stew's pin branch `stew/first-pin`: this section's commit cherry-picked onto 5f66553a - main's 242-244 are not
+in it - so the first stew's code keeps the Rust inputs of its released build a1936a5b.)
+
+**Why.** The first stew (239) stopped at the end of its first specialist turn: pausing the specialist's farm run
+(`Ops.farm_set`: the whole body as GET returns it, only `state` changed) got `400 bad_request: alternates[0].variant_notes:
+unknown field`. The coordinator's GET annotates each alternate with read-only notes - `problems` (rev 11), `variant_notes`
+(rev 20, an alternate naming a model variant), `gpu_notes` (rev 22), `opt_in_notes` (rev 27) - and its PUT takes only
+`build_id`, `runtime`, `when`, `model` on an alternate (zero-farm coordinator admin.ts), refusing anything else. The stew and
+`tools/ab.py farm_pause` cut only `problems` (written before rev 20); a run whose alternates name a variant (the GPU
+variants every release carries) could not be paused that way. The specialist's run itself had finished (32 iterations,
+clean exit); its farm run stayed active and was paused by hand the same way as below.
+
+**What.** `mtgz/az/farm_admin.py`: `put_body(got, **changes)` - the GET body with the changes, each alternate cut to the
+keys PUT takes (`RUN_ALTERNATE_KEYS`), so later notes need no change here. Used by `mtgz.stew.control.Ops.farm_set` and
+`tools/ab.py farm_pause`. Python only: no engine, encoding or worker change (the published build of the commit before is
+this one's: the same Rust inputs, `farm_builds.lookup`).
+
+**Tests.** `tests/test_stew_control.py::test_farm_set_puts_the_whole_body_with_only_the_state_changed` (an alternate with
+`when.opt_in`, `model` and all four notes: the notes cut, the rest kept) and `tests/test_ab.py` (a `variant_notes` cut).

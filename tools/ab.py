@@ -860,11 +860,8 @@ def farm_pause(s, arm, client=None):
     if client is None:
         from zero import farm_def as FD
         client = FD.Client()
-    body = dict(client.call('GET', f'/v1/admin/run/{fr}'))
-    body['state'] = 'paused'
-    if body.get('alternates'):
-        body['alternates'] = [{k: v for k, v in x.items() if k != 'problems'} for x in body['alternates']]
-    client.call('PUT', f'/v1/admin/run/{fr}', body=body)
+    from mtgz.az.farm_admin import put_body          # (GET's read-only notes cut: PUT refuses them)
+    client.call('PUT', f'/v1/admin/run/{fr}', body=put_body(client.call('GET', f'/v1/admin/run/{fr}'), state='paused'))
     print(f'{arm}: farm run {fr} paused', flush=True)
     return fr
 
