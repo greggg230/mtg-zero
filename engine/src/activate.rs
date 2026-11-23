@@ -1103,19 +1103,36 @@ impl Game {
         if mana.is_zero() {
             return Vec::new();
         }
-        // (The cost's own discards are graveyard cards by then: ruling
-        // bea302d9.)
-        let short = self.exile_short(p, card, cost).saturating_sub(self.discards_feed(p, card, cost));
+        // (The cost's own discards and the nontoken permanents it sacrifices are graveyard cards by then: ruling
+        // bea302d9, CR 601.2h; `cost_feeds_graveyard`, as castability counts them, `cost_payable_with`.)
+        let short = self.exile_short(p, card, cost);
         // (A spell whose mana can't be spent activates no mana source: ENGINE.md
         // 220.1.)
-        if short == 0 || self.def_of(card).casting.no_mana {
+        if short <= self.cost_feeds_graveyard(p, card, cost, &[]) || self.def_of(card).casting.no_mana {
             return Vec::new();
         }
+        // The fewest sources, in canonical order, that with the cost's own cards fill the graveyard: a source is
+        // activated first only if it adds a card (not one the cost's sacrifice would put there anyway) and leaves
+        // the cost's sacrifice its permanents (ENGINE.md 247.2: before, as many sources as the graveyard was short
+        // by after the discards alone - Lotus Petal activated for mana although it was the only artifact the cost
+        // could sacrifice, and its sacrifice the card the exile needed).
+        let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n as usize);
+        let cands = cost.sacrifice.as_ref().map_or(Vec::new(), |s| self.sacrifice_candidates(p, card, s));
+        let mut first: Vec<CardIdx> = Vec::new();
+        for c in self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c)) {
+            let fed = first.len() + self.cost_feeds_graveyard(p, card, cost, &first);
+            if fed >= short {
+                break;
+            }
+            first.push(c);
+            let left = cands.iter().filter(|x| !first.contains(x)).count();
+            if left < n_sac || first.len() + self.cost_feeds_graveyard(p, card, cost, &first) <= fed {
+                first.pop();
+            }
+        }
         let classes = self.mana_classes(p, exclude);
-        self.delve_sources(p)
+        first
             .into_iter()
-            .filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c))
-            .take(short)
             .filter_map(|c| classes.iter().find_map(|cl| cl.members.iter().find(|s| s.card == c && cl.sac_self).copied()))
             .map(|s| (s, false))
             .collect()
