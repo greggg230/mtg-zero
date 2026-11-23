@@ -46823,6 +46823,8 @@ that needs many cards from many feeders can still be large; the cap stays the lo
 
 #### 247.1.6 Found, not fixed (the first cause's)
 
+(Fixed in 249.1.)
+
 * **A land tapped for mana, then sacrificed by a feeding ability, in the step.** The step's search offers only the
   feeding abilities castability doesn't count (231.4); a land's own mana ability, which must be activated before a
   feeding ability sacrifices that land, is never activated there. 231.4's argument (b) - a non-feeder's mana is a
@@ -46869,7 +46871,7 @@ can be paid with it, or when the step's search completes with it - `feed_complet
 X are announced before the option: `begin_cast`'s order). Gated like `feed_castable` (`feed_gap`: a graveyard-reading
 cost and a feeding ability castability doesn't count), so every other cast asks what it asked.
 
-**Not changed** (the same shape, no failing game): X's range (`pays` in `choose_x`), the number of times
+**Not changed** (fixed in 249.2) (the same shape, no failing game): X's range (`pays` in `choose_x`), the number of times
 (`choose_times`) and a spree mode's cost ask the payment alone. Castability's search announces the least X, so the
 least X is always offered and the cast completes; a larger X, more times or a mode that only the step's feeding
 abilities make payable is not offered - a narrower choice than the rules give in a rare corner, no dead end. For the
@@ -46961,3 +46963,132 @@ which the digests' games hold. No layout, encoding or decision-kind change; no `
 * Fresh seeds, release, `tools/fuzz_shards.py`, through the slot throttle: the default pool, 4,000 games and 200
   matches from seed 247,100,000 - passed; the default pool with hidden decklists, 4,000 games from seed 247,200,000 -
   passed. No stop of any kind in either.
+
+## 249. The two items 247 left open: a land tapped for mana and then sacrificed in the 601.2g step's search, and the choices of X, times and spree modes counting the step's feeding abilities (branch `fix/payment-followups-1123`, 2026-11-23)
+
+(The number is provisional: 246 and 248 belong to branches not merged yet; the merge assigns the final one.)
+
+**Why.** 247 fixed the farm fuzz's payment stops and wrote down two things it found and left: 247.1.6 (the step's
+search never taps a land a feeding ability then sacrifices, so castability says no where a cast exists) and 247.3's
+"not changed" (the choices of X, of the times an additional cost is paid and of a spree mode ask the payment alone,
+though castability and the additional cost's choice count the step's feeding abilities). Both are fixed here, one
+commit each. No layout, encoding, decision kind or action id changes; the cap is untouched.
+
+### 249.1 A permanent's own mana ability, then its sacrifice (247.1.6)
+
+**The rule.** CR 601.2g: "the player then has a chance to activate mana abilities", any of them, in any order. Two
+Mountains, each tapped for {R} and then sacrificed to Squandered Resources for {R} (106.7: a type the land could
+produce), make four mana and two graveyard cards: Fiery Confluence ({2}{R}{R}) escapes through Underworld Breach with
+one other card in the graveyard. The game's own step already allowed the line (a land a feeding ability may sacrifice
+is not collapsed, 231.3's check 5, so the step offers its {T} ability); the **search** did not make it - it activates
+only the feeding abilities castability doesn't count (231.4), and 231.4's argument that any other ability's mana is
+the payment's own to make misses a land that is gone when the payment begins. So the escape was not offered at
+priority, and `PASS` and other options of a step could be judged wrongly.
+
+**The fix** (`activate.rs` `mana_now_costs`, `cast_mana.rs`). In the search only:
+
+* **Right before the sacrifice** (`Game::search_pretaps`): where an activation the search made from one of its own
+  step nodes chooses the permanent a feeding ability sacrifices, each candidate is offered as it is and once for each
+  mana ability of its own that the step offers and that leaves it on the battlefield (not a self-sacrifice, an exile
+  or return of itself, Rain of Filth's granted slot): that ability is activated first (`Choice::Ability`, its own
+  costs and choices as ever), then the permanent is sacrificed. If it is no longer one the cost may sacrifice once
+  that ability's costs are paid, the copy is a dead end.
+* **At any time, for the abilities "right before" doesn't cover** (`Game::search_loose_taps`): an ability that is
+  not a plain "{T}: add <fixed mana>" with nothing added by its tap (`Game::plain_tap_mana`, the collapse's checks 1
+  and 2 split out: Tolarian Academy's count, Gaea's Cradle's, an ability with a mana cost or a condition), or any of
+  them when some mana ability's sacrifice or return cost reads whether a permanent is tapped. Those are options of
+  the step node itself, and a node with one explores every order and marks none (as a node whose feeders don't
+  commute, 247.1.2).
+* **Only from the search's own nodes** (`SEARCH_NODE`, a second mark bit of `Task::CastMana::after`): the game's own
+  `Sacrifice` decision of a mana ability offers the permanents and nothing else, so an activation that is the option
+  of the game's decision the search starts from gets no "ability first" choice - else the search would call
+  "Squandered Resources" completable from untapped Mountains and the player, having picked it, would have no
+  Mountain whose sacrifice completes ("Sacrifice with no options", seen while writing this). The player taps the land
+  in the step first; the step offers that, and the search from there finds the rest.
+
+**Why it is exact.** Any line of the step in which a permanent L is tapped for mana by its own ability a and later
+sacrificed by a feeding activation F can have a moved to right before F when a is plain: what a makes and whether it
+may be activated read nothing of the game but L untapped, and L being tapped between the two times can only take
+options away from what happens there (a tap cost that would take L, an untapped-permanent filter) - unless a
+sacrifice or return cost reads the tapped status, which sends every such ability to the node's own options. Mana a
+makes earlier that an activation in between spends is mana that activation's own payment makes by tapping L itself
+(CR 605.3a), after which F sacrifices the tapped L, a line the search already made. A non-plain a is offered at
+every node, so every time of its activation is made. A permanent tapped in the step and never sacrificed is the
+payment's own source (231.4). With the abilities at their canonical time, 247.1.3's order argument is unchanged (the
+key of an activation is still its card and the permanent it sacrifices; a plain ability's mana doesn't depend on the
+order), and a node with a loose ability is unordered.
+
+**Bounded.** A sacrifice has one more option for each such ability of the permanent and, for a land of several
+types, one branch a type (the mana of the land's own ability is chosen as it is made: the feeding ability's costs
+follow it); the tree is still cut off where the graveyard holds the cost's cards (247.1.5), so its depth is the
+number of cards the graveyard is short. 247.1.4's comparison test (160 boards, now 136 castable escapes and 7,136
+paths) runs in 18 s, from 4 s: Tolarian Academy's and Gaea's Cradle's boards explore every order. The seeds of 247
+replay as fast as before.
+
+**Left.** A feeding ability whose cost *returns* a permanent to its owner's hand ("return a land you control") gets no
+"ability first" choice (a return feeds no graveyard, so such an ability is a feeding ability only through another part of its
+cost; the pools were not searched for one; the sacrifice path is the only one changed).
+
+### 249.2 The choices of X, of the times and of spree's modes (247.3)
+
+`cast.rs`: each of these announcements (CR 601.2b) filtered its values by the payment's castability alone
+(`can_pay_spell`); each now also accepts a value with which the 601.2g step's search completes
+(`Game::feed_completes`, 247.3: the search castability makes, on the stack item with that value announced):
+
+* **X** (`pays` of a spell's X, mana or "pay X life"): the item with that X. Mind Twist escaped with a Chromatic Star
+  as the third graveyard card was offered X = 0 only (castability's least X); now every X the lands pay.
+* **The times an additional cost is paid** (`choose_times`: replicate, squad, offspring; kicker {X}'s least X each
+  time): the item with those times.
+* **A spree mode** (`choose_modes`): the item with the mode added. This one was a dead end, not a narrower choice:
+  castability counted the Star with one mode, the choice of modes found none payable - "ChooseMode with no options"
+  (249.3's test without the fix).
+
+For the times and the modes the search is asked only when the item so announced has exactly the total cost the
+payment's check was asked about (`total_mana(item') == cost`; they differ only for a card with both such a cost and
+an additional cost option that adds mana, whose option is announced later - the pools were not searched for one; then the choice
+is as before). The search is gated as castability's (`feed_gap`): a cast with no graveyard cost or no feeding ability
+asks what it asked.
+
+**Left.** (a) A spell whose least X has no mana in its total cost has no 601.2g step at that X (601.2g: "if the
+total cost includes a mana payment"), so castability's search at the least X finds no feeding ability and says no,
+though X = 1 would have a step and could be castable through it (Walking Ballista escaped with a Star as the third
+card). Fixing it means castability trying a second X and the choice of X having a least value above 0: left, with
+this note. (b) Escalate's count of modes (`escalate_ok`) still asks the payment alone: castability's search counts
+its discards, the choice of one more mode doesn't - a narrower choice, no dead end (the first mode is the one
+castability counted).
+
+### 249.3 Tests
+
+`engine/tests/rules_cast_mana_search.rs`:
+* `cr_601_2g_a_land_tapped_for_mana_then_sacrificed_while_casting`: 247.1.6's ignored test, now run - two Mountains,
+  Fiery Confluence and Ponder in the graveyard: the escape is offered.
+* `cr_601_2g_605_3a_an_escape_castable_with_lands_mana_floated_first_is_castable_without` (new): 120 random boards
+  around Breach and Squandered Resources (one to three lands among basics, duals, Tolarian Academy, Gaea's Cradle,
+  Ancient Tomb; Chromatic Star, Mind Stone, Llanowar Elves; a spell and up to two other graveyard cards). A land
+  tapped with priority (605.3a) and then sacrificed while casting does what the land tapped in the step does, so:
+  whenever some set of lands floated first (every set, every choice of their mana: 774 states) makes the escape
+  castable, it is castable with none floated. An independent check of the search's completeness: the floated lines
+  use no "ability first" choice. 35 boards castable, all with the graveyard short. Without 249.1 it fails at once
+  (Badlands, Volcanic Island, Tolarian Academy and Frantic Search alone in the graveyard).
+* 247.1.4's comparison (the collapsed search against the brute-force one) passes with the new options on both sides.
+
+`engine/tests/rules_escape_costs.rs` (each cast walked every way to the next priority, every end with the spell on
+the stack):
+* `cr_601_2b_107_3_the_choice_of_x_counts_the_steps_feeding_abilities`: Mind Twist, a Star, three Swamps: X up to 2.
+* `cr_601_2b_702_175a_the_times_an_additional_cost_is_paid_count_the_steps_feeding_abilities`: Thundertrap Trainer
+  (offspring {4}), a Star, six Islands: the offspring cost paid in some line.
+* `cr_601_2b_702_172a_sprees_modes_count_the_steps_feeding_abilities`: Three Steps Ahead, a Star, two Islands and two
+  Mountains: a mode is chosen in every line, the + {R} mode in some.
+
+All five new or un-ignored tests fail with the source changes taken out (the escape not offered; the Academy board;
+X = 0 only; the offspring cost never; "ChooseMode with no options").
+
+### 249.4 Digests
+
+Both changes add options (an escape castable through a tapped-then-sacrificed land; larger X, times and spree modes
+through a feeding ability), so the digests could have moved. They did not: no game of theirs holds such a position.
+The cube c2b04fed925eed67 -> c2b04fed925eed67, `DIGEST_ENCODING=0` d3c144b6cc2977e5 -> d3c144b6cc2977e5,
+constructed 38ef93512e0a7259, EoE 5ffb850dd963bad0, driver cab97c01912f7e3f, metagame ed86a2f5ed21c436, pair
+80562a6aa452b765, dealt cc0d138ac5c80402: all main's (88cb474e), nothing re-recorded. A game that does hold one plays
+differently from here on (the new options are the rules'): a behaviour change, though not one the recorded games show.
+No `RULES_EPOCH` bump: it moves with a re-recorded digest (`tools/position_lab.py`), and none was re-recorded.
