@@ -47416,3 +47416,50 @@ and `::test_judge_records_is_a_boolean_of_the_recipe`.
 
 **To turn it on in a live stew.** At a pause before a judge phase: move the stew's worktree to a commit with this section
 and set `"records": true` in the stew's stew.json `recipe.judge`. Disk: a few MB a generation.
+
+## 251. zero-core pin c6b4e9d -> a39a8c1: the pool's rolling check of a torch alternate, no rows made for a finished game in the torch worker, one CUDA graph capture at a time (zero-core `fix/torch-worker-1123`, docs/az.md 81, docs/search.md 2.22; 2026-11-23)
+
+**Why.** Three problems of the first live runs played through the farm by the torch worker of section 244 (a test run,
+then the first stew's specialists). zero-core's docs/az.md 81 has the measurements; this section says what the pin
+brings here. No setting is added, and no run or stew is moved by this commit.
+
+**What changes here.** Only the pin (the torch worker build ships the pinned core's `python/zero/`, section 244.2, so
+the release of this commit carries the fixes to the machines that play through torch).
+
+* **The pool's rolling check runs a torch alternate from its runtime pack** (az.md 81.1; `zero/farm_pool.py`,
+  `zero/farm_h2h.py`). With `pool_rolling` set, the pool's first publish asks each alternate build whose executable is
+  on the machine for the feature `rolling` (`<exe> info`). A torch alternate's executable is `zf-pyshim.exe`, which
+  answers nothing without `ZEROFARM_RUNTIME_DIR` (exit 3); the pool took that for the alternate's own refusal, stopped,
+  and the run went on without the farm. Now the check gives the alternate its pack (the manifest's `requires_runtime`,
+  the pack's directory next to the worker builds) in the child's environment for that one call; a pack that is not on
+  the machine leaves the alternate unchecked (logged, as an alternate whose executable is not here) and the pool goes
+  on. A torch worker that answers without `rolling`, or fails for another reason, is refused as before. A native
+  alternate with a pack that is here (CUDA, DirectML) is now asked with the variable set too, as on a farm PC.
+* **The torch worker makes no rows for a finished game** (az.md 81.2, docs/search.md 2.22; zero-core `crates/search`
+  and `crates/py`: `Driver::set_sample_rows`, the binding's `SearchDriver.set_sample_rows(False)`;
+  `zero/farm_torch_worker.py`). A finished game's samples were unpacked dense and copied into one array of which the
+  worker read `net` alone (one best-of-three: 67 to 241 MB, 25 to 116 ms on the thread that drives the search). The
+  worker now asks for none: the same result rows and record texts, so the rows the pool driver replays are unchanged.
+  **Rows are on by default** - the trainer, the Python remote worker, the native worker and every digest never call it.
+  The ~8 MB per game in flight that remains is the driver's own state (measured there on the CPU at 64 games; the
+  worker at its full size on a GPU is not measured).
+* **One CUDA graph capture at a time** (az.md 81.3; `zero/infer.py` `CAPTURE_MU`, a process-wide lock around the
+  `torch.cuda.graph` block of both graph runners). A rolling job builds and self-tests the next generation's evaluator
+  on its own thread while the games go on; in a lease's first seconds both threads capture, on the one stream every
+  capture of a process shares, and CUDA invalidated the capture (the first torch lease died that way). With one
+  capturing thread - every run before the torch worker - nothing changes. **Not yet verified on a GPU**: the cause is
+  read from the traceback, the timing and torch's source, and the test stands in for torch.cuda (two runners on two
+  threads never capture at once; it fails without the lock). To check on a GPU: a rolling job sent a checkpoint within
+  its first seconds, repeatedly, with and without the lock.
+
+**The first stew's workaround can go.** The stew playing its specialists through the farm sets `ZEROFARM_RUNTIME_DIR`
+in its `recipe.env` so the pool's check of the torch alternate can answer (the first item above). Once that stew is
+re-pinned to a commit with this pin, the entry can be removed: the pool finds the pack itself. Until then it stays (it
+is harmless with the fix: the check sets the same variable for the call).
+
+**Tests** (zero-core's, run by the gate's core pytest and cargo steps): tests/test_farm_pool.py
+`test_rolling_check_runs_a_torch_alternate_from_its_runtime_pack`; tests/test_farm_torch_worker.py
+`test_the_worker_makes_no_sample_rows`, `test_a_driver_without_sample_rows_gives_the_same_records_and_no_rows`,
+`test_cuda_graph_captures_never_overlap`; the driver's `samples_without_rows_give_the_same_games_and_records` and
+`chain::contests_without_sample_rows_give_the_same_records`. Here: farm compat check 4 (the torch worker's records
+replay to the trainer's rows, section 244.4) runs the worker without its rows.
