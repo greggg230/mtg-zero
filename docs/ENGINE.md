@@ -46780,7 +46780,15 @@ expire with their definitions (30 days).
   refused mid-generation with no local match played, the next generation free to switch); a local generation refusing
   the farm; a farm refusal and a stop leaving the phase to resume. The config's refusals (`precision` with the farm,
   the farm keys).
-* The stew, farm head-to-head, ab and privacy test files together: 79 passed.
+* The stew, farm head-to-head, campaign, ab and privacy test files together: 84 passed, 3 skipped (no local worker
+  build in the editing checkout).
+* **Gate** of 5d396554 (the code; warm-1): **GATE PASSED WITH SKIPS python 5d3965540c90 in 534s** - privacy 0
+  findings; pytest 59 + 174 + 247 + 287 passed in four shards on the Mac and 49 in the desktop part; the run-loop smoke
+  16 games, 0 unfinished - skipped: 1 live-run-hazard test (fenced: a live run on this machine). A first attempt with
+  `--throttle on` forced while no run was live failed one unrelated test, `tests/test_mac_remote.py::
+  test_the_macs_selfplay_settings`: through `bash tools/slotd.sh` Git Bash rewrites the Mac's home path in the
+  environment (`/Users/...` -> a Windows path) before the Windows Python reads it; the test passes unthrottled and on
+  the Mac, and main's file is the same. Not fixed here (a throttled desktop pytest of that file is the trigger).
 * **Not run: a real campaign.** Nothing was put on the coordinator, no network was exported, no farm or GPU game was
   played, and the runner process was not started against the real farm: the campaign steps are fakes in the tests (as
   in tests/test_h2h_farm.py), and the real checks are 249.1's read-only ones (the real settings through `unit_job`,
