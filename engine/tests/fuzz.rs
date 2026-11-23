@@ -625,3 +625,41 @@ fn engine_223_doomsday_mirror_post_board_match_163_information_set() {
     }
     println!("ENGINE.md 223 scan: {decks} from game {start}: {n} matches passed");
 }
+
+/// ENGINE.md 248: the hidden-information entries of the fuzz steward's queue of 2026-11-23, found under the `fuzz`
+/// profile on main and replayed at its denominator (4) in every profile, every check of `play` / `play_hidden`.
+/// Default-pool games: 100,030,136 (106b63d67b1d: a searched-for Metamorphosis Fanatic drawn beside a twin and
+/// revealed for miracle, its place in its owner's row by card index - "same keys, different rows"), 100,391,600 and
+/// 100,661,596 (f1eebdfda0a1: the drawn Fanatic's knowledge moved onto a twin before the reveal - "same keys,
+/// different views"), 100,398,690 (f1eebdfda0a1: a fetch land's ability whose sacrificed source was shuffled back,
+/// its card slot found by a search in one world), 100,690,719 (88ef40b06b03: Robber of the Rich shuffled away by
+/// Timetwister, "attacked with a Rogue" read from its slot's dealt card - "determinize changed the viewer's
+/// decision", the `fuzz` profile's assertion) and 100,492,136 (fb92013286d3: three face-down permanents tapped for
+/// waterbend in two orders - "keyed apart only by the other player's forced answers"). Hidden-decklist games:
+/// 100,153,769 (ea73c6338e3f: Lim-Dul's Vault's random bottom order over a tutor's find group), 100,085,630
+/// (d4639eb826ec: a graveyard target's list slot after the loop rule withheld an option) and 100,096,300 and
+/// 100,237,234 (a3c8e29c2e3e: Tamiyo's +1 with a Blightsteel Colossus among the revealed cards). The payment entries
+/// of the same queue (467b098e2037, ddfc59e36d7e and f1eebdfda0a1's game 100,445,205) are not fixed (248.2).
+#[test]
+fn info_set_walk_seeds_of_248() {
+    use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
+    if pool_mode() != PoolMode::Default || sealed_mode() || hidden_decks_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Default)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        for seed in [100_030_136u64, 100_391_600, 100_661_596, 100_398_690, 100_690_719, 100_492_136] {
+            let p = std::panic::catch_unwind(|| play(seed, true))
+                .unwrap_or_else(|e| panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1, fuzz profile): {e:?}"));
+            assert!(!p.actions.is_empty(), "seed {seed}");
+        }
+        for seed in [100_153_769u64, 100_085_630, 100_096_300, 100_237_234] {
+            std::panic::catch_unwind(|| play_hidden(seed))
+                .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1, fuzz profile): {e:?}"));
+        }
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
