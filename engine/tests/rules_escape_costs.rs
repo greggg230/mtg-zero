@@ -3,6 +3,7 @@
 //! walk every decision of the cast every way.
 
 use engine::db::CardDb;
+use engine::rng::Rng;
 use engine::testkit::Scenario;
 use engine::{Choice, DecisionKind, Game, Step, Zone};
 
@@ -123,5 +124,45 @@ fn cr_601_2b_702_138a_the_additional_cost_choice_counts_the_steps_feeding_abilit
     for e in &ends {
         assert_eq!(e.obj(bt).zone, Zone::Stack, "{}", log(e));
         assert_eq!(e.obj(star).zone, Zone::Exile, "the Star sacrificed while casting, then exiled by escape: {}", log(e));
+    }
+}
+
+/// CR 702.81a, 712.11b (ENGINE.md 10, 247.4): Six gives Norman Osborn // Green Goblin in P0's graveyard retrace; P0
+/// begins to cast it and is asked which face. The faces offered were found castable counting the land card in P0's
+/// hand, so that card is pinned in every world dealt for P1 while the cast is in progress - as it is at "which
+/// graveyard card?" before and once the spell is on the stack. At the face choice it wasn't: a world gave P0 a hand
+/// with no land and the cast had nothing to discard, "DiscardCost with no options" (fuzz seed 100654376).
+#[test]
+fn cr_702_81a_retraces_land_card_is_pinned_at_the_face_choice() {
+    let mut g = cube()
+        .library(0, &["Lightning Bolt"; 12])
+        .battlefield(0, &["Six", "Underground Sea", "Badlands", "Volcanic Island", "Watery Grave"])
+        .hand(0, &["Island", "Lightning Bolt", "Lightning Bolt"])
+        .graveyard(0, &["Norman Osborn // Green Goblin"])
+        .at(Step::Main1, 0)
+        .start();
+    let norman = g.card(0, "Norman Osborn // Green Goblin", Zone::Graveyard);
+    let island = g.card(0, "Island", Zone::Hand);
+    for _ in 0..4 {
+        if g.kind() == Some(DecisionKind::ChooseFace) {
+            break;
+        }
+        let c = g
+            .offered()
+            .into_iter()
+            .find(|c| matches!(c, Choice::Cast(x) | Choice::CastFace(x) | Choice::Faces(x, _) | Choice::Card(x) if *x == norman))
+            .unwrap_or_else(|| panic!("no cast of the card: {}", opts(&g)));
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseFace), "{}\n{}", opts(&g), log(&g));
+    assert!(g.pinned_for(1).contains(&island), "the land card the retrace counted on: {:?}", g.pinned_for(1));
+    for s in 0..40 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        assert_eq!(d.obj(island).zone, Zone::Hand);
+        assert_eq!(d.name(island), "Island", "world {s}");
+        for e in every_way(&d, 200) {
+            assert_eq!(e.obj(norman).zone, Zone::Stack, "world {s}: {}", log(&e));
+        }
     }
 }
