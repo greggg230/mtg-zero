@@ -46609,3 +46609,267 @@ this one's: the same Rust inputs, `farm_builds.lookup`).
 
 **Tests.** `tests/test_stew_control.py::test_farm_set_puts_the_whole_body_with_only_the_state_changed` (an alternate with
 `when.opt_in`, `model` and all four notes: the notes cut, the rest kept) and `tests/test_ab.py` (a `variant_notes` cut).
+
+## 248. The fuzz steward's hidden-information queue of 2026-11-23: a miracle card among twins, a gone source's card slot, a random bottom order over a find group, a withheld graveyard option, a gone attacker's card, forced picks in two orders, Tamiyo's reveal around a shuffle; a payment's `vm` and class left open (branch `fix/infoset-queue-1123`, 2026-11-23)
+
+Branch from main 66288d93 (engine = df29ea38's). The number is provisional (246 and 247 are open branches'). Ten
+entries of the fuzz steward's queue (171), every one replayed on main under the `fuzz` profile before anything changed
+(`FUZZ_FIRST=<seed> FUZZ_GAMES=1 FUZZ_LOG=1 cargo test --profile fuzz -p engine --test fuzz fuzz_random_games -- --exact
+--nocapture`, `FUZZ_HIDDEN_DECKS=1` in front for the hidden-decklist games). One queue id can hold several causes:
+its key is the check's message, and f1eebdfda0a1's four seeds ("same keys, different views") are three different
+bugs.
+
+| entry | seeds (H: hidden decklists) | cause | engine or check | section | state |
+|---|---|---|---|---|---|
+| 106b63d67b1d | 100030136 | a told-apart hand card's place in its owner's row read card indices | engine (the row) | 248.1 | fixed |
+| f1eebdfda0a1 | 100391600, 100661596 | the card a miracle question asks about lost its knowledge to a twin | engine (knowledge) | 248.1 | fixed |
+| f1eebdfda0a1 | 100398690 | a gone source named by where its card slot is now | the check's view (and the loop hash) | 248.3 | fixed |
+| f1eebdfda0a1 | 100445205 | a payment's `min_class` shown to the other player | engine (view and v8 row) | 248.2 | **open** |
+| 467b098e2037 | H 100200461 | a payment's `vm` shown to the other player | engine (view and v8 row) | 248.2 | **open** |
+| ddfc59e36d7e | 100069409, 100148623 | the same | engine (view and v8 row) | 248.2 | **open** |
+| ea73c6338e3f | H 100153769 | a random bottom order left a find group's members where it put them | engine (state, v8 row) | 248.4 | fixed |
+| d4639eb826ec | H 100085630 | a graveyard list read again after the loop rule withheld an option | engine (the row) | 248.5 | fixed |
+| 88ef40b06b03 | 100690719 | "attacked with a Rogue" read the card at a gone attacker's slot | engine (rules) | 248.6 | fixed |
+| fb92013286d3 | 100492136 | the order of forced picks followed face-down permanents' identities | engine (keys) | 248.7 | fixed |
+| a3c8e29c2e3e | H 100096300, H 100237234 | Tamiyo's revealed cards moved around a replacement's shuffle | engine (rules, knowledge) | 248.8 | fixed |
+| 988792dc2dde | H 100122141 | no hang: one slow option completion | - | 248.9 | timed |
+
+d4639eb826ec's older seed (default 100519672, "the list token is not Auriok Salvagers") passes on main: it plays
+another game since 231's step.
+
+### 248.1 A miracle card among twins (106b63d67b1d; f1eebdfda0a1's 100391600 and 100661596)
+
+All three are Metamorphosis Fanatic, found by a tutor that puts it on top of the library revealed (Worldly Tutor), drawn
+as the turn's first card beside a second Fanatic already in the hand, and revealed for miracle (CR 702.94a).
+
+**The knowledge (engine).** Hand cards of one definition are interchangeable, so `canon_hand_knowledge` moves what the
+other player knows of them onto the first in card order - but for a card a public reference names (`told_apart`, 156).
+The miracle question (`Task::MiracleReveal`) names its card too: the first card drawn this turn, the one every player
+saw drawn. It was not told apart until its trigger was waiting, i.e. until after the reveal. Seed 100391600: P0 knew
+P1's drawn Fanatic (seen on top) and not the twin in P1's hand. In the game the drawn card had the lower index, kept
+its knowledge, and the reveal taught P0 nothing: one known Fanatic. In the world of P0's whose deal gave the unknown
+Fanatic to a hand slot below the drawn card, the normal form moved P0's knowledge onto that slot, the drawn card
+became unknown, and the reveal made it known again: two known Fanatics ("same keys, different views": 276 276 / 276
+in the multiset of P1's hand cards P0 knows). Seed 100661596 is the mirror for the owner's own view of what the other
+player knows. It was wrong in the real game as well when the hand's twin had the lower index: the other player was
+taught a second Fanatic it had no way to know (or, with the knowledge the other way round, kept one known card where
+it had seen two).
+
+*Fix.* `Game::told_apart` also holds for the card of a miracle question on the agenda (`Game::miracle_asked`): from
+the draw to the answer its knowledge is its own, as it is afterwards while its trigger names it.
+
+**The row (engine).** Seed 100030136, the owner's own walk: both Fanatics known to both players, the trigger on the
+stack naming the drawn one. The stack slot's source reference writes a hand card's place (`rf::POS`) in the viewer's
+hand, which the encoder took in card order (`hand_sorted`): 3/32 where the search found the Fanatic at a library slot
+below the twin's index, 4/32 where above ("same keys, different rows of P1 (head float 43486)"). Which library slot
+holds a card is dealt in each of the owner's worlds.
+
+*Fix.* `Cx::hand` (the encoder's order of the viewer's hand) is `Game::hand_slot_order_in`: canonical, and within a
+definition a told-apart card the other player knows first - the order a hand slot already takes its cards in (128,
+156), so a slot's token is the card its option names. Slot ids are unchanged (a definition's cards keep their places as
+a run). Only the order of twins one of which is told apart changes, between two orders both of which rows had before;
+no layout change.
+
+### 248.2 A payment's `vm` and `min_class` are the payer's own - open, not fixed (467b098e2037, ddfc59e36d7e, f1eebdfda0a1's 100445205)
+
+**The failure.** "determinize changed the view of P1 (mover P0)" / "a hidden-decklist world for P1 (mover P0): the
+view" / "same keys, different views (first at 971 of 979)": one number of `tail_v8::payment_view` differs between the
+game and a world dealt for the player who is not paying. A diagnostic (not kept) printed the payments: seed
+100069409, P0 paying {3} with an empty pool - the game `vm: None`, the world `vm: Some(2)`, P0's hand there holding a
+Simian Spirit Guide; seed 100148623 `None` / `Some(0)`, an Elvish Spirit Guide dealt; seed 100445205 `min_class` 4 / 3.
+Asking the decision again without a deal changes nothing (checked: `refresh_decision` alone keeps both views), so it is
+not a payment that is not re-entrant: the numbers are functions of the payer's hand.
+
+**The cause.** `PayMana::vm` (how much of the virtual pool the payment spends) and `PayMana::min_class` (the class of
+the last pick) come from the payer's classes of sources (`Game::payment_classes`), and a mana source in the hand (a
+Spirit Guide) is a class. Layout v8 (236) shows a payment's state to both players: the `payment` segment's state token
+writes `vm` (present, squashed, 32 bits) and `min_class` (32 bits) whoever the viewer is, and the view lists both
+(236.4: "every one changes both views and both v8 rows"). So it is a real leak in the row, not a false positive of the
+check. How far it reaches a network was not established here: a row is encoded for the player deciding, which inside
+a payment is normally its payer, so the leak needs another player deciding while a payment is on the agenda. The fuzz
+sees it because its checks compare the other player's view and row at every step; 248.11's 6,000 fresh games met none.
+
+**The fix it needs, and why it is not made here.** Show both numbers only to a viewer who sees the payer's hand (the
+payer, or the player deciding for it, CR 722.3): in `state_fields` and `payment_view`, a dozen lines (tried on this
+branch: with it the four seeds pass and every other seed of this section still does). It is left out because it changes
+what layout v8's rows show - two fields of a `payment` token go blank for the other player - and it contradicts 236.4's
+contract, which the public-state gate asserts: its perturbations "a payment spends one more mana of its pool" and "a
+payment's last pick was of a later class" must then reach the payer's view and row only, a third class of perturbation
+beside public and `HIDDEN_BY_DECKLISTS` in both passes of `tests/az.rs`. The layout is frozen while the live runs
+train on it, so this is the maintainer's decision (the widths and offsets would not move). Until then the farm's
+`games` and `hidden-games` modes keep finding these three entries.
+
+### 248.3 A gone source is named by no place (f1eebdfda0a1's 100398690; the check's view, and the loop hash)
+
+P1's Marsh Flats was sacrificed for its ability; with the ability still on the stack, Endurance shuffled P1's graveyard
+into its library. The walk's worlds (P1's own: its library dealt) then resolved a second fetch land's search for "a
+Blood Crypt": in one world the first Flats' card slot holds the Blood Crypt and enters the battlefield, in the other
+it stays in the library. `Game::view_state` named an ability's source, a target and a continuous effect's object by
+`view_place(r.idx)`, the place of the reference's **card slot** now, live or not: 3000 (hidden) against 21 (a battlefield
+place). A gone source is no object any more (CR 400.7), and where its card went through a hidden zone is nobody's to
+follow; the row was right (`Cx::write_ref`: a stale reference, its last known identity). So the check's view was wrong -
+and the engine's loop hash with it, which is `view_state` of the decider: two worlds of one information set could hash
+a state differently and keep different loop records.
+
+*Fix.* The three readers go through `view_live_place` like every other reference of the view (235.2): 7777 for a gone
+object or a library card the viewer lost track of.
+
+### 248.4 Cards put on the bottom in a random order join the find group they hold (ea73c6338e3f)
+
+P0's Vampiric Tutor put its find on top (a find everyone tells apart, 223); Lim-Dul's Vault then looked at the top five,
+put them back in an order of P0's (236.3: a group of five places holding one find), paid life, put them on the bottom,
+and at the end put the rest of the library on the bottom in a random order (`put_on_bottom_randomly`). `forget_order`
+forgot the cards' knowledge but left the group with its five members, which the random order - each world's own - had
+spread among the eight bottom cards: P1's view and layout v8's `find_groups` tokens listed the runs of places the
+group's members had landed on (7 2 / 10 3 against 5 3 / 9 1 / 12 1). It showed the random order's result, in the real
+game too.
+
+*Fix.* `forget_order` applies the group fact to its cards as `scramble` does to a private rearrangement's domain
+(`group_scramble`, before the told finds go): cards in an order nobody knows that hold a told find or a group's member
+are one group with every group they touch, its finds theirs.
+
+### 248.5 A graveyard list keeps each card at its option's slot (d4639eb826ec)
+
+Keen-Eyed Curator's "exile target card from a graveyard", activated again and again in one priority (a loop action,
+147.2). A graveyard target's id is `LIBRARY` + its slot in the decision's graveyard list; with cards of both graveyards
+offered the list is the offered cards (65.10). `ask_options` gives the ids, and then the loop rule withholds the
+options its taker already took at this state (`loop_ask`) - here the target Consult the Star Charts, slot 5. The list
+block and the pointers read the list again from the options left (`decision_graveyard_list`): one card fewer, so
+Fastbond (id 346, slot 6) sat at slot 5 and its option pointed at Life // Death's token.
+
+*Fix.* `decision_graveyard_list` keeps the list the ids came from when every option agrees with it, and otherwise lays
+the offered cards at their ids' slots, the withheld card's slot empty - what a page of a paged list already does. The
+ids stay (the loop records hold them).
+
+### 248.6 A gone attacker is the card that left (88ef40b06b03)
+
+Robber of the Rich: "during any turn you attacked with a Rogue, you may cast that card". For an attacker no longer on
+the battlefield `permission_ok` read `def_of(r.idx)`: the card at the attacker's slot **now**. After Timetwister that
+slot is in P0's library, and P0's own worlds deal it another card (a Scalding Tarn): the permission lapsed, the exiled
+card before it in exile order lost its option, and the next castable exiled card took slot 980 instead of 981 -
+"determinize changed the viewer's decision", the `fuzz` profile's assertion; in release the viewer's legal actions
+changed with its deal. `Cond::AttackedWithSubtype` read the slot's definition the same way.
+
+*Fix.* `Game::attacker_def`: a live attacker's card, a gone one's as it left the battlefield (`ref_lki`, recorded at
+every departure and kept until the next turn begins, when `attacked_with` is cleared too). In a real game the two are
+the same card except for a permanent whose card on the battlefield was not its front face. Unchanged, and still by the
+card rather than by the characteristics the creature had when it was declared: a face-down attacker or one that was a
+Rogue by an effect is read by its card - a follow-up for the rules lanes, not hidden information.
+
+### 248.7 Forced picks that follow each other are keyed in one order (fb92013286d3)
+
+P1 paid a waterbend cost with five permanents, three of them face down (a diagnostic, not kept: in one world the
+permanents at slots 13 and 17 were both dealt Fable of the Mirror-Breaker and slot 15 a Plains). `pay_twins` splits a class of sources into runs
+of twins, and a face-down permanent's identity is one of the facts twins share: P1 knows its own cards, so two face-down
+permanents of one identity are one option for it and of two identities two. In P0's worlds those identities are dealt,
+the runs differ, and the last three picks - forced, the payment needing every source left - came as 113, 115, 117 in
+one world and 113, 117, 115 in the other, each keyed `KEY_AUTO`: "keyed apart only by the other player's forced
+answers, with nothing the viewer P0 sees between the worlds". No decision of anyone falls between forced answers; the
+search would have split P0's node by P1's hidden cards for no difference P0 can see.
+
+*Fix.* In an observer's world a forced pick of another player's payment takes its place by value among the forced
+picks keyed just before it (`Game::order_forced_picks`): a run of them is one action to the observer. The payment's
+`PASS` and every other key end a run; a player's own worlds and the real game key as before. (If a decision of the
+payer's ever followed such a run inside the same payment with equal options in both worlds, the picks' order in
+`PayMana::chosen` would show in the other player's view; no walk has reached one - with every source left needed the
+payment ends - and the walk would report it as "same keys, different views".)
+
+### 248.8 Tamiyo's revealed cards move in one action (a3c8e29c2e3e)
+
+Tamiyo, Collector of Tales' +1 reveals the top four cards and puts the named ones into the hand and the rest into the
+graveyard. A Blightsteel Colossus among them is revealed and shuffled into its library instead (CR 614.1a), and the
+shuffle came where the loop met it: the revealed cards still to move were in the library, were shuffled with it and
+forgotten (`shuffle_library`), and a named card then went to the hand known to nobody - its owner included. Later that
+player's Chrome Mox asked it to choose a card of its own hand: "the chooser has seen the hand" (resolve_ext.rs, a debug
+assertion; in release the card sat in its owner's hand as an unknown one, dealt again in the owner's own worlds).
+
+*Fix.* The loop moves its cards under `pile_moving` (51.4): the Colossus stays in the library and the shuffle comes
+after the op (`flush_pile_shuffles`), as for a surveil's or a mill's pile. **A new check**: `Game::check_knowledge`
+(run by the fuzz after every step, in every profile) fails when a player does not know a card of its own hand (CR
+402.3), so the next op that moves cards around a shuffle is named at its step and not at a later debug assertion.
+
+### 248.9 The reported hang (988792dc2dde)
+
+`FUZZ_HIDDEN_DECKS=1` seed 100122141 passes, slowly: 693 s and 694 s of wall time under the `fuzz` profile on the
+desktop beside a live run (778 s and 821 s with timers in), against one or two seconds for its neighbours. Timers
+around each check (not kept) put all of it in one checkpoint - step 204, P0's `ChooseMana` on turn 27 - and there in
+the thirty random actions `check_determinize_hidden` plays on in a world dealt for P0: P1 casts Tinker with Birds of
+Paradise, Starting Town, Celestial Colonnade and Wizard's Rockets to activate. The step that casts it took 575 s, and
+the two `ChooseMana` answers of its 601.2g step 137 s and 64 s (776 of the 778 s). That is the payment search behind a
+601.2g step's options ("only the options that leave the cast's payment completable", 231: `completing`,
+`payment_completes_from`), under its 2,000,000-copy cap (100.4.9) but minutes long with the profile's assertions on; a
+farm PC's limit of 300 s of CPU a seed reports it as a hang. Nothing hidden is involved: it is the payment-search
+lane's (`fix/payment-search-cap`), left there.
+
+### 248.10 Tests
+
+Lib tests (`engine/src/hidden.rs`, `queue_1123_tests`; each fails with its fix taken out, checked one by one):
+* `cr_702_94a_the_card_a_miracle_question_asks_about_keeps_what_the_other_player_knows_of_it` (both index orders; 48
+  worlds of P1's, with and without a second Fanatic dealt: one known Fanatic and one view after the reveal) and
+  `cr_702_94a_a_revealed_miracle_card_is_the_one_the_other_player_learns`;
+* `a_told_apart_hand_cards_place_in_its_owners_row_does_not_read_card_indices` (the owner's v8 rows of two games that
+  differ only in which Fanatic has the lower index are equal);
+* `cr_400_7_a_gone_sources_ability_shows_no_place_of_its_card_slot` (two Marsh Flats; 40 worlds, the gone source's
+  slot found by the search in some: equal keys, one view);
+* `cr_701_20_cards_put_on_the_bottom_in_a_random_order_join_the_find_group_they_hold` (16 orders: one group of the five
+  cards, one run, one view of the other player's);
+* `a_graveyard_list_keeps_each_card_at_its_options_slot_when_an_option_is_withheld`;
+* `cr_400_7_a_gone_attackers_subtypes_are_those_of_the_card_that_left` (Robber shuffled into the library: P0's decision
+  asked again in 32 worlds is the game's);
+* `forced_picks_of_a_payment_are_keyed_in_one_order`.
+
+`cards_m7b_walkers2.rs`: `tamiyo_s_named_card_reaches_the_hand_known_when_a_revealed_colossus_is_shuffled_in_cr_608_2c`.
+`tests/fuzz.rs`: `info_set_walk_seeds_of_248` replays the ten fixed seeds at the `fuzz` profile's denominator in every
+profile (the four seeds of 248.2 are not in it).
+
+### 248.11 Digests, gates and the fresh-seed fuzz
+
+**Commits** (one a root cause, each compiled before it was made): 12defadd (248.1), a68ac934 (248.3), 2c2a538f (248.4),
+6bb4fded (248.5), b99e1351 (248.6), 21a48b2c (248.8), a8a74de6 (248.7, with the digests), 99d0db72 (the seeds' test).
+
+**Digests.** Every fix but 248.7's leaves every digest as main's: with `order_forced_picks` taken out of the finished
+tree the cube's full digest is c2b04fed925eed67 and its encoding-free one d3c144b6cc2977e5, constructed
+38ef93512e0a7259, metagame ed86a2f5ed21c436, EoE 5ffb850dd963bad0, pair 80562a6aa452b765, driver cab97c01912f7e3f, dealt
+cc0d138ac5c80402 - main's recorded files, so no row, key, legal action or action of a digest game changes with 248.1,
+248.3-248.6 and 248.8 (their rows change only in the states they describe, none of which a digest game encodes). 248.7
+changes the order of forced picks' keys in an observer's worlds, which the digests' determinized clones play five
+actions in: re-recorded, **cube full c2b04fed925eed67 -> 5a09242cf4f2cbab** (41 of 2,500 games), **encoding-free
+d3c144b6cc2977e5 -> be0626d4b97cebae**, constructed 38ef93512e0a7259 -> 47a8989dcc1a8a6a (2 of 570 lines), metagame
+ed86a2f5ed21c436 -> 41f7580b3553e1c3 (4 of 288), EoE 5ffb850dd963bad0 -> d754f4eef3c8adae (3 of 160), pair
+80562a6aa452b765 -> b41f691fd2583bf3 (1 of 70); driver and dealt unchanged. No real game's keys, actions or rows are in
+that change, and nothing a checkpoint reads: the feature layout (v8 and v7) is untouched by the whole section. Tree
+reuse never matches a real line against these keys: another player's forced answer other than a pass of priority is
+`KeyObs::Opaque` to it (149), and the real game's keys are as before. The change is in how one search merges its own
+worlds.
+
+**Gates** on 99d0db72 (in this branch's checkout; the pure-CPU steps on the Mac beside the live run, the rest on the
+desktop through the slot throttle):
+* `python tools/gate.py suite` - **GATE PASSED suite 99d0db72b060 in 484s**: privacy 0 findings; the full engine suite
+  2,947 passed (24 binaries); the sharded 2,000-game fuzz of the default pool (with 100 matches), of the default pool
+  with hidden decklists, and of delver_dealt (100 matches + 100 post-sideboard); the checkout unchanged.
+* `python tools/gate.py engine --tested-sha 99d0db72b060 --expect-digest 5a09242cf4f2cbab --expect-digest0
+  be0626d4b97cebae` - **GATE PASSED WITH SKIPS engine 99d0db72b060 in 825s** (skipped: one live-run-hazard pytest test of
+  the desktop part, fenced by the live run): both digests as expected; constructed 47a8989dcc1a8a6a, EoE
+  d754f4eef3c8adae, driver cab97c01912f7e3f, metagame 41f7580b3553e1c3, pair b41f691fd2583bf3, dealt cc0d138ac5c80402
+  (each = the checkout's file); `az` 58, `limits` 13, `hidden` 28 passed; pytest 123 + 169 + 278 + 183 (Mac) + 49
+  (desktop); the search smoke; **farm compat identical** (`delver-mirror-bo3-dealt`: gate 2 6 games, 2,468 rows, 150
+  batches; gate 3 6 games, 2,598 rows); the suite evidence of this commit.
+* `python tools/gate.py encoding --expect-digest 5a09242cf4f2cbab --expect-digest0 be0626d4b97cebae --allow-skip
+  checkpoint-load` (248.1, 248.4 and 248.5 change what a row reads) - **GATE PASSED WITH SKIPS encoding 99d0db72b060 in
+  260s** (skipped: checkpoint-load - no checkpoint was given, none loaded; the layout is unchanged - and the same fenced
+  pytest test): the digests as above, `az` 58 passed, pytest 194 + 157 + 236 + 166 (Mac) + 49 (desktop), farm compat
+  identical.
+
+**Fresh seeds** (the desktop, through the slot throttle, the `fuzz` profile - every fourth decision a checkpoint with
+its worlds and walks - at 99d0db72, thirty shards of 100 a mode): the default pool's games 248,100,000..248,102,999
+with 150 matches, **passed** (663,214 open-decklist walks, 3,716,215 states compared); hidden decklists, games
+248,600,000..248,602,999, **passed** (670,324 hidden-decklist worlds, 2,635,320 information-set steps). The same seeds
+with 248.2's two-field change applied by hand (not committed) passed as well. No stop: none of 248.2's payments, no
+payment-search cap, and `check_knowledge`'s new hand check held at every step.
+
+### 248.12 Left for others
+
+* **248.2**: the maintainer's decision on layout v8's `payment` state token (blank `vm` and `min_class` for a viewer
+  who does not see the payer's hand, and the gate's third class of perturbation). Three queue entries stay open on it.
+* **988792dc2dde** and every other cost of the 601.2g completability search: the payment-search lane.
+* "Attacked with a <subtype>" by the creature's characteristics when it was declared (248.6): the rules lanes.
