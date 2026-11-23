@@ -46114,7 +46114,7 @@ stew job holds matches / 4 = 100 matches. With the matches' decisions above (810
 window's**, with one match process; `judge.procs` processes share the GPU's idle time (199.5: 1.7-3x at best), so
 ~3-8 hours with 3 (the first stew's setting; `est_s_per_match` 9 s per process feeds `plan`'s estimate). The training of
 a generation is 3 turns of 32 iterations. Cheaper settings if the judge dominates: `judge.main_arms` off in some
-generations, a smaller `gen_matches`, or the farm backend once built.
+generations, a smaller `gen_matches`, or the farm backend once built. `judge.deck_arms` (246) drops arm A outside the generations it names.
 
 **Measured** (2026-11-21, CPU, beside the live meta3 run: the smoke's config lists it in `beside_runs` and never
 touches it).
@@ -46609,3 +46609,33 @@ this one's: the same Rust inputs, `farm_builds.lookup`).
 
 **Tests.** `tests/test_stew_control.py::test_farm_set_puts_the_whole_body_with_only_the_state_changed` (an alternate with
 `when.opt_in`, `model` and all four notes: the notes cut, the rest kept) and `tests/test_ab.py` (a `variant_notes` cut).
+
+## 246. The stew's deck-stew arm only in the generations the recipe names: `judge.deck_arms` (branch `feat/stew-deck-arms`; 2026-11-22)
+
+**Why.** `judge_deck_gap` (239.3) plays three things: the specialists gen over gen, arm B (each specialist against
+itself: the matchup table) and arm A (each deck stew piloting its deck against the specialist: the distillation gap
+A - B). The maintainer's point (2026-11-22): the deck stews are known to be weaker than their specialists, and no
+decision of an ordinary generation reads the size of that gap - it is asked once, at generation 0's hold (are the
+distillation settings adequate at all: the one earlier distillation lost 57 Elo), and again only to diagnose a main
+stew that falls short (arm M against the specialists says that it does; arm A says which of the two distillation hops
+lost it). Arm A is also the judge's largest share with arm M: 5 cells x `matches` of the first stew's
+3 + 2 + 5 + 5 comparisons, a third of a generation's matches.
+
+**What.** `recipe.judge.deck_arms`: `true` (the default: every generation, as before), `false`, or a list of
+generations (`[0]`: generation 0's hold only); anything else is refused by name (`config.normalize`;
+`config.deck_arms(jcfg, g)` answers for a generation). `judge.plan_jobs('judge_deck_gap', ...)` leaves arm A's jobs out
+of a generation the setting does not name; gen over gen and arm B are untouched, so the phase, its hold tags, the
+matchup table and the candidates' field rate under the specialists stay. The report of such a generation has no
+deck-stew column, no `gap_A_B` / `gap_M_A` and no "deck stews" field rate (`summarize` already takes the arms that
+were played); `gap_M_B` (main stew - specialist) is still measured by `judge`. The stew's log says so once per phase,
+and a `judge_deck_gap` left without any job (arm A off, `gen_over_gen` off, only mirrors) writes the report and goes on
+instead of failing as a phase without work. `plan` shows the smaller count. To measure the gap of a later generation,
+add it to the list before that generation's `judge_deck_gap` (a re-pin edit of stew.json, as `code.sha`).
+
+**The first stew** takes `"deck_arms": [0]` at its re-pin at generation 0's hold: its generation 0 arm A is played by
+then (the hold's question), and generations 1 on play 600 + 400 + 1,000 = 2,000 matches instead of 3,000.
+
+**Tests.** `tests/test_stew_judge.py::test_deck_arms_names_the_generations_that_play_arm_a` (the jobs by kind for
+true / false / a list, arm M's unchanged) and `tests/test_stew.py::test_deck_arms_only_in_the_generations_the_recipe_names`
+(the refusals; two generations with `[0]`: generation 0's report with the gap, generation 1's with gen over gen and the
+matchup table and without the deck-stew arm, no `A.` job in its judge directory). No engine change: digests untouched.

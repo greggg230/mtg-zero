@@ -578,3 +578,27 @@ def test_main_sources_with_a_deck_outside_the_archive(stew):
     # 16 cells: 7 covered, 9 uncovered of which 4 served (no Hogaak rows): retention 4 / (16 - 5)
     assert by['retention']['weight'] == pytest.approx(4 / 11, abs=1e-5)
     assert sum(s['weight'] for s in doc['sources']) == pytest.approx(1.0, abs=1e-4)
+
+
+def test_deck_arms_only_in_the_generations_the_recipe_names(tmp_path, monkeypatch):
+    good = {'name': 'x', 'decks': META3, 'candidates': [DEL], 'source': {'run': 'r'}}
+    assert C.normalize(good)['recipe']['judge']['deck_arms'] is True
+    for bad in ('yes', 1, [-1], [True], [0, 'a']):
+        with pytest.raises(C.ConfigError):
+            C.normalize(dict(good, recipe={'judge': {'deck_arms': bad}}))
+    src = make_source(tmp_path)
+    cfgp = make_cfg(tmp_path, src, hold_after=[],
+                    judge={'matches': 8, 'gen_matches': 4, 'device': 'cpu', 'deck_arms': [0]})
+    monkeypatch.setattr(Stew, 'judge_play', lambda self: {'seat': {}, 'sims': 4})
+    s = Stew.init(os.path.join(str(tmp_path), 'stew'), cfgp, ops=FakeOps(tmp_path), log=lambda m: None)
+    s.poll_s = 0.0
+    assert s.run(max_phases=8) == 'done' and s.st.tag() == 'distil_main@1'
+    c0 = jload(s.p('reports', 'gen_000.json'))['judge']
+    c1 = jload(s.p('reports', 'gen_001.json'))['judge']
+    cell = f'{DEL}|{DD}'
+    assert 'A' in c0['cells'][cell] and 'gap_A_B' in c0['cells'][cell] and 'deck stews' in c0['field'][DEL]
+    # generation 1: gen over gen and the matchup table (arm B) as before, no deck-stew arm
+    assert len(c1['gen_over_gen']) == 3 and 'B' in c1['cells'][cell] and 'specialists' in c1['field'][DEL]
+    assert 'A' not in c1['cells'][cell] and 'gap_A_B' not in c1['cells'][cell] and 'deck stews' not in c1['field'][DEL]
+    assert not [f for f in os.listdir(s.p('judge', 'gen_001')) if f.startswith('A.')]
+    assert [f for f in os.listdir(s.p('judge', 'gen_000')) if f.startswith('A.')]

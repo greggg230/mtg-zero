@@ -39,7 +39,7 @@ DEFAULT_DISTILL = {'steps': 20000, 'batch': 512, 'lr': 5e-4, 'lr_min': 1e-5, 'wa
                    'ram_budget_gb': 20, 'seed': 1}
 DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims': 64, 'device': 'cuda', 'threads': 16,
                  'groups': 1, 'procs': 1, 'seed': 0, 'chance_k': 2, 'precision': None, 'gen_over_gen': True,
-                 'main_arms': True, 'est_s_per_match': 3.5}
+                 'deck_arms': True, 'deck_arms': True, 'main_arms': True, 'est_s_per_match': 3.5}
 JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend per comparison)
 DEFAULT_RECIPE = {'game': 'mtg', 'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
                   'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
@@ -278,6 +278,11 @@ def normalize(cfg, check_lists=True):
     for k in ('sims', 'threads', 'groups', 'procs'):
         if not isinstance(j[k], int) or j[k] < 1:
             raise ConfigError(f'recipe.judge.{k} {j[k]!r}: a positive integer')
+    da = j['deck_arms']
+    if not isinstance(da, bool) and not (isinstance(da, list) and all(
+            isinstance(g, int) and not isinstance(g, bool) and g >= 0 for g in da)):
+        raise ConfigError(f'recipe.judge.deck_arms {da!r}: true (every generation), false, or the list of the '
+                          f'generations whose judge_deck_gap plays arm A (the deck stews against the specialists)')
     bad = sorted(set(r['distill']) - set(DEFAULT_DISTILL))
     if bad:
         raise ConfigError(f'recipe.distill: unknown keys {bad} (the sources file\'s "train" block: '
@@ -359,6 +364,12 @@ def normalize(cfg, check_lists=True):
     for a, b in pairs:                          # (the farm runs' names: checked now, not at the first turn)
         farm_run(out['name'], decks, a, b)
     return out
+
+
+def deck_arms(jcfg, g):
+    """Does generation g's judge_deck_gap play arm A (recipe.judge.deck_arms: true, false or a list of generations)?"""
+    da = jcfg.get('deck_arms', True)
+    return g in da if isinstance(da, list) else bool(da)
 
 
 def load(path, check_lists=True):

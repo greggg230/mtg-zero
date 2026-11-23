@@ -16,7 +16,8 @@ orientations x 2 choosers) of matches / 4, i.e. matches / 2 units.
 seed is the pair's: `cell_seed`):
 * B: S against S - X's side's score is the matchup table's P(X beats Y) under the specialist (played once per pair,
   read from either side for X|Y and Y|X; a mirror's is 0.5 by symmetry and not played);
-* A: deck stew X (version g + 1) piloting X against S piloting Y - the **distillation gap** A - B;
+* A: deck stew X (version g + 1) piloting X against S piloting Y - the **distillation gap** A - B (played in the
+  generations `judge.deck_arms` names: true = every one, false, or a list; without it the cell has no A and no M - A);
 * M: the main stew (version g + 1) piloting X against S piloting Y - main - deck stew (M - A) and main - specialist
   (M - B).
 A gap is `yardsticks.cell_stats` of the two arms' units: Elo = 400 log10 of the odds ratio of the two mean scores,
@@ -104,7 +105,8 @@ def gen_job(new, old, a, b, alias, jcfg, spec_fn, play, label):
 
 
 def plan_jobs(phase, st, g, jcfg, spec_fn, play):
-    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arms B and A; 'judge': arm M) of round `g`."""
+    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arm B, and arm A in the generations
+    judge.deck_arms names; 'judge': arm M) of round `g`."""
     decks = st.decks()
     al = {d['name']: d['alias'] for d in decks}
     pairs = C.pairings(decks, st.candidates())
@@ -121,6 +123,8 @@ def plan_jobs(phase, st, g, jcfg, spec_fn, play):
                 out += pair_b_jobs(new, a, b, al, jcfg, spec_fn, play, f'{sn} v{g + 1}')
         for x, y in ([(a, b), (b, a)] if a != b else [(a, a)]):
             if phase == 'judge_deck_gap':
+                if not C.deck_arms(jcfg, g):
+                    continue
                 out += arm_jobs('A', st.ckpt(C.deck_net(x), g + 1), new, x, y, al, jcfg, spec_fn, play,
                                 (f'deck:{x} v{g + 1}', f'{sn} v{g + 1}'))
             elif phase == 'judge' and jcfg['main_arms']:

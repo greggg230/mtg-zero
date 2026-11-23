@@ -168,3 +168,17 @@ def test_report_markdown_renders_a_summary():
     assert 'held here' in md and f'| {DEL}\\|{DD} |' in md and 'generation over generation' in md and 'a note' in md
     cells = [ln for ln in md.splitlines() if ln.startswith(f'| {DEL}\\|')]
     assert cells and all(ln.replace('\\|', '').count('|') == 8 for ln in cells)       # 7 columns: no stray bar
+
+
+def test_deck_arms_names_the_generations_that_play_arm_a():
+    st = FakeState([DEL, DD, SNS], [DEL], gens=(0, 1, 2))
+
+    def kinds(g, **kw):
+        out = {}
+        for j in J.plan_jobs('judge_deck_gap', st, g, dict(JC, **kw), spec_fn, {}):
+            out[j['id'][0]] = out.get(j['id'][0], 0) + 1
+        return out
+    assert kinds(0) == kinds(0, deck_arms=True) == kinds(0, deck_arms=[0]) == {'G': 3, 'B': 8, 'A': 20}
+    assert kinds(0, deck_arms=False) == kinds(1, deck_arms=[0]) == {'G': 3, 'B': 8}   # gen over gen and arm B stay
+    # arm M is the other phase's: the main stew is judged with or without arm A
+    assert len(J.plan_jobs('judge', st, 1, dict(JC, deck_arms=False), spec_fn, {})) == 20

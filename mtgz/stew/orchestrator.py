@@ -8,7 +8,8 @@ g + 1:
                       only during its turn; version g + 1 = that checkpoint.
 2. `distil_decks`   - the turn's newest shards of every specialist linked into rows/gen_<g+1>/ (`sources.copy_iters`),
                       then each deck stew distilled (`sources.deck_sources`; tools/distill.py --sources).
-3. `judge_deck_gap` - specialists gen over gen, arms B and A of every covered cell (mtgz.stew.judge); report.
+3. `judge_deck_gap` - specialists gen over gen, arm B of every covered cell, and arm A (the deck stews' gap) in the
+   generations `judge.deck_arms` names (mtgz.stew.judge); report.
 4. `distil_main`    - the main stew distilled from the deck stews on the specialists' rows + the retention source.
 5. `judge`          - arm M of every covered cell; the generation's report.
 
@@ -680,6 +681,9 @@ class Stew:
             if phase == 'judge' and not jcfg['main_arms']:
                 self.write_report(g)
                 return {'jobs': 0, 'note': 'judge.main_arms off'}
+            if phase == 'judge_deck_gap' and not C.deck_arms(jcfg, g):
+                self.write_report(g)
+                return {'jobs': 0, 'note': f'judge.deck_arms off in generation {g}'}
             raise Refused(f'{phase}@{g}: no judge job (nothing to measure)')
         if self.stop_requested():
             raise Halt(f'STOP / PAUSE before {phase}@{g}')
@@ -689,6 +693,9 @@ class Stew:
         n = sum(j['games'] for j in jobs)
         self.say(f'{phase}@{g}: {len(jobs)} jobs, {n} matches ({jcfg["backend"]}, {jcfg["device"]}, '
                  f'{jcfg["procs"]} at once)')
+        if phase == 'judge_deck_gap' and not C.deck_arms(jcfg, g):
+            self.say(f'{phase}@{g}: no arm A (judge.deck_arms {jcfg["deck_arms"]!r}): the deck stews are not judged '
+                     f'in this generation')
         try:
             res = self.ops.judge_jobs(jobs, self.judge_dir(g), jcfg['procs'], stop=self.stop_requested)
         except Interrupted:
