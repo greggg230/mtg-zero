@@ -39,12 +39,18 @@ class FakeClient:
 def test_farm_set_puts_the_whole_body_with_only_the_state_changed(tmp_path):
     o = ops(tmp_path)
     run = {'game': 'mtg', 'build_id': 'b' * 24, 'state': 'active', 'priority': 1.0, 'selfplay': {'quota': 9},
-           'alternates': [{'build_id': 'c' * 24, 'runtime': 'r', 'problems': ['x']}]}
+           'alternates': [{'build_id': 'c' * 24, 'runtime': 'r', 'problems': ['x']},
+                          # (every read-only note GET adds - rev 20, 22, 27 - cut: PUT refuses them as unknown fields)
+                          {'build_id': 'd' * 24, 'runtime': 'r', 'when': {'vendor': 'nvidia', 'opt_in': 'torch'},
+                           'model': 'torch', 'problems': [], 'variant_notes': ['y'], 'gpu_notes': ['z'],
+                           'opt_in_notes': ['w']}]}
     o._client = FakeClient({'stew-a-b': run})
     assert o.farm_set('stew-a-b', 'paused') == 'active'
     path, body = o._client.puts[0]
     assert path == '/v1/admin/run/stew-a-b' and body['state'] == 'paused' and body['selfplay'] == {'quota': 9}
-    assert body['alternates'] == [{'build_id': 'c' * 24, 'runtime': 'r'}]
+    assert body['alternates'] == [{'build_id': 'c' * 24, 'runtime': 'r'},
+                                  {'build_id': 'd' * 24, 'runtime': 'r', 'when': {'vendor': 'nvidia', 'opt_in': 'torch'},
+                                   'model': 'torch'}]
     assert o.farm_set('stew-a-b', 'paused') == 'paused' and len(o._client.puts) == 1      # nothing to change
     assert o.farm_set('nope', 'paused') is None and o.farm_state('nope') is None
 
