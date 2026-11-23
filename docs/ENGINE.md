@@ -47797,3 +47797,28 @@ Guide in hand - gave `None` both ways).
 
 So the bit is a function of the public state except through the payer's hand in those two ways. Whether the row
 should show it to the non-payer is that lane's decision.
+
+## 255. The release's speed gate on a machine set to work "always": user input is not waited for (branch `feat/bench-when-always`, 2026-11-23)
+
+**Why.** The speed gate (196.4, `tools/farm_speed.py`) benchmarks only an idle machine: no user input for 180 s before a
+window, and input during a window discards it (the maintainer's rule of 2026-11-18). On 2026-11-23 four releases in a
+row (88cb474e, 8ec477aa, d17b1ec3, 1edaf83c) sat in that wait for one to two hours each while the desktop was in use,
+and none was published. The maintainer's rule from now on: a machine whose owner told its zero-farm agent to work
+"always" (while it is in use) may be benchmarked while it is in use.
+
+**What.** The gate's plan carries `idle.input` "agent". The runner, on the machine it measures, reads that machine's
+agent setting at the start of its windows (`agent_works_in_use`: the settings' `mode` "always" in the agent's
+`state/machine.json` - the tray's "work when" choice, `work_when active`; the `owner` flag alone does not count) and, when
+it is set, neither waits for an input-free machine nor discards a window for input (`resolve_idle` -> `ignore_input`).
+Every window records `input_ignored` with the reason beside the idle seconds it still measures. Unchanged: AC power
+(battery still delays and discards), the Mac's locks, the settle, the pass rule and its handling of bursts of other
+load (10 s intervals above the machine's baseline are left out; a noisy block is repeated). A machine with no agent,
+with the agent set to idle-only, or with an unreadable settings file keeps the idle rule; `idle.input` "strict" (and a
+plan without the key) never reads the setting.
+
+**Tests** (`tests/test_farm_speed.py`): the setting read from a `machine.json`; input all the time passes with the
+setting on and fails as "machine in use" with it off, with a strict plan and with a plan without the key; battery
+power still stops such a machine. No Rust input changes: the engine hash and every digest are main's.
+
+**Left.** The agent's own on-device autotune trials (zero-farm `policy::tuning_allowed`, PROTOCOL 13) still require an
+idle machine whatever `work_when` says; the same rule there is a zero-farm change and an agent release.

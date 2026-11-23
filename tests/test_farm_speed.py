@@ -424,6 +424,56 @@ def test_input_during_a_window_discards_it_and_too_much_input_fails_as_machine_i
     assert not j['passed'] and j['in_use'] and 'machine in use' in j['why']
 
 
+def test_the_agents_work_when_setting_is_read_from_its_machine_json(tmp_path):
+    d = tmp_path / 'state'
+    assert not F.agent_works_in_use(str(d))                                         # no agent on the machine
+    d.mkdir()
+    (d / 'machine.json').write_text('{"settings": {"mode": "always", "owner": true}}')
+    assert F.agent_works_in_use(str(d))
+    (d / 'machine.json').write_text('{"settings": {"mode": "idle_only", "owner": true}}')
+    assert not F.agent_works_in_use(str(d))                                         # (only the owner's explicit "always")
+    (d / 'machine.json').write_text('{"settings": {}}')
+    assert not F.agent_works_in_use(str(d))
+    (d / 'machine.json').write_text('{not json')
+    assert not F.agent_works_in_use(str(d))
+
+
+def test_a_machine_set_to_work_always_is_benchmarked_while_in_use(tmp_path, monkeypatch):
+    # (the user's rule of 2026-11-23: input all the time - the "machine in use" failure of the test above - neither
+    # delays nor discards a window when the machine's agent works while in use; a strict plan and a plan without the
+    # key never read the setting)
+    monkeypatch.setattr(F, 'idle_state', lambda: (0.2, True))
+    monkeypatch.setattr(F, 'agent_works_in_use', lambda state_dir=None: True)
+    idle = {'check': True, 'min_s': 180, 'wait_max_s': 5, 'redo': 1, 'poll_s': 0.5, 'input': 'agent'}
+    plan = fake_plan(tmp_path, {'new': 1000, 'old': 1000}, idle=idle)
+    said = []
+    ws = F.run_windows(plan, str(tmp_path / 'o'), ['new', 'old'], 0, log=said.append)
+    assert [w['ok'] for w in ws] == [True, True] and not any(w.get('discarded') for w in ws)
+    assert all('work_when active' in w['idle']['before']['input_ignored'] for w in ws)
+    assert all('work_when active' in w['idle']['end']['input_ignored'] and w['idle']['end']['idle_s'] == 0.2 for w in ws)
+    assert any('user input is not waited for' in m for m in said) and F.judge(ws, 0.05)['passed']
+    for strict in (dict(idle, input='strict'), {k: v for k, v in idle.items() if k != 'input'}):
+        ws = F.run_windows(fake_plan(tmp_path, {'new': 1000, 'old': 1000}, idle=dict(strict, wait_max_s=0)),
+                           str(tmp_path / f'o-{len(strict)}'), ['new', 'old'], 0, log=lambda m: None)
+        assert not ws[-1]['ok'] and ws[-1]['in_use'] and 'input_ignored' not in ws[-1]['idle']['before']
+    # (the setting off: the same plan waits for an idle machine)
+    monkeypatch.setattr(F, 'agent_works_in_use', lambda state_dir=None: False)
+    ws = F.run_windows(fake_plan(tmp_path, {'new': 1000, 'old': 1000}, idle=dict(idle, wait_max_s=0)), str(tmp_path / 'o3'),
+                       ['new', 'old'], 0, log=lambda m: None)
+    assert not ws[-1]['ok'] and ws[-1]['in_use']
+
+
+def test_battery_power_still_stops_a_machine_set_to_work_always(monkeypatch):
+    monkeypatch.setattr(F, 'idle_state', lambda: (0.2, False))
+    c = Clock()
+    r = F.wait_idle({'min_s': 180, 'wait_max_s': 60, 'ignore_input': 'work_when active'}, log=lambda m: None, clock=c,
+                    sleep=c.sleep)
+    assert not r['ok'] and r['in_use'] and 'battery' in r['why']
+    monkeypatch.setattr(F, 'idle_state', lambda: (None, True))                      # (no user-input clock: not needed)
+    assert F.wait_idle({'min_s': 180, 'ignore_input': 'work_when active'}, log=lambda m: None, clock=Clock(),
+                       sleep=lambda s: None)['ok']
+
+
 # ------------------------------------------------------------------------------------------------ the gate's files
 
 @pytest.fixture
@@ -480,7 +530,7 @@ def test_the_gate_finds_the_baseline_and_writes_its_files(builds, tmp_path, monk
     assert res['network']['checkpoint'] == 'run/206' and res['network']['same_graph'] and res['machines']['cpu']['ratio'] == 0.99
     plan = seen[0]
     assert plan['job']['conc'] == 64 and plan['job']['threads'] == 8 and plan['job']['rolling'] and plan['minutes'] == 0.5
-    assert plan['priority'] == 'below_normal' and plan['idle']['min_s'] == 180 and plan['gen'] == 206
+    assert plan['priority'] == 'below_normal' and plan['idle']['min_s'] == 180 and plan['idle']['input'] == 'agent' and plan['gen'] == 206
     assert plan['settings']['selfplay_remote'] == '' and plan['settings']['shard_rows'] == 8192
     assert plan['sides']['old']['runtime_dir'] == str(builds / ('r' * 24))
     hints = json.load(open(out / 'hints.json'))['hints']

@@ -51,6 +51,13 @@ battery power discards the window, which is run again after the next idle wait -
 block, then the gate FAILS as "machine in use" (never a pass). An idle time the machine cannot tell fails too. Every
 check (idle seconds, AC, how long it waited) is recorded with its window.
 
+**Unless the machine's owner said "always"** (the user's rule, 2026-11-23). A machine whose zero-farm agent is set to
+work while it is in use (`work_when active`: `mode` "always" in the agent's `state/machine.json`, read by the runner on
+the machine itself at the start of its windows) is benchmarked while it is in use too: user input neither delays nor
+discards a window (the plan's `idle.input` "agent"; "strict" never reads the setting - a plan without the key is
+strict). AC power, the locks and the pass rule's burst handling stay as they are, and every window records
+`input_ignored` with the reason. No agent on the machine, another setting or an unreadable file: the idle rule above.
+
 **Pass rule, per machine:** mean(new windows' leaves/s) >= (1 - `--tolerance`) x mean(old windows'), tolerance 5%;
 any window that errors (the worker exits, an `error` event, no leaves, the wrong build id in its `info`) fails the
 machine, as does a machine in use (and a machine that cannot start: no baseline, a missing build). **Bursts of other
@@ -125,6 +132,39 @@ def say(m):
 
 
 # ================================================================================================ the runner (any machine)
+
+def agent_state_dir():
+    """The zero-farm agent's state directory on this machine (its install root's `state`), or None."""
+    if os.name == 'nt':
+        base = os.environ.get('LOCALAPPDATA')
+        return os.path.join(base, 'ZeroFarm', 'state') if base else None
+    if sys.platform == 'darwin':
+        return os.path.expanduser('~/Library/Application Support/ZeroFarm/state')
+    return None
+
+
+def agent_works_in_use(state_dir=None):
+    """Did this machine's owner set its zero-farm agent to work while the machine is in use (`work_when active`: the
+    settings' `mode` "always" in `state/machine.json`)? False for no agent, any other setting or an unreadable file."""
+    d = state_dir or agent_state_dir()
+    if not d:
+        return False
+    try:
+        with open(os.path.join(d, 'machine.json'), encoding='utf-8') as f:
+            return (json.load(f).get('settings') or {}).get('mode') == 'always'
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def resolve_idle(idle_cfg, log=say):
+    """The plan's idle rules as this machine applies them: `input` "agent" becomes `ignore_input` (a reason) when the
+    machine's agent works while in use (module docs); anything else leaves the rules strict."""
+    cfg = dict(idle_cfg or {})
+    if cfg.get('check', True) and cfg.get('input') == 'agent' and agent_works_in_use():
+        cfg['ignore_input'] = "the machine's zero-farm agent is set to work while in use (work_when active)"
+        log(f'user input is not waited for: {cfg["ignore_input"]}')
+    return cfg
+
 
 def idle_state():
     """(seconds since the machine's last user input or None when it cannot tell, on AC power: True / False / None)."""
@@ -370,22 +410,28 @@ def wait_idle(idle, log=say, clock=time.time, sleep=time.sleep, avoid=None, on_w
                'at': now()}
         if busy:
             rec['busy'] = busy
-        if s is None:
+        ignore = idle.get('ignore_input')
+        if ignore:
+            rec['input_ignored'] = ignore
+        elif s is None:
             return dict(rec, ok=False, why='the machine cannot tell its idle time (no user-input clock): not benchmarked')
-        if s >= min_s and ac is not False and not busy:
+        if (ignore or s >= min_s) and ac is not False and not busy:
             return dict(rec, ok=True)
         if clock() - t0 >= wait_max:
             if busy:
                 return dict(rec, ok=False, why=f'machine busy: {busy} held for {wait_max:.0f} s')
+            if ignore:
+                return dict(rec, ok=False, in_use=True, why=f'machine on battery power for {wait_max:.0f} s (AC {ac})')
             return dict(rec, ok=False, in_use=True, why=f'machine in use: no {min_s:.0f} s without user input on AC power '
                                                          f'within {wait_max:.0f} s (idle {s:.0f} s, AC {ac})')
         if checks == 1 and on_wait:
             on_wait()
         if said is None or clock() - said >= 600:
-            log(f'waiting for the machine to be idle: no input for {s:.0f} s of {min_s:.0f}, AC {ac}'
+            log((f'waiting: AC {ac}' if ignore else
+                 f'waiting for the machine to be idle: no input for {s:.0f} s of {min_s:.0f}, AC {ac}')
                 + (f', {busy} held' if busy else ''))
             said = clock()
-        sleep(max(5.0, min(30.0, min_s - s if (ac is not False and not busy) else 30.0)))
+        sleep(max(5.0, min(30.0, min_s - s if (not ignore and ac is not False and not busy) else 30.0)))
 
 
 WIN_UTILITY = r'\Processor Information(_Total)\% Processor Utility'
@@ -636,7 +682,7 @@ def _window(plan, side, d, rec, p, events, evf, errf, t0, avoid, index):
         if idle_cfg.get('check', True) and time.time() - t_check >= float(idle_cfg.get('poll_s', 10)):
             t_check = time.time()
             s, ac = idle_state()
-            if s is not None and s + 2 < t_check - t_start:
+            if s is not None and s + 2 < t_check - t_start and not idle_cfg.get('ignore_input'):
                 discard = f'user input {t_check - t_start - s:.0f} s into the window (idle {s:.0f} s)'
                 break
             if ac is False:
@@ -651,7 +697,11 @@ def _window(plan, side, d, rec, p, events, evf, errf, t0, avoid, index):
     if error is None and discard is None and idle_cfg.get('check', True):
         s, ac = idle_state()
         rec['idle']['end'] = {'idle_s': None if s is None else round(s, 1), 'ac': ac, 'window_s': round(t_stop - t_start, 1)}
-        if s is None:
+        if idle_cfg.get('ignore_input'):
+            rec['idle']['end']['input_ignored'] = idle_cfg['ignore_input']
+            if ac is False:
+                discard = 'on battery power at the window\'s end'
+        elif s is None:
             error = 'the machine cannot tell its idle time at the window\'s end'
         elif s + 2 < t_stop - t_start:
             discard = f'user input during the window (idle {s:.0f} s at its end, the window {t_stop - t_start:.0f} s)'
@@ -753,7 +803,8 @@ def run_windows(plan, out, order, first=0, log=say):
     """The runner: `order`'s windows (each after an idle wait; a discarded one again, at most plan idle.redo times)
     -> their records (discarded ones too); also written to `<out>/windows-<first>.json` with the host's hardware."""
     os.makedirs(out, exist_ok=True)
-    idle_cfg = plan.get('idle') or {}
+    idle_cfg = resolve_idle(plan.get('idle'), log)
+    plan = dict(plan, idle=idle_cfg)
     infos, windows = {}, []
     for name in sorted(set(order)):
         infos[name] = worker_info(plan['sides'][name])
@@ -822,8 +873,8 @@ def _windows(plan, out, order, first, log, idle_cfg, redo, quiet, windows, save)
                         save()
                         return windows
                     s, ac = idle_state()             # (input or an evaluation during the settle: wait again)
-                    if idle_cfg.get('check', True) and (s is None or s < float(idle_cfg.get('min_s', 180)) or ac is False
-                                                        or held_avoid(avoid)):
+                    in_use = not idle_cfg.get('ignore_input') and (s is None or s < float(idle_cfg.get('min_s', 180)))
+                    if idle_cfg.get('check', True) and (in_use or ac is False or held_avoid(avoid)):
                         quiet.records[-1]['after_settle'] = {'idle_s': s, 'ac': ac, 'busy': held_avoid(avoid)}
                         log(f'not idle after the settle (idle {s} s, AC {ac}): waiting again')
                         redo -= 1
@@ -1281,7 +1332,8 @@ class Gate:
                 'retry_blocks': ms['retry_blocks'], 'order': ORDER, 'priority': ms['priority'], 'nice': ms['nice'], 'quiet': ms['quiet'],
                 'bench_lock': ms['bench_lock'], 'busy_margin_pct': ms['busy_margin_pct'],
                 'seed': seed, 'gen': gen, 'settings': settings, 'job': dict(JOB_BASE, **ms['job']), 'sample_s': 10,
-                'idle': {'check': True, 'min_s': ms['idle_min_s'], 'wait_max_s': ms['idle_wait_max_s'], 'redo': ms['idle_redo']},
+                'idle': {'check': True, 'min_s': ms['idle_min_s'], 'wait_max_s': ms['idle_wait_max_s'], 'redo': ms['idle_redo'],
+                         'input': 'agent'},
                 'sides': {}}
         record = {'schema': SCHEMA, 'machine': m, 'label': LABELS[m], 'started': now(), 'tolerance': ms['tolerance'],
                   'network': net, 'layout': layout_of(plan['job']), 'sides': {}}
