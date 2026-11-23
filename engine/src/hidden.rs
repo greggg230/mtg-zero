@@ -2505,4 +2505,33 @@ mod queue_1123_tests {
         }
         assert!(other > 0, "worlds that deal the Robber's slot another card");
     }
+
+    /// ENGINE.md 248.7 (queue entry fb92013286d3, default game 100492136). In an observer's world the
+    /// forced picks of another player's payment that follow each other are keyed in one order, by
+    /// value, whatever order the payer's classes of sources forced them in; the payment's `PASS` and
+    /// any other key end the run.
+    #[test]
+    fn forced_picks_of_a_payment_are_keyed_in_one_order() {
+        let mut g = Scenario::new(db()).library(0, &["Island"; 3]).library(1, &["Island"; 3]).at(Step::Main1, 0).start();
+        let auto = |a: u16| key(KEY_AUTO, 1, ((DecisionKind::PayMana as u64) << 16) | a as u64);
+        let other = key(KEY_REVEAL, 1, 7);
+        for order in [[113u16, 115, 117], [113, 117, 115], [117, 115, 113]] {
+            g.keys = vec![other];
+            for a in order {
+                g.keys.push(auto(a));
+                g.order_forced_picks(1);
+            }
+            assert_eq!(g.keys, vec![other, auto(113), auto(115), auto(117)], "{order:?}");
+        }
+        // (A run ends at the payment's `PASS`, at another player's key and at another kind's.)
+        g.keys = vec![auto(117), auto(act::PASS), auto(113)];
+        g.order_forced_picks(1);
+        assert_eq!(g.keys, vec![auto(117), auto(act::PASS), auto(113)]);
+        g.keys = vec![key(KEY_AUTO, 0, ((DecisionKind::PayMana as u64) << 16) | 117), auto(113)];
+        g.order_forced_picks(1);
+        assert_eq!(g.keys[1], auto(113));
+        g.keys = vec![auto(117), other, auto(113)];
+        g.order_forced_picks(1);
+        assert_eq!(g.keys, vec![auto(117), other, auto(113)]);
+    }
 }

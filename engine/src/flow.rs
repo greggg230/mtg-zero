@@ -382,11 +382,34 @@ impl Game {
             };
             if let Some(payload) = payload {
                 self.emit_public(crate::hidden::KEY_AUTO, player, payload);
+                if kind == DecisionKind::PayMana && options[0].action != act::PASS && self.observer.is_some_and(|o| o != player && o != self.decider_of(player)) {
+                    self.order_forced_picks(player);
+                }
             }
             self.answer = Some(options[0].choice);
             return;
         }
         self.pending = Some(Decision { player, kind, options, stage: crate::decision::Stage::One });
+    }
+
+    /// The key just emitted is another player's forced pick of a payment's source (`KEY_AUTO`, `PayMana`, not its
+    /// `PASS`) in an observer's world: it takes its place among the forced picks keyed just before it, by value.
+    /// Forced picks that follow each other with nothing keyed between them are one action to the observer - no
+    /// decision of anyone falls between them, and the state after them shows the same sources picked - but their
+    /// order is the order of the payer's classes of sources, which reads cards the observer doesn't see: two
+    /// face-down permanents of one identity are twins (one class, `pay_twins`), of two identities two classes, so
+    /// worlds dealing those identities differently forced the same picks in two orders and were keyed apart with
+    /// nothing between them for the observer (ENGINE.md 248.7).
+    pub(crate) fn order_forced_picks(&mut self, player: PlayerId) {
+        use crate::hidden::{key_kind, key_payload, key_player, KEY_AUTO};
+        let pick = |k: u64| {
+            key_kind(k) == KEY_AUTO && key_player(k) == player && key_payload(k) >> 16 == DecisionKind::PayMana as u64 && key_payload(k) & 0xFFFF != act::PASS as u64
+        };
+        let mut i = self.keys.len() - 1;
+        while i > 0 && pick(self.keys[i - 1]) && self.keys[i - 1] > self.keys[i] {
+            self.keys.swap(i - 1, i);
+            i -= 1;
+        }
     }
 
     /// The `KEY_AUTO` payload of another player's forced answer (a decision
