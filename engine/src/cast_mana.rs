@@ -259,6 +259,13 @@ impl Game {
             let cost = self.total_mana(card, &self.stack[pos]);
             self.cast_lock.push((id, cost));
         }
+        // (In the payment search: an ability that removes its own permanent when the spell's cost sacrifices
+        // permanents and, without this one, has too few - a dead end before any of the ability's own cost is chosen,
+        // ENGINE.md 252.1.)
+        if self.oracle && self.takes_the_costs_sacrifice(id, p, c, slot) {
+            self.oracle_dead = true;
+            return;
+        }
         // (Activated from an ordered node of the search: the next ones from this card on, ENGINE.md 231.4; this card's
         // next sacrifice after the last one its activations made, kept across those that sacrifice nothing, 247.1.)
         let ordered = after & SEARCH_ORDER != 0;
@@ -386,6 +393,30 @@ impl Game {
             ManaProd::One(_) | ManaProd::Fixed(_) | ManaProd::SameType { .. } | ManaProd::Combo { .. } | ManaProd::OneOf(_) | ManaProd::Chosen | ManaProd::ChosenN(_)
         );
         tap_only && plain && fixed && m.damage_to_you == 0 && m.sac_if_no.is_none() && m.opp_life == 0 && self.tap_bonus_wide(c, true) == [0; 6]
+    }
+
+    /// Would activating mana ability `slot` of permanent `c` in spell `id`'s 601.2g step leave the spell's cost fewer
+    /// permanents than its "sacrifice n <permanents>" needs (ENGINE.md 252.1)? The ability's cost removes `c` itself
+    /// (a sacrifice or exile of its source, Rain of Filth's granted slot), `c` is one the spell's cost may sacrifice,
+    /// and the others are fewer than n. No mana ability puts a permanent onto the battlefield (a mana ability's
+    /// effect adds mana, CR 605.1a; the IR's `ManaDef` has no such part), so from then on the payment can't be
+    /// completed whatever the ability's mana cost is paid with: the search's copy is a dead end at once, where it
+    /// used to walk every way to pay that cost first - Tinker with Wizard's Rockets its only artifact, every set of
+    /// lands for each {X} (the fuzz steward's 988792dc2dde).
+    fn takes_the_costs_sacrifice(&self, id: u32, p: PlayerId, c: CardIdx, slot: AbilitySlot) -> bool {
+        let Some(pos) = self.item_index(id) else { return false };
+        let StackKind::Spell { card: spell } = self.stack[pos].kind else { return false };
+        let removes = slot == crate::pay::SAC_FOR || {
+            let k = &self.src_ability(c, slot).cost;
+            k.sac_self || k.exile_self
+        };
+        if !removes || self.objs[c.i()].zone != Zone::Battlefield {
+            return false;
+        }
+        let Some(rest) = self.spell_rest(spell, &self.stack[pos]) else { return false };
+        let Some(s) = &rest.sacrifice else { return false };
+        let cands = self.sacrifice_candidates(p, spell, s);
+        cands.contains(&c) && cands.len() <= s.n as usize
     }
 
     /// The payment search's bound on the permanent the next activation of card `c`'s ability in the 601.2g step

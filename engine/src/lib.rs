@@ -68,6 +68,7 @@ pub mod layers;
 mod triggers;
 
 pub use cast_mana::set_payment_search_collapse;
+pub use cost_order::take_payment_search_copies;
 pub use decision::{act, Choice, Decision, DecisionKind, NUM_ACTIONS};
 pub use game::{Game, GameSpec, Outcome, Step};
 pub use ids::{CardIdx, ObjRef, PlayerId, Target, Zone};

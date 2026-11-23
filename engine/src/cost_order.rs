@@ -1337,6 +1337,7 @@ impl Game {
 
     fn complete_from(mut g: Game, floor: usize, payer: PlayerId, nodes: &mut u64) -> bool {
         *nodes += 1;
+        SEARCH_COPIES.with(|c| c.set(c.get() + 1));
         assert!(*nodes <= ORACLE_NODES, "the payment search passed {ORACLE_NODES} copies (ENGINE.md 100.4.9)");
         while g.pending.is_none() {
             if g.oracle_dead || g.outcome.is_some() {
@@ -1476,7 +1477,19 @@ const CREW_DONE: CardIdx = CardIdx::new(u32::MAX - 1);
 /// The stack id of a payment the castability search makes with no stack item.
 pub(crate) const NO_ITEM: u32 = u32::MAX;
 
+thread_local! {
+    static SEARCH_COPIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A test hook (ENGINE.md 252.1; per thread): the copies of the game the payment searches made on this thread since
+/// the last call (every `payment_completes` search: castability's, the 601.2g step's options', a cost's order), and
+/// the count set back to 0 - what a test bounds a board's searches by, where the cap (`ORACLE_NODES`) only stops a
+/// single search of millions.
+#[doc(hidden)]
+pub fn take_payment_search_copies() -> u64 {
+    SEARCH_COPIES.with(|c| c.replace(0))
+}
+
 /// The most copies one payment search makes before failing loudly (ENGINE.md
 /// 100.4.9; 51's `SEARCH_NODES` likewise).
 const ORACLE_NODES: u64 = 2_000_000;
-

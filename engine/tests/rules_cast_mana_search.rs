@@ -378,3 +378,59 @@ fn cr_601_2g_605_3a_an_escape_castable_with_lands_mana_floated_first_is_castable
     println!("boards castable {castable}, with the graveyard short {helped}, floated states {states}");
     assert!(castable >= 20 && helped >= 8 && states >= 500, "castable {castable}, short {helped}, states {states}");
 }
+
+#[test]
+fn cr_601_2g_601_2h_an_ability_that_takes_the_costs_only_sacrifice_is_refused_without_searching_its_payment() {
+    // Tinker ("as an additional cost to cast this spell, sacrifice an artifact") with Wizard's Rockets ("{X}, {T},
+    // sacrifice: add X mana in any combination of colors") the only artifact, a Birds of Paradise and ten lands. The
+    // 601.2g step offers only the options that leave the payment completable (CR 601.2h: a cost is paid whole), and the
+    // Rockets never does: sacrificed for mana, Tinker has no artifact. The search of that option walked every X and,
+    // for each, every set of sources paying it before finding the same answer at each end - 2^n sets for n sources
+    // (the fuzz steward's 988792dc2dde: hidden-decklist seed 100122141, 79,096 copies in one search on main e687031c;
+    // before 247.1 each end also tried every combination of the Rockets' colors, minutes in all). An ability that
+    // removes its own permanent when the cost's sacrifice has no other is a dead end before its cost is chosen
+    // (`takes_the_costs_sacrifice`, ENGINE.md 252.1): the whole cast, every option of every decision, stays small.
+    let lands = ["Volcanic Island", "Underground Sea", "Tundra", "Tropical Island", "Steam Vents", "Watery Grave", "Hallowed Fountain", "Breeding Pool", "Island", "Seachrome Coast"];
+    let mut b = vec!["Wizard's Rockets", "Birds of Paradise"];
+    b.extend(lands);
+    let g = cube().battlefield(0, &b).hand(0, &["Tinker"]).at(Step::Main1, 0).start();
+    let tinker = g.card(0, "Tinker", Zone::Hand);
+    let rockets = g.card(0, "Wizard's Rockets", Zone::Battlefield);
+    assert!(g.has_option(Choice::Cast(tinker)), "{}", opts(&g));
+    engine::take_payment_search_copies();
+    let mut h = g.clone();
+    h.choose(Choice::Cast(tinker));
+    // (Down the first option of each decision to the payment's end: the Rockets is never an option of the step, and
+    // is the artifact sacrificed.)
+    for _ in 0..200 {
+        if h.is_over() || at_priority(&h) {
+            break;
+        }
+        if h.kind() == Some(DecisionKind::CastMana) {
+            assert!(!h.has_option(Choice::Card(rockets)), "the Rockets is Tinker's artifact: {}", opts(&h));
+        }
+        let c = h.offered()[0];
+        h.choose(c);
+    }
+    assert_eq!(h.obj(tinker).zone, Zone::Stack, "{}", log(&h));
+    assert_eq!(h.obj(rockets).zone, Zone::Graveyard, "sacrificed for Tinker: {}", log(&h));
+    let copies = engine::take_payment_search_copies();
+    println!("payment search copies of the cast: {copies}");
+    // (2 with the check; 4,097 without it on this board, whose lands the step leaves to the payment.)
+    assert!(copies < 100, "the cast's payment searches made {copies} copies");
+    // With a second artifact the Rockets may be activated in the step.
+    b.push("Mind Stone");
+    let mut g = cube().battlefield(0, &b).hand(0, &["Tinker"]).at(Step::Main1, 0).start();
+    let tinker = g.card(0, "Tinker", Zone::Hand);
+    let rockets = g.card(0, "Wizard's Rockets", Zone::Battlefield);
+    g.choose(Choice::Cast(tinker));
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::CastMana) || at_priority(&g) {
+            break;
+        }
+        let c = g.offered()[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::CastMana), "{}", opts(&g));
+    assert!(g.has_option(Choice::Card(rockets)), "{}", opts(&g));
+}

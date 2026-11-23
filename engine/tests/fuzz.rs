@@ -95,6 +95,23 @@ fn payment_and_cost_stops_of_247_hidden_decklist_seeds() {
     }
 }
 
+/// ENGINE.md 252.1 (the fuzz steward's 988792dc2dde): hidden-decklist seed 100122141 ran 818 s under the `fuzz` profile
+/// on main 66288d93 and was reported as a hang at the farm's 300 s a seed - the 601.2g step's payment search of a
+/// Tinker whose only artifact was a Wizard's Rockets. A second or two since 247.1 and 252.1; every check of
+/// `play_hidden`, the copies of all its payment searches bounded (79,096 in one search on main e687031c under the `fuzz` profile, whose debug checks play the world that casts Tinker; 22 in release).
+#[test]
+fn the_tinker_payment_search_of_252_hidden_decklist_seed_100122141() {
+    if pool_mode() != PoolMode::Default || !hidden_decks_mode() {
+        return;
+    }
+    engine::take_payment_search_copies();
+    let p = play_hidden(100122141);
+    assert!(!p.actions.is_empty());
+    let copies = engine::take_payment_search_copies();
+    println!("payment search copies of seed 100122141: {copies}");
+    assert!(copies < 50_000, "seed 100122141's payment searches made {copies} copies");
+}
+
 /// ENGINE.md 140.10: the hidden-decklist games whose checks compared the deck's objects alone (a companion put into
 /// the hand and shuffled away traded identities with a deck card in a world: "the viewer's own cards", "the match's
 /// deck of the opponent", "the sampled deck lacks a shown ..."), replayed with every check of `play_hidden`: seed 331
