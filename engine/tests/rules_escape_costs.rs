@@ -166,3 +166,77 @@ fn cr_702_81a_retraces_land_card_is_pinned_at_the_face_choice() {
         }
     }
 }
+
+/// Spell `card`'s item on the stack.
+fn spell_item(g: &Game, card: engine::CardIdx) -> &engine::game::StackItem {
+    g.stack().iter().find(|i| matches!(i.kind, engine::game::StackKind::Spell { card: c } if c == card)).expect("the spell")
+}
+
+/// The spell on the stack at each end of `ends`, and the most `f` reads of its item.
+fn most_of(ends: &[Game], card: engine::CardIdx, f: &dyn Fn(&engine::game::StackItem) -> u32) -> u32 {
+    assert!(!ends.is_empty());
+    let mut most = 0;
+    for e in ends {
+        assert_eq!(e.obj(card).zone, Zone::Stack, "{}", log(e));
+        most = most.max(f(spell_item(e, card)));
+    }
+    most
+}
+
+/// CR 601.2b, 601.2g-h, 107.3, 702.138a (ENGINE.md 249.2): Mind Twist ({X}{B}) escaped by Underworld Breach with two
+/// other cards in the graveyard; a Chromatic Star sacrificed for mana while it is cast is the third. Three Swamps: one
+/// pays the Star's {1}, so X is 0, 1 or 2. The choice of X asked the payment alone, which has no third card for any
+/// X: only X = 0 (castability's least) was offered.
+#[test]
+fn cr_601_2b_107_3_the_choice_of_x_counts_the_steps_feeding_abilities() {
+    let g = cube()
+        .battlefield(0, &["Underworld Breach", "Chromatic Star", "Swamp", "Swamp", "Swamp"])
+        .hand(1, &["Island", "Island", "Island"])
+        .graveyard(0, &["Mind Twist", "Ponder", "Brainstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    let mt = g.card(0, "Mind Twist", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(mt)), "{}", opts(&g));
+    let mut h = g.clone();
+    h.choose(Choice::Cast(mt));
+    let ends = every_way(&h, 4000);
+    assert_eq!(most_of(&ends, mt, &|it| it.x), 2, "X up to the two Swamps the Star's {{1}} leaves");
+}
+
+/// CR 601.2b, 702.175a (offspring), 601.2g-h, 702.138a (ENGINE.md 249.2): Thundertrap Trainer ({1}{U}, offspring {4})
+/// escaped by Underworld Breach with two other graveyard cards and a Chromatic Star the third; six Islands pay the
+/// Star's {1} and, with its mana, {1}{U} and {4}. Whether the offspring cost is paid asked the payment alone: never.
+#[test]
+fn cr_601_2b_702_175a_the_times_an_additional_cost_is_paid_count_the_steps_feeding_abilities() {
+    let g = cube()
+        .battlefield(0, &["Underworld Breach", "Chromatic Star", "Island", "Island", "Island", "Island", "Island", "Island"])
+        .graveyard(0, &["Thundertrap Trainer", "Ponder", "Brainstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    let tt = g.card(0, "Thundertrap Trainer", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(tt)), "{}", opts(&g));
+    let mut h = g.clone();
+    h.choose(Choice::Cast(tt));
+    let ends = every_way(&h, 4000);
+    assert_eq!(most_of(&ends, tt, &|it| it.times), 1, "the offspring cost paid once");
+}
+
+/// CR 601.2b, 702.172a (spree), 700.2h, 601.2g-h, 702.138a (ENGINE.md 249.2): Three Steps Ahead ({U}; spree + {R}:
+/// draw two cards, then discard a card) escaped by Underworld Breach with two other graveyard cards and a Chromatic
+/// Star the third. Castability counted the Star (the 601.2g step's search with one mode); the choice of modes asked
+/// the payment alone and had no mode to offer.
+#[test]
+fn cr_601_2b_702_172a_sprees_modes_count_the_steps_feeding_abilities() {
+    let g = cube()
+        .battlefield(0, &["Underworld Breach", "Chromatic Star", "Island", "Island", "Mountain", "Mountain"])
+        .graveyard(0, &["Three Steps Ahead", "Ponder", "Brainstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    let tsa = g.card(0, "Three Steps Ahead", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(tsa)), "{}", opts(&g));
+    let mut h = g.clone();
+    h.choose(Choice::Cast(tsa));
+    let ends = every_way(&h, 4000);
+    assert!(most_of(&ends, tsa, &|it| it.modes.len() as u32) >= 1, "a mode chosen");
+    assert!(ends.iter().any(|e| spell_item(e, tsa).modes.contains(&2)), "the draw mode, + {{R}}");
+}

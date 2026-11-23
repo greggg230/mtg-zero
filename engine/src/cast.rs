@@ -1012,11 +1012,13 @@ impl Game {
             || self.cast_for_granted_alt(card, item);
         // A spell's X with its cost: payable (any amount, ENGINE.md
         // 100.4.8).
+        // (Or with mana abilities activated while it is cast that feed its graveyard cost, CR 601.2g: the 601.2g
+        // step searched with that X, as castability searches it with the least, `feed_completes`; ENGINE.md 249.2.)
         let pays = |x: u64| {
             let mut tmp = item.clone();
             tmp.x = x as u32;
             let cost = self.total_mana(card, &tmp);
-            self.can_pay_spell(card, &tmp, &cost)
+            self.can_pay_spell(card, &tmp, &cost) || self.feed_completes(card, &tmp)
         };
         if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             // Kicker {X} (CR 601.2b): announced only if kicked, at least
@@ -1041,7 +1043,12 @@ impl Game {
             let classes = self.spell_pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke, allow);
             crate::decision::most_allowed(0, life, |v| {
                 let life = u32::try_from(v).expect("X life within the life total");
-                self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life, allow, ..Default::default() })
+                self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life, allow, ..Default::default() }) || {
+                    // (As a mana X above: ENGINE.md 249.2.)
+                    let mut tmp = item.clone();
+                    tmp.x = life;
+                    self.feed_completes(card, &tmp)
+                }
             })
         } else if !free {
             // CR 601.2f: X is part of the mana cost, before reductions. Cast
@@ -2041,7 +2048,15 @@ impl Game {
         if !m.costs.is_empty() {
             if let StackKind::Spell { card } = item.kind {
                 for (k, a) in avail.iter_mut().enumerate() {
-                    *a = *a && self.can_pay_spell(card, item, &self.announced_cost(card, item, &m.costs[k]));
+                    let cost = self.announced_cost(card, item, &m.costs[k]);
+                    *a = *a
+                        && (self.can_pay_spell(card, item, &cost) || {
+                            // (Or with the 601.2g step's feeding abilities, the mode announced: the item with it has
+                            // this total cost, so its step's search asks this question; ENGINE.md 249.2.)
+                            let mut tmp = item.clone();
+                            tmp.modes.push(k as u8);
+                            self.total_mana(card, &tmp) == cost && self.feed_completes(card, &tmp)
+                        });
                 }
             }
         }
@@ -2305,7 +2320,16 @@ impl Game {
             let mut more = tc.mana.times(n);
             more.generic = more.generic.saturating_add(x_min.saturating_mul(n));
             let cost = self.announced_cost(card, &self.stack[pos], &more);
-            self.can_pay_spell(card, &self.stack[pos], &cost)
+            self.can_pay_spell(card, &self.stack[pos], &cost) || {
+                // (Or with the 601.2g step's feeding abilities, the times announced - kicker {X}'s least X with them:
+                // the item so has this total cost, so its step's search asks this question; ENGINE.md 249.2.)
+                let mut tmp = self.stack[pos].clone();
+                tmp.times = u32::try_from(n).unwrap_or(u32::MAX);
+                if tc.x {
+                    tmp.x = x_min as u32;
+                }
+                self.total_mana(card, &tmp) == cost && self.feed_completes(card, &tmp)
+            }
         };
         let most = crate::decision::most_allowed(0, tc.max as u64, pays);
         match self.answer.take() {
