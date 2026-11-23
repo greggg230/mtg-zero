@@ -106,8 +106,9 @@ pub(crate) enum Task {
     /// paid (601.2h) (`DecisionKind::CastMana`; `card`: the permanent whose ability is asked next; `again`: one was
     /// activated; `cast_mana.rs`, ENGINE.md 231).
     /// (`after`: in the payment search, the card of the feeding ability the step activated last, its raw index - the
-    /// next ones in increasing card order, ENGINE.md 231.4; 0 otherwise.)
-    CastMana { id: u32, card: Option<CardIdx>, again: bool, after: u32 },
+    /// next ones in increasing card order, ENGINE.md 231.4; 0 otherwise. `sac`: then, the permanent that card's
+    /// activations sacrificed last - its next ones sacrifice a later one, ENGINE.md 247.1; `None` otherwise.)
+    CastMana { id: u32, card: Option<CardIdx>, again: bool, after: u32, sac: Option<CardIdx> },
     /// Devour land (CR 702.82a): the lands chosen so far, in battlefield
     /// order (ENGINE.md 99.12).
     Devour { card: CardIdx, picked: Vec<CardIdx> },
@@ -498,7 +499,7 @@ impl Game {
             Task::ManaNow { src, step } => self.mana_now(src, step),
             Task::ManaNowPick { p, prods, only, page } => self.mana_now_pick(p, prods, only, page),
             Task::ActivateMana { p, card, again } => self.activate_mana(p, card, again),
-            Task::CastMana { id, card, again, after } => self.cast_mana(id, card, again, after),
+            Task::CastMana { id, card, again, after, sac } => self.cast_mana(id, card, again, after, sac),
             Task::ManaNowCosts { src, sac, x, taps } => self.mana_now_costs(src, sac, x, taps),
             Task::AsEnters { card, page } => self.as_enters(card, page),
             Task::ChooseCreatureType { card, step } => self.choose_creature_type(card, step),

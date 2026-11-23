@@ -8,6 +8,10 @@
 mod rules_activated;
 #[path = "rules_cast_mana.rs"]
 mod rules_cast_mana;
+#[path = "rules_cast_mana_search.rs"]
+mod rules_cast_mana_search;
+#[path = "rules_escape_costs.rs"]
+mod rules_escape_costs;
 #[path = "rules_castpay.rs"]
 mod rules_castpay;
 #[path = "rules_chance.rs"]

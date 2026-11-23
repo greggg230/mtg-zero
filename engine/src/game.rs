@@ -867,12 +867,13 @@ pub struct Game {
     /// during its cast (601.2g: `Task::CastMana`), by stack id: what the ability changes (an artifact sacrificed, a
     /// creature gone) no longer changes the cost (`Game::total_mana`; ENGINE.md 231). Cleared as the spell becomes cast.
     pub(crate) cast_lock: Vec<(u32, crate::mana::ManaCost)>,
-    /// The payment search's mana of "X mana in any combination of <types>" (Wizard's Rockets) activated in a cast's
-    /// 601.2g step, per player: (how many, the types each may be) - each one mana of a type of the mask, its type not
-    /// chosen yet (`Game::oracle` copies only; ENGINE.md 231.4: the search asks whether some combination completes the
-    /// payment, so the payment's castability counts each as a unit of those types, `add_pool`, and a later choice that
-    /// needs the pool's types chooses them first). Always (0, 0) outside the search.
-    pub(crate) pool_wild: [(u8, crate::mana::ManaMask); 2],
+    /// The payment search's mana of no chosen type, activated in a cast's 601.2g step, per player: by mask, how many -
+    /// each one mana of a type of the mask, its type not chosen yet ("X mana in any combination of <types>", Wizard's
+    /// Rockets, ENGINE.md 231.4; "one mana of any type that land could produce", Squandered Resources, each of its
+    /// land's types, 247.1). `Game::oracle` copies only: the search asks whether some choice of the types completes the
+    /// payment, so the payment's castability counts each as a unit of its mask (`add_pool`), and a later choice that
+    /// needs the pool's types chooses them first. All zero outside the search.
+    pub(crate) pool_wild: [[u8; 64]; 2],
     /// The entering permanent's spell's delayed ability k (dash, warp) and
     /// the definition holding it: its own (`None`) or the one whose granted
     /// alternative cost it was cast for (ENGINE.md 99.15).
@@ -1428,7 +1429,7 @@ impl Game {
             repl_decided: false,
             route_choice: None,
             cast_lock: Vec::new(),
-            pool_wild: [(0, 0); 2],
+            pool_wild: [[0; 64]; 2],
             entering_dash: None,
             entering_warp: false,
             miracle_cast: None,
