@@ -140,7 +140,7 @@ fn cr_601_2g_the_collapsed_payment_search_answers_as_the_full_one_on_random_boar
     let lands = ["Mountain", "Forest", "Island", "Forest", "Volcanic Island", "Bayou", "Tundra", "Tolarian Academy", "Gaea's Cradle", "Gemstone Caverns", "Ancient Tomb", "Mishra's Workshop", "Taiga"];
     let spells = ["Lightning Bolt", "Llanowar Elves", "Ponder", "Preordain", "Frantic Search", "Oko, Thief of Crowns", "Demonic Tutor", "Tinker", "Fiery Confluence", "Mox Emerald"];
     let fillers = ["Brainstorm", "Ponder", "Island", "Strip Mine"];
-    let mut rng = Rng::new(247.1);
+    let mut rng = Rng::new(236);
     let (mut castable, mut paths) = (0, 0);
     for case in 0..160 {
         let mut b: Vec<&str> = vec!["Underworld Breach"];
