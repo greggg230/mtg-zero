@@ -466,6 +466,12 @@ impl Game {
                 let name = named.map(|d| self.db.def(d).name.clone());
                 self.note(|_| format!("P{p} names {}", name.as_deref().unwrap_or("a card not in their library")));
                 self.look_top(f, p, *n as usize, true);
+                // (One action, CR 608.2c: a revealed card a replacement shuffles into its library instead of
+                // the graveyard - Blightsteel Colossus, 614.1a - is shuffled in once the others have moved
+                // (`pile_moving`, `flush_pile_shuffles` after the op: ENGINE.md 51). Shuffled between them, the
+                // revealed cards still to move were in the library: a named card then went to the hand unknown
+                // to both players, its owner too - ENGINE.md 248.8.)
+                self.pile_moving = true;
                 for c in std::mem::take(&mut f.pile) {
                     if name.as_deref() == Some(self.name(c)) {
                         self.move_card(c, Zone::Hand, Pos::Top);
@@ -473,6 +479,7 @@ impl Game {
                         self.move_card(c, Zone::Graveyard, Pos::Top);
                     }
                 }
+                self.pile_moving = false;
                 Flow::Next
             }
             Ext::FlashSorceries => {

@@ -1252,6 +1252,12 @@ impl Game {
     /// identities are among the unknown cards of its domain; domains of one
     /// viewer over one owner are disjoint.
     pub fn check_knowledge(&self) -> Result<(), String> {
+        // (A player knows the cards in its own hand, CR 402.3: ENGINE.md 248.8.)
+        for p in 0..2u8 {
+            if let Some(&c) = self.players[p as usize].hand.iter().find(|&&c| self.objs[c.i()].known & (1 << p) == 0) {
+                return Err(format!("P{p} does not know its own hand card {} (#{})", self.name(c), c.i()));
+            }
+        }
         for (i, k) in self.clouds.iter().enumerate() {
             if k.viewer == k.owner || k.defs.is_empty() {
                 return Err(format!("degenerate cloud {k:?}"));

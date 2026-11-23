@@ -471,6 +471,35 @@ fn tamiyo_plus_one_names_a_card_and_minus_three_returns_a_card() {
     assert_eq!(g.count_in(0, "Consider", Zone::Hand), 1);
 }
 
+/// CR 608.2c, 614.1a; ENGINE.md 248.8 (the fuzz steward's queue entry a3c8e29c2e3e, hidden-decklist games 100096300
+/// and 100237234). Tamiyo's +1 reveals four cards and puts them into the hand and the graveyard in one action: a
+/// Blightsteel Colossus among them, shuffled into its library instead of going to the graveyard, is shuffled in once
+/// the others have moved. Before, the shuffle came between them, with the revealed cards still to move in the
+/// library: the named card went to the hand known to nobody, its owner included (a later Chrome Mox's imprint choice:
+/// "the chooser has seen the hand").
+#[test]
+fn tamiyo_s_named_card_reaches_the_hand_known_when_a_revealed_colossus_is_shuffled_in_cr_608_2c() {
+    let mut g = manual()
+        .library(0, &["Blightsteel Colossus", "Island", "Lightning Bolt", "Consider", "Island", "Island"])
+        .library(1, &["Forest"; 5])
+        .battlefield(0, &[TAMIYO])
+        .at(Step::Main1, 0)
+        .start();
+    let t = bf(&g, 0, TAMIYO);
+    let bolt = g.card(0, "Lightning Bolt", Zone::Library);
+    activate(&mut g, t, 0, none);
+    let bolt_def = g.db().id("Lightning Bolt").unwrap();
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::NameCard)).then_some(Choice::Def(bolt_def)));
+    assert_eq!(g.obj(bolt).zone, Zone::Hand);
+    assert!(g.knows(0, bolt) && g.knows(1, bolt), "revealed, then put into its owner's hand: both players know it");
+    g.check_knowledge().unwrap();
+    assert_eq!(g.count_in(0, "Blightsteel Colossus", Zone::Library), 1, "shuffled into the library");
+    assert_eq!(g.player(0).graveyard.len(), 2, "the Island and Consider");
+    assert_eq!(g.player(0).library.len(), 3);
+    let colossus = g.card(0, "Blightsteel Colossus", Zone::Library);
+    assert!(!g.knows(0, colossus) && !g.knows(1, colossus), "after the shuffle nobody knows where it is");
+}
+
 // ---- Teferi, Hero of Dominaria -----------------------------------------------------
 
 const TEFERI_H: &str = "Teferi, Hero of Dominaria";
