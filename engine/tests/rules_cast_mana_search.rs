@@ -238,3 +238,54 @@ fn cr_605_3a_the_lands_mana_floated_first_then_sacrificed_while_casting() {
     until_priority(&mut g, &|_| None);
     assert_eq!(g.obj(fc).zone, Zone::Stack, "{}", log(&g));
 }
+
+/// Twelve lands, none of them able to make {R} or {W}.
+const TWELVE: [&str; 12] = [
+    "Underground Sea",
+    "Bayou",
+    "Tropical Island",
+    "Watery Grave",
+    "Overgrown Tomb",
+    "Breeding Pool",
+    "Swamp",
+    "Island",
+    "Forest",
+    "Darkslick Shores",
+    "Blooming Marsh",
+    "Botanical Sanctum",
+];
+
+#[test]
+fn cr_601_2g_702_138a_a_graveyard_that_holds_the_escapes_cards_asks_the_payment_alone() {
+    // Phlage, Titan of Fire's Fury escapes for {R}{R}{W}{W} and five other graveyard cards exiled; six are there. Rain of
+    // Filth ("until end of turn, lands you control gain 'Sacrifice this land: Add {B}'") makes every land a feeding
+    // ability castability doesn't count for an exile, so the 601.2g step's search activated them: each land not at all,
+    // tapped, sacrificed or both - 4^n states for n lands, past the 2,000,000-copy cap with eleven (fuzz seed 100002232
+    // and 334 more stops, ENGINE.md 247.1). But the graveyard already holds the escape's cards and nothing else of
+    // the payment reads it: a sacrifice's card changes nothing, its mana is the payment's own to make. The search has
+    // nothing to activate (`Game::graveyard_fed`): no red or white mana, not castable, at once.
+    let gy = ["Phlage, Titan of Fire's Fury", "Ponder", "Brainstorm", "Preordain", "Counterspell", "Mountain", "Lightning Bolt"];
+    let mut g = cube().battlefield(0, &TWELVE).hand(0, &["Rain of Filth"]).graveyard(0, &gy).at(Step::Main1, 0).start();
+    let rain = g.card(0, "Rain of Filth", Zone::Hand);
+    let phlage = g.card(0, "Phlage, Titan of Fire's Fury", Zone::Graveyard);
+    g.choose(Choice::Cast(rain));
+    until_priority(&mut g, &|_| None);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g) && g.pending_decision().is_some_and(|d| d.player == 0));
+    assert_eq!(g.obj(rain).zone, Zone::Graveyard, "{}", log(&g));
+    assert!(!g.has_option(Choice::Cast(phlage)), "no red or white mana: {}", opts(&g));
+    // With two Plateaus and two Sacred Foundries among the lands it escapes.
+    let mut b: Vec<&str> = vec!["Plateau", "Plateau", "Sacred Foundry", "Sacred Foundry"];
+    b.extend(&TWELVE[..9]);
+    let mut g = cube().battlefield(0, &b).hand(0, &["Rain of Filth"]).graveyard(0, &gy).at(Step::Main1, 0).start();
+    let rain = g.card(0, "Rain of Filth", Zone::Hand);
+    let phlage = g.card(0, "Phlage, Titan of Fire's Fury", Zone::Graveyard);
+    g.choose(Choice::Cast(rain));
+    // (The Rain's {B} from a land that makes no red or white mana.)
+    until_priority(&mut g, &|g| g.offered().into_iter().find(|c| matches!(c, Choice::Card(x) if g.name(*x) == "Swamp")));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g) && g.pending_decision().is_some_and(|d| d.player == 0));
+    assert!(g.has_option(Choice::Cast(phlage)), "{}
+{}", opts(&g), log(&g));
+    g.choose(Choice::Cast(phlage));
+    until_priority(&mut g, &|_| None);
+    assert_eq!(g.obj(phlage).zone, Zone::Stack, "{}", log(&g));
+}

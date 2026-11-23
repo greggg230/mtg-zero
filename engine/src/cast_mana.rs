@@ -423,6 +423,11 @@ impl Game {
             }
             let exile = self.spell_rest(spell, &self.stack[pos]).is_some_and(|r| r.exile_graveyard > 0);
             reads = (self.def_of(spell).delve, self.def_of(spell).casting.no_mana, exile);
+            // (The graveyard already holds the cards the cost exiles and nothing else of the payment reads it: no
+            // feeding ability can make the payment completable that isn't - the leaf alone, ENGINE.md 247.1.)
+            if search_collapse() && self.graveyard_fed(p, spell, &self.stack[pos]) {
+                return out;
+            }
         }
         let gap = |ad: &ActivatedDef, slot: AbilitySlot, _own: bool| Self::gap_feeder(reads.0, reads.1, reads.2, ad, slot);
         let classes = self.mana_classes(p, None);
@@ -538,6 +543,31 @@ impl Game {
     /// from your graveyard" (escape, 702.138a)?
     pub(crate) fn payment_reads_graveyard(&self, card: CardIdx, item: &crate::game::StackItem) -> bool {
         self.def_of(card).delve || self.spell_rest(card, item).is_some_and(|r| r.exile_graveyard > 0)
+    }
+
+    /// Can no card put into `p`'s graveyard from here on change whether the payment of spell `card` (`item`, in its
+    /// 601.2g step) can be completed (ENGINE.md 247.1)? The payment reads the graveyard for delve's cards (CR 702.66a:
+    /// each more card may pay one more generic mana - not settled here) and for its cost's "exile n cards from your
+    /// graveyard" (702.138a), which reads only whether n cards the cost may exile are there: once they are
+    /// (`exile_short` is 0; a card never leaves the graveyard in the step but as a mana ability's own cost), a further
+    /// card changes nothing of it. And nothing else may read the graveyard: no mana ability `p` has (its permanents',
+    /// those granted to them, its hand's) exiles cards from it as a cost, has a condition ("activate only if") or
+    /// produces by a condition. A feeding ability's other effect, its mana, is the payment's own to make (the
+    /// payment's castability counts every mana ability as a source: CR 601.2g-h, 605.3a; ENGINE.md 231.4), so the
+    /// payment search's step node has nothing to activate: its answer is the payment's castability.
+    pub(crate) fn graveyard_fed(&self, p: PlayerId, card: CardIdx, item: &crate::game::StackItem) -> bool {
+        if self.def_of(card).delve {
+            return false;
+        }
+        let Some(rest) = self.spell_rest(card, item) else { return false };
+        if rest.exile_graveyard == 0 || self.exile_short(p, card, &rest) > 0 {
+            return false;
+        }
+        let reads = |ad: &ActivatedDef| ad.mana().is_some_and(|m| ad.cost.exile_graveyard > 0 || ad.only_if.is_some() || matches!(m.prod, ManaProd::IfElse { .. }));
+        let perms = self.permanents_of(p).any(|c| {
+            self.abilities(c).activated.iter().any(reads) || self.granted_activated(c).iter().any(|g| reads(self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot))))
+        });
+        !perms && !self.players[p as usize].hand.iter().any(|&c| self.def_of(c).hand_abilities.iter().any(reads))
     }
 
     /// The delve fuel of a spell whose mana can't be spent (CR 113.6e) from the mana abilities its 601.2g step may
@@ -1123,9 +1153,6 @@ mod tests {
         }
     }
 
-    /// CR 601.2f-g (ENGINE.md 231): the total cost is locked as the step's first mana ability is activated, so a cost
-    /// reducer the ability sacrifices (Emry's "costs {1} less for each artifact you control": Chromatic Star) doesn't
-    /// raise it; the lock is gone once the spell is cast.
     #[test]
     fn sacrifices_commute_unless_a_count_they_change_is_read() {
         // ENGINE.md 236: Lightning Bolt escaped by Underworld Breach, Squandered Resources' sacrifices searched as sets
@@ -1163,6 +1190,9 @@ mod tests {
         assert!(!at_step(&["Tolarian Academy", "Chromatic Star"]), "the Star may leave: the Academy's count changes");
     }
 
+    /// CR 601.2f-g (ENGINE.md 231): the total cost is locked as the step's first mana ability is activated, so a cost
+    /// reducer the ability sacrifices (Emry's "costs {1} less for each artifact you control": Chromatic Star) doesn't
+    /// raise it; the lock is gone once the spell is cast.
     #[test]
     fn the_total_cost_is_locked_at_the_steps_first_activation() {
         let mut g = Scenario::new(CardDb::cube())
