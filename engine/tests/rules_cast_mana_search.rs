@@ -192,7 +192,6 @@ fn cr_601_2g_the_collapsed_payment_search_answers_as_the_full_one_on_random_boar
 }
 
 #[test]
-#[ignore = "found, not fixed (ENGINE.md 247.1.6): the search activates no mana ability of a land before a feeder sacrifices it"]
 fn cr_601_2g_a_land_tapped_for_mana_then_sacrificed_while_casting() {
     // Fiery Confluence ({2}{R}{R}) escaped by Underworld Breach (three other graveyard cards, one there): each Mountain
     // tapped for {R}, then sacrificed to Squandered Resources for {R} (CR 601.2g: any mana abilities, in any order, CR
@@ -288,4 +287,94 @@ fn cr_601_2g_702_138a_a_graveyard_that_holds_the_escapes_cards_asks_the_payment_
     g.choose(Choice::Cast(phlage));
     until_priority(&mut g, &|_| None);
     assert_eq!(g.obj(phlage).zone, Zone::Stack, "{}", log(&g));
+}
+
+/// The lands of the test below.
+const FLOAT_LANDS: [&str; 8] = ["Mountain", "Island", "Volcanic Island", "Badlands", "Tundra", "Tolarian Academy", "Gaea's Cradle", "Ancient Tomb"];
+
+/// Every state at `p`'s priority reached from `g` (at that priority) by floating the mana of lands first (CR 605.3a:
+/// a mana ability with priority): any set of them, in increasing card order, each of their decisions every way.
+fn floated(g: &Game, last: u32, out: &mut Vec<Game>, limit: usize) {
+    out.push(g.clone());
+    if out.len() >= limit || !g.has_option(Choice::Yes) {
+        return;
+    }
+    let mut m = g.clone();
+    m.choose(Choice::Yes);
+    if m.kind() != Some(DecisionKind::ActivateMana) {
+        return;
+    }
+    for c in m.offered() {
+        let Choice::Card(x) = c else { continue };
+        if !FLOAT_LANDS.contains(&m.name(x)) || x.get() < last || m.obj(x).tapped {
+            continue;
+        }
+        let mut a = m.clone();
+        a.choose(c);
+        // (Which ability, which mana: every way, back to the question of the next source; then no more of them.)
+        let mut stack = vec![a];
+        while let Some(y) = stack.pop() {
+            match y.kind() {
+                Some(DecisionKind::ActivateMana) => {
+                    let mut z = y.clone();
+                    z.choose(Choice::Pass);
+                    if at_priority(&z) {
+                        floated(&z, x.get() + 1, out, limit);
+                    }
+                }
+                Some(DecisionKind::Priority) => floated(&y, x.get() + 1, out, limit),
+                _ => {
+                    for o in y.offered() {
+                        let mut z = y.clone();
+                        z.choose(o);
+                        stack.push(z);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cr_601_2g_605_3a_an_escape_castable_with_lands_mana_floated_first_is_castable_without() {
+    // ENGINE.md 249.1: a land tapped for mana with priority (CR 605.3a) and then sacrificed to Squandered Resources while
+    // a spell is cast does what the same land tapped in the cast's 601.2g step and then sacrificed does. So on random
+    // boards around Underworld Breach's escape, whenever some set of lands floated first makes an escape castable, it
+    // is castable with none floated (the 601.2g step's search finds the line: each sacrifice with the land's own mana
+    // ability activated right before it, or, for Tolarian Academy and Gaea's Cradle, at any time). Before 249.1 it
+    // wasn't: two Mountains, Fiery Confluence and one other graveyard card (247.1.6).
+    use engine::rng::Rng;
+    let lands = FLOAT_LANDS;
+    let spells = ["Lightning Bolt", "Fiery Confluence", "Counterspell", "Frantic Search", "Demonic Tutor", "Llanowar Elves", "Oko, Thief of Crowns"];
+    let fillers = ["Brainstorm", "Ponder", "Strip Mine"];
+    let mut rng = Rng::new(249);
+    let (mut helped, mut castable, mut states) = (0, 0, 0);
+    for case in 0..120 {
+        let mut b: Vec<&str> = vec!["Underworld Breach", "Squandered Resources"];
+        for (name, odds) in [("Chromatic Star", 4), ("Mind Stone", 4), ("Llanowar Elves", 5)] {
+            if rng.below(odds) == 0 {
+                b.push(name);
+            }
+        }
+        for _ in 0..1 + rng.below(3) {
+            b.push(lands[rng.below(lands.len() as u32) as usize]);
+        }
+        let name = spells[rng.below(spells.len() as u32) as usize];
+        let mut gy: Vec<&str> = vec![name];
+        gy.extend((0..rng.below(3)).map(|_| fillers[rng.below(fillers.len() as u32) as usize]));
+        let g = cube().battlefield(0, &b).graveyard(0, &gy).at(Step::Main1, 0).start();
+        let c = g.card(0, name, Zone::Graveyard);
+        let mut all = Vec::new();
+        floated(&g, 0, &mut all, 400);
+        states += all.len();
+        let with = all.iter().skip(1).any(|x| x.has_option(Choice::Cast(c)));
+        let without = g.has_option(Choice::Cast(c));
+        assert!(without || !with, "case {case}: {b:?} gy {gy:?}: castable only with mana floated first
+{}", opts(&g));
+        castable += without as u32;
+        // (Castable with fewer than three other cards in the graveyard: through Squandered Resources' sacrifices.)
+        helped += (without && gy.len() < 4) as u32;
+    }
+    println!("boards castable {castable}, with the graveyard short {helped}, floated states {states}");
+    assert!(castable >= 20 && helped >= 8 && states >= 500, "castable {castable}, short {helped}, states {states}");
 }

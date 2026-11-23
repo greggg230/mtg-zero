@@ -1722,6 +1722,14 @@ impl Game {
         let p = self.objs[src.card.i()].controller;
         let ad = self.src_ability(src.card, src.slot);
         if let Some(s) = &ad.cost.sacrifice {
+            // (The payment search's "its mana ability first, then sacrificed" below: the permanent must still be one
+            // the cost may sacrifice once that ability's costs are paid.)
+            if let Some(c) = sac.filter(|_| self.oracle) {
+                if !self.sacrifice_candidates(p, src.card, s).contains(&c) {
+                    self.oracle_dead = true;
+                    return;
+                }
+            }
             if sac.is_none() {
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
@@ -1730,17 +1738,36 @@ impl Game {
                             self.search_sac_record(src.card, c);
                         }
                     }
+                    // (In the payment search's 601.2g step: the permanent's own mana ability first, CR 601.2g - any
+                    // mana abilities, in any order - then it is sacrificed for this one; ENGINE.md 249.1.)
+                    Some(Choice::Ability(c, slot)) if self.oracle => {
+                        self.search_sac_record(src.card, c);
+                        self.agenda.push(Task::ManaNowCosts { src, sac: Some(c), x, taps });
+                        self.begin_activate(p, c, slot);
+                        return;
+                    }
                     Some(other) => unreachable!("sacrifice answer {other:?}"),
                     None => {
                         // (In the payment search's 601.2g step, a later permanent than the one this card's activation
                         // there sacrificed last, when that node's activations commute: ENGINE.md 247.1.)
                         let floor = if self.oracle { self.search_sac_floor(src.card) } else { None };
-                        let opts: Vec<Opt> = self
+                        let mut opts: Vec<Opt> = self
                             .sacrifice_candidates(p, src.card, s)
                             .into_iter()
                             .filter(|c| floor.is_none_or(|f| c.get() > f.get()))
                             .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                             .collect();
+                        // (And each with a mana ability of its own activated first: a land tapped for mana, then
+                        // sacrificed - what the step lets the player do and the payment after it can't, the land
+                        // gone; ENGINE.md 249.1.)
+                        if self.oracle {
+                            let cards: Vec<CardIdx> = opts.iter().filter_map(|o| if let Choice::Card(c) = o.choice { Some(c) } else { None }).collect();
+                            for c in cards {
+                                for slot in self.search_pretaps(c) {
+                                    opts.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+                                }
+                            }
+                        }
                         if opts.is_empty() && floor.is_some() {
                             self.oracle_dead = true;
                             return;
