@@ -1579,7 +1579,7 @@ fn v6_hash(x: &[f32]) -> (u64, u64) {
 /// `public_states_encode_apart`.
 #[test]
 fn public_state_reaches_the_encoding() {
-    use engine::public_state::{fields, known_gaps, limits, perturbations, Class, LimitKind, V6, V7, V8};
+    use engine::public_state::{fields, known_gaps, limits, payment_seen_by, perturbations, Class, LimitKind, PAYER_ONLY, V6, V7, V8};
     let t0 = std::time::Instant::now();
     let mut pos = gate_positions(scale(60) as usize, 59);
     pos.extend(enclosing_picks_positions());
@@ -1618,6 +1618,10 @@ fn public_state_reaches_the_encoding() {
     // from the other player: such a perturbation must change its owner's view and encoding and
     // neither of the other player's.
     let (mut hidden_ok, mut leaks) = (0, Vec::new());
+    // What a payment's search of its payer's sources says (`PAYER_ONLY`, ENGINE.md 251) reads the payer's hand:
+    // such a perturbation must change the view and the row of the viewers who see that hand, and neither of the
+    // other player's.
+    let (mut payer_ok, mut payer_leaks) = (0, Vec::new());
     let mut past_v6_caps = 0;
     for (spec, a) in &pos {
         let base_enc = [enc(a, 0), enc(a, 1)];
@@ -1640,14 +1644,25 @@ fn public_state_reaches_the_encoding() {
                 continue;
             }
             t[k].applied += 1;
-            for v in 0..2 {
-                if public_view(&b, v as u8) == base_view[v] {
-                    t[k].view_same[v] += 1;
-                    t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s view unchanged)"));
+            if PAYER_ONLY.contains(&p.name) {
+                let sees = payment_seen_by(&a.g).expect("a payment's perturbation applied: a payment in progress").to_vec();
+                let view: Vec<bool> = (0..2).map(|v| public_view(&b, v as u8) != base_view[v]).collect();
+                let code: Vec<bool> = (0..2).map(|v| enc(&b, v) != base_enc[v]).collect();
+                if view == sees && code == sees {
+                    payer_ok += 1;
+                } else {
+                    payer_leaks.push(format!("{spec}: {what}: the payer's hand seen by {sees:?}, views changed {view:?}, encodings {code:?}"));
                 }
-                if enc(&b, v) == base_enc[v] {
-                    t[k].enc_same[v] += 1;
-                    t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s encoding unchanged)"));
+            } else {
+                for v in 0..2 {
+                    if public_view(&b, v as u8) == base_view[v] {
+                        t[k].view_same[v] += 1;
+                        t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s view unchanged)"));
+                    }
+                    if enc(&b, v) == base_enc[v] {
+                        t[k].enc_same[v] += 1;
+                        t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s encoding unchanged)"));
+                    }
                 }
             }
             for v in 0..2 {
@@ -1771,6 +1786,9 @@ fn public_state_reaches_the_encoding() {
     println!("hidden decklists: {hidden_ok} perturbations of fields they hide reached only their owner");
     assert!(leaks.is_empty(), "hidden decklists: {} perturbations of hidden fields reached the other player:\n{}", leaks.len(), leaks.join("\n"));
     assert!(hidden_ok > 0, "hidden decklists: no perturbation of a field they hide applied");
+    println!("payments: {payer_ok} perturbations of what the payer's search says reached only the viewers of its hand (ENGINE.md 251)");
+    assert!(payer_leaks.is_empty(), "payments: {} perturbations of the payer's own facts reached the wrong viewers:\n{}", payer_leaks.len(), payer_leaks.join("\n"));
+    assert!(payer_ok > 0, "payments: no perturbation of the payer's own facts applied");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
     // A known gap's perturbation that alone left the encoding unchanged must still do so where it
     // applied (on a layout of its entry: v7, or v6 for an entry of layout v6 only), else the entry is
