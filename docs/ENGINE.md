@@ -47092,3 +47092,19 @@ constructed 38ef93512e0a7259, EoE 5ffb850dd963bad0, driver cab97c01912f7e3f, met
 80562a6aa452b765, dealt cc0d138ac5c80402: all main's (88cb474e), nothing re-recorded. A game that does hold one plays
 differently from here on (the new options are the rules'): a behaviour change, though not one the recorded games show.
 No `RULES_EPOCH` bump: it moves with a re-recorded digest (`tools/position_lab.py`), and none was re-recorded.
+
+### 249.5 Gates and the fresh-seed fuzz (on 27dadf4d8df7; docs only after it)
+
+* `python tools/gate.py suite --throttle on`: **GATE PASSED suite 27dadf4d8df7 in 480s** - the full engine suite
+  2,953 passed (24 binaries); the sharded fuzz, 2,000 games each from seed 0: the default pool (with 100 matches), the
+  default pool with hidden decklists, `delver_dealt` (with 100 matches and 100 post-sideboard), every merged check
+  passed.
+* `python tools/gate.py engine --tested-sha 27dadf4d8df7 --expect-digest c2b04fed925eed67 --expect-digest0
+  d3c144b6cc2977e5 --throttle on`: **GATE PASSED WITH SKIPS engine 27dadf4d8df7 in 886s - skipped: pytest-desktop: 1
+  live-run-hazard test(s) (fenced: a live run on this machine)**. Both digests equal the expected ones, the formats'
+  and the dealt digest equal the recorded ones, `az` 58, `limits` 13, `hidden` 28 passed, every pytest shard passed,
+  the search smoke passed, farm compat identical (gate 2: 6 games, 2,468 rows; gate 3: 6 games, 2,598 rows). The
+  card-IR tests and the Mac recheck were not needed.
+* Fresh seeds, release, `tools/fuzz_shards.py`, through the slot throttle: the default pool, 4,000 games and 200
+  matches from seed 249,100,000 - passed; the default pool with hidden decklists, 4,000 games from seed 249,200,000 -
+  passed. No stop of any kind in either.
