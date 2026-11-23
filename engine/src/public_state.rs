@@ -157,7 +157,7 @@ pub fn fields() -> Vec<Field> {
         repl_decided: Derived "transient: a replacement choice made for the next move",
         route_choice: Derived "transient: the route of the cast about to begin (its decision's context)",
         cast_lock: Public "the total cost of a spell being cast, locked at its first mana ability during the cast (CR 601.2f-g): the cost floats of its 601.2g step's and delve's decisions (ENGINE.md 231)",
-        pool_wild: Derived "transient: the payment search's copies only, empty in every state outside it (ENGINE.md 231.4, 236)",
+        pool_wild: Derived "transient: the payment search's copies only, empty in every state outside it (ENGINE.md 231.4, 247.1)",
         entering_dash: Derived "transient: set and cleared around one move",
         entering_warp: Derived "transient: set and cleared around one move",
         miracle_cast: Derived "transient: the card a miracle trigger is casting (its decisions' context)",

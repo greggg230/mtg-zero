@@ -1,4 +1,4 @@
-//! The 601.2g step's payment search (ENGINE.md 231.4, 236): every option of a cast's 601.2g step must leave its payment
+//! The 601.2g step's payment search (ENGINE.md 231.4, 247.1): every option of a cast's 601.2g step must leave its payment
 //! completable (CR 601.2h), decided by searching the step's activations of the mana abilities that feed the graveyard
 //! a payment reads and its castability doesn't count (Squandered Resources' "sacrifice a land: add one mana of any
 //! type that land could produce" for Underworld Breach's escape exile). Such activations commute, so the search makes
@@ -74,7 +74,7 @@ fn cr_601_2g_702_138a_squandered_resources_sacrifices_are_searched_as_sets() {
     // Underworld Breach's escape for Llanowar Elves: {G} and three other graveyard cards exiled, two there. Squandered
     // Resources may sacrifice any of ten lands while it is cast (CR 601.2g), each land a third card and one mana of a
     // type it could make (CR 106.7) - none green: not castable. The search made every sequence of sacrifices and every
-    // type (sum over k of 10!/(10-k)! sequences) and failed loudly past 2,000,000 copies (ENGINE.md 236); each set of
+    // type (sum over k of 10!/(10-k)! sequences) and failed loudly past 2,000,000 copies (ENGINE.md 247.1); each set of
     // sacrifices once, their types unchosen, it is 2^10 sets.
     let mut b = vec!["Underworld Breach", "Squandered Resources"];
     b.extend(TEN);
@@ -134,13 +134,13 @@ fn cr_601_2g_the_collapsed_payment_search_answers_as_the_full_one_on_random_boar
     // Caverns, Ancient Tomb, Mishra's Workshop (restricted mana) - Mind Stone and Llanowar Elves for the counts, a
     // floating mana, and graveyard cards of different costs (Tinker's additional sacrifice: a cost whose parts' order
     // can matter). Every option of the priority and of every decision of each castable escape (up to 60 paths a card)
-    // must be the same with the payment search's collapses (231.4's order, 236's) and without them: the search's
+    // must be the same with the payment search's collapses (231.4's order, 247.1's) and without them: the search's
     // answers are the full search's.
     use engine::rng::Rng;
     let lands = ["Mountain", "Forest", "Island", "Forest", "Volcanic Island", "Bayou", "Tundra", "Tolarian Academy", "Gaea's Cradle", "Gemstone Caverns", "Ancient Tomb", "Mishra's Workshop", "Taiga"];
     let spells = ["Lightning Bolt", "Llanowar Elves", "Ponder", "Preordain", "Frantic Search", "Oko, Thief of Crowns", "Demonic Tutor", "Tinker", "Fiery Confluence", "Mox Emerald"];
     let fillers = ["Brainstorm", "Ponder", "Island", "Strip Mine"];
-    let mut rng = Rng::new(236);
+    let mut rng = Rng::new(247.1);
     let (mut castable, mut paths) = (0, 0);
     for case in 0..160 {
         let mut b: Vec<&str> = vec!["Underworld Breach"];
@@ -192,7 +192,7 @@ fn cr_601_2g_the_collapsed_payment_search_answers_as_the_full_one_on_random_boar
 }
 
 #[test]
-#[ignore = "found, not fixed (ENGINE.md 236.6): the search activates no mana ability of a land before a feeder sacrifices it"]
+#[ignore = "found, not fixed (ENGINE.md 247.1.6): the search activates no mana ability of a land before a feeder sacrifices it"]
 fn cr_601_2g_a_land_tapped_for_mana_then_sacrificed_while_casting() {
     // Fiery Confluence ({2}{R}{R}) escaped by Underworld Breach (three other graveyard cards, one there): each Mountain
     // tapped for {R}, then sacrificed to Squandered Resources for {R} (CR 601.2g: any mana abilities, in any order, CR

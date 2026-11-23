@@ -1842,7 +1842,7 @@ impl Game {
     /// add, ENGINE.md 100.4.5).
     fn add_pool(&self, p: PlayerId, any: crate::doomsday_b::Allow, c: &mut Cands) {
         // (The payment search's mana whose type isn't chosen yet, one of a mask each: `Game::pool_wild`, ENGINE.md
-        // 231.4, 236.)
+        // 231.4, 247.1.)
         if !any.no_mana {
             for (mask, &n) in self.pool_wild[p as usize].iter().enumerate() {
                 for _ in 0..n {

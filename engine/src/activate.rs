@@ -592,7 +592,7 @@ impl Game {
     }
 
     /// Is the order of `cost`'s parts free with its mana (`order_free_with`), so that its castability is the fixed
-    /// order's checks (`cost_payable_with`) and not a search of the payment (`cost_payable_order`)? ENGINE.md 236.
+    /// order's checks (`cost_payable_with`) and not a search of the payment (`cost_payable_order`)? ENGINE.md 247.1.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn cost_order_free(
         &self,
@@ -1733,7 +1733,7 @@ impl Game {
                     Some(other) => unreachable!("sacrifice answer {other:?}"),
                     None => {
                         // (In the payment search's 601.2g step, a later permanent than the one this card's activation
-                        // there sacrificed last, when that node's activations commute: ENGINE.md 236.)
+                        // there sacrificed last, when that node's activations commute: ENGINE.md 247.1.)
                         let floor = if self.oracle { self.search_sac_floor(src.card) } else { None };
                         let opts: Vec<Opt> = self
                             .sacrifice_candidates(p, src.card, s)
@@ -1866,7 +1866,7 @@ impl Game {
                 // (In the payment search, the mana's types not chosen yet: each one mana of a type of the mask, as the
                 // payment's castability counts it, `Game::pool_wild` - the search asks whether some combination
                 // completes the payment; ENGINE.md 231.4; mana of different masks kept apart, each unit its own mask,
-                // 236.)
+                // 247.1.)
                 self.pool_wild[p as usize][unit_mask as usize] = wn + (picks * per) as u8;
             } else if self.oracle && picks > 1 {
                 // (In the payment search, one choice of the whole combination: the pool keeps amounts, not the order

@@ -107,7 +107,7 @@ pub(crate) enum Task {
     /// activated; `cast_mana.rs`, ENGINE.md 231).
     /// (`after`: in the payment search, the card of the feeding ability the step activated last, its raw index - the
     /// next ones in increasing card order, ENGINE.md 231.4; 0 otherwise. `sac`: then, the permanent that card's
-    /// activations sacrificed last - its next ones sacrifice a later one, ENGINE.md 236; `None` otherwise.)
+    /// activations sacrificed last - its next ones sacrifice a later one, ENGINE.md 247.1; `None` otherwise.)
     CastMana { id: u32, card: Option<CardIdx>, again: bool, after: u32, sac: Option<CardIdx> },
     /// Devour land (CR 702.82a): the lands chosen so far, in battlefield
     /// order (ENGINE.md 99.12).

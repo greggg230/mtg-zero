@@ -870,7 +870,7 @@ pub struct Game {
     /// The payment search's mana of no chosen type, activated in a cast's 601.2g step, per player: by mask, how many -
     /// each one mana of a type of the mask, its type not chosen yet ("X mana in any combination of <types>", Wizard's
     /// Rockets, ENGINE.md 231.4; "one mana of any type that land could produce", Squandered Resources, each of its
-    /// land's types, 236). `Game::oracle` copies only: the search asks whether some choice of the types completes the
+    /// land's types, 247.1). `Game::oracle` copies only: the search asks whether some choice of the types completes the
     /// payment, so the payment's castability counts each as a unit of its mask (`add_pool`), and a later choice that
     /// needs the pool's types chooses them first. All zero outside the search.
     pub(crate) pool_wild: [[u8; 64]; 2],

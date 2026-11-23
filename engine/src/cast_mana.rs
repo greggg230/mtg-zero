@@ -54,9 +54,9 @@ thread_local! {
     static SEARCH_COLLAPSE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
-/// A test hook (ENGINE.md 236; per thread): with `false` the payment search's 601.2g step explores every order of the
+/// A test hook (ENGINE.md 247.1; per thread): with `false` the payment search's 601.2g step explores every order of the
 /// feeding abilities it activates and chooses the types of their mana as each is made (no `Game::pool_wild`) - the
-/// search without 231.4's order and 236's collapses, whose answers the collapsed search's are compared with.
+/// search without 231.4's order and 247.1's collapses, whose answers the collapsed search's are compared with.
 #[doc(hidden)]
 pub fn set_payment_search_collapse(on: bool) {
     SEARCH_COLLAPSE.with(|c| c.set(on));
@@ -183,7 +183,7 @@ impl Game {
                     }
                     // (A feeding ability may pay its cost with the pool: the types of its mana chosen first, each
                     // combination once - when one offered has a mana cost to pay; else nothing before the leaf reads
-                    // the pool's types, ENGINE.md 236.)
+                    // the pool's types, ENGINE.md 247.1.)
                     if self.wild_total(p) > 0 && (self.feeders_pay_mana(p, &sources) || !search_collapse()) {
                         let prods = self.wild_combos(p);
                         self.pool_wild[p as usize] = [0; 64];
@@ -193,7 +193,7 @@ impl Game {
                     }
                     // The feeding abilities in increasing order of their card, then of the permanent each sacrifices (each
                     // set of them once, not each order) when their activations commute for the search's question
-                    // (`feeders_commute`, ENGINE.md 231.4, 236); else every order, and no order carried on from this
+                    // (`feeders_commute`, ENGINE.md 231.4, 247.1); else every order, and no order carried on from this
                     // node (its activations mark nothing).
                     let ordered = search_collapse() && self.feeders_commute(id, p, spell);
                     let (after, sac) = if ordered { (after, sac) } else { (0, None) };
@@ -244,7 +244,7 @@ impl Game {
             self.cast_lock.push((id, cost));
         }
         // (Activated from an ordered node of the search: the next ones from this card on, ENGINE.md 231.4; this card's
-        // next sacrifice after the last one its activations made, kept across those that sacrifice nothing, 236.)
+        // next sacrifice after the last one its activations made, kept across those that sacrifice nothing, 247.1.)
         let ordered = after & SEARCH_ORDER != 0;
         let sac = if ordered && after & !SEARCH_ORDER == c.get() + 1 { sac } else { None };
         let after = if ordered { (c.get() + 1) | SEARCH_ORDER } else { 0 };
@@ -261,7 +261,7 @@ impl Game {
     }
 
     /// The payment search's bound on the permanent the next activation of card `c`'s ability in the 601.2g step
-    /// sacrifices (ENGINE.md 236): when the step's node it was activated from is ordered (`SEARCH_ORDER`) and that
+    /// sacrifices (ENGINE.md 247.1): when the step's node it was activated from is ordered (`SEARCH_ORDER`) and that
     /// node's last activations were `c`'s, the last permanent they sacrificed - the next one is a later card. Read from
     /// the step's task waiting under the activation (the topmost `Task::CastMana`).
     pub(crate) fn search_sac_floor(&self, c: CardIdx) -> Option<CardIdx> {
@@ -272,7 +272,7 @@ impl Game {
     }
 
     /// Record in the step's task waiting under it that the activation of card `c`'s ability from an ordered node of the
-    /// payment search sacrificed `x` (`search_sac_floor`; ENGINE.md 236).
+    /// payment search sacrificed `x` (`search_sac_floor`; ENGINE.md 247.1).
     pub(crate) fn search_sac_record(&mut self, c: CardIdx, x: CardIdx) {
         if let Some(Task::CastMana { card: None, again: true, after, sac, .. }) = self.agenda.iter_mut().rev().find(|t| matches!(t, Task::CastMana { .. })) {
             if *after & SEARCH_ORDER != 0 && *after & !SEARCH_ORDER == c.get() + 1 {
@@ -282,7 +282,7 @@ impl Game {
     }
 
     /// Do the activations of the feeding abilities a node of the payment search of spell `id`'s 601.2g step may make,
-    /// now or later, commute for the search's question (ENGINE.md 231.4, 236)? Then the search activates them in
+    /// now or later, commute for the search's question (ENGINE.md 231.4, 247.1)? Then the search activates them in
     /// increasing order of their card and, for one card's, of the permanent each sacrifices: each set once, not each
     /// order. They commute when no activation can change what another may do but by taking objects (a permanent
     /// tapped or sacrificed, a card discarded: each object one activation's), so in any order each has the same choices
@@ -644,7 +644,7 @@ impl Game {
     }
 
     /// Does activating one of `sources` (the feeding abilities a node of the payment search offers) read the pool's
-    /// mana by its types: a mana cost to pay, or an X announced as much as can be paid (ENGINE.md 236)? Nothing else of
+    /// mana by its types: a mana cost to pay, or an X announced as much as can be paid (ENGINE.md 247.1)? Nothing else of
     /// an activation does (its sacrifice, discard and tap costs and its production read no mana).
     fn feeders_pay_mana(&self, p: PlayerId, sources: &[(CardIdx, Vec<AbilitySlot>)]) -> bool {
         sources.iter().any(|(c, slots)| {
@@ -684,7 +684,7 @@ impl Game {
     /// the payment search's mana of no chosen type (`Game::pool_wild`)? A spell whose castability reads the pool once,
     /// through the class model (`can_pay_with`'s candidates, each such mana a unit of its mask's types, `add_pool`), is
     /// exact at once: a spell whose cost has no part besides its mana, or whose other parts' order is free with its mana
-    /// (`Game::spell_rest_free`, ENGINE.md 236). Otherwise (a part whose order with the mana can matter, its
+    /// (`Game::spell_rest_free`, ENGINE.md 247.1). Otherwise (a part whose order with the mana can matter, its
     /// castability a search of its own reading the pool's types; emerge's; teamwork's taps and mana) each combination is
     /// tried.
     fn wild_any(&self, p: PlayerId, id: u32, check: &dyn Fn(&Game) -> bool) -> bool {
@@ -1176,7 +1176,7 @@ mod tests {
 
     #[test]
     fn sacrifices_commute_unless_a_count_they_change_is_read() {
-        // ENGINE.md 236: Lightning Bolt escaped by Underworld Breach, Squandered Resources' sacrifices searched as sets
+        // ENGINE.md 247.1: Lightning Bolt escaped by Underworld Breach, Squandered Resources' sacrifices searched as sets
         // (`feeders_commute`) - unless what a land could produce counts permanents another feeding ability may remove:
         // Tolarian Academy's artifacts and Chromatic Star (an artifact it sacrifices), whose order then matters.
         let at_step = |extra: &[&str]| {

@@ -2182,7 +2182,7 @@ impl Game {
     /// class model alone, once (`can_pay_with`'s candidates, `add_pool`)? When its total cost has no part besides its
     /// mana, or its other parts are not emerge's nor teamwork's (whose checks read the mana again) and their order is free
     /// with its mana (`cost_order_free`: else a search of the payment, reading the pool's types). The payment search's
-    /// mana of no chosen type is then exactly a unit of its types (ENGINE.md 236, `Game::wild_any`).
+    /// mana of no chosen type is then exactly a unit of its types (ENGINE.md 247.1, `Game::wild_any`).
     pub(crate) fn spell_rest_free(&self, card: CardIdx, item: &StackItem) -> bool {
         let Some(rest) = self.spell_rest(card, item) else { return true };
         if rest.crew > 0 || item.alt > 0 && self.item_alt(card, item).is_some_and(|(a, _)| a.emerge.is_some()) {

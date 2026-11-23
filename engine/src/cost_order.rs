@@ -340,7 +340,7 @@ pub(crate) fn filter_reads_tapped(f: &Filter) -> bool {
 
 /// Does filter `f` read nothing the rest of a cast may change (`RestReach`) but by taking objects: no tapped status, no
 /// counters, no count of permanents, no colour; types and abilities (which `RestReach::chars` says may change or not);
-/// power and toughness only while `unsettled` is false (ENGINE.md 236)?
+/// power and toughness only while `unsettled` is false (ENGINE.md 247.1)?
 pub(crate) fn filter_settled(f: &Filter, unsettled: bool) -> bool {
     let r = filter_reads(f);
     !r.tapped && !r.counters && !r.counts && r.kinds & !(kind::TYPES | kind::ABILITIES | kind::PT) == 0 && !(unsettled && r.kinds & kind::PT != 0)
@@ -350,7 +350,7 @@ pub(crate) fn filter_settled(f: &Filter, unsettled: bool) -> bool {
 /// (`Game::cast_rest_reach`; ENGINE.md 231.3): `leave`, the permanents it may remove; `chars`, whether a continuous
 /// effect may change some permanent's types or abilities; `unsettled`, whether a permanent may lose counters or a
 /// toughness change (a state-based action could then remove a permanent); `counters`, the permanents that may lose (or
-/// gain) counters (ENGINE.md 236).
+/// gain) counters (ENGINE.md 247.1).
 pub(crate) struct RestReach {
     pub leave: Vec<CardIdx>,
     pub chars: bool,
