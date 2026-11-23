@@ -47108,3 +47108,47 @@ No `RULES_EPOCH` bump: it moves with a re-recorded digest (`tools/position_lab.p
 * Fresh seeds, release, `tools/fuzz_shards.py`, through the slot throttle: the default pool, 4,000 games and 200
   matches from seed 249,100,000 - passed; the default pool with hidden decklists, 4,000 games from seed 249,200,000 -
   passed. No stop of any kind in either.
+
+## 250. The stew's judged matches as game records: `recipe.judge.records` (branch `feat/stew-judge-records`, 2026-11-23)
+
+**Why.** The user's stew dashboard (stew.greggg230.com; its own repository, a read-only publisher beside the stew) has to
+show how each network sideboards. A specialist's self-play does not say: 85% of its seats take a dealt deck and the rest
+follow the matchup model's choice table as teacher decisions (240), so its records hold the taught line. A network's own
+sideboarding happens only in judging (the plain evaluation spec: no dealt decks, no tables, 239.3) - and the judge kept
+each match's result, never its moves. `mtgz.az.sideboard_census` (132) refuses a specialist (it needs `start_game` 2) and
+the game database skips best-of-three matches (a chained contest), so neither could stand in.
+
+**What.** `recipe.judge.records` (bool, default false: the jobs of before, key for key). With it on, each local judge job
+carries a `records` block - {records: `<stew>/judge/records`, kind `stew_judge`, it: the round, labels {a, b}: its two
+nets' stew names and versions ('deck:X v2', 'spec:X|Y v2', 'main v2'), meta {tool, job, arm, decks, chooser, layout,
+round}} - and its match process turns the driver's game log on and writes the job's matches as one records file
+(`zero.gamerec.MatchSink.add_rows`: `<stew>/judge/records/stew_judge/iter_<round>/local-<pid>-<ms>-<n>.jsonl.gz`, the build
+line, the spec, one record a match: seed, steps with the episode boundaries, `players` per seat in the match's seat order,
+`meta` with the job's and the driver seed). The result file names it (`records`: {file, dir, games}): a reader goes by the
+results, so a file of a job that died between the two writes is never counted and a job played again is counted once.
+
+* `mtgz/stew/judge.py`: `_job(..., nets=)`, `with_records(jobs, records, g)` (the block in place of `nets`; without
+  records `nets` is dropped), `plan_jobs(..., records=None)`, `play_job` (`set_game_log` + `write_records`). `job_hash`
+  leaves `records` out as it leaves `label` out: the game log changes no game (zero-core docs/az.md 59.3), so a result
+  played without records stays valid when the setting is turned on in the middle of a round (its matches then have no
+  record: the reader sees fewer matches, never wrong ones).
+* `mtgz/stew/config.py`: `DEFAULT_JUDGE['records']` false, a boolean. `mtgz/stew/orchestrator.py`: `judge_phase` passes the
+  directory when the recipe says so. The farm backend of 249 is not on main yet: its campaign rows carry each match's
+  trace (`rec`), which `zero.gamerec.from_trace` turns into the same records - a follow-up once 249 lands.
+
+Python only: no engine, encoding, search or worker change; the published farm build of the commit before is this one's
+(`farm_builds.lookup`: the same Rust inputs).
+
+**Checked.** A real judge job of the first stew's generation 0 (arm A, the Doomsday deck stew against the Delver-Doomsday
+specialist, 4 best-of-three matches at 64 simulations on CUDA) played without and with `records`: the same rows match for
+match (results, games a match, decisions), the same job hash; the records file holds its 4 matches with the players in
+seat order, and replaying them through the engine gives each seat's 60 for games 2 and 3 (the dashboard's reader:
+the deck stew took out 2 Street Wraith, Pact of Negation and Lion's Eye Diamond for 2 Fatal Push and 2 Murktide Regent in
+all 4; the specialist's Delver seat kept its 60).
+
+**Tests.** `tests/test_stew_judge.py::test_game_records_ride_on_the_jobs_without_changing_them` (every job of both judge
+phases with and without records: equal but for `records`, equal hashes, no `nets` left, the labels of arms G, B, A, M)
+and `::test_judge_records_is_a_boolean_of_the_recipe`.
+
+**To turn it on in a live stew.** At a pause before a judge phase: move the stew's worktree to a commit with this section
+and set `"records": true` in the stew's stew.json `recipe.judge`. Disk: a few MB a generation.

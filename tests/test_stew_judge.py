@@ -168,3 +168,31 @@ def test_report_markdown_renders_a_summary():
     assert 'held here' in md and f'| {DEL}\\|{DD} |' in md and 'generation over generation' in md and 'a note' in md
     cells = [ln for ln in md.splitlines() if ln.startswith(f'| {DEL}\\|')]
     assert cells and all(ln.replace('\\|', '').count('|') == 8 for ln in cells)       # 7 columns: no stray bar
+
+
+def test_game_records_ride_on_the_jobs_without_changing_them():
+    """recipe.judge.records (docs/ENGINE.md 250): the same jobs, hash for hash, each with where its matches' game
+    records go and its two nets' stew names; without it the jobs carry neither `records` nor `nets`."""
+    st = FakeState([DEL, DD, SNS], [DEL])
+    plain = J.plan_jobs('judge_deck_gap', st, 0, JC, spec_fn, {}) + J.plan_jobs('judge', st, 0, JC, spec_fn, {})
+    rec = (J.plan_jobs('judge_deck_gap', st, 0, JC, spec_fn, {}, records='R')
+           + J.plan_jobs('judge', st, 0, JC, spec_fn, {}, records='R'))
+    assert [j['id'] for j in plain] == [j['id'] for j in rec]
+    for a, b in zip(plain, rec):
+        assert 'records' not in a and 'nets' not in a and 'nets' not in b
+        assert {k: v for k, v in b.items() if k != 'records'} == a
+        assert J.job_hash(a) == J.job_hash(b)              # a result played without records stays valid
+        r = b['records']
+        assert (r['records'], r['kind'], r['it']) == ('R', 'stew_judge', 0)
+        assert r['meta'] == {'tool': 'stew_judge', 'job': b['id'], 'arm': b['id'][0], 'decks': b['decks'],
+                             'chooser': b['chooser'], 'layout': b['layout'], 'round': 0}
+    by = {j['id']: j['records']['labels'] for j in rec}
+    spec = C.spec_name(DEL, DD)
+    assert by['G.izzet-doomsday'] == {'a': f'{spec} v1', 'b': f'{spec} v0'}
+    assert by['B.izzet-doomsday.c0'] == {'a': f'{spec} v1', 'b': f'{spec} v1'}
+    assert by['A.doomsday-izzet.s1.c0'] == {'a': f'deck:{DEL} v1', 'b': f'{spec} v1'}   # (X = seat 1's deck)
+    assert by['M.izzet-doomsday.s0.c1'] == {'a': 'main v1', 'b': f'{spec} v1'}
+
+
+def test_judge_records_is_a_boolean_of_the_recipe():
+    assert C.DEFAULT_JUDGE['records'] is False

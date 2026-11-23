@@ -39,7 +39,7 @@ DEFAULT_DISTILL = {'steps': 20000, 'batch': 512, 'lr': 5e-4, 'lr_min': 1e-5, 'wa
                    'ram_budget_gb': 20, 'seed': 1}
 DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims': 64, 'device': 'cuda', 'threads': 16,
                  'groups': 1, 'procs': 1, 'seed': 0, 'chance_k': 2, 'precision': None, 'gen_over_gen': True,
-                 'main_arms': True, 'est_s_per_match': 3.5}
+                 'main_arms': True, 'est_s_per_match': 3.5, 'records': False}
 JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend per comparison)
 DEFAULT_RECIPE = {'game': 'mtg', 'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
                   'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
@@ -278,6 +278,9 @@ def normalize(cfg, check_lists=True):
     for k in ('sims', 'threads', 'groups', 'procs'):
         if not isinstance(j[k], int) or j[k] < 1:
             raise ConfigError(f'recipe.judge.{k} {j[k]!r}: a positive integer')
+    if not isinstance(j['records'], bool):
+        raise ConfigError(f"recipe.judge.records {j['records']!r}: true (every judged match's game record is kept: "
+                          f"judge/records/, docs/ENGINE.md 250) or false")
     bad = sorted(set(r['distill']) - set(DEFAULT_DISTILL))
     if bad:
         raise ConfigError(f'recipe.distill: unknown keys {bad} (the sources file\'s "train" block: '
