@@ -988,7 +988,16 @@ impl Game {
         let paged = d.options.iter().any(|o| o.action == act::LIBRARY + act::LIBRARY_N - 1 && matches!(o.choice, Choice::Page(_)))
             || matches!(d.stage, Stage::Paged { window } if window > 0) && d.options.iter().any(named);
         if !paged {
-            return self.graveyard_list(p, d.kind, &d.options).into_iter().map(Some).collect();
+            // (The list the decision's ids were given by, unless an option left the decision after that: the loop
+            // rule withholds a taken option of an open loop action's activation once the ids are set
+            // (`ask_options`, `loop_ask`; its records hold ids, so the ids stay). The offered cards of both
+            // graveyards read from the options left would then put every card after the withheld one a slot early,
+            // one slot off its option's id (ENGINE.md 248.5): then, as on a page, each offered card at its id's
+            // slot and the withheld card's slot empty.)
+            let list = self.graveyard_list(p, d.kind, &d.options);
+            if d.options.iter().filter(|o| named(o)).all(|o| list.get((o.action - act::LIBRARY) as usize).copied() == self.graveyard_choice(o.choice)) {
+                return list.into_iter().map(Some).collect();
+            }
         }
         let mut v = Vec::new();
         for o in d.options.iter().filter(|o| named(o)) {

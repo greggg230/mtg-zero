@@ -2422,4 +2422,35 @@ mod queue_1123_tests {
         assert!(views.iter().any(|x| x.0 != views[0].0), "the random orders differ");
         assert!(views.iter().all(|x| x.1 == views[0].1), "P1's view is the same whatever the order");
     }
+
+    /// ENGINE.md 248.5 (queue entry d4639eb826ec, hidden-decklist game 100085630). The list block's
+    /// graveyard cards sit at the slots their options' ids name when an option left the decision
+    /// after the ids were given (the loop rule's withheld option, `loop_ask`): the withheld card's
+    /// slot is empty. Before, the list was read again from the options left, every card after the
+    /// withheld one a slot early: an option's pointer named another card's token.
+    #[test]
+    fn a_graveyard_list_keeps_each_card_at_its_options_slot_when_an_option_is_withheld() {
+        let g = Scenario::new(db())
+            .graveyard(0, &["Plains", "Swamp", "Island"])
+            .graveyard(1, &["Forest"])
+            .library(0, &["Island"; 3])
+            .library(1, &["Island"; 3])
+            .at(Step::Main1, 0)
+            .start();
+        let (g0, g1) = (g.players[0].graveyard.clone(), g.players[1].graveyard.clone());
+        let opt = |k: u16, c: CardIdx| Opt { action: act::LIBRARY + k, choice: Choice::Target(Target::Obj(g.obj_ref(c))) };
+        let d = |options: Vec<Opt>| Decision { player: 0, kind: DecisionKind::Target, options, stage: Stage::One };
+        // (Cards of both graveyards offered: the list is the offered cards, the decider's first.)
+        let all = d(vec![opt(0, g0[0]), opt(1, g0[1]), opt(2, g0[2]), opt(3, g1[0])]);
+        assert_eq!(g.decision_graveyard_list(0, &all), vec![Some(g0[0]), Some(g0[1]), Some(g0[2]), Some(g1[0])]);
+        let held = d(vec![opt(0, g0[0]), opt(2, g0[2]), opt(3, g1[0])]);
+        assert_eq!(g.decision_graveyard_list(0, &held), vec![Some(g0[0]), None, Some(g0[2]), Some(g1[0])], "the withheld card's slot is empty");
+        // (Every card of the decider's graveyard withheld: the options left are the other graveyard's, whose whole
+        // list would start at slot 0.)
+        let theirs = d(vec![opt(3, g1[0])]);
+        assert_eq!(g.decision_graveyard_list(0, &theirs), vec![None, None, None, Some(g1[0])]);
+        // (One graveyard offered: its whole list, a card not offered at its slot as before.)
+        let one = d(vec![opt(0, g0[0]), opt(2, g0[2])]);
+        assert_eq!(g.decision_graveyard_list(0, &one), vec![Some(g0[0]), Some(g0[1]), Some(g0[2])]);
+    }
 }
