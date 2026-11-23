@@ -959,6 +959,27 @@ impl Game {
         false
     }
 
+    /// `feed_castable`'s question of a spell being cast (ENGINE.md 247.3): can the payment of spell `card`, on the stack
+    /// as `item` says (what is announced so far, with the announcement a decision of the cast is asking about: its
+    /// additional cost option), be completed with the help of mana abilities activated in its 601.2g step that feed
+    /// its graveyard cost? The step searched on a copy with the item so, as `feed_search` does for castability - so a
+    /// decision of the cast offers what castability counted (CR 601.2b: the option is announced, then 601.2g-h pay it).
+    pub(crate) fn feed_completes(&self, card: CardIdx, item: &crate::game::StackItem) -> bool {
+        let p = item.controller;
+        if item.from == crate::eoe_c::FREE_CAST || !self.feed_gap(p, card, item.from, item.alt) {
+            return false;
+        }
+        let Some(pos) = self.item_index(item.id) else { return false };
+        let mut g = self.clone();
+        g.pending = None;
+        g.answer = None;
+        g.page = None;
+        g.stack[pos] = item.clone();
+        let floor = g.agenda.len();
+        g.agenda.push(Task::CastMana { id: item.id, card: None, again: false, after: 0, sac: None });
+        g.payment_completes(floor, p)
+    }
+
     /// Is there a mana ability the 601.2g step may activate that puts a card into `p`'s graveyard which spell `card`'s
     /// payment (cast the way `from` and `alt` say) reads and its castability does not count (`feed_castable`)? Its
     /// cost reads the graveyard (delve, an exile from it); `p` has such an ability (whether it may be activated now is

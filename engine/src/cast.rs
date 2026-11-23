@@ -2832,11 +2832,15 @@ impl Game {
                 // payment's sources, improvise's and convoke's too, its
                 // spending restrictions, emerge's permanent to choose;
                 // ENGINE.md 100.4.11.)
+                // (Or with mana abilities activated while it is cast that feed its graveyard cost, CR 601.2g: the
+                // option castability counted, `feed_castable`; ENGINE.md 231.4, 247.3.)
                 let mut base = item.clone();
                 let opts: Vec<Opt> = (0..def.additional.len())
                     .filter(|&k| {
                         base.cost_option = k as u8;
-                        kicker_ok(k) && self.route_extra(card, item.from, k as u8).is_some() && self.can_pay_spell(card, &base, &self.total_mana(card, &base))
+                        kicker_ok(k)
+                            && self.route_extra(card, item.from, k as u8).is_some()
+                            && (self.can_pay_spell(card, &base, &self.total_mana(card, &base)) || self.feed_completes(card, &base))
                     })
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();

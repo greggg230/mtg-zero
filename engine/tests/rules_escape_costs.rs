@@ -95,3 +95,33 @@ fn cr_702_66a_702_138a_delves_graveyard_picks_leave_the_escapes_cards() {
         assert_ne!(e.obj(lotus).zone, Zone::Battlefield, "the Lotus pays: {}", log(e));
     }
 }
+
+/// CR 601.2b, 601.2g-h, 702.138a: Bitter Triumph ("as an additional cost to cast this spell, discard a card or pay 3
+/// life") escaped by Underworld Breach with one other card in the graveyard: the card discarded and a Chromatic Star
+/// sacrificed for mana while it is cast (601.2g) are the second and third. Castability counted that (the 601.2g
+/// step's search, ENGINE.md 231.4); the choice of the additional cost asked the payment alone and offered nothing:
+/// "ChooseCost with no options" (fuzz seed 100438064 with hidden decklists, ENGINE.md 247.3). It offers the discard
+/// (not the life: two cards only).
+#[test]
+fn cr_601_2b_702_138a_the_additional_cost_choice_counts_the_steps_feeding_abilities() {
+    let g = cube()
+        .battlefield(0, &["Underworld Breach", "Chromatic Star", "Swamp", "Swamp", "Swamp"])
+        .battlefield(1, &["Llanowar Elves"])
+        .hand(0, &["Island"])
+        .graveyard(0, &["Bitter Triumph", "Ponder"])
+        .at(Step::Main1, 0)
+        .start();
+    let bt = g.card(0, "Bitter Triumph", Zone::Graveyard);
+    let star = g.card(0, "Chromatic Star", Zone::Battlefield);
+    assert!(g.has_option(Choice::Cast(bt)), "{}", opts(&g));
+    let mut h = g.clone();
+    h.choose(Choice::Cast(bt));
+    assert_eq!(h.kind(), Some(DecisionKind::ChooseCost), "{}\n{}", opts(&h), log(&h));
+    assert_eq!(h.offered(), vec![Choice::Number(0)], "the discard: {}", opts(&h));
+    let ends = every_way(&h, 2000);
+    assert!(!ends.is_empty());
+    for e in &ends {
+        assert_eq!(e.obj(bt).zone, Zone::Stack, "{}", log(e));
+        assert_eq!(e.obj(star).zone, Zone::Exile, "the Star sacrificed while casting, then exiled by escape: {}", log(e));
+    }
+}
