@@ -804,8 +804,8 @@ def build_cuda(a):
     return bid, d
 
 
-# ---------------------------------------------------------------------- the torch runtime (docs/ENGINE.md 241)
-# The torch runtime pack (zero-farm's per-machine torch runtime; zero-core docs/az.md 78): Windows' embeddable CPython at
+# ---------------------------------------------------------------------- the torch runtime (docs/ENGINE.md 244)
+# The torch runtime pack (zero-farm's per-machine torch runtime; zero-core docs/az.md 80): Windows' embeddable CPython at
 # the minor version `mtgz/_engine.pyd` is built for (cp313), torch's CUDA build and the third-party modules the torch
 # worker's play path imports (measured: numpy, typing_extensions; torch's wheel brings torchgen and functorch), each from
 # its publisher, pinned by sha256.
@@ -831,7 +831,7 @@ MANIFEST_MAX_FILES = 20000
 # a path segment the coordinator takes (zero-farm: [A-Za-z0-9._-]; torch's dist-info is `torch-2.11.0+cu128.dist-info`)
 SEGMENT_OK = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-')
 # the checkout's data files the game package reads at import and in play (measured with an audit hook on a real job,
-# docs/ENGINE.md 241): the decklists a spec names, EoE's card list
+# docs/ENGINE.md 244): the decklists a spec names, EoE's card list
 TORCH_BUILD_DATA = ('data/decks/', 'engine/src/az/eoe_cards.txt')
 PROBE = r'''
 import json, sys, time
@@ -899,7 +899,7 @@ def unpack_wheel(path, what, dest, prune=True):
 
 
 def build_torch_pack(a):
-    """The torch runtime pack (module docs, docs/ENGINE.md 241) -> (build_id, directory)."""
+    """The torch runtime pack (module docs, docs/ENGINE.md 244) -> (build_id, directory)."""
     import zipfile
     tdir = target_dir()
     cache = a.wheel_dir or os.path.join(tdir, 'wheels')
@@ -1004,7 +1004,7 @@ def tracked(root, prefix):
 
 
 def build_torch_worker(a):
-    """The torch worker build (module docs, docs/ENGINE.md 241) -> (build_id or None with --no-sign, directory)."""
+    """The torch worker build (module docs, docs/ENGINE.md 244) -> (build_id or None with --no-sign, directory)."""
     ec, cc = clean_tree()
     if not a.pyshim or not os.path.isfile(a.pyshim):
         die(f'--pyshim: zero-farm\'s zf-pyshim.exe (the build\'s entry), not {a.pyshim!r}')
@@ -1409,7 +1409,7 @@ def main():
     g.add_argument('--runtime', action='store_true', help='the runtime pack (ONNX Runtime + its MSVC runtime)')
     g.add_argument('--resign', metavar='BUILD_DIR', help='sign a signed worker build\'s executable again for --runtime-id (PROTOCOL 9.1)')
     g.add_argument('--publish-dir', metavar='BUILD_DIR', help='publish a signed build directory (verified first)')
-    g.add_argument('--torch', action='store_true', help='the torch worker build (docs/ENGINE.md 241): the Python of the commit, '
+    g.add_argument('--torch', action='store_true', help='the torch worker build (docs/ENGINE.md 244): the Python of the commit, '
                    'its engine module and zf-pyshim.exe, for the torch runtime pack (--runtime-id)')
     ap.add_argument('--root', help='the checkout to build (default: this one): a clean worktree at the commit to release')
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')

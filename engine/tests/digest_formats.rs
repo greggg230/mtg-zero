@@ -2,7 +2,7 @@
 //! on the cube's table; none of them plays constructed play's table, a best-of-three match, its
 //! sideboarding, the constructed prior's hidden 60s, the EoE table with its layout v6 rows, or
 //! zero-core's driver (the searches, the belief and deck deals, the evaluation cache, the records).
-//! Four digests here, each compared with its recorded file in `tests/data/`:
+//! Five digests here, each compared with its recorded file in `tests/data/`:
 //!
 //! * `constructed_digests` (`digests_constructed.txt`): matches of the Delver best-of-three preset's
 //!   spec (`delver-mirror-bo3`, `tests/data/digest_specs.json`: post-sideboard games only, one
@@ -20,6 +20,12 @@
 //!   its seed) - 180 games of random play, 45 of `MtgAz`'s heuristic against random play -, 45 matches of its
 //!   best-of-three (the 75s, one episode per game) and 18 post-sideboard matches of its mirrors (`"start_game": 2`,
 //!   weights on the diagonal); each line names the game's pairing.
+//! * `pair_digests` (`digests_pair.txt`, ENGINE.md 240): a stew specialist's spec (`legacy-pair-bo3-varied`,
+//!   `digest_specs.json`'s `pair`: the best-of-three metagame restricted to Delver against Doomsday, whole matches,
+//!   each seat dealt from its own 75 with probability 0.85, the forced find at p 0) with a choice table per deck (seeded
+//!   random legal 60s), the same with the forced find at p 1, the same shape for Delver against Sneak and Show and for
+//!   the Delver mirror, and the fixed two-75 spec with `decks.p0_table` / `decks.p1_table`; a seat with a table plays its
+//!   table's action (a teacher decision), every other decision at random; each line names the match's pairing.
 //! * `driver_digest` (`digests_driver.txt`): zero-core's `Driver<MtgAz>` on the Delver best-of-three
 //!   preset's spec with a self-play seat as the live run's (fewer simulations: 16, 8 in a fast search,
 //!   4 for a minor decision; 2 groups of 8 games; the completed-Q target, the evaluation cache, root-view leaves with view
@@ -41,7 +47,7 @@
 //! tilt every other time, the deck's where decks are hidden) with its identities and decks; each
 //! game's end (the result, the outcome, the turn), each next episode, and the match's results.
 //!
-//! `cargo test --release -p engine --test digest_formats -- --ignored --nocapture` compares (the four
+//! `cargo test --release -p engine --test digest_formats -- --ignored --nocapture` compares (the five
 //! run at once); `DIGEST_WRITE=1` records instead - only when behaviour is meant to change, stating
 //! the old -> new combined digests. `DIGEST_ENCODING=0` leaves the encodings out of the first two and
 //! prints their combined digests only (compare them across an encoding-only change, run on both
@@ -296,8 +302,11 @@ fn play<G: Digested>(spec: &G::Spec, seed: u64, bot: Option<usize>) -> u64 {
         if step % 40 == 27 {
             hash_belief_world(&mut h, &g, seed, step);
         }
-        let a = match (&mut heur, bot) {
-            (Some(b), Some(s)) if s == p => b.choose(&g, &legal),
+        // (a seat's choice table, ENGINE.md 168.3 / 223: its action, as zero-core's driver plays a teacher decision; no
+        // spec of the other digests has one)
+        let a = match (g.az().table_action(), &mut heur, bot) {
+            (Some(t), _, _) => t,
+            (None, Some(b), Some(s)) if s == p => b.choose(&g, &legal),
             _ => legal[rng.below(legal.len() as u32) as usize],
         };
         keys.clear();
@@ -453,6 +462,101 @@ fn metagame_digests() {
         lines.push(format!("mp {seed} {c} {:016x}", play::<MtgAz>(&post, 3000 + seed, None)));
     }
     finish("metagame", "digests_metagame.txt", "225 best-of-one games and 63 best-of-three matches", &lines, t);
+}
+
+/// A choice table of deck `d` (ENGINE.md 168.3, 223): the 24 contexts' random legal 60s of its 75 (the main with 1 to
+/// 12 random one-for-one swaps), seeded.
+fn pair_table(d: &Decklist, seed: u64) -> serde_json::Value {
+    let side: Vec<String> = d.sideboard.iter().flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
+    let main = d.main_names();
+    let (mut names, mut copies, mut base): (Vec<String>, Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new(), Vec::new());
+    for (i, n) in main.iter().chain(&side).enumerate() {
+        let k = names.iter().position(|x| x == n).unwrap_or_else(|| {
+            names.push(n.clone());
+            copies.push(0);
+            base.push(0);
+            names.len() - 1
+        });
+        copies[k] += 1;
+        if i < main.len() {
+            base[k] += 1;
+        }
+    }
+    let mut r = Rng::new(seed);
+    let mut choices = Vec::new();
+    for game in 2..=3u8 {
+        for first in 0..2u8 {
+            for lead in -1..=1i8 {
+                for od in 0..2u8 {
+                    let mut c = base.clone();
+                    for _ in 0..1 + r.below(12) {
+                        let out: Vec<usize> = (0..c.len()).filter(|&k| c[k] > 0).collect();
+                        let inn: Vec<usize> = (0..c.len()).filter(|&k| c[k] < copies[k]).collect();
+                        let (o, i) = (out[r.below(out.len() as u32) as usize], inn[r.below(inn.len() as u32) as usize]);
+                        if o != i {
+                            c[o] -= 1;
+                            c[i] += 1;
+                        }
+                    }
+                    choices.push(serde_json::json!([game, first, lead, od, c]));
+                }
+            }
+        }
+    }
+    let list: Vec<serde_json::Value> = names.iter().zip(&copies).map(|(n, k)| serde_json::json!([n, k])).collect();
+    serde_json::json!({"version": format!("d{seed}"), "list": list, "choices": choices})
+}
+
+/// `legacy-pair-bo3-varied`'s spec (ENGINE.md 240, `digest_specs.json`'s `pair`: Delver against Doomsday) with each
+/// deck's choice table, or its shape for the pairing `ks` of the real 75s (0 Delver, 1 Doomsday, 2 Sneak and Show; one
+/// index: the mirror); the forced find at `ff` (None: none).
+fn pair_value(ks: &[usize], ff: Option<f64>) -> serde_json::Value {
+    let mut v: serde_json::Value = serde_json::from_str(&spec_json("pair")).unwrap();
+    let files = ["izzet_delver_8016541", "doomsday_8027957", "sneak_show_8014220"];
+    let decks: Vec<serde_json::Value> = ks
+        .iter()
+        .map(|&k| {
+            let d = Decklist::parse(&std::fs::read_to_string(format!("{}/../data/decks/{}.json", env!("CARGO_MANIFEST_DIR"), files[k])).unwrap()).unwrap();
+            let side: Vec<String> = d.sideboard.iter().flat_map(|(n, c)| std::iter::repeat_n(c.clone(), *n as usize)).collect();
+            serde_json::json!({"name": files[k], "main": d.main_names(), "sideboard": side, "table": pair_table(&d, 223 + k as u64)})
+        })
+        .collect();
+    // (the preset's decks are the rebuilt ones, without their tables)
+    if ks == [0, 1] {
+        let strip: Vec<serde_json::Value> = decks.iter().map(|d| serde_json::json!({"name": d["name"], "main": d["main"], "sideboard": d["sideboard"]})).collect();
+        assert_eq!(v["metagame"]["decks"], serde_json::json!(strip), "the preset's pairing is Delver against Doomsday");
+    }
+    v["metagame"]["weights"] = if ks.len() == 1 { serde_json::json!([[1]]) } else { serde_json::json!([[0, 1], [1, 0]]) };
+    v["metagame"]["decks"] = serde_json::json!(decks);
+    match ff {
+        Some(p) => v["forced_find"]["p"] = serde_json::json!(p),
+        None => {
+            v.as_object_mut().unwrap().remove("forced_find");
+        }
+    }
+    v
+}
+
+#[test]
+#[ignore]
+fn pair_digests() {
+    let t = std::time::Instant::now();
+    let dd = MtgSpec::parse(&pair_value(&[0, 1], Some(0.0)).to_string()).unwrap();
+    assert!(dd.dealt_decks.is_some_and(|d| d.per_seat) && dd.start_game == 1 && dd.game_episodes, "the preset's shape");
+    let wheel = MtgSpec::parse(&pair_value(&[0, 1], Some(1.0)).to_string()).unwrap();
+    let sns = MtgSpec::parse(&pair_value(&[0, 2], None).to_string()).unwrap();
+    let mirror = MtgSpec::parse(&pair_value(&[0], None).to_string()).unwrap();
+    // the fixed two-75 spec of a pairing (Doomsday in seat 0): its seats' own tables
+    let fixed = MtgSpec::parse(&engine::az::metagame::Metagame::pair_json(&pair_value(&[0, 1], Some(0.5)).to_string(), [1, 0]).unwrap()).unwrap();
+    assert!(fixed.seat_tables.iter().all(|t| t.is_some()), "the fixed spec's seat tables");
+    let cell = |s: &MtgSpec, seed: u64| s.pairing(seed).map_or("f".to_string(), |p| format!("{}{}", p.decks[0], p.decks[1]));
+    let mut lines = Vec::new();
+    for (tag, s, n, base) in [("pp", &dd, 20u64, 6000u64), ("pw", &wheel, 15, 6100), ("ps", &sns, 15, 6200), ("pm", &mirror, 10, 6300), ("pf", &fixed, 10, 6400)] {
+        for seed in 0..n {
+            lines.push(format!("{tag} {seed} {} {:016x}", cell(s, base + seed), play::<MtgAz>(s, base + seed, None)));
+        }
+    }
+    finish("pair", "digests_pair.txt", "70 best-of-three matches", &lines, t);
 }
 
 #[test]

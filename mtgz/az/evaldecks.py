@@ -14,15 +14,25 @@ import json
 
 
 def eval_spec(spec):
-    """`spec` (the mtg game's JSON) with the evaluation deck set, without dealt decks (`undealt`) and without the forced
-    find (docs/ENGINE.md 180: a self-play training aid, `mtgz.az.forced_find`); the same
-    rule as the engine's `MtgSpec::eval_json`. A spec with explicit decklists keeps them, and so does a metagame (its 75s,
-    docs/ENGINE.md 176: evaluation plays every pairing as self-play does)."""
+    """`spec` (the mtg game's JSON) with the evaluation deck set, without dealt decks (`undealt`), choice tables
+    (docs/ENGINE.md 168.3; a seat's or a metagame deck's own, 223) and the forced find (docs/ENGINE.md 180: a self-play
+    training aid, `mtgz.az.forced_find`); the same rule as the engine's `MtgSpec::eval_json`. A spec with explicit
+    decklists keeps them, and so does a metagame (its 75s, docs/ENGINE.md 176: evaluation plays every pairing as
+    self-play does)."""
     s = json.loads(undealt(spec)) if spec and spec.strip() else {}
     if not isinstance(s, dict):
         raise ValueError(f'mtg spec is not a JSON object: {spec!r}')
     # (the forced find is a self-play training aid, docs/ENGINE.md 180: evaluation plays every pick of the network's own)
     s.pop('forced_find', None)
+    # (sideboarding by a choice table is a self-play setting, docs/ENGINE.md 168.3, 223: evaluation measures the
+    # network's own sideboarding)
+    s.pop('sideboard_table', None)
+    if isinstance(s.get('decks'), dict):
+        s['decks'].pop('p0_table', None)
+        s['decks'].pop('p1_table', None)
+    for e in (s.get('metagame') or {}).get('decks', []):
+        if isinstance(e, dict):
+            e.pop('table', None)
     if s.get('decks', 'random') == 'random' and 'metagame' not in s:
         s['decks'] = 'eval'
     return json.dumps(s, separators=(',', ':'))

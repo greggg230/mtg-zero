@@ -58,6 +58,10 @@
 //!   "result", "aborted", "turns", "time"}` after a spec line `{"v": 1, "kind": "bo1-spec", "spec", "lists", "mains",
 //!   "metagame", "max_turns"}` at the step that ends the game (`MtgAz::match_step`); a game a seat resigned (zero-core's
 //!   resign rule ends it outside the game) writes none, as a sealed game's. Every other spec's lines are what they were.
+//! * **One choice table per deck** (ENGINE.md 240: a seat's own `decks.pN_table`, a metagame deck's `table`): the
+//!   spec line adds `"tables"` ([seat 0's table's version or null, seat 1's]); each game line already carries, per
+//!   seat, its 60's copies of its own 75 (`"decks"`, against the spec line's per-seat `"lists"` and `"mains"`), and a
+//!   metagame's the pairing - what the per-pairing matchup model reads (`mtgz.az.matchup`).
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -217,6 +221,15 @@ impl Bo3Log {
         // (ENGINE.md 176: the metagame's pairing, only for a metagame - every other spec line is what it was)
         if let Some(p) = &pairing {
             spec_json["metagame"] = p.json();
+        }
+        // (ENGINE.md 240: one choice table per deck - each seat's table's version, or null; only when the spec has
+        // per-deck tables, so every other spec line is what it was)
+        if !bo1 && spec.sideboard_table.is_none() {
+            let pools = seats.each_ref().map(|s| super::matches::MatchPool::constructed(&s.deck, &s.sideboard).0);
+            let t = spec.seat_tables_of(seed, &pools);
+            if t.iter().any(|t| t.is_some()) {
+                spec_json["tables"] = json!(t.map(|t| t.map(|t| t.version.clone())));
+            }
         }
         let spec_key = spec_json.to_string().bytes().fold(0x6A3E_B030u64, |h, b| crate::rng::split64(h ^ b as u64));
         LiveLog(Some(Arc::new(Bo3Log { spec_key, spec: spec_json, seed, pairing: pairing.map(|p| p.decks), bo1 })))

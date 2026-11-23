@@ -1,4 +1,4 @@
-"""MTG Zero's torch worker entry (docs/ENGINE.md 241; zero-core docs/az.md 78): shipped as `worker_main.py` at the root of
+"""MTG Zero's torch worker entry (docs/ENGINE.md 244; zero-core docs/az.md 80): shipped as `worker_main.py` at the root of
 a torch worker build (tools/farm_build.py --torch), next to the commit's `mtgz/` (with its `_engine.pyd`) and zero-core's
 `third_party/zero-core/python/zero/` (a checkout's layout: `mtgz` finds its pinned core there). zero-farm's `zf-pyshim.exe` runs it with the torch runtime pack's Python:
 

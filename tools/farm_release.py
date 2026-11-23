@@ -38,7 +38,7 @@ in the macOS part (below), whose failure is recorded and leaves the published bu
    then `probe-providers --runtime-dir <DirectML pack> --providers dml,cpu --reps 2` on it: both must pass (this PC's
    GPU through DirectML, whatever its vendor). `--no-dml` skips it.
 6c. **torch** (when release.json sets `torch_runtime`, the torch runtime pack of `farm_build.py --runtime --pack torch`, and
-   `pyshim`, zero-farm's zf-pyshim.exe: the owner's opted-in machines, docs/ENGINE.md 241): `farm_build.py --root
+   `pyshim`, zero-farm's zf-pyshim.exe: the owner's opted-in machines, docs/ENGINE.md 244): `farm_build.py --root
    <release worktree> --torch --runtime-id <torch pack> --pyshim <pyshim> --min-agent <torch_min_agent>` (the commit's
    Python, its engine module, worker_main.py, zf-pyshim.exe; built for EVERY commit - Python changes count, unlike the
    other builds' Rust inputs) and **torch-selftest**: the reference checkpoint as torch-weights/1 (the run's
@@ -158,7 +158,7 @@ DEFAULTS = {
     'mac_runtime': None,                           # the macOS CPU pack (farm_build.py --runtime --pack macos-cpu)
     'dml_runtime': None,                           # the DirectML pack for AMD GPUs (farm_build.py --runtime --pack dml)
     'dml_min_agent': '0.3.11',                     # agents that use AMD GPUs through DirectML (PROTOCOL rev 22)
-    'torch_runtime': None,                         # the torch runtime pack (farm_build.py --runtime --pack torch; ENGINE.md 241)
+    'torch_runtime': None,                         # the torch runtime pack (farm_build.py --runtime --pack torch; ENGINE.md 244)
     'torch_min_agent': '0.3.18',                   # agents that run the torch worker (zero-farm's TORCH_AGENT, at least)
     'pyshim': None,                                # zero-farm's zf-pyshim.exe: the torch worker build's entry
     'mac_min_agent': '0.3.0',                      # agents that know platforms (PROTOCOL 11)

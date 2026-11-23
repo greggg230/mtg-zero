@@ -268,7 +268,7 @@ def pool_settings(e, alternates=True, cfg=None, log=None):
     pass the platform check (`mac_check`; '' when there is none) - and pool_variants naming the variant each GPU
     alternate plays (`VARIANT_OF`: 'gpu=fp16' with a CUDA alternate, 'dml=matmul@amd' with a DirectML one; left out
     with neither): without 'dml=matmul@amd' an AMD PC runs the gen's default graph, which DirectML refuses, on its CPU.
-    The torch alternate (docs/ENGINE.md 241: the owner's opted-in machines, `torch=weights`) comes first, so the
+    The torch alternate (docs/ENGINE.md 244: the owner's opted-in machines, `torch=weights`) comes first, so the
     machines opted in get it before the CUDA one - and only when it was built for exactly the commit asked (the torch
     build is the commit's Python; a reused entry's is another commit's). A route left out is said through `log`
     (docs/ENGINE.md 218)."""

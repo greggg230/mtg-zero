@@ -21,7 +21,7 @@ the uniform evaluator has no auxiliary head, the auxiliary targets are still rec
 3. **Features** (ENGINE.md 195): the worker's `info` announces the protocol feature `rolling` (zero-farm PROTOCOL rev
    15, 10.5) with this build's id: farm runs get rolling self-play leases by default (zero-core `pool_rolling` 'auto',
    docs/az.md 54.7) and their pool refuses a worker without it, so a build that loses the feature fails here first.
-4. **The torch worker** (ENGINE.md 241; zero-core tools/torch_worker_gate.py): this checkout's torch worker entry
+4. **The torch worker** (ENGINE.md 244; zero-core tools/torch_worker_gate.py): this checkout's torch worker entry
    (`tools/torch_worker_main.py serve`, the owner's machines' farm worker) plays a job on a small token network of the
    preset's layout on the CPU at float32, and its records, replayed by the trainer's path, must be the trainer's own
    local self-play rows of the same seed, game ids and network, game for game, bit for bit (pi and q at the float16 a
