@@ -46653,3 +46653,45 @@ and `::test_judge_records_is_a_boolean_of_the_recipe`.
 
 **To turn it on in a live stew.** At a pause before a judge phase: move the stew's worktree to a commit with this section
 and set `"records": true` in the stew's stew.json `recipe.judge`. Disk: a few MB a generation.
+
+## 251. The stew's stall rule: a specialist with no significant gain over its last turns sits out, an overrideable recommendation (`recipe.stall`, `tools/stew.py specialist`; 2026-11-23)
+
+**Why** (the user, 2026-11-23, after the first stew's generation 0: Delver-Doomsday +104 and Delver-Sneak +156 Elo in
+their first turn, the Delver mirror -24 +- 22): every specialist trained a fixed 32 iterations every generation and the
+stew never stopped - nothing measured whether a specialist had plateaued or what another turn was worth. The user's
+rule: "an overrideable recommendation from an algorithm: if we see no statistical gain in Elo over ~40 iterations, mark
+it as stalled, but I want to be able to manually specify that we should unpause it if we see other metrics that are
+improving". Turns are the judging grain, so the window is 2 turns (64 iterations, the nearest to 40); a stalled
+specialist sits out on its own (the user's choice) and the override brings it back.
+
+**The test** (each `judge_deck_gap@g`, for each specialist that trained in round g): its new version against its version
+`window` TRAINED turns before (a round it sat out is not a turn), paired (both seats on common deals), `matches` matches
+(`W.<a>-<b>.0`, its own deals: `seed_of('stew-window', ...)`); while the score is above 1/2 but its one-sided z = (score -
+1/2) / se is below `z`, another part of `matches` (`.1`, `.2`, ...) up to `max_matches` (sequential: a clear result costs
+one part, an ambiguous one is resolved before it decides). The decision: **stalled** when z < `z` (no significant gain;
+z capped at +-99 when every pair scored alike - JSON has no infinity), else improving. Stored per specialist in
+state.json (`nets.<spec>.stall`, the history in `stall_log`) and shown in the report ("Specialists: the stall rule": mode,
+versions tested, score, Elo, z, matches, recommendation, whether it trains next round) and in `status`.
+
+**What happens to a stalled specialist** (mode `auto`, the default): at the next train phase it sits out - its version
+g + 1 is version g (`skipped`), its deck stews distil from its last turn's rows again (`rows/<gen>` reused, recorded as
+`reused_from`), no gen-over-gen or stall test of it (nothing changed); its other judge jobs still run - a job identical
+to one judged in an earlier round (same nets, deals and spec: the same hash, e.g. arm B of a specialist that sat out)
+takes that result instead of replaying it (`reuse_judged`). A specialist that is not tested (fewer than `window` trained
+turns) keeps training. If no specialist would train in a round, the stew writes its PAUSE and stops ("the stall rule: no
+specialist trains").
+
+**The override**: `python tools/stew.py specialist DIR 'A|B' --train | --stall | --auto` (deck names, aliases or
+`spec:A|B`): `--train` (mode `on`) trains it every round whatever the rule says (its test still runs and is reported),
+`--stall` (mode `off`) sits it out, `--auto` hands it back to the rule. Applied at once when no run of the stew is live,
+else written to `requests/` and taken at the run's next train phase; every change logged in state.json `overrides`.
+
+**Config**: `recipe.stall` = `{"window": 2, "matches": 200, "max_matches": 600, "z": 1.645}` (the default; `null`: no
+test, every specialist trains every round). The first stew sets it in its stew.json at the re-pin that brings this.
+
+**Tests** (`tests/test_stew.py`, on the fakes): a round-0 test (window 1) where one specialist's new version only splits
+pairs (stalled), one wins every pair (improving at the first part), one alternates 1 / 0.5 (extended once, then
+improving); generation 1 - the stalled one sits out (v2 = v1, rows reused, no G or W job, arm A still judged), the
+window of the others their last two trained versions; the override on / auto / off by name, alias or net name, refused
+for an unknown pairing; the override while a run is live (a request file the run takes); every specialist off pauses the
+stew before any turn; the config's refusals and `null`.

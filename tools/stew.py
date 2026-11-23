@@ -10,6 +10,10 @@ distilled upward from them, judged every generation (mtgz.stew).
   python tools/stew.py step    DIR PHASE          # one phase by hand (it must be the next one)
   python tools/stew.py add-deck DIR NAME [--candidate] [--share S] [--alias A]   # joins at the next generation
   python tools/stew.py stop    DIR [--pause]      # write DIR/STOP (or PAUSE): the loop stops at its next safe point
+  python tools/stew.py specialist DIR PAIR --train | --stall | --auto
+                                                  # override the stall rule (docs/ENGINE.md 251) for one specialist
+                                                  #   (PAIR: 'A|B', deck names or aliases): --train trains it every
+                                                  #   round, --stall sits it out, --auto gives it back to the rule
 
 Run it from the stew's pinned checkout (`code.worktree` of stew.json; refused from another one unless
 --any-checkout): every process it starts runs there. `run` is long: start it hidden in the background (tools/
@@ -33,15 +37,20 @@ def same_checkout(cfg):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('cmd', choices=['init', 'plan', 'status', 'run', 'step', 'add-deck', 'stop'])
+    ap.add_argument('cmd', choices=['init', 'plan', 'status', 'run', 'step', 'add-deck', 'stop', 'specialist'])
     ap.add_argument('dir', help="the stew's directory")
-    ap.add_argument('arg', nargs='?', help='step: the phase; add-deck: the deck (a data/decks/ name)')
+    ap.add_argument('arg', nargs='?', help="step: the phase; add-deck: the deck (a data/decks/ name); specialist: "
+                                           "its pairing 'A|B'")
     ap.add_argument('--config', help='init: the stew config (JSON, mtgz/stew/config.py)')
     ap.add_argument('--candidate', action='store_true', help='add-deck: the deck is a candidate too')
     ap.add_argument('--share', type=float, default=None, help='add-deck: its field share (default: the mean)')
     ap.add_argument('--alias', default=None, help="add-deck: its short name in farm runs' names")
     ap.add_argument('--pause', action='store_true', help='stop: write PAUSE instead of STOP')
     ap.add_argument('--any-checkout', action='store_true', help="run from a checkout other than code.worktree")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument('--train', dest='mode', action='store_const', const='on', help='specialist: train every round')
+    mode.add_argument('--stall', dest='mode', action='store_const', const='off', help='specialist: sit out')
+    mode.add_argument('--auto', dest='mode', action='store_const', const='auto', help='specialist: the stall rule decides')
     a = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(errors='replace')
@@ -58,7 +67,7 @@ def main(argv=None):
             print(s.status())
             return 0
         s = Stew(a.dir)
-        mutating = a.cmd in ('run', 'step', 'add-deck')
+        mutating = a.cmd in ('run', 'step', 'add-deck', 'specialist')
         if mutating and not same_checkout(s.cfg) and not a.any_checkout:
             raise Refused(f"run tools/stew.py from the stew's code: {s.cfg['code']['worktree']}")
         if a.cmd == 'status':
@@ -76,6 +85,10 @@ def main(argv=None):
             if not a.arg:
                 ap.error('add-deck: the deck name')
             s.add_deck(a.arg, a.share, a.alias, a.candidate)
+        elif a.cmd == 'specialist':
+            if not a.arg or not a.mode:
+                ap.error("specialist: the pairing 'A|B' and one of --train / --stall / --auto")
+            s.set_train_mode(a.arg, a.mode)
         elif a.cmd == 'stop':
             from mtgz.stew.state import jsave
             import time

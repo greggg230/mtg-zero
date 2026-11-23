@@ -40,11 +40,17 @@ DEFAULT_DISTILL = {'steps': 20000, 'batch': 512, 'lr': 5e-4, 'lr_min': 1e-5, 'wa
 DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims': 64, 'device': 'cuda', 'threads': 16,
                  'groups': 1, 'procs': 1, 'seed': 0, 'chance_k': 2, 'precision': None, 'gen_over_gen': True,
                  'main_arms': True, 'est_s_per_match': 3.5, 'records': False}
+# The stall rule (docs/ENGINE.md 251): after a specialist's turn the judge plays its new version against its version of
+# `window` turns before (paired, `matches` matches; extended by `matches` at a time up to `max_matches` while the gain is
+# positive but not significant); no gain significant at one-sided z >= `z` = the algorithm's recommendation STALLED, and a
+# specialist on 'auto' (its default; `tools/stew.py specialist ... --train / --stall / --auto` overrides) gets no turn
+# while it stands. None: no stall test (every specialist trains every round).
+DEFAULT_STALL = {'window': 2, 'matches': 200, 'max_matches': 600, 'z': 1.645}
 JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend per comparison)
 DEFAULT_RECIPE = {'game': 'mtg', 'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
                   'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
                   'distill_iters': 6, 'retention_share': 'field', 'judge': DEFAULT_JUDGE, 'hold_after': [], 'env': {},
-                  'archive': 'copy'}
+                  'archive': 'copy', 'stall': DEFAULT_STALL}
 DEFAULT_CODE = {'worktree': None, 'sha': None, 'python': None, 'farm': None, 'farm_gates': True}
 FARM_KEYS = ('pool_build', 'pool_runtime', 'pool_worker', 'pool_alternates', 'pool_variants', 'pool_min_agent')
 
@@ -224,6 +230,8 @@ def normalize(cfg, check_lists=True):
     r = _merge(DEFAULT_RECIPE, cfg.get('recipe'), 'recipe')
     r['distill'] = _merge(DEFAULT_DISTILL, (cfg.get('recipe') or {}).get('distill'), 'recipe.distill')
     r['judge'] = _merge(DEFAULT_JUDGE, (cfg.get('recipe') or {}).get('judge'), 'recipe.judge')
+    sraw = (cfg.get('recipe') or {}).get('stall', DEFAULT_STALL)
+    r['stall'] = None if sraw is None else _merge(DEFAULT_STALL, sraw, 'recipe.stall')
     bad = sorted(set(r) - set(DEFAULT_RECIPE))
     if bad:
         raise ConfigError(f'recipe: unknown keys {bad} ({sorted(DEFAULT_RECIPE)})')
@@ -281,6 +289,19 @@ def normalize(cfg, check_lists=True):
     if not isinstance(j['records'], bool):
         raise ConfigError(f"recipe.judge.records {j['records']!r}: true (every judged match's game record is kept: "
                           f"judge/records/, docs/ENGINE.md 250) or false")
+    s = r['stall']
+    if s is not None:
+        bad = sorted(set(s) - set(DEFAULT_STALL))
+        if bad:
+            raise ConfigError(f'recipe.stall: unknown keys {bad} ({sorted(DEFAULT_STALL)}; null: no stall test)')
+        for k, m in (('window', 1), ('matches', 2), ('max_matches', 2)):
+            if not isinstance(s[k], int) or isinstance(s[k], bool) or s[k] < m or s[k] % m:
+                raise ConfigError(f'recipe.stall.{k} {s[k]!r}: a positive integer' + (f' (a multiple of {m}: paired '
+                                  f'matches)' if m > 1 else ' (turns)'))
+        if s['max_matches'] < s['matches'] or s['max_matches'] % s['matches']:
+            raise ConfigError(f"recipe.stall.max_matches {s['max_matches']}: a multiple of matches ({s['matches']})")
+        if isinstance(s['z'], bool) or not isinstance(s['z'], (int, float)) or not s['z'] > 0:
+            raise ConfigError(f"recipe.stall.z {s['z']!r}: a positive number (one-sided)")
     bad = sorted(set(r['distill']) - set(DEFAULT_DISTILL))
     if bad:
         raise ConfigError(f'recipe.distill: unknown keys {bad} (the sources file\'s "train" block: '
