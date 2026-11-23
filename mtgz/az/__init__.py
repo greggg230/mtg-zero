@@ -50,6 +50,7 @@ from .yardsticks import DELVER_YARDSTICKS
 from ..sealed.games import REMOTE_EVAL_LOG
 from ..sealed.rolling import SETTINGS as ROLLING_SETTINGS
 from .matchup import SETTINGS as MATCHUP_SETTINGS
+from .dealt_schedule import SETTINGS as DEALT_SCHEDULE_SETTINGS
 from .forced_find import SETTINGS as FORCED_FIND_SETTINGS, with_forced_find
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -516,6 +517,8 @@ REAL_DECKS_SETTINGS = {'real_decks_every': 0, 'real_decks_pools': 64, 'real_deck
 assert not set(REAL_DECKS_SETTINGS) & set(ROLLING_SETTINGS), 'two features of the package declare one setting'
 assert not set(MATCHUP_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS)), 'two features declare one setting'
 assert not set(FORCED_FIND_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS) | set(MATCHUP_SETTINGS)), 'two features declare one setting'
+assert not set(DEALT_SCHEDULE_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS) | set(MATCHUP_SETTINGS)
+                                        | set(FORCED_FIND_SETTINGS)), 'two features declare one setting'
 
 # How the native farm worker treats each of the package's own settings (zero-core GamePackage.setting_classes, its
 # docs/az.md 61; docs/ENGINE.md 196): the trainer declares these classes with a run's settings to a worker build that
@@ -527,7 +530,8 @@ SETTING_CLASSES = dict(
     {k: 'param:evaluator_every' for k in ROLLING_SETTINGS if k.startswith('evaluator_') and k != 'evaluator_every'},
     evaluator_every='python_only', deckchoice_eval_games='trainer',
     **{k: 'trainer' for k in REAL_DECKS_SETTINGS}, **{k: 'trainer' for k in MATCHUP_SETTINGS},
-    **{k: 'trainer' for k in FORCED_FIND_SETTINGS}, publish='trainer', yardsticks='trainer')
+    **{k: 'trainer' for k in FORCED_FIND_SETTINGS}, **{k: 'trainer' for k in DEALT_SCHEDULE_SETTINGS},
+    publish='trainer', yardsticks='trainer')
 
 # Every Rust input of the engine (tools/zcache.py's RUST_PATHS; tests/test_gamedb.py keeps them equal): with zero-core's
 # crates they name the engine that played a game record (zero-core docs/az.md 59.4, docs/gamedb.md "The engine"): a
@@ -581,8 +585,10 @@ PACKAGE = register(GamePackage(
     # delver-mirror* presets), measured by a second companion process: mtgz.az.companions composes the two
     # the matchup model of a constructed best-of-three mirror and sideboarding by its choice table (docs/ENGINE.md 168,
     # mtgz.az.matchup: matchup_every 0 = off), through `mtg`'s selfplay_specs hook; and the forced find's schedule
-    # (docs/ENGINE.md 180, mtgz.az.forced_find: forced_find_schedule {} = off), through the same hook after it
-    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, **FORCED_FIND_SETTINGS, publish={}, yardsticks={}),
+    # (docs/ENGINE.md 180, mtgz.az.forced_find: forced_find_schedule {} = off), through the same hook after it; and the
+    # dealt share's schedule (docs/ENGINE.md 254, mtgz.az.dealt_schedule: dealt_decks_schedule {} = off), between them
+    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, **FORCED_FIND_SETTINGS,
+                  **DEALT_SCHEDULE_SETTINGS, publish={}, yardsticks={}),
     setting_classes=SETTING_CLASSES,
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
     # the published farm build of this checkout's commit (docs/ENGINE.md 218, zero-core docs/az.md 70): a run whose

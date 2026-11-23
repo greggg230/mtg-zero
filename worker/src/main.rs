@@ -26,7 +26,7 @@ static GAMES: &[zero_worker::GameEntry] = &[
 
 /// The game package's own run settings (`mtgz.az`'s `GamePackage.settings`: `mtgz.sealed.rolling.SETTINGS` and
 /// `REAL_DECKS_SETTINGS`, ENGINE.md 112 / 113; `publish`, ENGINE.md 163; the matchup model's, 168; the forced find's
-/// schedule, 180) and how a worker treats them (check-config; tests/test_worker_farm.py
+/// schedule, 180; the dealt share's schedule, 254) and how a worker treats them (check-config; tests/test_worker_farm.py
 /// checks the list against the package's).
 static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("evaluator_every", "python_only", "the deck evaluator retrained inside the run: the selfplay_specs hook (mtgz.sealed.rolling, Python) changes the self-play spec between phases; remote self-play refuses it too"),
@@ -55,6 +55,7 @@ static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("matchup_swap_z", "trainer", "the matchup table's swap evidence (standard errors)"),
     ("matchup_members", "trainer", "the matchup model's bootstrap members"),
     ("forced_find_schedule", "trainer", "the forced find's p per iteration (ENGINE.md 180): the selfplay_specs hook writes it into the self-play spec, which remote self-play follows per iteration (zero-core docs/az.md 52); the worker plays the spec's forced_find"),
+    ("dealt_decks_schedule", "trainer", "the dealt share's p per iteration (ENGINE.md 254): the selfplay_specs hook writes it into the self-play spec, which remote self-play follows per iteration (zero-core docs/az.md 52); the worker plays the spec's dealt_decks"),
 ];
 
 static WORKER: zero_worker::Worker = zero_worker::Worker {

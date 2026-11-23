@@ -126,6 +126,10 @@ def selfplay_spec(run, it):
     # the matchup model's choice table (docs/ENGINE.md 168.3; matchup_every 0: None, the run's spec)
     from .matchup import selfplay_spec as matchup_spec
     s = matchup_spec(run, it)
+    # then the dealt share of the iteration (docs/ENGINE.md 254; dealt_decks_schedule {}: None, the spec so far)
+    from .dealt_schedule import selfplay_spec as dealt_spec
+    d = dealt_spec(run, it, s)
+    s = d if d is not None else s
     # then the forced find's p of the iteration (docs/ENGINE.md 180; forced_find_schedule {}: None, the spec so far)
     from .forced_find import selfplay_spec as forced_find_spec
     f = forced_find_spec(run, it, s)

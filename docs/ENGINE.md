@@ -47515,3 +47515,56 @@ fenced (live runs on the desktop); the flaky retry: the core's
 `test_remoteplay.py::test_a_worker_slower_than_a_phase_is_capped_at_its_floor` (a timing floor, beside live runs; it
 passed alone, as at section 244's gate). Then merged with main 42f02b8a (the stew's stall rule took 251, Python only,
 no file in common but this one: this section renumbered 251 -> 252) and the python tier run on the merge.
+
+## 254. The dealt share's schedule: `"dealt_decks"` p moved over a run's iterations (run setting `dealt_decks_schedule`, `mtgz.az.dealt_schedule`; branch `feat/dealt-decks-schedule`, 2026-11-23)
+
+(253 is left to the open branch whose section 252 collides with main's.)
+
+**Why.** Sideboarding learned pb3's way (168, 240) deals a share p of the seats their 60 from the 75 (`"dealt_decks"`,
+154, 168.1) and lets the rest sideboard by the matchup model's choice table. p was one number for the whole run: 0.85
+in pb3 and in the stew's specialists. The two jobs of the dealt seats want different shares at different times. Early,
+the network has to play every card of its 75, or the matchup model reads a card it plays badly as a bad card (the
+stew's first Delver mirror specialist, seeded from a network that never played its sideboard, rated Pyroblast below
+Force of Will through its first three versions and its table kept the main, where pb3's table took four Force of Will
+out for the blasts). Later, 85% of the games are still played with random 60s the deck will never register, which is
+practice on the wrong decks. The user's decision (2026-11-23): the share starts high and comes down over the
+iterations, to a floor rather than to 0.
+
+**What.** `mtgz/az/dealt_schedule.py`. The package's run setting `dealt_decks_schedule` (a dict; `{}` = off: the
+spec's own p every iteration) has the forced find's shape (180.5): p moves linearly from `start` (at iteration `from`
+and before) to `end` (at `from` + `iters` and after); `iters` 0 or absent holds `start`. E.g. `{"start": 0.85, "end":
+0.15, "from": 64, "iters": 128}`: 0.85 through iteration 64, 0.5 at 128, 0.15 from 192. `decklists.selfplay_spec`
+(zero-core's `selfplay_specs` hook) chains it after the matchup model's table and before the forced find's p: only
+`dealt_decks.p` of the iteration's spec changes (its swaps and `per_seat`, the table, the forced find stay). p is a
+pure function of the run's settings and the iteration, so the local driver, the Mac's workers and the farm's
+definition of the iteration play one spec (zero-core docs/az.md 52: remote self-play follows the phase's spec).
+
+**A floor above 0.** `start` and `end` are shares in (0, 1]: the engine refuses `dealt_decks.p` 0, and the matchup
+model's retrain reads a card's worth from the seats that played another 60 than the table's - with none it has nothing
+to compare and its table freezes. The dealt opponents also keep the network playing against 60s other than its own
+table's. A schedule on a spec without `"dealt_decks"`, a malformed one and one that reaches 0 are refused at the
+run's first self-play phase (exit 78, not restarted).
+
+**Off by default.** `{}` in every preset; with it off the hook answers what it answered before (the tests compare).
+No engine, encoding or search change: the engine already plays any p in (0, 1].
+
+**What a lower share costs.** The matchup model's window holds fewer dealt seats, so its per-copy estimates are
+noisier late in the schedule (at p 0.15 with per-seat deals 27.75% of the matches have a dealt seat, against 97.75% at
+0.85); its guards (168.6: the held-out gain, swaps past 2 standard errors) then hold the table still rather than move
+it on noise.
+
+**The farm.** The setting is declared trainer-only (`SETTING_CLASSES`, the worker's `PACKAGE_SETTINGS`): the worker
+plays the spec's `dealt_decks` as before. A worker that announces `setting_classes` (196.1) accepts the key from the
+trainer's declaration even when its own list predates it; an older one refuses it. The worker's list is a Rust input,
+so this commit has its own build key: a run that moves to it needs the commit's published build (218) and the farm
+gates on its real config (114.8).
+
+**The stew.** `recipe.settings: {"dealt_decks_schedule": {...}}` reaches every specialist (`pair_settings` one
+pairing); a specialist's iterations run on across its turns, so `from` and `iters` count the specialist run's own
+iterations. Not set in any stew by this change.
+
+**Tests.** tests/test_dealt_schedule.py: the schedule's p and checks; the hook writes only p, answers the same for one
+iteration, and its specs parse in the engine; the refusals (no dealt decks, malformed, p 0 - with the engine's own
+refusal of p 0); the chain keeps the matchup model's table and the forced find, and with the schedule off answers the
+matchup model's spec unchanged; the package setting is off in every preset. tests/test_worker_farm.py's package-settings
+checks cover the worker's list.
