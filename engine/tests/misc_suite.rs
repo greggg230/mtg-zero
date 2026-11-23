@@ -56,6 +56,8 @@ mod measure_cast_mana;
 mod merge_key;
 #[path = "metagame.rs"]
 mod metagame;
+#[path = "pair_sideboarding.rs"]
+mod pair_sideboarding;
 #[path = "post_board.rs"]
 mod post_board;
 #[path = "sealed.rs"]

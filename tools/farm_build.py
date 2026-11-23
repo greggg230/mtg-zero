@@ -7,6 +7,9 @@
     python tools/farm_build.py --runtime --pack winml [--winml-version V | --winml-nupkg F] [--publish] [--url URL]
     python tools/farm_build.py --runtime --pack dml [--gpu-vendor amd] [--winml-version V | --winml-nupkg F] [--publish] [--url URL]
     python tools/farm_build.py --runtime --pack cuda --msvc-dir DIR [--check-net EXPORT_DIR] [--publish] [--url URL]
+    python tools/farm_build.py --runtime --pack torch --msvc-dir DIR [--no-gpu-check] [--no-sign] [--publish] [--url URL]
+    python tools/farm_build.py --torch --runtime-id TORCH_PACK_ID --pyshim zf-pyshim.exe [--check-runtime PACK_DIR] [--root CHECKOUT]
+        [--no-sign] [--publish]
     python tools/farm_build.py --resign BUILD_DIR --runtime-id ID [--min-agent V] [--publish] [--url URL]
     python tools/farm_build.py --publish-dir BUILD_DIR [--url URL]
 
@@ -801,6 +804,266 @@ def build_cuda(a):
     return bid, d
 
 
+# ---------------------------------------------------------------------- the torch runtime (docs/ENGINE.md 244)
+# The torch runtime pack (zero-farm's per-machine torch runtime; zero-core docs/az.md 80): Windows' embeddable CPython at
+# the minor version `mtgz/_engine.pyd` is built for (cp313), torch's CUDA build and the third-party modules the torch
+# worker's play path imports (measured: numpy, typing_extensions; torch's wheel brings torchgen and functorch), each from
+# its publisher, pinned by sha256.
+TORCH_PYTHON = ('3.13.14', 'https://www.python.org/ftp/python/3.13.14/python-3.13.14-embed-amd64.zip',
+                '90b4e5b9898b72d744650524bff92377c367f44bd5fbd09e3148656c080ad907')
+TORCH_WHEEL = ('torch', '2.11.0+cu128', 'cp313-cp313-win_amd64', 'https://download.pytorch.org/whl/cu128/torch-2.11.0%2Bcu128-cp313-cp313-win_amd64.whl',
+               '6f367e62fd81b75cdf23ca4b75ced834d2db2cf98d1588ac935bde345de9de23')
+TORCH_PYPI = (('numpy', '2.3.5', 'cp313-cp313-win_amd64'), ('typing_extensions', '4.15.0', 'py3-none-any'))
+TORCH_CUDA = '12.8'
+# the pack's hard requirement (PROTOCOL 9.2, 19.1): an NVIDIA GPU whose driver is CUDA 12.8's (570.65: torch cu128's
+# toolkit, Blackwell included), the torch provider, and the owner's opt-in (zero-farm's per-machine `opt_in`)
+TORCH_GPU = ('nvidia', '570.65', 'torch-cuda')
+TORCH_OPT_IN = 'torch'
+TORCH_MIN_AGENT = '0.3.19'                # (zero-farm PROTOCOL rev 27, 19: agents that read opt-in packs; sign --opt-in needs it)
+# what a pack leaves out of the wheels: nothing the worker loads - C++ headers and import libraries for building
+# extensions, CMake files, type stubs, a protobuf compiler, bytecode caches, test suites (every importable package stays:
+# an opt-in manifest may list 20,000 files in 8 MiB, zero-farm PROTOCOL 19.1)
+TORCH_PRUNE_DIRS = ('torch/include/', 'torch/share/', 'torch/bin/', 'numpy/_pyinstaller/')
+TORCH_PRUNE_PARTS = ('/tests/',)
+TORCH_PRUNE_EXT = ('.lib', '.pyi', '.h', '.hpp', '.cuh')
+MANIFEST_MAX = 8 << 20                  # an opt-in runtime manifest's limits (zero-farm PROTOCOL 19.1): 8 MiB, 20,000 files
+MANIFEST_MAX_FILES = 20000
+# a path segment the coordinator takes (zero-farm: [A-Za-z0-9._-]; torch's dist-info is `torch-2.11.0+cu128.dist-info`)
+SEGMENT_OK = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-')
+# the checkout's data files the game package reads at import and in play (measured with an audit hook on a real job,
+# docs/ENGINE.md 244): the decklists a spec names, EoE's card list
+TORCH_BUILD_DATA = ('data/decks/', 'engine/src/az/eoe_cards.txt')
+PROBE = r'''
+import json, sys, time
+import torch
+ok = torch.cuda.is_available()
+out = {"python": sys.version.split()[0], "torch": torch.__version__, "cuda": torch.version.cuda,
+       "cudnn": torch.backends.cudnn.version(), "available": ok, "devices": torch.cuda.device_count() if ok else 0}
+if ok:
+    x = torch.randn(512, 512, device="cuda")
+    y = (x @ x).sum().item()
+    out.update(device=torch.cuda.get_device_name(0), matmul_ok=y == y, capability=list(torch.cuda.get_device_capability(0)))
+print(json.dumps(out))
+'''
+
+
+def fetch(url, sha256, path):
+    """`url` into `path` (cached), checked against `sha256` -> path."""
+    import urllib.request
+    if os.path.exists(path) and file_sha256(path) == sha256:
+        return path
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    print(f'fetching {url}', flush=True)
+    tmp = path + '.part'
+    with urllib.request.urlopen(url, timeout=3600) as r, open(tmp, 'wb') as f:
+        shutil.copyfileobj(r, f, 1 << 20)
+    if file_sha256(tmp) != sha256:
+        die(f'{url}: the download is not the pinned sha256 {sha256}')
+    os.replace(tmp, path)
+    return path
+
+
+def unpack_wheel(path, what, dest, prune=True):
+    """A wheel's members into `dest` (site-packages), each checked against its RECORD; the pack's prunes left out ->
+    (files, bytes, [license members])."""
+    import csv
+    import io
+    import zipfile
+    n = size = 0
+    lic = []
+    with zipfile.ZipFile(path) as z:
+        rec = next(m for m in z.namelist() if m.endswith('.dist-info/RECORD'))
+        rows = {r[0]: r[1] for r in csv.reader(io.TextIOWrapper(z.open(rec), encoding='utf-8')) if len(r) >= 2}
+        for m in z.namelist():
+            if m.endswith('/') or '__pycache__/' in m:
+                continue
+            if prune and (m.startswith(TORCH_PRUNE_DIRS) or m.lower().endswith(TORCH_PRUNE_EXT)
+                          or any(x in '/' + m for x in TORCH_PRUNE_PARTS)):
+                continue
+            data = z.read(m) if m == rec else wheel_member(z, rows, m, what)
+            # (a dist-info directory named with the local version's '+', which the coordinator refuses in a path:
+            # '-' instead; its METADATA keeps the version, nothing imports by the directory's name)
+            parts = m.split('/')
+            if parts[0].endswith('.dist-info'):
+                parts[0] = parts[0].replace('+', '-')
+            out = os.path.join(dest, *parts)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, 'wb') as f:
+                f.write(data)
+            n += 1
+            size += len(data)
+            low = m.lower()
+            if '.dist-info/' in low and ('license' in low or 'notice' in low or 'copying' in low):
+                lic.append(m)
+    return n, size, lic
+
+
+def build_torch_pack(a):
+    """The torch runtime pack (module docs, docs/ENGINE.md 244) -> (build_id, directory)."""
+    import zipfile
+    tdir = target_dir()
+    cache = a.wheel_dir or os.path.join(tdir, 'wheels')
+    pyv, pyurl, pysha = TORCH_PYTHON
+    tname, tver, ttag, turl, tsha = TORCH_WHEEL
+    pack = f'torch-{tver.split("+")[0]}-cu{TORCH_CUDA.replace(".", "")}-py{"".join(pyv.split(".")[:2])}'
+    d = os.path.join(a.out or os.path.join(tdir, 'dist'), pack)
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    py = os.path.join(d, 'python')
+    sp = os.path.join(py, 'Lib', 'site-packages')
+    os.makedirs(sp)
+    # the embeddable CPython: as python.org ships it, its ._pth naming the stdlib zip, its own directory and the pack's
+    # site-packages (no `import site`: nothing of the PC's Python reaches it; zf-pyshim runs it with -I too)
+    zp = fetch(pyurl, pysha, os.path.join(cache, os.path.basename(pyurl)))
+    with zipfile.ZipFile(zp) as z:
+        z.extractall(py)
+    st, subj = sig_of(os.path.join(py, 'python.exe'))
+    if st != 'Valid' or 'Python Software Foundation' not in subj:
+        die(f'python.exe: signature {st} by {subj!r}: expected the Python Software Foundation\'s')
+    pth = os.path.join(py, f'python{"".join(pyv.split(".")[:2])}._pth')
+    with open(pth, 'w', encoding='ascii', newline='\r\n') as f:
+        f.write(f'python{"".join(pyv.split(".")[:2])}.zip\n.\nLib\\site-packages\n')
+    sources = [{'component': 'python', 'version': pyv, 'url': pyurl, 'sha256': pysha}]
+    wp = fetch(turl, tsha, os.path.join(cache, f'{tname}-{tver}-{ttag}.whl'))
+    stats = {'torch': unpack_wheel(wp, f'{tname} {tver}', sp)}
+    sources.append({'component': tname, 'version': tver, 'url': turl, 'sha256': tsha})
+    for name, ver, tag in TORCH_PYPI:
+        p, src = pypi_wheel(name, ver, tag, cache)
+        stats[name] = unpack_wheel(p, f'{name} {ver}', sp)
+        sources.append({'component': name, 'version': ver, **src})
+    # the MSVC runtime torch's DLLs import (app-local next to python.exe; at least the toolset they were linked with)
+    lib = os.path.join(sp, 'torch', 'lib')
+    need = sorted({m for f in os.listdir(lib) if f.endswith('.dll') for m in pe_imports(os.path.join(lib, f))} & set(MSVC))
+    msvc = {}
+    if need:
+        if not a.msvc_dir:
+            die(f'--msvc-dir: torch\'s DLLs import {need}: give the VS redist folder (the pack carries them app-local)')
+        for n in need:
+            src = os.path.join(a.msvc_dir, n)
+            st, subj = sig_of(src)
+            if st != 'Valid' or 'O=Microsoft Corporation' not in subj:
+                die(f'{src}: signature {st} by {subj!r}: the MSVC runtime must be Microsoft-signed')
+            shutil.copy2(src, os.path.join(py, n))
+            msvc[n] = {'version': file_version(src), 'sha256': file_sha256(src), 'source': os.path.abspath(src)}
+        with open(os.path.join(lib, 'torch_cpu.dll'), 'rb') as f:
+            b = f.read(4096)
+        pe = struct.unpack_from('<I', b, 0x3C)[0]
+        link = [b[pe + 24 + 2], b[pe + 24 + 3]]
+        for n, x in msvc.items():
+            if [int(v) for v in x['version'].split('.')[:2]] < link:
+                die(f'{n} is {x["version"]}, older than the toolset {link[0]}.{link[1]} torch was linked with')
+        for n, (data, comp, source) in msvc_licenses(a.msvc_dir, [x['version'] for x in msvc.values()]).items():
+            with open(os.path.join(d, n), 'wb') as f:
+                f.write(data)
+    # the probe (the agent's, contract section 3): the pack's own Python, isolated, imports torch and multiplies on the GPU
+    # (-B: no bytecode written into the pack - its files are exactly the signed ones)
+    pr = subprocess.run([os.path.join(py, 'python.exe'), '-I', '-B', '-X', 'utf8', '-c', PROBE], capture_output=True, text=True, cwd=d)
+    probe = json.loads(pr.stdout.strip().splitlines()[-1]) if pr.returncode == 0 and pr.stdout.strip() else None
+    if not probe:
+        die(f'the pack\'s probe failed: {pr.stdout[-500:]} {pr.stderr[-1500:]}')
+    if not probe.get('available') and not a.no_gpu_check:
+        die(f'torch sees no CUDA device through the pack on this PC (--no-gpu-check to sign anyway): {probe}')
+    files = [os.path.relpath(os.path.join(r, f), d).replace('\\', '/') for r, _, fs in os.walk(d) for f in fs]
+    bad = [f for f in files if len(f) > 260 or any(not seg or set(seg) - SEGMENT_OK for seg in f.split('/'))]
+    if bad:
+        die(f'{len(bad)} path(s) the coordinator refuses ([A-Za-z0-9._-] per segment, at most 260 characters): {bad[:8]}')
+    total = sum(os.path.getsize(os.path.join(d, f)) for f in files)
+    est = sum(len(f) + 230 for f in files) + 4096
+    vendor, min_driver, provider = TORCH_GPU
+    rj = {'runtime': pack, 'python': pyv, 'torch': probe['torch'], 'cuda': probe['cuda'], 'cudnn': probe['cudnn'],
+          'numpy': dict((n, v) for n, v, _ in TORCH_PYPI)['numpy'], 'provider': provider, 'providers': [provider],
+          'gpu': {'vendor': vendor, 'min_driver': min_driver, 'providers': [provider]}, 'opt_in': TORCH_OPT_IN,
+          'entry_python': 'python/python.exe', 'sources': sources, 'msvc': msvc,
+          'unpacked': {k: {'files': v[0], 'bytes': v[1], 'licenses': v[2]} for k, v in stats.items()},
+          'files': len(files), 'bytes': total, 'manifest_estimate': est, 'check': probe}
+    with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8', newline='') as f:
+        json.dump(rj, f, indent=1)
+    print(f'runtime pack {pack}: Python {pyv}, torch {probe["torch"]} (CUDA {probe["cuda"]}, cuDNN {probe["cudnn"]}), '
+          f'{len(files)} files, {total / 1e9:.2f} GB; probe {probe}')
+    if est > MANIFEST_MAX * 0.9 or len(files) > MANIFEST_MAX_FILES:
+        die(f'{len(files)} files: the signed manifest would be ~{est:,} bytes, near its {MANIFEST_MAX:,}-byte limit '
+            f'({MANIFEST_MAX_FILES:,} files at most)')
+    if a.no_sign:
+        print('--no-sign: the directory is built and checked, not signed')
+        return None, d
+    min_agent = a.min_agent if git_semver_ge(a.min_agent, TORCH_MIN_AGENT) else TORCH_MIN_AGENT
+    bid = sign_publish(a, d, ['--kind', 'runtime', '--version', pack, '--min-agent', min_agent, '--gpu-vendor', vendor,
+                              '--gpu-min-driver', min_driver, '--gpu-providers', provider, '--opt-in', TORCH_OPT_IN,
+                              '--zst-level', str(a.zst_level)])
+    with open(os.path.join(d, 'manifest.json'), 'rb') as f:
+        n = len(f.read())
+    if n > MANIFEST_MAX:
+        die(f'manifest.json is {n:,} bytes: over the {MANIFEST_MAX:,}-byte limit agents read')
+    return bid, d
+
+
+def tracked(root, prefix):
+    """The tracked files under `prefix` of the checkout `root` (relative, '/'), the committed ones only."""
+    out = subprocess.run(['git', 'ls-files', '-z', '--', prefix], cwd=root, capture_output=True, check=True).stdout
+    return [p for p in out.decode('utf-8').split('\0') if p]
+
+
+def build_torch_worker(a):
+    """The torch worker build (module docs, docs/ENGINE.md 244) -> (build_id or None with --no-sign, directory)."""
+    ec, cc = clean_tree()
+    if not a.pyshim or not os.path.isfile(a.pyshim):
+        die(f'--pyshim: zero-farm\'s zf-pyshim.exe (the build\'s entry), not {a.pyshim!r}')
+    if not a.runtime_id and not a.no_sign:
+        die('--torch: give --runtime-id (the torch runtime pack the build requires)')
+    # the engine module at exactly this commit (tools/build_py.sh: the artifact cache, else cargo) - what the worker imports
+    env = dict(os.environ)
+    env.pop('ZERO_CORE_UNPINNED', None)
+    subprocess.run(['bash', os.path.join(ROOT, 'tools', 'build_py.sh')], cwd=ROOT, env=env, check=True)
+    pyd = os.path.join(ROOT, 'mtgz', '_engine.pyd')
+    version = f'mtg-{ec[:7]}-torch'
+    d = os.path.join(a.out or os.path.join(target_dir(), 'dist'), version)
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    core = os.path.join(ROOT, 'third_party', 'zero-core')
+    n = 0
+    for rel in tracked(ROOT, 'mtgz'):
+        if rel.endswith('.py') or '/' in rel and not rel.endswith(('.pyd', '.so')):
+            dst = os.path.join(d, *rel.split('/'))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(os.path.join(ROOT, rel), dst)
+            n += 1
+    for rel in tracked(core, 'python/zero'):
+        if rel.endswith('.pyd') or rel.endswith('.so'):
+            continue
+        dst = os.path.join(d, 'third_party', 'zero-core', *rel.split('/'))      # (a checkout's layout: mtgz finds its core)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(os.path.join(core, rel), dst)
+        n += 1
+    for rel in [r for x in TORCH_BUILD_DATA for r in tracked(ROOT, x)]:
+        dst = os.path.join(d, *rel.split('/'))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(os.path.join(ROOT, rel), dst)
+        n += 1
+    shutil.copy2(pyd, os.path.join(d, 'mtgz', '_engine.pyd'))
+    shutil.copy2(os.path.join(ROOT, 'tools', 'torch_worker_main.py'), os.path.join(d, 'worker_main.py'))
+    shutil.copy2(a.pyshim, os.path.join(d, 'zf-pyshim.exe'))
+    print(f'torch worker {version}: {n} files (Python, the package data), mtgz/_engine.pyd, worker_main.py, zf-pyshim.exe', flush=True)
+    if a.no_sign:
+        bid = None
+    else:
+        sign = ['--kind', 'worker', '--version', version, '--game', 'mtg', '--engine-commit', ec, '--core-commit', cc,
+                '--profile', 'release', '--aw', '1', '--zero-onnx', '', '--min-agent',
+                a.min_agent if git_semver_ge(a.min_agent, TORCH_MIN_AGENT) else TORCH_MIN_AGENT,
+                '--entry', 'zf-pyshim.exe', '--requires-runtime', a.runtime_id]
+        bid = sign_publish(a, d, sign)
+    # the build answers `info` as signed: the runtime pack's Python when given (--check-runtime), else this one
+    rt = a.check_runtime
+    python = [os.path.join(rt, 'python', 'python.exe'), '-I'] if rt else [sys.executable]
+    info = json.loads(subprocess.run([*python, '-X', 'utf8', os.path.join(d, 'worker_main.py'), 'info'], capture_output=True,
+                                     text=True, check=True, cwd=d).stdout)
+    want = bid or 'unsigned-dev'
+    if info['build_id'] != want or 'rolling' not in info['features'] or info['kinds'] != ['selfplay']:
+        die(f'the torch worker says {info} (want build {want}, kinds [selfplay], rolling)')
+    return bid, d
+
+
+
 def git_semver_ge(a, b):
     p = lambda v: [int(x) for x in v.split('-')[0].split('+')[0].split('.')]
     return p(a) >= p(b)
@@ -1146,9 +1409,11 @@ def main():
     g.add_argument('--runtime', action='store_true', help='the runtime pack (ONNX Runtime + its MSVC runtime)')
     g.add_argument('--resign', metavar='BUILD_DIR', help='sign a signed worker build\'s executable again for --runtime-id (PROTOCOL 9.1)')
     g.add_argument('--publish-dir', metavar='BUILD_DIR', help='publish a signed build directory (verified first)')
+    g.add_argument('--torch', action='store_true', help='the torch worker build (docs/ENGINE.md 244): the Python of the commit, '
+                   'its engine module and zf-pyshim.exe, for the torch runtime pack (--runtime-id)')
     ap.add_argument('--root', help='the checkout to build (default: this one): a clean worktree at the commit to release')
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')
-    ap.add_argument('--pack', choices=('cpu', 'winml', 'dml', 'cuda', 'macos-cpu'), default='cpu',
+    ap.add_argument('--pack', choices=('cpu', 'winml', 'dml', 'cuda', 'macos-cpu', 'torch'), default='cpu',
                     help='--runtime: the CPU pack (default), the Windows ML GPU pack, the CUDA pack (NVIDIA, PROTOCOL 9) or the '
                          'macOS CPU pack (Apple silicon, PROTOCOL 11)')
     ap.add_argument('--platform', choices=('windows-x64', 'macos-arm64'), default='windows-x64',
@@ -1159,6 +1424,9 @@ def main():
     ap.add_argument('--no-gpu-check', action='store_true', help='--pack cuda: sign even if the CUDA provider fails on this PC')
     ap.add_argument('--check-net', help='--pack cuda: a directory with a real export (model.onnx + reference.npz) for the CUDA '
                     'self-test (the built-in probe graph fails CUDA)')
+    ap.add_argument('--pyshim', help='--torch: the zf-pyshim.exe of zero-farm (the entry of the build)')
+    ap.add_argument('--check-runtime', help='--torch: a torch runtime pack directory whose Python checks the build')
+    ap.add_argument('--no-sign', action='store_true', help='--torch / --pack torch: build and check the directory, sign nothing')
     ap.add_argument('--gpu-vendor', choices=('amd', 'nvidia', 'intel'), help='--pack dml: the GPU vendor its manifest requires (default amd)')
     ap.add_argument('--winml-version', help=f'--pack winml: the Microsoft.Windows.AI.MachineLearning version (default {WINML_VERSION})')
     ap.add_argument('--winml-nupkg', help='--pack winml: a local .nupkg instead of nuget.org')
@@ -1191,12 +1459,17 @@ def main():
     if a.resign:
         bid, d = resign_worker(a)
     elif a.runtime:
-        bid, d = {'winml': build_winml, 'dml': build_dml, 'cuda': build_cuda, 'macos-cpu': build_mac_runtime}.get(a.pack, build_runtime)(a)
+        bid, d = {'winml': build_winml, 'dml': build_dml, 'cuda': build_cuda, 'macos-cpu': build_mac_runtime,
+                  'torch': build_torch_pack}.get(a.pack, build_runtime)(a)
+    elif a.torch:
+        bid, d = build_torch_worker(a)
     elif a.platform == 'macos-arm64':
         bid, d = build_worker_mac(a)
     else:
         bid, d = build_worker(a)
     print(f'build directory {d}')
+    if a.publish and bid is None:
+        die('--publish: an unsigned build (--no-sign) is never published')
     if a.publish:
         print(farm_release(a, 'publish', d, '--url', a.url, token=True))
         print(f'published to {a.url}')

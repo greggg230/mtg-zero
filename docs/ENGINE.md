@@ -43602,7 +43602,8 @@ information**, in the real game too.
 * `check_match_information_set` reports where two rows differ (`Row::locate`: a head segment's slot and float, a tail
   token's segment, slot and float, or an override) and handles rows of different lengths.
 
-**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8).** Once finds are mixed with other cards, the rows
+**What the strict rule gives up (decision 4; the user, 11-21: fold the group fact into layout v8; built: layout v8's
+`find_groups` segment, ENGINE.md 236).** Once finds are mixed with other cards, the rows
 no longer show "k of these n places hold finds" (e.g. a pile of 4 library finds + Force of Will from the graveyard; 140.9
 already dropped it for a find shuffled into a library with unknown cards). That fact is public, so dropping it is an
 encoding gap. Keeping it exactly needs a group-level token, i.e. an additive layout. The options are written up for the
@@ -43947,7 +43948,7 @@ effects (ENGINE.md 156), so a departed copy's copied identity, last known mana v
 while an ability about it waits on the stack (the public-state gate classes the LKI fields Derived). The fix doesn't
 widen it (before, the network was equally blind to the copied face; the rules now compute 0 instead of the front
 face's). The maintainer's decision: one additive layout v8 (a stale-object LKI block in `rf`, the LKI fields Public in
-the gate) built by a later encoding change, not here.
+the gate) built by a later encoding change, not here. (Built: layout v8's `lki` segments keyed by the stale reference's key, ENGINE.md 236.)
 
 ### 226.8 Shared-file functions changed
 
@@ -44158,6 +44159,8 @@ casting it satisfies, `Keep::allow`, as its payment does); `x_range`'s X-paid-wi
 random boards.
 
 ### 229.4 Bug 4: a payment's picks in progress - deferred to layout v8
+
+(Built: layout v8's `payment` and `pay_options` segments, the game `mtg`, ENGINE.md 236.)
 
 `PayMana`'s picks in progress (`chosen`, `multi`, `actors`, `phyrexian_life`, `now` / `which` / `actor_for` and the
 productions offered, `spend`) are in neither `Game::view_of` nor layout v7's input; two payments that differ only in
@@ -45148,3 +45151,1461 @@ Checks:
   **fails the same on main 71ca1493** (4,235,003,677 release and 4,236,000,644 under the `fuzz` profile, replayed
   there): a pre-existing blow-up of the 601.2g / payment search, not this section's (which changes no rule, key or
   legal action). No information-set check failed.
+
+## 236. Layout v8: a payment's state in progress, a gone object's last known information, the groups of places holding search finds (the game `mtg`; layout v7 the compatibility game `mtg_v7`; branch `feat/layout-v8`, 2026-11-22)
+
+**Naming.** Layout v8 is the game `mtg` and layout v7 the game `mtg_v7` (236.10: the user's decision, zero-core's game
+alias - everything made before layout v8 names `mtg` without a layout record and is `mtg_v7`). 236.1-236.9 were written
+while layout v8 was a game of its own name, `mtg_v8`, and `mtg` meant layout v7: read their `mtg_v8` as today's `mtg` and
+their `mtg` (where it means layout v7) as today's `mtg_v7`.
+
+**Why.** Three public facts the input left out, each found by a Hogaak-era fix and deferred to one additive layout by
+the user's decision of 2026-11-21 (thread T4): P's bug 4 (229.4, `encoding_needs_fix_P.md` option B: a mana payment's
+picks in progress and the decisions' option meanings, with fix M's 601.2g step, 231), E's stale-reference LKI (226.7,
+`encoding_needs_fix_E.md` option 2: a departed copy's copied identity, its last known mana value, power, toughness,
+counters) and D's group fact (223's decision 4, `encoding_needs_fix_D.md` option 2: "k of these places hold search
+finds" once a scramble mixes finds with other cards). Layout v7's rows stay byte for byte; layout v8 = v7 + six tail-only
+gated segments.
+
+### 236.1 Design decisions (the user's answers of 2026-11-22: float32-close widening on rows with v8 tokens accepted, the keyed `lki` segment OK, layout v8 the default for new runs)
+
+1. **Layout v8 is the default: the game `mtg_v8`. The game name `mtg` stays layout v7, the compatibility layout of what
+   was made before.** zero-core chooses a token layout and an engine game by the game's NAME (`GamePackage.tokens`,
+   `SearchGame::TAILS`), and its encoding guard compares a checkpoint's recorded game with the game it is loaded as
+   (`zero.net.encoding_mismatch`: "game 'mtg' -> ..."). Every run, checkpoint, farm run, campaign and game record made
+   before layout v8 records the name `mtg` - so under zero-core as it is, a v7 run resumes unchanged only if `mtg` stays
+   layout v7 (renaming it would make the guard refuse every old checkpoint, the run's own included). So: `mtg_v8`
+   (`engine/src/az/v8.rs`: `MtgV8Az`, every `SearchGame` method forwarded to `MtgAz`; the same specs, rules, head, bots,
+   auxiliary targets) is every MTG preset's game, the game package's default game (`GamePackage(game='mtg_v8')`), every
+   co-training preset's resolver and what every tool that starts fresh plays (`mtgz.az.layouts.GAME`); `mtg` is what an
+   old run, an old checkpoint and an old record keep. A run moves by `python tools/fork_run.py <checkpoint> <new run>
+   --game mtg_v8` (zero-core's widen, 236.5). Making the name `mtg` itself layout v8 needs a zero-core change (an alias
+   in the encoding guard and the farm's graph check, so that a checkpoint recorded as `mtg` with layout v7 loads as a
+   `mtg_v7`) plus each old run's config rewritten once - a decision for the user (236.9), not taken here. **Superseded
+   by 236.10** (the user: "The v8 layout needs to be the default for mtg going forward"): `mtg` is layout v8, `mtg_v7`
+   layout v7, through zero-core's game alias - and no old run's config is rewritten.
+2. **E's "widen `rf`" is a segment keyed by the stale key.** The orchestrator's requirement - a v7 network widens onto v8
+   computing what it did - rules out wider slots (a wider slot is one input product over more columns: equal to float32
+   rounding only, 125.7); appended gated tail-only segments are exact (zero-core docs/az.md 43.8). So the stale object's
+   last known information is a token of its own (`lki`) whose slot k is the stale key k that every holder of the
+   reference already shows (`rf::STALE_KEY`, 125.3: the key that pairs two references to one gone object): every holder
+   sees it through the key. The facts are E's option 2's, all of them.
+
+### 236.2 The segments (appended after `found`; `tail_v8.rs`)
+
+| # | segment | width | tokens |
+|---|---|---:|---|
+| 25 | `payment` | 535 | per `Task::PayMana` on the agenda (innermost depth 0): one per picked source (`chosen`, then `multi` with its production; its object - a permanent, or a hand card with its identity where the viewer knows it -, its source kind one-hot (own ability, hand ability, improvise / convoke / waterbend, `TAP_FOR`, `POL_FOR`, `SAC_FOR`, `SQ_FOR`, `LJ_FOR`, another trigger slot, a graveyard ability) with its slot's 8 bits and its pool's 16, its actor (`actors`), its rank), one per source activated first (`forced`, with its delve flag), one for the payment's state (payer; `vm` present and 32 bits; `pooled`, `convert`, `improvise`, `waterbend`, `convoke`, `oracle`; `spend`'s count; the Phyrexian life's 64 bits; `life_after`'s 32; `min_class`'s 32; `now`'s source and its productions' count, `now_taken`, `now_min`; `which`'s permanent and its sources' count; `actor_for`'s source; `delve_late`'s count), one per non-zero part of `cost` (which of the 22 parts, its 64 bits: exact where the context's cost floats sum the hybrid pairs); per `Task::CastMana` (231): the caster, the spell, the permanent whose ability `ChooseMode` asks, `again` |
+| 26 | `pay_options` (`columns: 1`) | 173 | the viewer's payment decision's items, slot k = item k: `ChooseMana`'s productions (6 amounts) or, one mana at a time, the colour; `ChooseMode`'s sources of `which`'s permanent (kind, slot, pool) or the abilities of the permanent a 601.2g step asks about (`Game::cast_mana_slots`); `PayPool`'s pools (6 amounts, haste, the restricted parts' count) with each restricted part (type, purposes' 32 bits, amount) a token of its own past the items. Every option naming item k (`Number(k)`, a page's `Item(k)`) points at token k (`tail_v8::pay_overrides`); at gate 0 its logit is exactly the generic one |
+| 27 | `lki` | 1,018 | per stale reference the row holds (slot = its key): its copiable values (an `effects` token's copy-effect fields: the copied identity where the viewer knew the object, the exceptions, double-faced) and mana value (64 bits), power and toughness (sign, squashed, 64 bits) with the controller, its qualities as a damage source (controller, deathtouch, lifelink, infect, spell, colours, card types, itself), what it was attached to (a reference), a recorded spell item and its mana value; one token per kind of counter it had (a `counters` token's fields, slots from 2^24) |
+| 28 | `lki_spells` | 520 | a gone spell's item (`Game::spell_lki`: "copy it") as a stack slot shows an item (`write_departed_item`: its definition as it last existed; none of its card's facts now), its key and mana value |
+| 29 | `lki_relations` | 194 | that item's targets, divisions, noted objects, spliced cards and ninjutsu planeswalker - every one - as `stack_relations` tokens (`item_relations`, shared with them), with the key |
+| 30 | `find_groups` | 146 | one per contiguous run of a group's places: owner, group key, zone (library: top depth and size with 16 bits each, the whole library; face-down exile and a hand: a count, they are bags), the group's finds and other cards (16 bits each), its runs |
+
+A v8 row = the v7 row (head, v7 tail tokens, v7 overrides, the stale keys in the same order) + these tokens + the
+overrides into `pay_options`, sorted by option. The `lki` pass runs last and first meets every gone object a reference
+of the public state names (`Game::for_each_public_ref`) that no token wrote, after every v7 token.
+
+**What is left out, and why.** `PayMana`'s `marked`, `extra`, `extra_restr`, `extra_made`, `made_by`,
+`extra_made_restr`, `extra_haste` and `keep` follow from the picks and the state; `pool_page` is the decision's page
+(the context floats); `Task::CastMana::after` and `Game::pool_wild` exist only in the payment search's copies (231.4).
+`W3State::lki_host` is `lki_attached`'s entry kept when a card reads it (now Derived). `lki_loss` is read only while its
+simultaneous move's leave triggers are gathered (Derived).
+
+### 236.3 Engine state added (no rule reads it; DIGEST_ENCODING=0 unchanged)
+
+* `Game::find_groups` (`hidden::FindGroup`: owner, members by card, finds). `scramble` (`group_scramble`, before 223's
+  strict rule drops the domain's told finds): a domain mixing told finds or a group's members with any other card
+  makes the domain and every group it touches one group, its finds the domain's told finds plus theirs; a domain inside
+  one group (Ponder over a pile's places) changes nothing. A member moving to another zone (`move_card_ctl`) or the other
+  player learning one (`learn`) ends its group - the count is then no longer one number, as a told find going into a hand
+  stops being one (223). Public moves shift the places; the rows read them live.
+* `Game::lki_qualities`: every battlefield departure's damage-source qualities, whatever the cards of the game. The
+  rules' `lki_damage` is kept only under `SEEN_LKI_DAMAGE`, a bit of every card in the game, hidden ones too: encoding
+  its presence leaked a hidden card (the fuzz's hidden-decklist information-set walk found it: worlds dealing the
+  opponent such a card recorded it, the others not).
+* Described positions (`build.rs`, `mtg-build/1`): a stale reference may carry `"lki"` (copy, dfc, mv, power,
+  toughness, qualities, attached, counters); a copy's exceptions, keyword or named counters and a gone spell's item are
+  refused (`unsupported`), never approximated. The round trips pass.
+
+### 236.4 The public-state gate (`tests/az.rs`; its rows are layout v8's now)
+
+Classification: `lki_copy`, `lki_power`, `lki_toughness`, `lki_counters`, `lki_attached`, `spell_lki`, the new
+`lki_qualities` and `find_groups` Public; `lki_damage`, `W3State::lki_host` Derived (above). `view_of` lists the payments
+and steps (`tail_v8::payment_view`), the gone objects' last known information of every public stale reference
+(`lki_view`, a multiset) and the find groups (`find_groups_view`); the loop hash (`view_state`) is untouched.
+
+Positions (`public_state_v8.rs`, added to both passes): payments in each decision - Sol Ring with {U}{B} floating
+(`PayPool`), Gitaxian Probe (`PayPhyrexian`), Kappa Cannoneer with Urza, Black Lotus, two Orcish Lumberjacks and Forests
+(`PayMana` picks, `ChooseMode` of `which`, `ChooseMana`, `ChoosePermanent`), Hogaak's and the 601.2g step's of 231; a
+Phyrexian Metamorph that left as a copy of Concealing Curtains with a trigger naming it waiting (by hand: Terminal
+Velocity is EoE's table), Jacked Rabbit with three counters attacking then gone (226's test), Thor's trigger about a
+Green Sun's Zenith that left the stack (`spell_lki`); a Doomsday pile of four library finds and Force of Will from the
+graveyard (a group of five places, four finds), then fetched and shuffled (the whole library).
+
+Perturbations (35 new, `v8_perturbations`): 21 of a payment or a step (picks added and undone, a production, the
+Phyrexian life, the cost, `vm`, the flags, the class, the life after, a forced source, `now`'s source and mana taken,
+`which`, an actor and `actor_for`, the pools, the search floor, `delve_late`, the step's permanent and `again`), 9 of
+last known information (mana value, copiable values, power, toughness, deathtouch, a +1/+1 counter, attached, a spell's
+X, a spell's item recorded), 4 of find groups (a group made, one more find, ended, one more place). Every one changes
+both views and both v8 rows; on layout v7 all but "a payment's cost has one more generic mana" (the context's cost floats
+show the innermost payment's) leave the row as it was - a new known gap scoped to layout v7, "layout v7 lacks layout
+v8's facts", checked alone by the single pass (layout v6's entry for v7's facts lists them too).
+
+Results: the single pass **266 perturbations encoded, 2 deliberate limits, 0 known gaps** on v8 (284 fields: 143 public,
+13 hidden, 128 derived; 280 perturbations; 530 positions); every v8 fact a v7 known gap; hidden decklists: 120
+perturbations reached only their owner. The pairwise pass: 151,118 states, no collision outside the known gaps. Its new
+perturbations draw their partners from a stream of their own, so every pair of the older ones is main's (with one shared
+stream, the reshuffled partners met four pre-existing collisions unrelated to v8 - a copy effect and a types effect alike
+in v6, a hand card past the 16th learned in a framed row, a control effect's end, two loyalty records cancelling - noted
+here, not changed).
+
+### 236.5 The widen (exact) and v7 kept
+
+* Rust: `layout_v8_is_checked_in_and_widens_layout_v7_exactly` - `mtgz/az/layout_v8.json` = `encode::layout_json_v8`, the
+  widen's map from v7 is the identity, v7's 25 segments unchanged, the six appended tail-only and gated, `pay_options`'s
+  pointer column, `TAILS_V8`. `az::v8::tests::mtg_v8_is_mtg_in_layout_v8`: one random game plays alike in both games, the
+  v8 rows' v7 part equal to the v7 rows.
+* The fuzz (`check_row`, every decision of every pool): the v8 row's head, v7 tail tokens and v7 overrides are the v7 row's
+  bit for bit; every option of a payment decision points at its `pay_options` token (`check_pointers_layout`); the
+  information-set and hidden-decklist walks compare v8 rows (a superset of v7's).
+* Python: `test_a_v7_network_widened_onto_layout_v8_answers_bit_for_bit` - a random v7 token network (64 x 2, its policy
+  heads random too) widened onto v8 (gates of the six new segments exactly 0, the old gates kept; saved, loaded as
+  `mtg_v8`), cube and Delver games in lockstep in both games, eager on the CPU: on every v7 row the widened network
+  answers bit for bit; on the v8 rows bit for bit wherever the row holds no v8 token (2,090 rows), and on rows holding v8
+  tokens (278) to float32 rounding, worst |diff| 2.1e-7 - the gated tokens weigh exactly 0, but the attention runs over
+  more keys (zero-core docs/az.md 43.8: "to float rounding otherwise"). Bit-identity there would need zero-core to drop
+  zero-weight tokens before the attention (not done: a zero-core change). The encoding guard takes the v7 network as `mtg`
+  and refuses it as `mtg_v8` until widened.
+
+### 236.6 Digests
+
+Behaviour unchanged: cube `DIGEST_ENCODING=0` **d3c144b6cc2977e5** (= main). Layout v7 unchanged: `DIGEST_ENCODING=v7`
+(new: v7's whole rows) **9473f7debc4bceb3** = main's recorded full digest; `digest_formats` with `DIGEST_ENCODING=v7`:
+constructed 4a03293608edeba2, metagame d72ae0c904a0ffbd, EoE 5ffb850dd963bad0, driver 6a03572828250b86 = main's files.
+Re-recorded on purpose (`DIGEST_WRITE=1`) because the full digests now hash layout v8's rows: cube
+**9473f7debc4bceb3 -> c2b04fed925eed67** (2,294 of 2,500 games: their hashed rows hold a payment or last-known-information
+token), constructed **4a03293608edeba2 -> 38ef93512e0a7259** (537 / 570), metagame **d72ae0c904a0ffbd ->
+ed86a2f5ed21c436** (256 / 288). The digests that played the game `mtg` hash the default game's rows now too: the
+driver's (zero-core's driver on `mtg_v8`) **6a03572828250b86 -> cab97c01912f7e3f**, dealt (the dealt Delver preset, now
+`mtg_v8`) **f858b1880091d94f -> cc0d138ac5c80402**, dealt per seat **2719fdd478d14fa3 -> e2a91849b5b9f372**; with
+`DIGEST_ENCODING=v7` each gives main's value again (6a03572828250b86, f858b1880091d94f, 2719fdd478d14fa3). EoE (layout v6)
+unchanged.
+
+### 236.7 Cost
+
+`layout_v8_cost` (`tests/az.rs`, ignored): 200 random games a pool, both viewers' rows at every decision, on the Mac.
+
+| pool | rows | rows with v8 tokens | tokens a row v7 -> v8 | floats a row v7 -> v8 | encode a row v7 -> v8 | v8 tokens (rows %) |
+|---|---:|---:|---|---|---|---|
+| cube | 162,502 | 14.86% | 33.63 -> 33.93 | 57,342 -> 57,543 (+0.35%) | 5.43 -> 5.33 us | payment 33,534 (8.10%), pay_options 2,004 (0.41%), lki 14,226 (7.37%) |
+| Delver | 150,128 | 12.61% | 21.72 -> 21.88 | 56,701 -> 56,833 (+0.23%) | 3.93 -> 3.73 us | payment 8,594 (3.54%), pay_options 139, lki 14,750 (9.32%), lki_spells 240, lki_relations 118 |
+| Doomsday | 131,000 | 5.94% | 21.49 -> 21.57 | 56,702 -> 56,761 (+0.11%) | 3.00 -> 2.86 us | payment 5,750 (2.47%), pay_options 98, lki 4,672 (3.52%) |
+| Hogaak | 101,122 | 5.82% | 25.76 -> 25.84 | 57,116 -> 57,176 (+0.10%) | 4.29 -> 4.24 us | payment 3,770 (2.02%), pay_options 100, lki 3,946 (3.82%) |
+
+(Floats a row: the head's 56,384 and every tail token's width. Encode: `encode_row_layout` into reused buffers, each
+layout timed first on every other row; the differences are within the timer's noise - v8 adds no measurable host
+cost.) Random play makes no Doomsday pile with a graveyard pick, so no `find_groups` token here; 223's count on the meta3
+digest spec was 132 of ~14,500 rows. The network's cost: the new tokens are 0.1-0.3 more a row on average (the
+attention's T), the six segments' input maps (d x width each) and one pointer column.
+
+### 236.8 Checks
+
+* The engine suite on the Mac (`cargo test --release -p engine -p card_ir --no-fail-fast`): passed but the two build
+  round trips, whose described positions lost the new public last known information (fixed: 236.3's `"lki"`; both pass).
+  `az` 58 passed (+ `layout_v8_cost` ignored), `hidden` 28, the engine's unit tests with `mtg_v8_is_mtg_in_layout_v8`.
+* Fuzz on the Mac (`tools/fuzz_shards.py`, 2,000 games each, every decision's v8 row checked against its v7 row and its
+  payment pointers): default (+100 matches), delver (+100 matches, +100 post-sideboard), doomsday, hogaak (+100, +100),
+  cross (+100, +100): **all PASSED**. Found on the way and fixed: the hidden-decklist information-set walk's leak of
+  `lki_damage`'s presence (236.3).
+* pytest on the Mac (`bash tools/build_py.sh && python -m pytest -q tests`): 3,453 passed, 32 skipped; failed only the
+  three tests gate.py runs on the desktop (`PYTEST_DESKTOP_ONLY`: the artifact cache's Windows paths, the deck scorer's
+  bit-for-bit fixtures, the run publisher's supervisor) and `test_presets_leave_shard_sparse_off`, which now names
+  `mtg_v8`'s preset as a game with tails (fixed).
+* **The real-checkpoint widen**: a copy of a live meta3 run's checkpoint (legacy-meta3-r1 iteration 1233, layout v7, read
+  only) forked by `python tools/fork_run.py <copy> <scratch run> --game mtg_v8` (the six segments "gate 0"; the run not
+  started) and compared with the original on Delver, Doomsday, Sneak and Show and Hogaak mirror games played in lockstep
+  in both games (CPU, eager): 1,640 of 1,640 rows without a v8 token bit for bit; 136 rows with v8 tokens, 58 bit for bit,
+  the others within 2.7e-6 (236.5: the attention over more keys).
+* **Farm parity of layout v8**: `tools/farm_compat.py --set game="mtg_v8"` (the release worker of this commit, the Delver
+  best-of-three dealt preset as the game `mtg_v8`): gate 2 identical (6 games, 2,468 rows, 150 batches: dense features,
+  tails, overrides) and gate 3 identical (6 games, 2,598 rows): **farm compat: PASSED**. The gates' own farm compat
+  (the preset as `mtg`, layout v7) passed too.
+* `python tools/gate.py suite` on 191aa9dc: **GATE PASSED suite 191aa9dc6771 in 575s** (privacy 0 findings; the full
+  engine suite 2,915 passed in 24 binaries; the 2,000-game fuzz of default, default with hidden decklists and
+  delver_dealt passed).
+* On 4ef275e0 (191aa9dc + the paragraphs above, docs only), env MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME, the system Python:
+  `python tools/gate.py engine --expect-digest c2b04fed925eed67 --expect-digest0 d3c144b6cc2977e5 --tested-sha
+  191aa9dc6771` - **GATE PASSED WITH SKIPS engine 4ef275e0ac18 in 695s** (skipped: one live-run-hazard test of the
+  desktop's pytest, fenced by a live run); `python tools/gate.py encoding --expect-digest c2b04fed925eed67
+  --expect-digest0 d3c144b6cc2977e5 --checkpoint <a copy of legacy-meta3-r1's iteration 1233>` - **GATE PASSED WITH SKIPS
+  encoding 4ef275e0ac18 in 748s** (the same fence). Both: the digests as recorded (full c2b04fed925eed67, encoding-free
+  d3c144b6cc2977e5, constructed 38ef93512e0a7259, EoE 5ffb850dd963bad0, driver 6a03572828250b86, metagame
+  ed86a2f5ed21c436, dealt f858b1880091d94f), `az` 58 passed, pytest on the Mac 239 + 176 + 172 + 112 passed and the
+  desktop part 49, farm compat identical (the preset as `mtg`); the encoding tier's checkpoint loads and plays (8 games).
+  (A first engine run on 191aa9dc failed one timing test of pytest, `test_cells_local_parallel`'s 300 s bound, on a Mac
+  under another job's load; it passed on the rerun and in the full Mac pytest.) The next commit adds this paragraph only.
+
+### 236.9 The default and the compatibility layout: who plays which (the orchestrator's rework, 2026-11-22)
+
+**`mtgz.az.layouts`**: `GAME` = `mtg_v8` (the default), `GAME_V7` = `mtg`; `checkpoint_game` / `model_game` (the game a
+checkpoint or a network records), `load` (zero.net.load as that game), `use` / `current` / `load_used` (a tool plays the
+game of the checkpoints it loads - layout v8 until it loads one - and refuses a second layout in one process),
+`same_game` (a pair of networks of two layouts is refused), `record_game` (a record's own game; one written before
+layout v8 names `mtg` or none: v7).
+
+**An old run re-pinned onto this main without a fork** (e.g. legacy-meta3-r1, whose pinned config.json saves `"game":
+"mtg"` and whose checkpoints record game `mtg`, layout v7): `python -m mtgz.az.run --run <it>` resolves DEFAULTS <
+preset < the saved config, so its game stays `mtg` (a preset now says `mtg_v8`, but presets fill only settings a run has
+not saved); zero-core then plays, encodes, trains on and evaluates layout v7 (`package.tokens_of('mtg')`, version 7, 21
+tail segments), loads its own checkpoints as `mtg` (the guard passes), reads its v7 shards, and its farm jobs carry
+`"game": "mtg"`: a worker of this main plays them as `mtg` (the release worker registers both games) - byte for byte
+v7 (farm compat with `--set game="mtg"`: identical, no v8 token in its shards). Nothing to do for it, and nothing
+happens to it: no flag, no rewrite. Mistakes fail loudly: its checkpoint loaded as `mtg_v8` (the encoding guard, exit 78:
+the game and the token layout differ), a v8 network given to a `mtg` job (the worker refuses the graph: "another layout"),
+a run directory given `--game mtg_v8` over its v7 checkpoints (the guard at its start).
+
+**A new run** (any MTG preset, or none: the package's default game) is `mtg_v8`: layout v8 rows, v8 checkpoints (version
+8, 27 tail segments), v8 shards, farm jobs `"game": "mtg_v8"` (farm compat on the default preset: identical; 698 v8 tokens
+in its shards). `tests/test_mtg_az.py::test_old_runs_stay_layout_v7_and_new_runs_are_layout_v8` builds both from the same
+preset and checks the resolved game, the layout, the checkpoint loads and the refusals.
+
+**Call sites changed** (every place that named the game `mtg` to build a game, load a network or record one; each now
+takes the game from the checkpoint, the run or the record, and starts fresh as `mtg_v8`):
+* `mtgz/az/__init__.py`: the package's default game, every MTG preset's game and resolver (`mtg_v8`), `MTG_GAMES`, both
+  layouts' tokens, aux heads, readers, specs, evaluation specs, self-play specs; `mtgz/az/deck_reader.py` (both games).
+* `mtgz/az/farm_campaign.py`: a campaign's game from its checkpoints (`ckpt_game`: the pair must agree) - match and
+  self-play settings, the exports, the state, the spot check's replays, `describe` (an old campaign's state saved `mtg`).
+* `mtgz/az/keep_h2h.py` (either MTG game), `mtgz/az/build.py` (`build_game(game=)`, default the process's).
+* `tools/`: belief_eval, belief_search, combo_stats, delver_archive, delver_blunders, delver_rerecord,
+  delverai_blunder_games, delverai_meta, forks_check, gamedb (records by their own game), gamedb_bauble, gumbel_eval,
+  match_noise, matchup_agreement, mull_floor, position_lab, root_view, search_smoke (88 sites: `load(..., game='mtg')` ->
+  `load_used`, `Game('mtg', ...)` / `Driver('mtg', ...)` / `rowkit.kind('mtg')` / `replay_rows('mtg', ...)` / records'
+  `'game'` -> the loaded checkpoint's game); `tools/rowkit.py` (`kind(game)` without a default); `tools/gate.py`'s
+  search smoke (`mtg_v8`).
+* Unchanged on purpose: zero-core's own loaders (`zero.h2h`, judging, yardsticks, `zero.run`, the farm pool) already
+  take a checkpoint's or a run's recorded game; `tools/farm_build.py` / `tools/farm_campaign.py`'s `--game mtg` is a
+  worker build's repository name (zero-farm PROTOCOL 7: "mtg" for any MTG Zero run), not a layout; `mtg_eoe` (layout v6)
+  as it was.
+
+**Open for the user: the name** (decided and done: 236.10). The orchestrator asked for the name `mtg` itself to mean layout v8 (v7 as e.g.
+`mtg_v7`). zero-core refuses that without a change of its own: its encoding guard compares a checkpoint's recorded game
+with the game it is loaded as, and every checkpoint of every old run (each live run's own included) records `mtg`; the
+farm's graphs carry the game too. Doing it needs (a) a zero-core change - an alias table in the game package (`mtg_v7`
+accepts a checkpoint recorded as `mtg` with layout v7), honoured by the guard, `HeldOut`, the farm pool and the worker's
+graph check - pushed and pinned, and (b) each old run started once as `mtg_v7` (its config's game rewritten, e.g. by
+`python -m mtgz.az.run` on seeing v7 checkpoints under `mtg`). This branch takes neither: the old name keeps the old
+layout, the new layout is the default under its own name, and nothing old changes.
+
+**The gates of the rework** (on 69cba460: layout v8 the default; env MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME, the system Python):
+`python tools/gate.py suite` - **GATE PASSED suite 69cba460002e in 483s**; `python tools/gate.py engine --expect-digest
+c2b04fed925eed67 --expect-digest0 d3c144b6cc2977e5 --tested-sha 69cba460002e` - **GATE PASSED WITH SKIPS engine
+69cba460002e in 1068s**; `python tools/gate.py encoding --expect-digest c2b04fed925eed67 --expect-digest0
+d3c144b6cc2977e5 --checkpoint <a copy of legacy-meta3-r1's iteration 1233, a layout v7 checkpoint of the game mtg>` -
+**GATE PASSED WITH SKIPS encoding 69cba460002e in 810s** (both skips: one live-run-hazard test of the desktop's pytest,
+fenced by a live run). The digests as recorded (full c2b04fed925eed67, encoding-free d3c144b6cc2977e5, constructed
+38ef93512e0a7259, metagame ed86a2f5ed21c436, EoE 5ffb850dd963bad0, driver cab97c01912f7e3f, dealt cc0d138ac5c80402),
+pytest on the Mac and the desktop passed, the encoding tier's v7 checkpoint loads and plays as `mtg` (8 games), the gates'
+farm compat (the Delver dealt preset, now `mtg_v8`) identical; `tools/farm_compat.py --set game="mtg"` (layout v7) and
+`--set game="mtg_v8"` both identical (6 games, 2,468 rows, 150 batches; records 2,598 rows; 0 and 698 v8 tokens in their
+shards). The next commit adds this paragraph only.
+
+**After merging origin/main b11fa163** (main's 232-234 and zero-core pin 52134c3; this section renumbered 232 -> 235, later 236;
+`MtgV8Az` forwards the pin's new `merge_key` / `branch_alt_ok`): every digest as before (cube full c2b04fed925eed67,
+encoding-free d3c144b6cc2977e5, formats and dealt as recorded). On 94b768b6: **GATE PASSED suite 94b768b68163 in 666s**;
+**GATE PASSED WITH SKIPS engine 94b768b68163 in 1838s**; **GATE PASSED WITH SKIPS encoding 94b768b68163 in 833s** (the
+live-run fence's one desktop test; a first encoding run failed only `test_cells_local_parallel`'s 300 s timing bound on
+a loaded Mac, as on 191aa9dc, and passed on the rerun); farm compat with `--set game="mtg_v8"` and `--set game="mtg"`:
+both PASSED. The next commit adds this paragraph only.
+
+### 236.10 The name: `mtg` is layout v8, `mtg_v7` the compatibility layout (the user's decision; zero-core's game alias, zero-core docs/az.md 73; 2026-11-22)
+
+The user, on 236.9's open question: "The v8 layout needs to be the default for mtg going forward. Seems better than
+forking everything permanently into a new game." So the game NAME `mtg` is layout v8 for everything new, and layout v7
+survives only as the compatibility game `mtg_v7` for what was recorded before - with no file of an old run rewritten.
+
+**The rule (zero-core feat/game-alias, its docs/az.md 73).** A game package may declare `game_aliases`; MTG Zero's is
+`{'mtg': {'layout': 8, 'before': 'mtg_v7'}}` (`mtgz.az.GAME_ALIASES`). A record that names `mtg` **without a layout
+record** - a run config.json, a checkpoint's network config, an ONNX graph's or reference set's metadata, a shard's meta,
+a records file's header, a farm job's settings, an archive, a campaign state, a replay, a failure record: everything
+written before this change - is the game `mtg_v7`. `mtg` **with** `game_layout` 8 is layout v8; `mtg` with any other
+layout record, or `mtg_v7` with one, is refused (`GameAliasError` / the worker's `resolve_game`), never guessed. Inside a
+process every game name is the resolved one (the engine registers `mtg` = `MtgV8Az` and `mtg_v7` = `MtgAz`; every package
+table is keyed by those names); what is written from now on carries the stamp (`game_layout` 8 next to `mtg`; nothing
+next to `mtg_v7`, so `mtg_v7` reads back as itself and every other game's files are exactly as before).
+
+**What new runs record.** A run's first start records `game_layout` = the name's current revision (zero.run
+`resolve_run_game`): every MTG preset says `game='mtg'` and a new run's config.json saves `"game": "mtg", "game_layout":
+8`; its networks' configs record `game_layout` 8 (`zero.net.stamp_game`), its graphs and reference sets the metadata
+`game_layout` "8", its shards and records headers `game_layout` 8 (the Python writers and the native worker's), its farm
+jobs the settings `game_layout` 8. Presets and package defaults may not set `game_layout` (refused at registration): a
+preset fills a resumed run's missing settings and would otherwise move an old run onto layout v8.
+
+**How an old run resumes unchanged** (legacy-meta3-r1 as the case: its pinned config saves `"game": "mtg"` and no
+`game_layout`, its checkpoints record `mtg`, its preset legacy-meta3-ddwheel now says `mtg`). Re-pinned onto this main
+with no fork: `resolve_run_game` takes the saved config's layout record because the game is the saved config's - none -
+so the run is `mtg_v7` (the preset's `mtg` never lends it a record, and `--game mtg` given again changes nothing); it
+plays, encodes, trains on and evaluates layout v7 (`tokens_of('mtg_v7')`, version 7, 21 tail segments), loads its own
+checkpoints (`mtg` without a record = `mtg_v7`: the guard passes), reads its shards (their meta says `mtg`: `mtg_v7`).
+zero.run writes its config back with `"game": "mtg_v7", "game_layout": null` (as with any new setting; it reads back
+as the same game), and what it writes from then on names `mtg_v7`. Checked on read-only copies in scratch: r1's
+config.json resolved by origin/main and by this branch differs in exactly `game` (`mtg` -> `mtg_v7`) and the new key
+`game_layout` (None); r1's iteration 1234 played by origin/main as `mtg` and by this branch as `mtg_v7` (zero-core's
+selfplay_digest: self-play records, samples and results for 'visits' and 'cq', and a match against the random bot; 8
+games at 16 sims on r1's spec) - identical: 592 samples per target, records 9ee241f58002c4d3 ('visits') /
+f0ac0011ac060c97 ('cq'), results cc152b847861ae3c, every one of the 15 sample arrays, the random-bot match 4.0/4
+(results bd1308611b59da6c) on both sides; a shard of r1's iteration 1234 (its meta says `mtg`, no record) reads as
+`mtg_v7` (zero.heldout); the release worker of this commit's `check-config` of r1's own config.json: game `mtg_v7`, no failure. A
+mistake fails loudly: the run moved by `--game-layout 8` (the guard refuses its v7 checkpoints at the start), a v7
+checkpoint loaded as `mtg` (exit 78: "game 'mtg_v7' -> 'mtg'"), a v8 graph given to an `mtg_v7` job (the worker refuses
+it: a network of game "mtg" layout 8, the job plays "mtg_v7").
+
+**A v7 run moves** to layout v8 only by a fork: `python tools/fork_run.py <its checkpoint> <new run> --game mtg` (the
+widen of 236.5; the fork's network config gets `game_layout` 8).
+
+**Old farm workers** (the releases on friends' PCs, built before this change: they know `mtg` = layout v7 and no
+`game_layout`). A run of the new layout declares `game_layout` python_only in its settings' `setting_classes` (zero-core's
+table classes it so, its docs/az.md 61 and 73), so an old build refuses it at `check-config` - before any lease - instead
+of playing layout v7 under the name. Checked with r1's own pool_worker build (f22f63bb...): `check-config` of r1's
+settings moved to `mtg` + `game_layout` 8 gives "REFUSED game_layout = 8: unsupported (unknown to this build; the run's
+definition declares it python_only (setting_classes))", exit 1 (its graphs would also fail its tail check: 27 tail
+segments, its `mtg` has 21). An old build given a resumed v7 run's settings (`mtg_v7`) refuses the unknown game; such a
+run needs a worker build of the commit it is pinned to, as every re-pin does (the pool replays records through the
+run's engine). The release worker of this commit plays `mtg` + `game_layout` 8 as layout v8, `mtg` without a record and
+`mtg_v7` as layout v7 (`GameEntry::of::<MtgV8Az>("mtg").layout(8)`, `GameEntry::of::<MtgAz>("mtg_v7").before_of("mtg")`).
+
+**Call sites changed** (beyond 236.9's): zero-core reads every recorded game through the rule (zero.run, zero.net
+build / load / the guard, the farm pool's headers and shards, RemotePlay's shards, the held-out set, archives,
+zero.farm_h2h and zero.h2h settings, fork_run, distill, failure replays, the gate tools onnx_worker_gate,
+worker_records_gate, worker_parity) and writes the stamp (configs, networks, graphs, shard metas, h2h results, failure
+records; the worker's shard metas, headers and failure files). MTG Zero: the engine's names (`v8::NAME` = `mtg`,
+`NAME_V7` = `mtg_v7`, `MtgSpec::check_game`), the py and worker registrations, `mtgz.az` (tables keyed `mtg` / `mtg_v7`,
+`GAME_ALIASES`, presets `mtg` natively), `mtgz.az.layouts` (`GAME` `mtg`, `GAME_V7` `mtg_v7`, `checkpoint_game` /
+`record_game` resolve, `stamp`), farm_campaign (job settings via `package.set_game`, its state stamped, old states
+resolved), mac (a mirror's config), deck_reader, keep_h2h, sideboard_census; tools farm_compat (a `--set game=` means the
+name's current layout unless `--set game_layout=` too), farm_gates, search_smoke, gamedb and root_view (replays
+resolved), delver_archive, delver_blunders, delverai_blunder_games (stamped), gate.py's checkpoint compat (`--game mtg`);
+the tests' names swapped (`mtg_v8` -> `mtg`, a v7 meaning -> `mtg_v7`) and
+`test_old_runs_stay_layout_v7_and_new_runs_are_layout_v8` rewritten for the alias (a config and a checkpoint saying
+`mtg` without a record resolve to `mtg_v7` and stay so across starts; a new run records `game_layout` 8;
+`--game-layout 8` on an old run is refused by the guard). Unchanged: `--game mtg` of tools/farm_build.py and
+farm_campaign.py and a worker manifest's `game` (the build's repository name, zero-farm PROTOCOL 7); the game records'
+files (zero.gamerec: they name no game; gamedb replays rules, the same in both layouts).
+
+**Digests** (on 256d1ef4, the Mac): layout v8 (the default) unchanged by the rename and the merge - full
+c2b04fed925eed67, encoding-free d3c144b6cc2977e5, constructed 38ef93512e0a7259, metagame ed86a2f5ed21c436, EoE
+5ffb850dd963bad0, driver cab97c01912f7e3f, dealt cc0d138ac5c80402, dealt per seat e2a91849b5b9f372 (each = the recorded
+file); `DIGEST_ENCODING=v7` (layout v7, the game `mtg_v7`) = origin/main c6ba3909's own digests exactly: full
+9473f7debc4bceb3, constructed 4a03293608edeba2, metagame d72ae0c904a0ffbd, EoE 5ffb850dd963bad0, driver
+6a03572828250b86, dealt f858b1880091d94f, dealt per seat 2719fdd478d14fa3 (computed in a checkout of main the same day).
+
+**Farm compat, both layouts** (the release worker of 256d1ef4, the Delver dealt preset): `tools/farm_compat.py` as is
+(`mtg`, `game_layout` 8), with `--set game="mtg_v7"`, and with `--set game="mtg" --set game_layout=null` (the name as a
+run of before layout v8 records it): all three PASSED - gate 2 identical (6 games, 2,468 rows, 150 batches), gate 3
+identical (2,598 rows, 6 decks compared); the v7 shards' metas say `mtg_v7` (no record) and the v8 shards' `mtg` /
+`game_layout` 8, with 698 more tail tokens (layout v8's segments).
+
+**The gates** (env MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME, the system Python, warm worktrees): on f9d04af3 (this section's
+code; the next commit adds this paragraph only) **GATE PASSED suite f9d04af3867f in 425s**; `python tools/gate.py engine
+--tested-sha f9d04af3867f --expect-digest c2b04fed925eed67 --expect-digest0 d3c144b6cc2977e5` - **GATE PASSED WITH SKIPS
+engine f9d04af3867f in 1446s**; `python tools/gate.py encoding --expect-digest c2b04fed925eed67 --expect-digest0
+d3c144b6cc2977e5 --checkpoint <a copy of legacy-meta3-r1's iteration 1234: game mtg, no layout record>` - **GATE PASSED
+WITH SKIPS encoding f9d04af3867f in 815s** (its checkpoint step loads and plays it as `mtg_v7`, 8 games). Both skips: the
+desktop's one live-run-hazard pytest test, fenced by a live run. The zero-core change alone, gated as an opt-in core
+feature: `python tools/gate.py optin-core --baseline-root <this branch's 330cba1f at the old pin 52134c3>` on 5082442f
+(330cba1f at zero-core feat/game-alias 6e54da5, no alias declared) - **GATE PASSED WITH SKIPS optin-core 5082442fb186 in
+1833s** (checkpoint_compat byte identity across both checkouts, 3,554 samples per target; core tests 223, core pytest 781
+passed with 17 live-run-hazard tests fenced; the other three games built against the core; farm compat identical). The
+Mac's full pytest of 9d01c425 had three failures, none of this change: `test_run_publisher`'s supervisor test passes alone
+(a timing flake under load), and `test_artifact_cache::test_check_scope_reads_cargo_dep_info` and
+`test_deck_scorer::test_the_engines_fixtures_are_reproducible` fail the same on the Mac at origin/main c6ba3909 (they pass
+on the desktop).
+
+## 237. zero-core pin 6e54da5 -> 61909fa: the probe's graph-derived expectation resolves the graph's game (the farm release's DirectML self-test after layout v8; zero-core `fix/probe-alias` 61909fa, docs/az.md 73.1; 2026-11-22)
+
+**Why.** The farm release of 1d327d07 (the first with layout v8, section 236) failed at its DirectML self-test
+(`tools/farm_release.py` step 6b): `reference: a network of game Some("mtg"), the job plays "mtg_v7" (docs/az.md 73)`.
+That step re-exports the release's reference checkpoint (a v7 checkpoint recorded as plain `mtg`) with the release's
+code, so the new graph names its game `mtg_v7`, and checks it with `probe-providers --model ... --reference ...` against
+the reference set exported before the change (`mtg`, no `game_layout`). The probe and `eval-batches` have no job: their
+expectation was the graph's own metadata (zero-core `session::expect_of`) with no knowledge of the worker's registered
+games, so the alias rule (`mtg` without a record = `mtg_v7`) never applied and the pair was refused. Jobs
+(`Expect::of_entry`) were never affected; the CUDA self-test (the old export, `mtg` against `mtg`) passed. Every farm
+release since layout v8 would fail the same way.
+
+**What.** zero-core: `SessionSpec::games` and `probe::Opts::games` carry the worker's registry (`cli_with` passes
+`Worker::games` to `probe-providers` and `eval-batches`); with no job expectation, the graph's game and layout record are
+resolved in it (`resolve_game`) and the expectation takes that entry's name, layout revision and `before_of`, so a graph
+and its reference set pass exactly when a job of that entry would accept them: a graph `mtg_v7` (or `mtg` without a
+record) takes a set `mtg` without a record or `mtg_v7`, never `mtg` layout 8; a graph `mtg` layout 8 takes only `mtg`
+layout 8; a game the registry does not resolve keeps strict equality as before. No engine, encoding, search or self-play
+change: the worker's jobs, shards and records are unchanged (digests unmoved); the farm build changes only in what these
+two commands accept.
+
+**Reproduced and fixed** (scratch copies of the release's reference files and runtime packs, nothing written under the
+farm builds directory): the release's own worker (`mtg-1d327d0-release-rt2713f148`) on the release's re-exported
+`model_fm.onnx` against the reference `reference.npz` with `--providers dml,cpu --reps 2` - exit 2, `providers: []`,
+`FAIL cpu: reference: a network of game Some("mtg"), the job plays "mtg_v7"`, the release's failure; this branch's
+`mtgz-worker` on the same files - exit 0, `providers: ["dml","cpu"]`, cpu max abs 3.0e-6, dml max abs 4.5e-6 (NVIDIA)
+and 3.9e-6 (Intel), deterministic. The CUDA self-test's pair (the old `model.onnx` against the same set, `--providers
+cuda,cpu`) passes with this worker too (cuda max abs 2.4e-6, cpu 3.6e-6).
+
+**Tests.** zero-core `session::tests::a_graph_derived_expectation_resolves_the_graphs_game_in_the_registry` (the
+stand-in alias `toy` layout 2 / before `toy_old`: every pairing above through `expect_of`, the graph's own game check and
+`selftest::check_meta`; plain games unchanged; an empty registry still refuses the release's pair); zero_worker lib 49
+passed.
+
+## 238. A gate's Mac steps really run at once, and zero-core's pytest runs in shards (branch `feat/gate-parallel`, 2026-11-22)
+
+The question was whether the gates could be faster by spreading their work over cores and machines. 167 had already
+made a tier's independent checks one parallel group and 166 had put the pure-CPU ones on the Mac beside a live run. Two
+things undid most of that:
+
+* **`tools/mac.sh` ran one command per Mac checkout** (143's lock: a second mac.sh had once force-switched the sources
+  under a running cargo test). A gate's parallel group, offloaded, therefore ran one step at a time, and so did every
+  gate of the same commit (their Mac checkout is the same `detached-<sha>`). The engine gate of f9d04af3 (236.10, 1,446
+  s): `cargo test az` 23 s of work in a step of 829 s, `limits` 0.04 s in 1,067 s, `hidden` 1 s in 877 s, the digest
+  formats 20 s in 866 s, the four pytest shards 116 / 138 / 175 / 308 s of work in steps of 594 / 797 / 1,065 / 475 s -
+  each log's first line: "[mac] ... is in use (...): waiting for it".
+* **zero-core's pytest was one process**: 44 and 52 minutes of test time in two optin-core gates of the day (815 and
+  851 tests, 40 s of slot wait), the long pole of the core tiers. It cannot go to the Mac (its search goldens are x86's:
+  166.2).
+
+### 238.1 `tools/mac.sh`: one commit's commands share the checkout
+
+* A command of the SAME commit as the ones running in a Mac checkout joins them (the checkout is not touched: its HEAD
+  is checked, never moved); a command of ANOTHER commit waits until the checkout is free, then checks its own out as
+  before. `--pin`, `--eval-checkout` and `MTGZ_MAC_EXCLUSIVE=1` take the checkout alone.
+* Beside the checkout: `<checkout>.mac-users/<pid>` per running command ("<sha> <shared|excl> <what>"; a file whose
+  process is gone is dropped), `<checkout>.mac-want/<pid>` per waiting command ("<since> <what>": waiters go in the order
+  they began to wait, and a later arrival goes after them even where it could share), and the old
+  `<checkout>.mac-lock`, now held only while a command reads those and syncs the checkout (the bare repos' fetch, the
+  config, the worktree list and the checkout are written under it: several mac.sh arrive at once). An older mac.sh still
+  holds that lock for its whole command and is waited for, so the two versions are safe beside each other on a
+  `detached-<sha>` checkout; an older mac.sh on a named branch that moved could still switch the sources under a new
+  one's command, until every checkout carries this version.
+* The desktop side: several mac.sh of one checkout push the same refs at once; a push that lost the race for the ref's
+  lock is tried again (quietly), and `git remote add mac` losing its race is not an error.
+* How many commands run at once on the Mac is `tools/slotd.sh`'s there (the gate's Mac commands take a slot each:
+  166.2); its `slots` went from 2 to 4 (the Mac's own `~/.mtgz-state/slots.conf`, not in the repo). A caller that does
+  not use slotd.sh and counted on the lock to run its commands one at a time now sets `MTGZ_MAC_EXCLUSIVE=1`.
+* Checked on the Mac with commands that only sleep: three of one commit overlapped (15 s for 3 x 8 s); with one
+  running, an exclusive command, then a sharing one, then one of another commit each waited and ran in that order, the
+  last at its own commit.
+
+### 238.2 The gate on the Mac: the module built once, a shard's own basetemp
+
+* `mac-build`: when a parallel group holds more than one Mac step that imports the module (their commands begin with
+  `bash tools/build_py.sh &&`), `place` puts one Mac step before the group that builds it there
+  (`mac_module_step`; evidence: build_engine.sh's "mtgz._engine OK: .../mtgz/_engine.* | games: [...]" line + exit 0).
+  The group's steps then take the artifact cache's module (placed by a rename). Without it, the first build's install
+  (the old file removed, the new one copied) could land under a step importing it, now that the steps run at once.
+* A Mac pytest shard runs with its own `--basetemp` under the Mac checkout's `gates/tmp`, removed after (`mkdir -p
+  gates/tmp` first: pytest makes its basetemp, not the parents - the first run's three shards errored on a new Mac
+  checkout for that).
+
+### 238.3 zero-core's pytest in shards
+
+`--core-pytest-shards` (default 4; search-core, optin-core): `core_steps` splits the core's `tests/test_*.py` with
+`pytest_partition` / `pytest_coverage` (167.4's, now taking the suite's root) into steps `core-pytest-K-of-N`, each its
+own process, `--basetemp` and junit file, each a heavy desktop step with the flaky policy (91) for its own failures;
+durations in `core_pytest_durations.json` beside this repo's `pytest_durations.json` (a file without one is weighed by
+its size, so the first run's shards were uneven). One shard, or a core checkout without two test files: the one step
+`core-pytest` as before.
+
+### 238.4 Builds
+
+* `--jobs` defaults to the environment's `CARGO_BUILD_JOBS`, else `jobs` of the machine's `slots.conf` (what slotd.sh
+  gives a command whose caller set none; 10 on the desktop), else 4. It was 4 everywhere. Not measured.
+* The Python module and the worker are still built one after the other. Two cargo builds in one target dir serialise on
+  its lock, and one `cargo build -p mtgz_py -p mtgz_worker` unifies the host dependencies' features (`syn` and
+  `proc-macro2` get other feature sets than in either build alone: `cargo tree -e features`), so the separate builds the
+  cache keys and the farm use would each compile again. A second target dir would compile the engine twice.
+
+### 238.5 Measured (beside two live runs and other sessions' gates)
+
+| gate | before | here |
+|---|---|---|
+| python, no Rust change | 703 - 1,029 s (167.7) | **190 s** (567522d0: `mac-build` 4 s; the four shards 73 / 86 / 101 / 114 s of pytest at once, one waited 40 s for a Mac slot; the run-loop smoke 40 s; the desktop part 60 s) |
+| optin-core's core pytest | one step, 44 - 52 min of test time | four steps, 6.2 / 7.7 / 8.9 / 12.7 min of test time (780 passed; one `test_remoteplay` test failed in its shard and passed alone: the flaky policy) |
+| optin-core, whole gate | 1,833 s (5082442f) | 1,875 s (1622f2ab, checkpoint_compat skipped): no gain - each core shard waited 7 - 17 min for one of the desktop's 4 slots, which the gate's own eight heavy desktop steps and two other sessions' gates shared |
+
+The first row is the Mac lock. The last row says what bounds a core tier now: the desktop's slot count (`slots.conf`,
+the machine owner's setting for side work beside live runs), not the test time.
+
+### 238.6 Gates, and what is left
+
+`tests/test_gate.py` 102 passed (new: the Mac module checker, the `mac-build` step before a group and none for the suite
+tier, a Mac shard's basetemp, the jobs default, the core shards - every file once, the split of a measured file, the
+flaky retry's own basetemp, the one-step fallback - and a failed core shard failing the gate). **GATE PASSED WITH SKIPS
+python 567522d039cd in 190s** (skip: the desktop's one live-run-hazard test, fenced). After the merge of origin/main c8dd218d (237): **GATE PASSED WITH SKIPS python 781f593cb1fc in 143s** (the same skip; this sentence is the next commit, docs only). The optin-core run above passed
+every step and failed only "the checkout unchanged by the gate" (the basetemp fix was edited in its checkout while it
+ran).
+
+Left: more desktop slots for the single-threaded pytest shards (the owner's call); the durations of shards that ran on
+the Mac are still not recorded (167.10), so beside a live run this repo's shards stay as balanced as the last desktop
+run left them; `check_checkpoint_compat` is one ~22 min step.
+
+### 238.7 zero-core pin 688e753 -> 2f7263c: the core's own sharded pytest runner, `smoke_all.sh` builds the games at once
+
+zero-core `main` 2f7263c (its docs/az.md 75; tools, tests and docs only - no crate, no Python package file):
+`tools/pytest_shards.py` (the core's standalone counterpart of 238.3) and `tools/smoke_all.sh` running its pytest
+suites through it and `SMOKE_JOBS` (3) games at once. This gate's build-only step runs the pinned core's
+`smoke_all.sh --with-this-core --build-only`, so the three other games now build at once there (96 s for the three
+against 171 s one after the other, zero-core's measurement).
+
+`python tools/gate.py optin-core --baseline-root <a warm worktree of main f74d5fd7, its module built>` on 1b7616de (the
+pin commit; this paragraph is the next commit, docs only): **GATE PASSED WITH SKIPS optin-core 1b7616de28c1 in 2378s**
+(the skips: 17 live-run-hazard tests of the core, fenced). The first core gate with the desktop's `slots` at 8
+(`slots.conf`; 4 until then: 238.5): the builds 190 + 185 + 120 s one after the other (a new pin: nothing from the
+cache), then the group - the four core shards 427 to 745 s of pytest after 120 to 400 s of waiting for a slot (7 to 17
+minutes of waiting at 4 slots), 787 passed; the build-only step 138 s for the three games at once; checkpoint_compat
+identical (3,554 samples per target) in 1,808 s - one step, now the longest of the tier and what its wall time is.
+
+### 238.8 zero-core pin 2f7263c -> 61341a7: `check_checkpoint_compat.py` plays its digests at once
+
+zero-core `main` 61341a7 (its docs/az.md 75.1; tools, tests and docs only, and 0d2a503 before it: docs): the core
+tiers' checkpoint_compat step runs each target's self-play and the match of both checkouts as six processes at once
+instead of two processes one after the other, with the same printed lines (make_compat_checker reads them unchanged)
+and the same digests - this gate's command on one checkout against itself: 384 s against the 1,808 s of 238.7's gate,
+visits 4c42f1160eca9121, cq 88ab3306d3beba12, the match f2a5103266c05aa6, each the gate's own value.
+
+`python tools/gate.py optin-core --baseline-root <a warm worktree of main 73dcf783, its module built>` on 790dc7b6 (the
+pin commit; this paragraph is the next commit, docs only): **GATE PASSED WITH SKIPS optin-core 790dc7b6e0fa in 984s**
+(the skips: the core's live-run-hazard tests, fenced) - against 2,378 s for 238.7's gate and 1,833 s for 236.10's.
+checkpoint_compat identical in 540 s (1,808 s); the four core shards 641 to 871 s, now the tier's longest steps; the
+build-only step 149 s; the module, the worker and the core module from the artifact cache (the pin changed no Rust
+input).
+
+### 238.9 The seconds of shards that ran on the Mac reach the durations file
+
+Beside a live run every pytest shard runs on the Mac, and its junit file stayed there (167.10's deferred item): the
+durations file was only ever updated by a gate without a live run, so the shards drifted apart (238.5's four: 73 / 86 /
+101 / 114 s). A Mac shard's command now writes its junit file under the Mac checkout's `gates/tmp`, prints the tests'
+seconds as one line after pytest's own output (`python tools/gate.py --junit-seconds <file>`: "GATE_PYTEST_SECONDS
+{...}", nothing when the file is unreadable) and removes it; the shard's checker (`recording(check_pytest)`) merges that
+line into `pytest_durations.json` once the shard passed (`merge_durations`: the desktop's own `record_durations` is the
+junit reader plus the same merge). A shard's result is still pytest's final summary line alone. The Mac's seconds and
+the desktop's are different clocks; a gate's shards all run on one of them, so one gate's seconds balance the next
+gate's shards on either.
+
+Checked (164e0604, beside two live runs; this paragraph is the next commit, docs only): `tests/test_gate.py` 103 passed
+(new: the line's round trip, a failed shard recording nothing, the merge keeping other files' seconds); **GATE PASSED
+WITH SKIPS python 164e0604f82c in 319s** (the desktop's one fenced test; the Mac was also running another repo's tests)
+- each of its four Mac shards printed its line, `pytest_durations.json` was rewritten at the gate's end, and the next
+plan's shards are 16 / 19 / 19 / 27 files where this gate's were 20 / 24 / 18 / 20.
+
+## 239. The stew: specialists, deck stews and a main stew, distilled upward (branches `feat/stew-distill`, `feat/stew`, zero-core `feat/multi-distill`; 2026-11-21)
+
+### 239.1 Several teachers, each on its own rows: `tools/distill.py --sources` and the MTG row selector (zero-core pin c850a5d -> ae3bc6c, zero-core `feat/multi-distill`, docs/az.md 76)
+
+Branch `feat/stew-distill` from main 1e7416c5. **Why.** The stew distils a *deck stew* of deck X from every
+specialist whose pairing includes X, on the rows where X's player acts, and the *main stew* from each row's
+acting deck's deck stew plus a retention share (the stew's design, the rest of section 239). Distillation (62,
+zero-core docs/az.md 13) took one teacher and every row. This lane adds several sources to zero-core's tool and the
+row selector that says, exactly, which deck the acting player of a training row plays.
+
+**zero-core (docs/az.md 76).** `python tools/distill.py --sources SOURCES.json OUT.pt` (this repo's wrapper passes
+it through): a student (`{"init": S.pt}` warm start, or a fresh size), sources `{name, teacher, data, select,
+weight, heldout, config}`, `heldout` "auto" (each source's last shard with selected rows), the `train` block (the
+flags' settings). One window of every source's selected rows, each teacher's answers on its own rows only, every
+batch split by the sources' weights (stratified: a source's share does not depend on its row count), held-out
+agreement per source (KL(teacher || student), top-1, P(win) and margin differences, both networks' losses against
+the shards, per kind of row and per auxiliary target) in the progress lines and in OUT.pt's `extra.distill`
+(the sources file and its sha256, each source's teacher sha256, rows selected and used, the steps). The game package
+answers `select` through a new optional hook, `GamePackage.row_selectors` (a game without one refuses a non-empty
+select). Opt-in: the single-teacher tool is byte for byte the pin's (zero-core's golden test).
+
+**The row selector** (`mtgz/az/rowselect.py`, registered as `row_selectors={'mtg': 'mtgz.az.rowselect:row_select'}`):
+
+```json
+{"actor": "izzet_delver_8016541"}                          rows whose acting player plays that 75
+{"pairing": ["izzet_delver_8016541", "doomsday_8027957"]}  rows of games of that pairing (unordered; [x, x] = x's mirror)
+{"not_pairing": [[a, b], ...]}                              rows of none of those pairings
+```
+
+keys AND-combined, every name one of the shard's run's metagame decks (its config.json's spec: `<run>/config.json`
+beside `<run>/data`, or the source's `config`). A row is its `player`'s view - a value-only row (zero-core docs/az.md
+16) too. What the row holds, exactly (engine `encode.rs`; checked against the engine below):
+
+* **The opponent's deck: the opponent-pool bag** (`bag::OPP_POOL`, 0.25 a copy) is the opponent's whole pool in every
+  row of an open-decklist constructed game: in a best-of-three (`MatchPool::constructed`) its 75, basic lands
+  included, in game 1, at sideboarding and in the post-board games whose 60s are hidden (`known_before` hides
+  nothing of a constructed pool: no first picks); in a best-of-one (`MatchPool::new`) the main and sideboard less the
+  five basic lands (they are not pool cards there). The row's opponent deck is the one deck of the run whose pool
+  equals the bag count for count; none or several: a loud failure (a shard of another run or spec). Two decks with
+  the same pool are refused when the metagame is read.
+* **The acting player's own cards, U**: the bags of its hand, graveyard, exile and library (`MY_HAND`,
+  `MY_GRAVEYARD`, `MY_EXILE`, `MY_LIBRARY`) summed over the identities below the token range (`CUBE_CAP`: a token is
+  no deck card). Each of those zones is its owner's (CR 400.3; the exile bag is written by owner, a delve's promised
+  hand card counts as exiled, the library bag is the frame's own library), so U is a sub-multiset of the player's
+  current deck, itself within its 75. The battlefield bag is left out: it is by controller (a stolen permanent would
+  be the opponent's card). The true deck's 75 always holds U.
+* **Candidates** = the decks whose 75 holds U and that meet the row's opponent deck in a cell of positive weight
+  (either seat order). The true deck is always one of them, so a single candidate IS the deck. A row's selection is
+  **decided** when every candidate gives the same answer (one candidate; or several that agree, e.g. a pairing the
+  opponent's deck alone rules out); a row it cannot decide fails the whole selection, naming the shard, the count
+  and the first such row - never a guess, never a silent drop.
+
+Where that is complete: **a two-deck run and a mirror run** (a stew specialist: decks [C, D] with weights [[0, 1],
+[1, 0]], or [C] with [[1]]) decide every row from the opponent's deck alone (U cross-checks it); **a best-of-one
+metagame** decides every row from U (a best-of-one row always has the player's library and hand: 0 undecided on
+2.2 M real rows below); **a best-of-three metagame of three or more decks** cannot decide `actor` on a
+sideboarding row whose opponent deck several decks meet: no game bag is written while sideboarding (`encode_sideboarding`:
+the match block, the decider's pool list in the `list` segment, nothing of the waiting player's), so U is empty -
+the waiting player's value-only rows hold nothing of its own pool at all. The stew does not need it (its
+specialists are pairing runs; its retention rows come from the best-of-one source run's archive); a run that does
+needs a per-row tag (below).
+
+**By its 75, never by its 60.** The deck is identified by its pool: the opponent-pool bag is the whole 75 whatever 60
+the opponent plays, and U is checked against each deck's 75. So a post-board 60 with sideboard cards in, a dealt
+random 60 (ENGINE.md 154, 168.1: the stew's specialists will be dealt per seat, section 239's lane 3) and a sideboarding
+row whose decision is a table's teacher decision (168.3: one-hot targets) are read alike. The metagame spec refuses
+dealt decks until that lane lands, so it is checked on a fixed mirror: the engine test below plays a best-of-three
+Delver mirror dealt per seat (`dealt_decks` p 1.0, swaps 0-15, `start_game` 1 and 2), and on real data the Delver
+best-of-three line's `delver-bo3-pb3` (dealt per seat at p 0.85 / swaps 0-15, sideboarding by the matchup model's
+tables as teacher decisions; its spec read as a one-deck metagame): iteration 155, **220,211 rows, the opponent-pool
+bag the 75 and the own cards within the 75 on every one**, 205,008 of them (93%) with own cards NOT within the
+registered main 60, 3,762 sideboarding rows.
+
+**Tests** (`tests/test_rowselect.py`, 9): against the engine, every 2nd to 5th decision of random games, both
+players' head rows (`encode_row`): best-of-one metagame of the three decks (18 games of all 9 cells, 2,030 rows),
+best-of-three metagame (6 matches, 4,322 rows, 176 at sideboarding), a Delver|Doomsday pairing run (3 matches, 1,270
+rows) and the Delver mirror (2 matches, 1,086 rows) - the opponent's deck is the pairing's on every row, the true
+deck is among the candidates on every row, and the candidates are one deck on every row but the three-deck
+best-of-three's sideboarding rows (exactly those, where all 3 decks remain); a dealt 60 read by its 75 (the dealt
+Delver mirror above, both start games: the bag the 75 on every row, every row's own cards within the 75, over a
+tenth of the rows' own cards outside the main 60); `evaluate` decides what the opponent alone tells (a pairing ruled
+out on a sideboarding row) and nothing more; the hook on dense and sparse shard files
+(`actor`, `pairing`, `actor` + `not_pairing` equal the truth; `tally`), every refusal (an unknown key, a deck the
+run does not have, a malformed pair, no config, a non-metagame spec, a shard of another metagame), an undecidable
+row failing the selection with its count; `tools/distill.py --sources` through this repo's wrapper on
+best-of-three self-play shards of a Delver|Doomsday pairing run (value-only samples on): sources `actor` Delver and
+`actor` Doomsday, each from its own teacher - their selections partition the rows, both held-out KLs fall.
+
+**Measured: real shards** (read-only; the desktop's CPU, ~10 s a 65,536-row shard for the selection pass):
+
+* **`legacy-meta3-r1`** (its config's spec: the three decks with weights [[3, 1, 1], [1, 1, 1], [1, 1, 1]] - the Delver
+  mirror three times as often -, best-of-one): iterations 1199-1204 (the run was live: its six newest complete
+  iterations then; 1191-1196, the brief's, had left its window by the time the selector ran on them but 1196, read
+  before: 158,835 rows, 0 undecided, the same picture), **803,665 rows, every one decided** (0 undecided, 0
+  refused). By acting deck | opponent deck, rows and share, against each cell's share of games (11 weight units):
+
+  | acting deck \| opponent | rows | share of rows | share of games | rows / game, relative |
+  |---|---:|---:|---:|---:|
+  | Delver \| Delver | 272,408 | 33.9% | 27.3% | 1.24 |
+  | Delver \| Doomsday | 65,810 | 8.2% | 9.1% | 0.90 |
+  | Delver \| Sneak | 68,160 | 8.5% | 9.1% | 0.93 |
+  | Doomsday \| Delver | 68,640 | 8.5% | 9.1% | 0.94 |
+  | Doomsday \| Doomsday | 66,386 | 8.3% | 9.1% | 0.91 |
+  | Doomsday \| Sneak | 62,227 | 7.7% | 9.1% | 0.85 |
+  | Sneak \| Delver | 71,361 | 8.9% | 9.1% | 0.98 |
+  | Sneak \| Doomsday | 61,854 | 7.7% | 9.1% | 0.85 |
+  | Sneak \| Sneak | 66,819 | 8.3% | 9.1% | 0.91 |
+
+  (A cross pairing's games give rows to both acting decks, so each acting cell is compared with half its pairing's
+  games, 1/11.) The sanity check against the game database's shares of 2026-11-18 (`meta3_row_shares`, iterations
+  220-229, uniform weights then: decisions per game Delver mirror 239, Delver v Sneak 155, Doomsday v Sneak 152,
+  Doomsday v Delver 127, Doomsday mirror 190, Sneak mirror 145): with today's weights those predict the pairings'
+  row shares 37% / 16% / 16% / 13% / 10% / 8%; measured 33.9% / 17.4% / 15.4% / 16.7% / 8.3% / 8.3% - the same
+  ordering in size (the Delver mirror the longest per game, by about a quarter), the rest a thousand iterations of
+  changed game lengths. Within each cross pairing the two acting decks' rows are within 4% of each other (both
+  players' rows: decisions and value-only samples).
+* **`legacy-meta3-mirror`** (the Delver mirror alone): iterations 1229-1234, local and farm shards, **1,278,894
+  rows, all Delver | Delver, 0 undecided**.
+* Cost: ~10 s a 65,536-row shard (single-threaded numpy: the shard's sparse arrays read once, the five bags' columns
+  per chunk of 4,096 rows).
+
+**Measured: best-of-three smoke runs and the two-source distillation** (scratch runs, CPU, the tiny
+`legacy-meta3-smoke` network with value-only samples 0.5, root-view leaves and the belief and deck heads, 3
+iterations of 16 matches each: the three-deck best-of-three metagame, a Delver|Doomsday pairing run and a Delver
+mirror run, all `format` bo3, `game_episodes`, `start_game` 1):
+
+* **Rows per best-of-three match against a best-of-one game** (for sizing a specialist's iteration). The same
+  settings and network on the three-deck metagame in both formats, 48 matches against 48 games: best-of-three
+  **30,394 rows, 633 a match** (129 games, 2.69 a match - the untrained networks draw 62 of them at the turn limit,
+  which makes game 3 likelier -, 236 rows a game, sideboarding rows 257 = 5.4 a match, 0.85%); best-of-one **11,480
+  rows, 239 a game**. So a match's rows = its games x a game's rows (236 vs 239) + under 2% at sideboarding: **2.65
+  best-of-one games' rows a match here**. With trained networks: `legacy-meta3-r1` makes ~159k rows of its 2,444
+  best-of-one games an iteration (65 a game, three quarters of them resigned; the Delver mirror ~81, the other cells
+  55-64, from the table above), and `delver-bo3-pb3` (trained Delver mirror networks, best-of-three post-board games
+  only, `start_game` 2) makes 163 rows a match of 1.53 post-board games (1,950 games of 1,276 local matches at its
+  iteration 155; 3,762 of its 220,211 rows, 1.7%, at sideboarding: ~105 rows a post-board game). A full match
+  (`start_game` 1) plays game 1 and then 1.5 games on average in a mirror (pb3's game 3 rate 0.53), fewer in a
+  lopsided pairing: **about 2.5 best-of-one games' rows a match, up to ~3 if post-board games run as long as pb3's**,
+  i.e. ~800-1,000 matches an iteration for the rows of the meta3 run's 2,444 games. An estimate, not a measurement on
+  the stew's own networks: its first iteration's DONE.json (`samples`, `episodes.per_contest`) gives the real one.
+* **The selector on these shards**: the Delver|Doomsday run 18,756 rows (Delver acting 9,512, Doomsday 9,244), the
+  Delver mirror run 29,235 rows - **every row decided by the opponent's deck alone, 0 undecided**; the three-deck run
+  30,394 rows, 30,137 decided by U, **257 undecidable for `actor`** (169 sideboarding decisions, 88 the waiting
+  player's value-only rows at sideboarding): exactly its sideboarding rows, as 239.1 says.
+* **The two-source distillation** (`E:/mtg-zero-scratch/stew/m0/`: `sources_bo3_smoke.json`, `run_proof.sh`; CPU,
+  4 torch threads): a Delver deck stew warm-started from the three-deck run's last checkpoint (32 x 1 tokens with
+  the belief and deck heads), source 1 the Delver mirror run's last checkpoint on its rows where Delver acts, source
+  2 the Delver|Doomsday run's last checkpoint on its rows where Delver acts, weights 1:1 (64 + 64 rows a batch of
+  128), held out "auto", 300 steps at lr 1e-3. Source 1: its 2 training shards' 19,865 rows all selected; source 2:
+  7,606 of 15,229 selected; 27,471 rows in the window (9,185 value-only); held out 4,096 / 1,906 rows. Load and
+  selection 17 s, both teachers' answers 22 s, 0.35 s a step, 152 s in all. Held-out agreement, step 0 -> 300 (each
+  source against its own teacher):
+
+  | source | policy KL | top-1 | P(win) sq. error | belief KL | deck KL |
+  |---|---:|---:|---:|---:|---:|
+  | Delver mirror, Delver acting | 0.0065 -> 0.0019 | 0.46 -> 0.74 | 0.075 -> 0.053 | 1.05 -> 0.38 | 0.18 -> 0.061 |
+  | Delver \| Doomsday, Delver acting | 0.0057 -> 0.0013 | 0.62 -> 0.81 | 0.014 -> 0.0066 | 0.74 -> 0.20 | 0.13 -> 0.031 |
+
+  (the untrained teachers' policies are near uniform, hence the small KLs), the averages in the progress lines and in
+  `extra.distill.heldout`, each source's teacher sha256, rows and selection in `extra.distill.sources`. The same file
+  with an `actor` source on the three-deck run fails before any training: `source 'meta3-bo3:delver': shard ...: 42 of
+  9827 rows the selector {"actor": "izzet_delver_8016541"} cannot decide (row 953: its acting player plays one of
+  [all three] against sneak_show_8014220, and the row holds none of its own cards - a sideboarding row ...)`.
+
+**A per-row tag, not built** (for a best-of-three metagame of three or more decks): the driver would write each row's
+deck index (`MatchState::pairing` of the row's seat) as an optional shard member, the farm worker too (farm
+compatibility), and the selector would read it when present. An engine, core and worker change; nothing in the stew
+needs it.
+
+**Gates.** zero-core (tier `optin-core`'s checks, `feat/multi-distill` ae3bc6c): `cargo test --release` 212 + 3
+passed (a first run, beside the live meta3 run and other sessions' builds, failed the timing-sensitive
+`driver::tests::queued_setups_fill_every_free_slot_when_the_queue_is_long` and passed on the rerun; the branch changes
+no Rust file); `tests/test_distill_sources.py` 11 passed, the two byte-identity goldens among them; `test_distill`,
+`test_net_data`, `test_package_hooks`, `test_tail_train`, `test_shard_thread` 76 passed; privacy check 0 findings;
+`bash tools/smoke_all.sh --with-this-core --build-only`: **games: 3 of 3 checked** (glassroad-zero, caverna-zero,
+kingdombuilder-zero built against ae3bc6c), its core cargo test and build ok, its full core pytest 790 passed, 31
+skipped, 2 failed - both CUDA tests outside the diff on the GPU the live run holds:
+`test_dup_reduce::test_max_is_deterministic_on_cuda_and_matches_the_cpu` (fails alike on c850a5d in its own
+worktree) and `test_token_graphs::test_absent_slots_are_never_read[max]` (a 3e-8 difference; passed on the rerun, on
+c850a5d too). This repo: `tests/test_rowselect.py` 9 passed, with `test_mtg_az`'s distillation test,
+`test_delverai_meta` and `test_privacy`. The `python` gate on 4c11cd0d: GATE PASSED WITH SKIPS (only the live-run fence: 8 `live_run_hazard` tests fenced off beside the live runs; pytest 4 shards 227 + 178 + 163 + 150 passed, the desktop part 48, the run-loop smoke 16 games 0 unfinished; 1,830 s).
+
+### 239.2 The orchestrator: `tools/stew.py`, `mtgz/stew` (branch `feat/stew`)
+
+**Why.** The design agreed with the user on 2026-11-21 (the brief of the build): a **metagame** of N decks with field
+shares, **candidates** among them; one **specialist** per unordered pairing with at least one candidate (mirrors
+included; K candidates in N decks: K*N - K(K-1)/2), trained by AlphaZero self-play of that pairing only (one net plays
+both sides); one **deck stew** per deck, distilled from every specialist whose pairing holds the deck, on the rows
+where that deck acts; one **main stew**, distilled from the deck stews (each row's teacher the stew of its acting
+deck) plus a retention share for the pairings no specialist covers. Everything in the stew is best of three (the
+user, 2026-11-21): the specialists self-play full matches with sideboarding (`"format": "bo3"`, `game_episodes`,
+`start_game` 1; their sideboarding learnt the Delver mirror's way - dealt decks per seat, a per-pairing matchup model
+and its tables as teacher decisions - once that lane merges: section 240), and every judging comparison is
+best-of-three matches on the plain evaluation spec (the network's own sideboarding). Until now each of
+these steps was made by hand for one experiment (the mirror-only fork's launch script with the source run's supervisor
+arguments, the farm runs paused and activated on the coordinator by a script, an end watcher that resumes the meta3
+run, the vs-pb1@262 refmatch watcher); the orchestrator makes them one resumable loop.
+
+**What it reuses** (nothing re-invented): zero-core's `tools/fork_run.py <seed> <run>` (a NEW run whose iteration 0 is
+the seed: no inherited window, a fresh AdamW with its warm-up) and `check_heads`; `tools/supervise.py` and
+`tools/launch_hidden.py` (each specialist an ordinary supervised run from the stew's pinned checkout);
+`tools/pause_run.py --wait` / `--resume` and zero.runctl's states, `live_supervisors`; the coordinator's admin API
+through `zero.farm_def.Client` (a farm run's whole body as GET returns it with only `state` changed, as tools/ab.py's
+`farm_pause`); `tools/farm_gates.py` + the worker's check-config before a specialist's first farm turn (tools/ab.py's
+`farm_gates`); `mtgz.az.farm_builds` for `"pool_build": "published"`; `decklists.metagame_spec` / `pair_spec`;
+`yardsticks.cell_stats` (177.2's statistics); zero-core's multi-teacher `tools/distill.py --sources` (239.1).
+
+**The stew directory** (the code takes its path; the maintainer's: `stews/<name>/` on the big disk):
+
+| path | what |
+|---|---|
+| `stew.json` | the config (normalized at init; a stew's config does not change - `add-deck` moves its field) |
+| `state.json` | the lineage and the phase machine (atomic writes) |
+| `runs/spec-<A>-<B>/` | each specialist: an ordinary zero-core run |
+| `nets/main/gen_NNN.pt`, `nets/deck-<X>/gen_NNN.pt` | the main stew's and the deck stews' versions (+ `.stew.json`: its sources file's sha256) |
+| `sources/gen_NNN-<net>.json` | the distillation sources files (239.1's contract) |
+| `rows/gen_NNN/spec-<A>-<B>/` | the shards a generation distils from (hard links of the specialist's newest data iterations + its config.json) |
+| `archive/` | the source run's window copied at init + its config.json: the retention source's rows |
+| `judge/gen_NNN/` | the judge's jobs and results (`<id>.job.json`, `<id>.json`, `<id>.log`) |
+| `reports/gen_NNN.{json,md}` | each generation's report |
+| `farm_gates/`, `logs/`, `stew.log`, `requests/`, `run.lock` | farm gate summaries, process logs, the stew's log, add-deck requests to a live run, the running loop's lock |
+| `STOP`, `PAUSE` | the stew's own control files |
+
+**stew.json** (`mtgz/stew/config.py`, every default filled in at init): `name` (a slug: farm runs
+`<name>-<alias A>-<alias B>`), `decks` [{`name`, `share`, `alias`}] (data/decks/ names; each checked to play the
+format: a best-of-three 60 + its sideboard), `candidates`, `source` {`run`, `iter` (a number or "newest")}, `seeds`
+{"<A>|<B>": .pt} (default: the main stew's version 0), `recipe` {`turn_iters` (32), `format` / `game_episodes` /
+`start_game` ("bo3", true, 1), `settings` (run settings over the source's for every specialist; the stew's own keys -
+`spec`, `eval_spec`, `iters`, `selfplay_remote`, `run`, `resolver` - refused), `pair_settings`, `farm` (true: each
+specialist self-plays on its own farm run), `distill` (the sources file's `train` block), `distill_cli` (extra
+tools/distill.py arguments: `--device cuda`), `distill_iters` (6: the newest data iterations of a turn a generation
+distils from), `retention_share` ("field" or a number), `judge` {...} (239.3), `hold_after` (["<phase>@<generation>"]),
+`env` (the stew's processes' environment), `archive` ("copy" | "link"), `spec_extra` / `deck_spec_extra` (below)},
+`code` {`worktree`, `sha`, `python`, `farm`
+(pool_build, pool_runtime, pool_worker, pool_alternates, pool_variants, pool_min_agent; `"pool_build": "published"` =
+the published farm build of `code.sha`), `farm_gates` (true)}, `yield_runs` [{`run`, `farm_runs`}], `beside_runs`
+(live runs a stew off the GPU may run beside, never touched: the CPU smoke beside the meta3 run), `requires` (what
+the recipe needs merged first; init and plan say it), `notes`. Unknown
+keys, an odd judge count, a hold tag that names no phase, a seed of a pairing no specialist has, a farm run name over
+63 characters and the like are refused by name.
+
+**Generations.** Generation g runs five phases, each tagged `<phase>@g`: `train`, `distil_decks`, `judge_deck_gap`,
+`distil_main`, `judge`. It reads version g of every net and writes version g + 1; version 0 is the start (the main
+stew = a copy of the source run's checkpoint, each deck stew = a copy of it, each specialist = its seed). Net files
+carry their version (`gen_NNN.pt`), the judge's directories and the reports their generation (`reports/gen_000` is
+generation 0's: specialists v1 against v0, deck stews v1, main stew v1). state.json keeps every version of every net
+with its path, sha256 and parents; a distilled one its sources file (and sha256), teachers and the distillation's
+record; a specialist's its run iteration and the turn's training numbers.
+
+**init** (idempotent; refuses a stew.json that differs from the one there): checks the decks, the source checkpoint,
+the seeds, the yield runs and (with `code`) the checkout's sha and engine build; copies the main stew's version 0 and
+the deck stews'; archives the source run's complete data iterations up to its checkpoint (the source run deletes old
+shards: keep_data); and creates each specialist: `tools/fork_run.py <seed> runs/spec-<A>-<B>`, then its config.json
+written by the stew - the source run's config.json, then the stew's own keys, then `code.farm`, `recipe.settings`,
+`recipe.pair_settings`, resolved as zero.run resolves it (so the run's first start resolves the same; every turn
+passes only `--iters`) - and the seed's heads checked against it (fork_run's `check_heads`: net.HeadMissing is
+reported, never patched around). The stew's own keys: `spec` = `eval_spec` = the recipe's metagame restricted to the
+pairing (`metagame_spec([A, B], weights [[0, 1], [1, 0]])`: every match A against B, either seat; a mirror `[A]`,
+`[[1]]`) with `recipe.spec_extra` over its top level and `recipe.deck_spec_extra[<deck>]` over each deck's entry
+(self-play options: dealt decks per seat, the per-deck table keys of 240) - and `eval_spec` the plain one (no extras:
+an evaluation never deals decks or plays tables) -, `iters` 0, evaluation off (`eval_every` 100000, and `eval_games`,
+`eval_random_games`, `elo_games` 0: zero.run always evaluates iteration 0; `elo_anchors` '', `eval_remote` '',
+`yardsticks` {}), `publish` {}, `forced_find_schedule` {} (the source spec's forced find is dropped, with a note in
+state.json and the report: the engine refuses it in best of three, 180.1, and a new run would restart its schedule
+at its first p), `selfplay_remote` 'pool:<name>-<alias A>-<alias B>' (`recipe.farm`; '' without). The matchup
+model's settings (`matchup_every`, `matchup_window`, ...: 240's sideboarding) are ordinary run settings of
+`recipe.settings` - the stew neither sets nor clears them, so they come from the recipe or the source. The engine
+parses each specialist's spec at init (a game made from it): an option this build refuses - dealt decks in a metagame
+before 240 merges - fails `init`, not the run's first start.
+
+**1. train.** Each specialist of the generation in turn (the field's pairing order): its turn's target (version g's
+iteration + `turn_iters`) recorded in state.json first (a resumed turn keeps it); the stew's STOP / PAUSE checked; the
+live supervisors checked; the machine taken (`yield_runs`, below); the farm gates passed for its config and pool
+worker (once: `farm_gates/<run>/summary.json`); its farm run set active (it exists from the pool's first PUT); its
+leftover PAUSE / PAUSE_NEXT / STOP (the stew's own, from a stopped turn) cleared; `launch_hidden.py ...
+tools/supervise.py <run> --iters <target>` from the stew's code; then polled every 30 s until its checkpoint
+`<target>` exists and its supervisor is gone. Its farm run is paused again at once (a failed pause leaves it in
+state.json `farm_to_pause`, retried, and fails the phase loudly). Version g + 1 = that checkpoint, with the turn's
+matches, rows, rows a match and hours from its metrics. A supervisor that ends short of the target, or a turn of 0
+iterations, fails the phase.
+
+**2. distil_decks.** First the rows: each specialist's newest `distill_iters` complete data iterations (a DONE.json) of
+its turn, hard-linked (copied across volumes) into `rows/gen_<g+1>/spec-<A>-<B>/data/` with its config.json beside -
+the run's own later pruning cannot take them from a phase that has not used them (the main stew's distillation comes
+after the hold point). Then each deck stew X: sources file `sources/gen_<g+1>-deck-<X>.json` = `student.init` its
+version g; one source per specialist {X, Y}: `teacher` the specialist's version g + 1, `data` its rows, `config` the
+copied config.json (the row selector's context), `select` {"actor": X}, `weight` share(Y) (the mirror's: share(X));
+`heldout` "auto"; `train` = `recipe.distill`. Then `tools/distill.py --sources FILE OUT.pt <distill_cli>` (`--resume`
+when OUT.pt.partial exists). The version is recorded with the per-source rows and held-out agreement read from OUT.pt's
+`extra` (zero-core docs/az.md 76); an OUT.pt whose record names another sources file, or a source with 0 selected rows,
+fails.
+
+**4. distil_main.** `student.init` the main stew's version g; per specialist {A, B} and acting deck Z of it a source on
+the same rows: `select` {"actor": Z}, teacher = deck stew Z's version g + 1, weight the cell's field weight share(Z) x
+share(other); plus **retention**: teacher = the main stew's version g, data = `archive/data`, `select` {"not_pairing":
+every pairing of the archive's decks that is not an uncovered cell of the field}. `retention_share` "field" = the
+uncovered cells' field weight among the cells the main stew is distilled on (uniform shares, Delver the candidate: 4 of
+9 cells, 0.444), the others scaled so that every cell keeps its field weight. An uncovered cell whose decks the archive
+does not have (a deck added later: Hogaak against Doomsday) has no rows: named in a note, its weight left out. The
+retention rows are the source run's (the meta3 run's best-of-one games): the only rows of those pairings there are.
+
+**Control.** `run` refuses while the stew's PAUSE exists (remove it to continue) and moves a STOP to STOP.old, as
+tools/supervise.py does. STOP or PAUSE is checked between phases, between turns, every poll of a turn (the live
+specialist paused at its iteration boundary - `pause_run.py --wait` - then STOP written in its run so its supervisor
+ends; the turn resumes with the same target), and while a distill or judge process runs (stopped with its tree:
+distill resumes from its partial file, finished judge jobs are kept). `recipe.hold_after` tags write the stew's PAUSE
+after that phase (once per tag), with the report so far. Before the first GPU work of a `run` the stew takes the
+machine: each yield run that is running is paused at its boundary (refused if it does not pause within the timeout),
+its farm runs paused; and gives back exactly what it paused (a yield run found paused or stopped stays so; a farm run
+returns to its state before) when it stops, pauses, holds or fails - not while a specialist of its own is live. It
+refuses to start while a supervisor is live that is neither a specialist's, a yield run's nor a beside run's
+(`runctl.live_supervisors`, relative run paths by the process's working directory). One `run` at a time
+(`run.lock`, a live pid and creation time). A phase that did no work fails loudly: a turn of 0 iterations, no shard
+to distil from, no distillation output, no judge job, fewer matches than asked.
+
+**Games an iteration in best of three** (the first stew's `recipe.settings`, `pair_settings`). The brief: an iteration
+of a specialist yields about as many rows as the meta3 run's 2,444 best-of-one games (~152k: legacy-meta3-r1's last 20
+iterations, 2,955,629 samples of 47,456 games, 62.3 a game). At fixed run settings the rows are proportional to the
+decisions (the playout cap records a fixed share; the value-only view samples follow the recorded decisions), so rows a
+best-of-three match = 62.3 x d3 / d1, d1 the decisions of a best-of-one game on the meta3 run's own self-play mix
+(weights 3:1:1) and d3 a best-of-three match's of the pairing (`game_episodes`, `start_game` 1, the deck tilt).
+Measured with legacy-meta3-r1's iteration 1196 against itself (CPU, 8 simulations, no resignation; 48 games / 16
+matches each, so +-10%): d1 = 287.2 decisions (the Delver mirror's best-of-one game alone 309.5); d3 = 810.5 for the
+Delver mirror (2.375 games a match), 689.5 for Delver-Doomsday (2.625), 576.4 for Delver-Sneak (2.5). So **866, 1,018
+and 1,218 matches an iteration** (~176, 150 and 125 rows a match), the farm's `pool_quota` scaled from the meta3 run's
+8,000 by the same ratio and its lease sizes from 16 / 128 to 6 / 48. Each turn's report shows the real rows a match of
+self-play (with resignation and the playout cap) to correct them by.
+
+**add-deck** `<name> [--candidate] [--share s] [--alias a]`: checked at once (the deck plays the format, not in the
+field, its farm runs' names), recorded as pending (or, while a run is live, as a file in `requests/` the run takes); it
+joins at the start of the next generation before any turn of it: the deck stew = a copy of the main stew's current
+version, the new pairings' specialists forked from it (or `seeds`), the field's shares from then on in every sources
+file and the matchup table.
+
+**Commands** (run from the stew's pinned checkout, `code.worktree`; refused from another one unless --any-checkout):
+
+```
+python tools/stew.py init stews/first --config first_stew.json
+python tools/stew.py plan stews/first       # the next phase, its exact commands, the judge's matches and hours
+python tools/stew.py status stews/first
+python tools/launch_hidden.py stews/first/run_console.txt python tools/stew.py run stews/first
+python tools/stew.py step stews/first distil_main
+python tools/stew.py add-deck stews/first hogaak_tempo_NNNN --alias hogaak
+python tools/stew.py stop stews/first [--pause]
+```
+
+**Tests** (`tests/test_stew.py`, 18, and `tests/test_stew_judge.py`, 6: fakes for every process, the coordinator and
+the networks; nothing starts a process): pairings (K*N - K(K-1)/2), the config's refusals; init's layout, the
+specialists' settings (the restricted best-of-three spec of both 75s, evaluation off, the forced find dropped, the farm
+run's name, recipe and pairing overrides; the recipe's spec extras and matchup settings, the plain eval_spec, dealt decks refused at init by this build) and an idempotent second init; generation 0 to its hold point (round-robin
+turns of B iterations, farm runs active only in their turns, the yield run paused before the first turn and given back,
+the deck stews' sources: teachers, selectors, opponent-share weights, the rows' layout, the per-source record; the
+report's gen-over-gen, cells, gaps and field rates), the loop on after the hold (the main stew's sources routed to the
+acting deck's stew, retention 4/9 with its not_pairing, weights summing to 1; generation 1's turns from version 1), a
+crash in a distillation resumed without a second turn and a judge phase re-run without a match replayed, `step`, STOP
+during a turn (the specialist paused at its boundary and its supervisor ended; resumed at the same target), a turn
+without progress, the live-supervisor refusal (and yield / beside / own runs allowed), a yield run paused before the
+stew left paused, add-deck (pending, joining at generation 1 with its deck stew and specialist, a request file beside a
+live run), plan / status, main sources with a deck outside the archive (retention 4/11).
+
+### 239.3 Judging: best-of-three matches where the deck follows the net, on common deals (branch `feat/stew`)
+
+**Why not zero.h2h as it is.** zero.h2h seats side A in seat gid % 2: on pair_spec(X, Y) every other match moves A onto
+Y. Its per-seat settings (214) set a seat's search, not its deck. A stew comparison is a property of one cell - X's
+pilot against Y's - so its matches fix the seats: `zero.games.Driver` takes a seat list per game, and the judge's match
+process (`python -m mtgz.stew.judge play JOB OUT`) builds it with the measured net in X's seat for every match.
+
+**The unit and the arms.** A cell X|Y is played in two **orientations** - pair_spec(X, Y) with the measured net in seat 0,
+pair_spec(Y, X) with it in seat 1 (a mirror's two orientations are its two seats, with seeds of their own: the same
+deal twice would be one unit) - each with the spec's `chooser` 0 and 1 on one driver seed, so match g of the two halves
+is one deal (one game seed) played once with X's side choosing play or draw and once with Y's side choosing: the
+**unit**, as the cells yardstick's (177.1). Best of three: the chooser is game 1's, later games' the previous game's
+loser; one result per match (the contest's row, zero-core docs/az.md 42). `judge.matches` per comparison (400) = 4 jobs
+of matches / 4 = matches / 2 units. Every arm of a pair uses the pair's seeds (the same every generation), so the arms
+are on common deals:
+
+* **B** - the specialist against itself (both orientations x both choosers; played once per non-mirror pair, read from
+  either side for X|Y and Y|X). X's side's mean score is the **matchup table**'s P(X beats Y) under the specialist; a
+  mirror's is 0.5 by symmetry and not played.
+* **A** - deck stew X (version g + 1) piloting X against the specialist piloting Y: the **distillation gap** A - B.
+* **M** - the main stew (version g + 1) piloting X against the specialist piloting Y: main - deck stew (M - A) and main -
+  specialist (M - B).
+
+A gap is `yardsticks.cell_stats` of two arms' units: Elo = 400 log10 of the odds ratio of the two mean scores, its se by
+the delta method over the paired units with their covariance (the common deals' gain over unpaired; `se_unpaired`
+beside it), a bootstrap over units (`boot_se`, `boot_95`).
+
+**Specialist gen over gen**: version g + 1 against version g on pair_spec(A, B), a paired head-to-head (matches 2k and
+2k + 1 one deal with the seats swapped: both nets play both decks), `judge.gen_matches` (400); the pair scores' mean,
+se, Elo +- se, pentanomial.
+
+**Field win rates**: for each candidate C, sum over the field's decks Y of share(Y) x P(C beats Y), se in quadrature (the
+pairs' deals are disjoint): with the specialists (arm B), and with the deck stews and the main stew as C's pilot (arms
+A and M) beside it.
+
+**Play settings.** Both sides of every match: the specialists' evaluation seat (`zero.h2h.run_rule` of a specialist's
+checkpoint: its eval_select, guard, completed-Q transform, leaf view, root belief - the deck tilt kept: best of three
+has hidden 60s), its run's margin_w / redet / eval_cache (`run_seat_keys`), max_steps and sparse batches; the judge's
+`sims` (64), `device` ('cuda'), `threads` (16), `groups` (1), `chance_k` (2), `precision` (fp32). `procs` jobs at once
+(each its own process with its two networks). A job's result is reused only when its job hash matches (the networks'
+paths, the spec, the seed, the settings), so a judge phase resumed after a kill plays only what is missing.
+`judge.backend` 'local' only: farm campaigns (one backend per comparison) are not built yet and are refused by name.
+
+**Reports** (`reports/gen_NNN.json` / `.md`, written by both judge phases and at a hold): the generation's nets, each
+turn's matches / rows / rows a match / hours, each distillation's per-source weight, rows and held-out agreement (policy
+KL, top-1, value errors), gen over gen, the cells table (P(X wins) under the specialist, the deck stew's and the main
+stew's scores as X, the three gaps), the candidates' field win rates, the judging's matches, games a match and
+process-hours, and the notes (the forced find dropped, uncovered cells without rows).
+
+**Cost of the first stew** (Delver the candidate in Delver / Doomsday / Sneak and Show: 3 specialists, 5 covered cells):
+gen over gen 3 x 400, arm B 2 x 400, arm A 5 x 400, arm M 5 x 400 = **6,000 best-of-three matches a generation** (4,000
+in `judge_deck_gap`, 2,000 in `judge`). Their time on the desktop's GPU depends on the matches in flight: its judges
+ran 4.6 ms a decision with 400 games in flight (the vs-pb1@262 refmatch: 800 best-of-one Delver mirror games of 309
+decisions in ~1,150 s) and 13 ms with 100-200 (the cells window of 199.1: ~950 games an hour of ~287 decisions); a
+stew job holds matches / 4 = 100 matches. With the matches' decisions above (810 / 690 / 576 a match by pairing:
+1,200, 2,400 and 2,400 matches) that is **~5.2 GPU-hours a generation at the refmatch's rate, ~14.5 at the cells
+window's**, with one match process; `judge.procs` processes share the GPU's idle time (199.5: 1.7-3x at best), so
+~3-8 hours with 3 (the first stew's setting; `est_s_per_match` 9 s per process feeds `plan`'s estimate). The training of
+a generation is 3 turns of 32 iterations. Cheaper settings if the judge dominates: `judge.main_arms` off in some
+generations, a smaller `gen_matches`, or the farm backend once built.
+
+**Measured** (2026-11-21, CPU, beside the live meta3 run: the smoke's config lists it in `beside_runs` and never
+touches it).
+
+* *The match process on a best-of-three cell*: `judge.play_job` with the smoke's tiny network (`legacy-meta3-smoke`,
+  aux heads trained), pair_spec(Doomsday, Delver, bo3, `game_episodes`) with chooser 1, layout a1 (the measured net in
+  seat 1 = Delver for every match), the evaluation seat with the deck tilt, 4 simulations: 6 matches, 2-3 games each, one
+  result row a match, no panic (the deck tilt in a best-of-three match: nothing to tilt in game 1, the hidden 60s after).
+* *The CPU smoke, part 1* (`tools/stew.py`, a scratch stew; 2 decks - Delver and Doomsday, Delver the candidate - so 2
+  specialists; the source a 2-iteration `legacy-meta3-smoke` run with the meta3 run's aux heads and belief settings):
+  `init` copied version 0 of the main stew and both deck stews, archived the source's 2 data iterations, forked both
+  specialists (`tools/fork_run.py`) with their config.json (the restricted best-of-three spec of both 75s, evaluation off,
+  the forced find dropped) and checked the seed's heads (the deck tilt needs the deck head); `plan` printed both turns'
+  supervisor commands; the first `step train` REFUSED - the meta3 run's supervisor was live and not listed - which is
+  how `beside_runs` came about; then `step train` ran both turns with real supervisors: 2 iterations x 16 best-of-three
+  matches each, Delver mirror 12 min and Delver-Doomsday 6.5 min, versions 1 = iteration 2, the source (a stopped run in
+  `yield_runs`) recorded "was stopped" and neither paused nor resumed. Self-play rows a match: 397 (mirror, 2.1-2.75
+  games a match) and 312 (Delver-Doomsday), against 111 rows a best-of-one game of the source - the tiny network's games
+  run long and draw at the turn limit, so the first stew's games an iteration come from the real network (239.2).
+* *The CPU smoke, part 2* (a local merge of this branch with `feat/stew-distill`, never pushed): `run` went on from the
+  train phase - `distil_decks@0` (50-step `tools/distill.py --sources` distillations: deck stew Delver from both
+  specialists, its Delver-Doomsday source selecting 1,927 of 3,886 rows by `actor`, the mirror's all 6,400; deck stew
+  Doomsday 1,959 rows; per-source held-out agreement read into the report), `judge_deck_gap@0` (18 jobs, 40
+  best-of-three matches, 4 processes at once, 2.475 games a match; gen over gen, arm B, arms A, the field rate), then
+  HOLD (the stew's PAUSE, `reports/gen_000.md`); after the PAUSE was removed `step distil_main` (4 sources: three routed
+  to the acting deck's stew, retention 1/4 = the Doomsday mirror's rows of the best-of-one archive by `not_pairing`)
+  was REFUSED once more - another live run had started - and ran with it in `beside_runs`; `step judge` (arm M, 24
+  matches) then finished (exit 0): the report's cells table gained the main stew as X, main - deck and main - spec,
+  and the candidate's field rate per net (specialists 75.0%, deck stews 56.2%, main stew 53.1% - a tiny network on 50
+  distillation steps, so only the plumbing is measured); 64 matches in all at 2.531 games a match, 4.68 process-hours.
+  Under CPU load the tiny network's best-of-three match took ~40 s.
+* *Tests*: `tests/test_stew.py` 18, `tests/test_stew_judge.py` 6, `tests/test_stew_control.py` 4 (2 of them start
+  processes: `live_run_hazard`).
+* *Gate*: the `python` gate on 4b2f7b15 (this branch's head): GATE PASSED WITH SKIPS (only the live-run fence: 8
+  `live_run_hazard` tests fenced off beside the live runs; 2,432 s). With lane 3 merged, `test_spec_extras_and_matchup_
+  settings_come_from_the_recipe` changed: the engine now parses dealt decks per seat in the best-of-three metagame at
+  init, so its check refuses the test's unknown per-deck key instead, and passes without it.
+* *Layout v8* (the user, 2026-11-22: "Definitely need to move the stew to v8"; main's layout v8 section): `recipe.game`
+  (default `mtg` = layout v8). `init` widens the source checkpoint onto it - `Ops.widen`: fork_run's new-run path into
+  `nets/main/gen_000.pt.fork` (kept: the provenance), its iteration 0 copied to `nets/main/gen_000.pt`, the version
+  recording `game` and `source_sha256` - so every net descends from a v8 network; each specialist is forked with
+  `--game` (the Delver mirror's seed pb1@262 too) and its config names `mtg` with `game_layout` 8 (`package.set_game`;
+  the source's config names `mtg` without a layout record, i.e. `mtg_v7`). Probe on the real nets (read-only):
+  the meta3 run's iteration 1234 widened across the token layout change, new segments payment, pay_options, lki,
+  lki_spells, lki_relations, find_groups each gated at exactly 0; pb1@262 (44,212 features) onto 56,384 with tails and
+  twenty new gated segments - both computing what they did on every row without the new tokens. The judge reads a
+  net's game through `package.record_game`. The retention archive (the source's v7 shards) cannot train a v8 net as
+  it is: the main stew's first distillation (after generation 0's hold) needs them replayed as v8 rows or another
+  retention source - decided at the hold.
+
+### 239.4 The merge onto main: lanes 1-3 together, layout v8, the gates
+
+Integration branch `feat/stew-int`: lane 1 (`feat/stew-distill`), lane 2 (`feat/stew`), lane 3 (`feat/pair-sideboarding`,
+240) merged onto main and kept merged with it as main moved (217-238), the stew moved onto layout v8 (239.2's last
+bullet), the sections numbered at the merge (239, 240; zero-core docs/az.md 76). The zero-core pin -> 324b2b7 = zero-core
+`feat/multi-distill-int`: `feat/multi-distill` merged onto zero-core main 61341a7 (conflicts: docs/az.md, and
+`GamePackage`'s hooks - game_aliases and row_selectors both kept). zero-core main had moved on meanwhile (bf3c4cf,
+its own docs/az.md 76: the eager evaluator's priors on CUDA), so zero-core main is the merge 1b87ff9 of the two, where
+multi-distill's section is docs/az.md **77**; this pin stays the gated 324b2b7 (whose docs still call it 76) until the next
+pin move.
+
+Fixes found while integrating: the fuzz pool meta_pair's pairing spec carrying a forced find a pairing can never apply
+(240.7); `test_deck_tilt`'s preset list (the pair presets are constructed best-of-three presets with the tilt);
+`test_stew`'s init check (dealt decks per seat parse now); `test_rowselect`'s shards written with the layout record.
+
+**Gates.** `suite` (fuzz pools default, default+hidden, delver_dealt, meta_pair) on c8ae91af: GATE PASSED (the full engine
+suite, each pool 2,000 games). `python` on c8ae91af: GATE PASSED WITH SKIPS (the live-run fence). `engine --tested-sha
+c8ae91af` on 2931eecb (main 15bed950 merged, the sections numbered): GATE PASSED WITH SKIPS (the live-run fence) - the
+digests full c2b04fed925eed67 and encoding-free d3c144b6cc2977e5 (= main's), constructed 38ef93512e0a7259, EoE
+5ffb850dd963bad0, driver cab97c01912f7e3f, metagame ed86a2f5ed21c436, pair 80562a6aa452b765, dealt cc0d138ac5c80402 (each
+= recorded), farm compat identical, the full suite again on the merged sha 2,942 passed. `optin-core --baseline-root`
+<main 15bed950> on 2931eecb: GATE PASSED WITH SKIPS AND FLAKY RETRIES (the live-run fence; zero-core's
+`test_remoteplay::test_a_dying_worker_gives_its_accepted_games_back` passed on its retry alone, as on main's own
+optin-core gates).
+
+## 240. pb3's sideboarding for every stew specialist: dealt decks from each seat's own 75, the per-pairing matchup model and one choice table per deck, in the best-of-three metagame restricted to a pairing (branch `feat/pair-sideboarding`, 2026-11-21)
+
+Branch `feat/pair-sideboarding` from main 1e7416c5, then main 45dbf2e1 (220, Legacy Hogaak Tempo) merged in (two
+conflicts, the fuzz pool lists and the match step: both sides kept); zero-core pinned at c850a5d, unchanged - the
+existing hooks suffice (`SearchGame::teacher_policy`, 168.3; `selfplay_specs`, 168.4; `value_only_decision`, 180.12).
+Section number: assigned at the merge onto main (239 is the stew's own, its lanes 1 and 2).
+
+**Why** (the stew brief, section 7; the user's go of 2026-11-21: "everything in the stew is best-of-three"). Each stew
+specialist (one pairing {C, D} of the field, mirrors included; ENGINE.md 239) self-plays full best-of-three matches with
+sideboarding, and learns sideboarding the way the Delver mirror did (pb3, 168), not by its own search (pb1's way stalled:
+the inherited swap held 0.93 of the prior for 130 generations of pb2, 168). pb3's three parts - dealt decks per seat,
+the matchup model, its choice table as teacher decisions - were one shared 75 only; here each works for a pairing of two
+DIFFERENT 75s, inside the best-of-three metagame spec restricted to the pairing (the stew's specialists' spec), and a
+mirror is exactly what it was.
+
+### 240.1 The specs (engine)
+
+| | the fixed two-75 spec (`decks`) | the metagame spec (`metagame`, 176) |
+|---|---|---|
+| dealt decks (`"dealt_decks"`, 154, 168.1) | already per seat from each seat's own 75 (`set_dealt(d, swaps, &seats[d])`); each seat's sideboard at least the range's top | **now accepted** in best-of-three: each seat dealt from ITS OWN 75; every deck of a pairing of positive weight must have the range's top in its sideboard (refused naming the deck); a deck no played pairing holds is never dealt |
+| choice tables (168.3) | **new**: `decks.p0_table` / `decks.p1_table` - each seat its OWN deck's table, its list exactly that seat's 75 (refused otherwise) | **new**: a deck entry's `"table"` (`{"name", "main", "sideboard", "table"}`), its list exactly that deck's 75 - keyed by the deck, so whichever seat plays the deck plays its table |
+| pb3's `"sideboard_table"` | unchanged (every seat whose 75 is its list); refused beside a seat table ("one table for every seat of its 75, or one per deck - not both") | still refused (a metagame deck carries its own) |
+| the forced find (180) | **now accepted in best-of-three** (also the metagame's): each game of the match carries it; the "some deck holds both" check reads each deck's 75 there (a 60 of it can board them in), its main in best-of-one | the same |
+| refused with a table | `keep_deck` (the yardstick's), best-of-one, a drafted spec | `keep_deck`, `keep_known` (refused for a metagame as before), best-of-one |
+
+* **Where a seat's table comes from** (`MtgSpec::seat_tables_of`, `MtgAz::new`): pb3's one table for every seat of its
+  75; else a fixed spec's seat table; else a metagame seat's pairing deck's (`Metagame::tables`). Nothing else changed:
+  `MatchState::table` (per seat, 168.3) carries it, `MtgAz::table_action` plays the canonical path toward the seat's
+  context's 60 (the next game, first, lead, the other seat dealt), the release worker plays it through
+  `teacher_policy` with no code of its own.
+* **`Metagame::pair_json`** passes the per-deck settings through: `dealt_decks` and `forced_find` as they are (every key
+  but `metagame` was copied before), a deck's table as its seat's `decks.pN_table`. So 176's invariant holds with them:
+  a metagame match IS its pairing's fixed match of the seed (`metagame.rs` / `pair_sideboarding.rs` tests, the fuzz's
+  `meta_lockstep` on every match of `FUZZ_POOL=meta_pair`, below).
+* **The evaluation spec** (`MtgSpec::eval_json`, `mtgz.az.evaldecks.eval_spec`) drops the tables in every form (the old
+  `sideboard_table`, a seat's, a metagame deck's), the dealt decks and the forced find: judging measures the network's
+  own sideboarding (168.3). (`eval_spec` had not dropped pb3's `sideboard_table` - the engine's did; no run spec ever
+  held one, the tables arrive by the hook, so nothing changes for a run.)
+* **The game log** (168.2, 176.3): a best-of-three line already carries per seat its 60's copies of its own 75
+  (`"decks"`, against the spec line's per-seat `"lists"` and `"mains"`) and a metagame's pairing; the spec line adds
+  `"tables"` ([seat 0's table's version or null, seat 1's]) only when the spec has per-deck tables (every other spec line
+  is what it was).
+
+**Decisions (the brief left them open; each the exact option, and why).**
+
+1. *Keyed by the deck: in its metagame entry; in a fixed spec per seat.* A list of tables matched by 75 content (pb3's
+   `fits`) would be one rule for both specs, but it is not exact for a metagame: two decks of one 75 under different
+   names would share a table, and a deck without a table would take the other's. In its entry the table IS the named
+   deck's; a fixed spec has no names, its seats are its decks; `pair_json` maps entry -> seat. Exact by construction.
+2. *The forced find in best-of-three: each game its own draws.* 180.1 left it open ("a match's later games would need the
+   draw per game"); they have them already: `next_game` makes every game with its own seed from the match's RNG, and the
+   draw is `split64(that game's seed ^ SALT)` (`Game::empty`), so game 2's draws are independent of game 1's (measured
+   below) and the same in every world of the game (its seed is not reseeded; a search world reaching the next game deals
+   that game's seed afresh, as all chance that has not happened). 180.12's value-only rows apply in every game (the
+   hook reads the game in progress; never at a sideboarding).
+3. *A dealt range past a deck's sideboard is refused, never clamped per deck* (a clamp would deal another swap
+   distribution than the spec says). Every 75 of the stew's field has a 15-card sideboard.
+
+### 240.2 Hidden information
+
+Nothing new is encoded and `MatchState` has no new field. Per seat with two 75s: who is dealt is public (154.2, both
+flags); each deal is `KEY_DEALT` of its seat with as many keys as ITS 75's list needs (public: the 75 is), its payload
+its own 60's copies, `HIDDEN` for the other observer (the same number of keys) - tested with Delver (29 entries: 4 keys)
+against Doomsday (`two_75s_deals_are_keyed_privately_each_by_its_own_75`); the other player's worlds deal each dealt
+seat's 60 from that seat's restricted prior, untilted (154.2); a seat's table is its own policy (`MatchState::table`
+Hidden in the public-state gate, 168.3), never encoded. The forced find stays Derived and unencoded in every game
+(180.4); its draws are the same in every world of a game. The fuzz (`FUZZ_POOL=meta_pair`) runs every check of
+`delver`'s and `meta`'s matches on it: worlds of both viewers, the private-key check (every dealt-deck key of another
+player `HIDDEN`), the information-set walks.
+
+### 240.3 The per-pairing matchup model (`mtgz/az/matchup.py`)
+
+**One pairing per model** (`the_pairing`): the games' spec lines must play one pairing - a mirror (one 75 both seats:
+pb3's case) or two different 75s in either seat order (a metagame restricted to the pairing plays both). Several
+pairings (the stew's main metagame) are refused loudly, as are two metagame names of one 75. C is the deck of the lower
+metagame index (a fixed spec: seat 0's); every game is one row oriented C first.
+
+**A mirror is pb3's model, the same code** (`_mirror_version` = 168.3's fit and table, unchanged). **Two different
+75s** (`select_and_fit_pair`, `pair_choice_tables`):
+
+    z(A, B) = m + w_C . dA - w_D . dB + (dA U_C) W (dB U_D)^T + c_pd pd + c_pdg3 pd g3 + c_g3 g3 + c_lead lead
+              + c_dC dealt_C + c_dD dealt_D,     P(C wins) = sigmoid(z)
+
+dA (dB): C's (D's) 60 as copies minus its own main per entry of its own 75; pd +1 when C starts; lead sign(C's wins - D's)
+before the game. Not antisymmetric: the pairing's base rate m, a game-3 main effect, each deck's dealt flag on its own,
+W unconstrained (U_C and U_D differ). **The reduction**: with C = D and w_C = w_D, U_C = U_D, W = M - M^T, m = c_g3 = 0,
+c_dC = -c_dD it IS pb3's model; for a mirror the code fits pb3's model itself (a mirror's seat labels are arbitrary, so
+the constraints are the symmetry, and pb3's guards and approvals carry over unchanged).
+
+* **The fit is pb3's**: the same time split (the newest `matchup_val_iters` validate), grid (dim 0 or 2; the L2s), the
+  selection rule (near-ties to the simpler), the held-out ensemble (5 bootstrap fits on the training iterations: the
+  guard's number) and the published ensemble (`matchup_members` bootstrap fits on the window), the same seeds and
+  recency weights. **The guard's baseline** is the pairing's base rate + play / draw + game 3 (no deck term): pb3's play
+  / draw baseline plus the base rate a non-mirror has (else the deck model would be credited with the pairing's base
+  rate); a version publishes tables only when the model beats it on the held-out games by `matchup_table_min_gain`.
+* **One table per deck**: deck C's 24 contexts maximise F_C(A) = the members' mean over worlds B of sigmoid(z) - the
+  worlds drawn exactly from D's constructed prior (`sample_prior`; restricted to the dealt range for a dealt opponent) -,
+  deck D's maximise F_D(B) = the mean over worlds A of C's prior of sigmoid(-z); context terms from the decider's side
+  (its play / draw, lead, the other seat's dealt flag, its own dealt flag 0: it chooses); first takes its better side of
+  play and draw, second its worse; pb3's guarded climb (`confident_climb`, `matchup_swap_z` standard errors over the
+  bootstrap members) from each deck's own main. Each table is the spec's `{"version", "list", "choices"}` of its own 75.
+* **Game-1 rows**: whole matches log game 1 (both mains, dA = dB = 0); they inform m and the play / draw terms and are
+  in the fit, as pb3's code fits every logged game (pb3's run started at game 2, so it had none).
+* **What is exact and what is modelled**: 168.3's statements hold per deck unchanged - the belief about a choosing
+  opponent is its constructed prior (the user's approved modelling choice, 120.2, 168.6), F's expectation an unbiased
+  Monte-Carlo estimate over `matchup_worlds` worlds, the climb a guarded local search; the exact alternatives and costs
+  are 168.3's. Nothing approximate is new here (`docs/shortcuts.md` unchanged).
+
+**The mirror regression on pb3's own games** (read-only; `E:/mtg-zero-scratch/stew/lane3/pb3_regression.py`): pb3's
+logged self-play games of iterations 113-144 (61,967 games), fit and tabled at pb3's settings (val 2, half-life 16, 4
+threads, 8,000 worlds, 20 members, min gain 0.005, z 2) by main's code and by this branch's path (`the_pairing` ->
+mirror -> `_mirror_version`): both reproduce pb3's published `matchup/v0144.json` exactly - `list`, `main`, `members`, `report`, `table`, `table_detail` and `dealt_swaps` all equal (gain 0.0659 nats, the selected model dim 0, l2_w 0.001, validation log loss 0.6266; ~5.3 min each on 4 threads): the mirror path is pb3's code path, untouched.
+
+### 240.4 The hook and where the tables go (`with_tables`)
+
+The `selfplay_specs` hook (168.4: one answer per iteration in `used.jsonl`, so the local driver, the Mac's workers and the
+farm's definition play one spec) publishes a version's tables (`version_tables`: a mirror's one `table`, two 75s'
+`tables`) where the engine reads them - each on the deck whose 75 is its list: a metagame deck's entry, a fixed spec's
+seat, and for a fixed mirror pb3's one `"sideboard_table"` (so pb3's spec is what it was). A table that fits no deck, or
+two tables of one 75, are refused; the run's own spec may hold no table (the retrain writes them). The retrain job
+checks every version's tables through the engine's parser (`check_tables`) before publishing.
+
+### 240.5 Specs and presets
+
+* `decklists.pairing_spec(a, b, ...)`: the stew specialist's spec - `metagame_spec([a, b], weights [[0, 1], [1, 0]])`, a
+  mirror `([a], [[1]])` - best-of-three, game 1 played, one episode per game; `metagame_spec` and `pair_spec` take
+  `dealt_decks`.
+* **`legacy-pair-bo3-varied`** = `legacy-meta3-ddwheel` with the meta3 run's launch settings (its supervisor's args minus
+  the run-specific ones: farm pools, anchors, yardsticks, evaluation cadence, length, seed), best of three's deck target
+  and deck tilt (`delver-mirror-bo3`'s), pb3's matchup settings (168.4, the guards user-approved 2026-11-15), the spec
+  `pair_varied_specs(Delver, Doomsday)`: dealt decks per seat 0.85 / [0, 15], the forced find kept at p 0.0 (the meta3
+  run's schedule reached 0 at its iteration 61; `forced_find_schedule` {} holds the spec's p), the evaluation spec without
+  dealt decks, tables and the forced find; `games` PAIR_GAMES (240.8). `pair_varied_settings(a, b)` gives any pairing's
+  settings (the forced find only beside a deck whose 75 holds Doomsday and Thassa's Oracle).
+* **`legacy-pair-bo3-varied-smoke`**: `mtg-smoke`'s tiny network on the same spec shape, the forced find at p 1.0, a
+  retrain every iteration from the second.
+
+### 240.6 The fuzz pool and the digest
+
+* **`FUZZ_POOL=meta_pair`**: `meta`'s games and matches with the specialists' settings in its matches (whole and the
+  mirrors' post-sideboard): per-seat dealt decks (p 0.85 [0, 15], p 1 [0, 15] or p 0.5 [2, 6] by seed), a table per deck
+  in two matches of three (random legal 60s of each deck's own 75), the forced find (p 1, 0.5 or 0.25). Every check of
+  `meta`'s matches - the lockstep with each pairing's fixed match first (now comparing the dealt seats, the seats' tables
+  and their actions, played as teacher decisions) -, every dealt 60 within the range of its own 75, every table seat's
+  60 its own deck's choice for its context; with 100 matches or more table decisions, dealt 60s and forced Doomsday
+  resolutions must have been seen. The release worker knows the pool (`worker/src/fuzz.rs`). Not in the suite tier's
+  default pools: `--fuzz-pools ...,meta_pair`.
+* **`pair_digests`** (`digest_formats.rs`, `tests/data/digests_pair.txt`, a fifth digest_formats line; `gate.py`'s
+  `digest-formats` step now expects five lines and "5 passed"): `legacy-pair-bo3-varied`'s spec (`digest_specs.json`'s
+  `pair`, kept equal to the preset by `tests/test_digest_specs.py`) with a table per deck - 20 matches -, the same with
+  the forced find at p 1 (15), Delver against Sneak and Show (15), the Delver mirror (10), and the fixed two-75 spec of
+  Doomsday against Delver with its seat tables (10); a seat with a table plays its table's action (`play` now takes
+  `table_action` first: no spec of the other digests has a table, so theirs are unchanged).
+
+### 240.7 Checks
+
+* **The engine tests** (`engine/tests/pair_sideboarding.rs`, 8 tests in `misc_suite`, with `metagame.rs`, `forced_find.rs`,
+  `dealt_per_seat.rs`): the whole `misc_suite` 220 passed, 0 failed. Two of the branch's first tests were wrong, not the
+  engine: (1) `two_75s_deals_are_keyed_privately_each_by_its_own_75` stepped each world with the real step's action and
+  expected the world to deal too, but how far one step runs is hidden information - seed 0's action is P1's mana
+  choice, after which the real game had only forced decisions up to the turn cap (12), so the step ended game 1 and
+  dealt; in a world whose resampled hand gives P1 a real choice the step stops there and nothing is dealt yet. The test
+  now checks every world whose step deals (all of each seat's keys, HIDDEN exactly for the other seat's deal, the
+  world's next game the real one's) and counts the others: 88 worlds checked, 28 whose step stopped before the game
+  ended. (2) The evaluation-spec test built its expected value with serde_json's `IndexMut` (`w["decks"]`), which
+  inserts `"decks": null` into a metagame spec; it reads through `get_mut` now.
+* **Python** (with the branch's engine module): `test_pair_sideboarding` (all, the engine-module ones included),
+  `test_forced_find`, `test_metagame`, `test_dealt_decks`, `test_matchup`, `test_digest_specs`, `test_gate`: 133 passed.
+  `test_metagame::test_the_engine_parses_and_refuses` expected dealt decks in a best-of-three metagame to be refused;
+  they are accepted now (240.1), so the test checks that they parse and that best of one still refuses them.
+* **Digests**: on the branch, every existing digest_formats digest equal to main's 220 values - constructed
+  91b6cf60576961a7, metagame be3766d1f943c95c, EoE c3a9c786030f42eb, the driver 6a03572828250b86 -; the pair digest
+  recorded f82ab8148a4870a9 (`DIGEST_WRITE=1 ... pair_digests`, then re-run equal, 70 matches). Merged with main's
+  Doomsday-mirror leak fix (its section: a search's finds by place, an encoding change that re-recorded the metagame
+  digest, be3766d1f943c95c -> 4039d04b7971975e), the pair digest moved with it: f82ab8148a4870a9 -> **b0e1c7c5dbcce38e**,
+  re-recorded; its encoding-free digest (`DIGEST_ENCODING=0`) is b1e9aa24fa89b2fb on both sides of that merge - play
+  unchanged, only the encoding. Merged with main's 227-238 (the Hogaak payment fixes changed play: main's cube
+  encoding-free 5674f63cc335d204 -> d3c144b6cc2977e5; layout v8 hashes v8 rows by default): the pair digest **80562a6aa452b765**
+  (v8 rows; `DIGEST_ENCODING=v7` 11b7a5f3f2dc7d9e, encoding-free 719f834f0766cbed), re-recorded; every other
+  digest_formats digest as main recorded it. The cube's and the dealt digests: the engine gate.
+* **Farm compatibility on the specialists' preset** (`tools/farm_compat.py --preset legacy-pair-bo3-varied`, the
+  branch's release worker; the gate's own farm-compat step runs the Delver preset): PASSED - gate 2 (worker vs the
+  Python remote worker) identical, 6 matches, 3,056 rows, 150 batches; gate 3 (records -> trainer rows) identical, 3,349
+  rows, 6 decks. And with a published table phase (`--set spec=` the pairing spec with a 24-context table per deck and
+  the forced find at p 1, `E:/mtg-zero-scratch/stew/lane3/table_spec.py`): PASSED - gate 2 identical, 2,980 rows, 150
+  batches; gate 3 identical, 2,839 rows.
+* **The CPU smoke** (`legacy-pair-bo3-varied-smoke`, 4 iterations x 16 matches): iterations 1-2 self-play with no table, the retrain of v0002 (the games of iterations 1-2: 88 games) and v0003 as subprocesses, versions published with `"model": "pair"`; at the preset's guard (`matchup_table_min_gain` 0.005) neither published a table - held-out log loss 0.711 vs play / draw 0.577, gain -0.134 nats on 88 games of a tiny network - and iteration 4's chosen-60 seats sideboarded by search, as the guard says. Run again with `--matchup-table-min-gain -10` (the tables forced through, `E:/mtg-zero-scratch/stew/lane3/smoke2`): v0002 and v0003 each published two tables (one per deck), iteration 4's self-play sideboarded by them ("the chosen-60 seats sideboard by the matchup model's choice tables v0002.json"), and the game log's spec lines of those matches carry `"tables": ["v0002", "v0002"]`. The stew's row selector (239.1) on this smoke's rows - two different 75s, dealt per seat, post-board 60s hidden: 19,204 rows, 8,979 Delver acting and 10,225 Doomsday acting, 0 undecided.
+* **The fuzz found one bug** (the suite gate's `meta_pair` shard, match 0): the lockstep's pairing spec
+  (`Metagame::pair_json`) carried the metagame's forced find into a pairing with no Doomsday deck (the Delver mirror,
+  Delver-Sneak, the Sneak mirror), which the engine rightly refuses ("no deck's 75 holds both Doomsday and Thassa's
+  Oracle: it could never apply", 180). In the metagame the option is inert for such a pairing's games - the spell never
+  resolves, `ff_draw` is a pure function of the game's seed read only at a resolution, nothing of it is encoded - so
+  `pair_json` now leaves the forced find out exactly when neither deck of the pair holds both cards (75 in best of
+  three, main in best of one: the engine's own rule) and the fixed spec is still the metagame game's twin; test
+  `pair_json_leaves_out_a_forced_find_the_pairing_can_never_apply` (kept for Delver-Doomsday, the Doomsday mirror and
+  Sneak-Doomsday, left out for the other three, each fixed spec parses, the kept form refused). Then `meta_pair` 2,000
+  games: PASSED (2,000 games, 100 matches + 100 post-sideboard, the lockstep, tables, dealt 60s and forced
+  resolutions seen); every digest unchanged. The gates: 239.4.
+
+### 240.8 Rows per full best-of-three match (lane 2 sizes an iteration from it)
+
+Not measured again here: lane 2 measured decisions per full best-of-three match with the meta3 run's checkpoint against itself (239.3: the Delver mirror 810.5, Delver-Doomsday 689.5, Delver-Sneak 576.4, against 287.2 a best-of-one game of the meta3 mix), and rows follow decisions at fixed run settings, so an iteration of the meta3 run's rows (2,444 games) is 2,444 x 287.2 / d3 matches: 866 / 1,018 / 1,218. `PAIR_GAMES` (the preset's pairing, Delver-Doomsday) = 1,018; the stew sets each pairing's own `games` from the same table (its `pair_settings`).
+
+### 240.9 Card support of the stew's 75s
+
+`test_every_card_of_the_stew_75s_is_supported_in_best_of_three`: every ordered pairing of Delver, Doomsday, Sneak and Show and Legacy Hogaak Tempo (220) - its self-play spec, its evaluation spec and the dealt `pair_spec` - parses in the engine (`mtg_spec_check`): passed.
+
+### 240.10 Open, decisions for the maintainer
+
+* forced_find p in the preset is 0.0 (the meta3 run's schedule ended at its iteration 61); the stew's first config drops the
+  forced find for its specialists (equivalent at p 0) - a later stew may set it (it works in best of three now).
+* `tools/matchup_agreement.py` and `tools/delverai_matchup.py` are mirror-only (they read `table`); not adapted.
+* The farm fuzz steward has no `meta_pair` mode yet (the worker knows the pool).
+
+## 241. zero-core pin 324b2b7 -> 00eb2d7 (the merge of c36a566 into zero-core main 1b7d4ee): a saved config read back resolves its games (the farm release's gate 2 after layout v8; zero-core `fix/remote-worker-alias` c36a566, docs/az.md 73.2; 2026-11-22)
+
+**Merged onto main c40d496d (2026-11-22).** Branch `fix/remote-worker-alias` was gated on zero-core c36a566 (from 688e753); main meanwhile pinned 324b2b7 (section 239's stew, zero-core main 1b7d4ee). zero-core 00eb2d7 merges c36a566 into 1b7d4ee without conflicts (their changes share no file but `docs/az.md`), and this section moved from 239 (taken by the stew) to 241. The merged head is re-gated (suite, engine) and gate 2 re-run on the farm's reference config.
+
+**Why.** The farm release of c8dd218d (the first after section 237's fix) passed its DirectML self-test and failed at
+its farm gates (`tools/farm_release.py` step 8, `tools/farm_gates.py`): gate 3 passed (the native worker resolved the
+reference config's game to `mtg_v7`), gate 2 failed - the Python remote worker refused the checkpoint, `a network of
+another encoding than this build's (game 'mtg_v7' -> 'mtg'; ... token layout version 7 -> 8)`, exit 78. The farm's
+reference config is a run's config of before layout v8 (`"game": "mtg"`, no layout record), and gate 2
+(zero-core `tools/worker_parity.py`) copies it as it is into the remote worker's mirror. zero-core's
+`remoteplay.Worker` read its mirror's config.json without resolving the alias (`mtg` without a record = `mtg_v7`,
+zero-core docs/az.md 73), so it played `mtg` (layout 8) while the checkpoint loaded as `mtg_v7`. Runs never met it (the
+run resolves its config before it writes a mirror), but every farm release since layout v8 would fail the same way, and
+any other reader of a saved config with the same gap would play the wrong layout.
+
+**What.** zero-core: `package.resolve_saved_games(cfg, where)` resolves a saved config's games in place as a resumed
+run's are resolved (`game` with its `game_layout`, a co-training `resolver` with `resolver_cfg`'s record; a config
+written resolved reads back unchanged), and every reader that skipped it now calls it: `remoteplay.Worker` (the mirror's
+config.json; a layout record the checkout has no game for is refused as an `encoding` error, exit 78), the remote
+evaluation commands (`remote.evaluate_mirror`, `evaluate_net_mirror`: REFUSED on a bad record) and
+`farm_eval.match_driver` (an eval job's settings, as the native worker's `game_of` resolves them;
+`tools/worker_eval_gate.py`'s Python side). The other readers were audited and already resolved (the list is in
+docs/az.md 73.2). This repo's farm gates and worker are unchanged; no engine, encoding, search or self-play change.
+
+**Reproduced and fixed** (copies of the farm's reference config and checkpoint, the release's CPU runtime pack and its
+`mtgz-worker` under a scratch directory; nothing written under the farm builds directory): `python tools/farm_gates.py
+--config <copy> --checkpoint <copy> --worker <the release's worker> --runtime-dir <copy>` as the release runs it - with
+this checkout's core at the old Python (the fix stashed): `FARM GATES FAILED: gate 2 (plumbing) FAILED, gate 3 (records)
+passed`, gate 2's worker log the release's message (`game 'mtg_v7' -> 'mtg'`, exit 78); with this pin: `FARM GATES
+PASSED` - gate 2 8 games, 534 rows, 200 network batches, every shard array identical; gate 3 12 games, `mtg_v7`,
+identical.
+
+**Tests.** zero-core `tests/test_game_alias.py` (the stand-in alias `toy_match` rev 1 / before `toy`):
+`resolve_saved_games`; a remote Worker in-process on a mirror naming `toy_match` with `game_layout` null plays `toy` and
+loads a `toy` checkpoint (fails before the fix with the release's refusal), `toy_match` with its record plays it and
+refuses a `toy` checkpoint, a record 4 is refused as `encoding`; the remote evaluation's mirror (both commands); an eval
+job's match driver; `tests/test_worker_settings.py`: an eval match's reads are the worker's `EVAL_READS` whole, `game_layout`
+included. This repo's `tests/test_mac_remote.py` wrote mirror configs from DEFAULTS and a preset unresolved (`mtg`,
+`game_layout` null - by the alias rule a config of before layout v8, the game `mtg_v7`) beside layout-8 checkpoints;
+the old worker read the name as `mtg` and passed, the resolving one refused them (the engine gate's pytest: the
+remote evaluation of a resolver mirror and of an eval-net mirror, the worker in both modes). They now write the
+config as a run's first start does (`resolve_run_game`: `mtg` with layout 8), as every real mirror is written.
+
+## 242. The core's pytest in six shards; the eager CUDA evaluator's priors reach the pin (branch `pin/core-gpu-fix-shards6`, 2026-11-22)
+
+`--core-pytest-shards` defaults to 6 (4): with the desktop's eight slots the four shards of 7 to 12 minutes each were
+the core tiers' longest steps (238.8). The pin of 241 (00eb2d7) already holds zero-core's docs/az.md 76 - `NetEvaluator`'s
+eager path on CUDA sums a leaf's options with `segment_reduce` instead of `index_add_`, whose order of additions on
+CUDA changed a prior's last bit from call to call (the CPU path, the CUDA graphs and the ONNX export untouched: this
+repo's digests and gates run on the CPU) - and 75.2, a test's bar; this branch first pinned them itself (1b7d4ee, a
+parent of 00eb2d7) and was gated so:
+
+`python tools/gate.py optin-core --baseline-root <a warm worktree of main c40d496d, its module built>` on 8f7c8c4b (that
+pin and the six shards; before the merge of main's 241): **GATE PASSED WITH SKIPS optin-core 8f7c8c4b4d8e in 1046s**
+(the skips: the core's live-run-hazard tests, fenced) - the module and the worker built (169 + 118 s: main's Rust had
+changed) and the Mac's test binaries (208 s), then the group in about 520 s: the six core shards 237 to 520 s (641 to
+871 s as four), checkpoint_compat identical in 296 s, the build-only step 122 s.
+
+After the merge of main (57c5e0e5: the six shards and this section on top of 241's pin; this paragraph is the next
+commit, docs only): `tests/test_gate.py` 103 passed, **GATE PASSED WITH SKIPS python 57c5e0e59c3f in 255s** (the
+desktop's one fenced test).
+
+## 243. zero-core pin 00eb2d7 -> 8370543: the fast graph at fixed capacities as a farm pool variant, CUDA graphs on NVIDIA farm PCs (opt-in: `pool_variants` 'gpu=fixed-fp16@nvidia'; zero-core `perf/gpu-parity-r3` + `feat/fixed-variant`, docs/az.md 78-79; 2026-11-22)
+
+**Why.** On a 4-core CUDA farm PC the worker's GPU calls are host-bound: ONNX Runtime launches the fast graph's ~1,200
+kernels one by one with 27 device syncs a call, so a crew reached ~0.86x of the trainer's evaluator (which replays CUDA
+graphs). zero-core's graph 'fast-fixed' is the fast graph's arithmetic with every size an input's (capacities S, MR, T),
+so the worker captures it once per bucket of fixed shapes and replays it.
+
+**What changes here.** Only the pin. With it a run may set `pool_variants` 'gpu=fixed-fp16@nvidia' (with AMD PCs:
+'gpu=fixed-fp16@nvidia,dml=matmul@amd'): each generation is exported again as graph 'fast-fixed' in float16 and
+registered as the run's NVIDIA (CUDA) alternate's model; the worker turns its CUDA-graph buckets on by itself for a fixed
+graph on CUDA (`ZERO_WORKER_CUDA_GRAPHS=0` turns them off). **Off by default**: no run sets it, every graph and run plays
+as before (the fixed graph is a new export; the default and fast graphs are byte for byte).
+
+**Measured** (a 4-core CUDA farm PC, gen 769 of legacy-meta3-r1 in fp16, 5-minute crews, trainer 32.9k leaves/s): 3 x
+1,150 games in flight 32.3k / 32.3k leaves/s (0.98x; 32.7k with bucket reuse, 0.99x) vs the fast fp16 graph's 29.8k;
+2 x 1,152 (the agent's layout there) 30.3k / 30.3k, then 30.7k (vs 27.4k; the graph released before the Pad export 24.4k).
+Worker self-test on CUDA passes (fp16, max abs 1.7e-2, deterministic); the worker's answers on the CPU vs the Python
+reference 1.2e-7, vs torch 6.8e-6 (zero-core `tools/onnx_worker_gate.py`).
+
+**Gates.** optin-core on 06d4d1df: GATE PASSED WITH SKIPS (17 live-run-hazard tests fenced: live runs on the desktop) -
+checkpoint_compat byte identity vs main e3bb4f0b (3,554 samples), digests = the recorded ones, farm compat identical, the
+other games built, core pytest in 6 shards.
+
+## 244. The farm's torch worker build and runtime pack: the owner's machines play farm self-play through torch (branch `feat/torch-worker`, zero-core docs/az.md 80; 2026-11-22)
+
+**Why.** The owner's decision (2026-11-22): farm machines are configurable per machine, and the owner's two machines play
+farm self-play with torch instead of the native ONNX worker, which reaches ~0.4x of the trainer's torch self-play on an
+RTX 5090 (the GPU, not the host, is the limit: ~26 us of GPU per leaf for the ORT fp16
+graph, ~9 us for torch bf16 with CUDA graphs). The bar is the trainer's local self-play (>= 95% of its leaves/s), so the
+worker plays through the trainer's own path: zero-core's `zero.farm_torch_worker` (docs/az.md 80 there). This repo builds
+what the farm ships of it; zero-farm (coordinator opt-in, agent, `zf-pyshim.exe`) is built alongside.
+
+### 244.1 The torch runtime pack (`tools/farm_build.py --runtime --pack torch`)
+
+`torch-2.11.0-cu128-py313`: Windows' embeddable CPython 3.13.14 (python.org's zip, pinned sha256, python.exe signed by
+the Python Software Foundation; its `._pth` names the stdlib zip, its own directory and `Lib\site-packages` - no `import
+site`, so nothing of a PC's own Python reaches it; zf-pyshim runs it `-I` too), torch 2.11.0+cu128 (download.pytorch.org,
+pinned sha256: CUDA 12.8, cuDNN 9.19, its own CUDA libraries), numpy 2.3.5 and typing_extensions 4.15.0 (PyPI, the JSON
+API's sha256) - the third-party modules the worker's play path imports (measured: numpy, typing_extensions; torch's
+wheel brings torchgen and functorch) - every member checked against its wheel's RECORD; the MSVC runtime torch's DLLs
+import, app-local next to python.exe (`--msvc-dir`, Microsoft-signed, at least torch's linker toolset), with its license
+files. Pruned (nothing the worker loads): C++ headers, import libraries, CMake files, type stubs, torch's protoc, test
+suites; every importable package stays (an opt-in manifest may list 20,000 files in 8 MiB, zero-farm PROTOCOL 19.1). A
+path segment is `[A-Za-z0-9._-]` and at most 260 characters (the coordinator's rule): torch's
+`torch-2.11.0+cu128.dist-info` becomes `torch-2.11.0-cu128.dist-info` (its METADATA unchanged; nothing imports by the
+directory's name), and the build refuses any other such path. The pack: 2,609 files, 4.33 GB (zstd level 12: ~2.06 GB,
+ratio 0.48, measured on the pack before the restored packages; the release signs level 19). `runtime.json`: every source (url, sha256), the versions, the MSVC files, the probe. Checked before signing: the
+pack's own Python, isolated (`-I -B`: no bytecode written into it), imports torch and multiplies on this PC's GPU
+(`--no-gpu-check` to sign without one). Signed `--kind runtime --gpu-vendor nvidia --gpu-min-driver 527.41
+--gpu-providers torch-cuda --opt-in torch --zst-level 19`, min_agent at least 0.3.19 (zero-farm PROTOCOL rev 27, 19.1:
+`--opt-in` writes the manifest's `opt_in`; min_driver 570.65, CUDA 12.8's), so the coordinator leases it only to machines
+the owner opted in.
+
+### 244.2 The torch worker build (`tools/farm_build.py --torch`)
+
+`mtg-<sha7>-torch`: the commit's tracked `mtgz/` (+ the `_engine.pyd` `tools/build_py.sh` gives exactly that commit),
+zero-core's tracked `python/zero/` laid out as in a checkout (`third_party/zero-core/python/zero/`: `mtgz` finds its
+pinned core there), the package data the worker reads (measured with an audit hook on a real job: `data/decks/`,
+`engine/src/az/eoe_cards.txt`; `mtgz/az/*.json` come with mtgz), `worker_main.py` (tools/torch_worker_main.py) and
+`zf-pyshim.exe` (`--pyshim`: zero-farm's `cargo build --release -p zf-pyshim` in `agent/`; the build's entry, which runs
+`%ZEROFARM_RUNTIME_DIR%\python\python.exe -I -B -X utf8 -u <its directory>\worker_main.py <its arguments>`, PROTOCOL 19.4). Signed `--kind worker --profile release --aw 1 --zero-onnx ''
+--entry zf-pyshim.exe --requires-runtime <torch pack>`; checked: `worker_main.py info` through the pack's Python
+(`--check-runtime`) answers the signed build id, kinds [selfplay], the feature rolling. `--no-sign` builds and checks a
+directory only. Nothing is written next to the signed files (the agent re-verifies a build and a pack before every
+start): python runs `-B`, and worker_main.py points `sys.pycache_prefix` (`ZEROFARM_PYCACHE_DIR`, else
+<temp>/zero-farm-pycache) and torch's caches (`TORCH_HOME`, `TORCH_EXTENSIONS_DIR`, `TORCHINDUCTOR_CACHE_DIR`,
+`TRITON_CACHE_DIR`, `XDG_CACHE_HOME`: <work dir>/.torch-cache) elsewhere. The agent sets `CUDA_VISIBLE_DEVICES=GPU-<uuid>`:
+the worker plays on `cuda:0`.
+
+### 244.3 The release and the pool
+
+`tools/farm_release.py`: step **torch** when release.json sets `torch_runtime` (the pack's build id, its directory in
+`<builds>/`) and `pyshim`: the torch build of the release worktree, then **torch-selftest** - the reference checkpoint as
+torch-weights/1 with the reference config's inference settings, self-tested by the build through the pack's Python on
+this GPU (`worker_main.py selftest`). Built for EVERY commit, a reused build's commit included (the torch build is the
+commit's Python, not its Rust inputs); the index entry's `torch` {build_id, runtime, min_agent, commit, selftest,
+worker}. `--no-torch` skips it. `mtgz.az.farm_builds.pool_settings` (lookup --pool-args, `--pool-build published`) lists
+the torch alternate FIRST with `torch=weights` in pool_variants - opted-in machines take it, every other machine falls
+through to the CUDA / DirectML / default build - and only when the entry's torch build is the commit asked's.
+
+### 244.4 The gate: farm-compat check 4
+
+`tools/farm_compat.py` (every tier that runs farm-compat) adds the torch worker: this checkout's
+`tools/torch_worker_main.py serve` plays a job on a small token network of the preset's layout on the CPU at float32
+(zero-core tools/torch_worker_gate.py), and its records, replayed by the trainer's path, must be the trainer's own local
+self-play rows of the same seed, game ids and network, game for game and bit for bit (pi and q at a record's float16).
+On the Delver best-of-three dealt preset: 6 of 6 games identical, 2,309 rows (worker 65 s, trainer 57 s), run by the
+venv's Python and again by the built worker through the pack's own isolated Python.
+
+### 244.5 Measured: the GPU smoke
+
+The torch worker build through the torch pack, started by zero-farm's `zf-pyshim.exe` as the agent starts it (a rolling
+job, `CUDA_VISIBLE_DEVICES` set, the agent's environment), on meta3-ab-ctrl1234's gen 1334 at the trainer's settings -
+conc 1536, groups 4, 16 search threads, bf16, CUDA graphs - on a PC with an RTX 5090 and no run on it:
+
+| | leaves/s | games/h | GPU | notes |
+|---|---|---|---|---|
+| the trainer's self-play path (that PC's bench, P0) | 93,450 | 81,463 | 82% | the remote worker's driver at bf16, 5 min |
+| the torch worker (this build) | **103,845** | 97,075 | 92%, 560 W | steady window 221 s of a 5-min job; 1.11x |
+
+hello 0.07 s after start, the first leaf at 11.8 s; the self-test on the gen's 256 reference rows max 0.078 (bf16, a
+value), deterministic; 8 records files in 5 min (flush_s 60); yield 40-120 ms - torch's reserved memory 1.9 GB -> 0 once
+the yield also clears cuBLAS's workspaces (the first smoke left 2.1 GB held: a local of the drive loop kept the
+evaluator alive, fixed), the CUDA context stays -, resume 0.1 s; quit: `end` with the games in flight in `unfinished`.
+Against the trainer's path, 48 games of the same network (zero-core tools/torch_worker_gate.py, conc 48, groups 2, 8
+threads, the worker through the pack): fp32 on the GPU with CUDA graphs 48 of 48 identical, bf16 16 of 48 (bf16
+autocast's kernels choose differently between processes; every record replay-valid, the same ids and seeds).
+
+### 244.6 What zero-farm provides (lane B, PROTOCOL rev 27 section 19) and what is left
+
+Relied on: zf-pyshim.exe's command line (`-I -B -X utf8 -u`, arguments passed through: `serve`, `info`, `selftest`) and
+exit codes 3 / 4 / 5; `ZEROFARM_RUNTIME_DIR` and `CUDA_VISIBLE_DEVICES=GPU-<uuid>` from the agent; one worker process per
+GPU; `farm-release sign --opt-in`; the coordinator's opt-in alternates (`when.opt_in`, the pack's `opt_in`), the
+`torch-cuda` provider (a run's `providers` allowlist: the pool sends none, null), opt-in manifests of up to 20,000 files.
+Left for the rollout (the user's OK at each step): sign and publish the pack and a torch build (release.json
+`torch_runtime`, `pyshim`), the coordinator and agent deploys, `opt-in torch` on the owner's machines, then a run with
+`pool_variants` 'gpu=fp16,torch=weights' and the torch alternate first (lookup --pool-args emits both).
+
+### 244.7 Onto main (2026-11-22)
+
+Merged with main 64a82070 (ENGINE.md 239-243 landed meanwhile: this section renumbered 241 -> 244, and its zero-core
+section az.md 78 -> 80, since the fixed-capacity graph took 78-79 there). zero-core pin -> c6b4e9d = feat/torch-worker
+774c25e + the merge of zero-core main 8370543 (one conflict in `farm_pool.VARIANT_FORMS`: 'fixed-fp16' / 'fixed' kept,
+'weights' added beside them). No behaviour change beyond the two branches'.
+
+## 245. A farm run's PUT body from its GET: every read-only note of an alternate cut (`mtgz.az.farm_admin.put_body`; 2026-11-22)
+
+**Why.** The first stew (239) stopped at the end of its first specialist turn: pausing the specialist's farm run
+(`Ops.farm_set`: the whole body as GET returns it, only `state` changed) got `400 bad_request: alternates[0].variant_notes:
+unknown field`. The coordinator's GET annotates each alternate with read-only notes - `problems` (rev 11), `variant_notes`
+(rev 20, an alternate naming a model variant), `gpu_notes` (rev 22), `opt_in_notes` (rev 27) - and its PUT takes only
+`build_id`, `runtime`, `when`, `model` on an alternate (zero-farm coordinator admin.ts), refusing anything else. The stew and
+`tools/ab.py farm_pause` cut only `problems` (written before rev 20); a run whose alternates name a variant (the GPU
+variants every release carries) could not be paused that way. The specialist's run itself had finished (32 iterations,
+clean exit); its farm run stayed active and was paused by hand the same way as below.
+
+**What.** `mtgz/az/farm_admin.py`: `put_body(got, **changes)` - the GET body with the changes, each alternate cut to the
+keys PUT takes (`RUN_ALTERNATE_KEYS`), so later notes need no change here. Used by `mtgz.stew.control.Ops.farm_set` and
+`tools/ab.py farm_pause`. Python only: no engine, encoding or worker change (the published build of the commit before is
+this one's: the same Rust inputs, `farm_builds.lookup`).
+
+**Tests.** `tests/test_stew_control.py::test_farm_set_puts_the_whole_body_with_only_the_state_changed` (an alternate with
+`when.opt_in`, `model` and all four notes: the notes cut, the rest kept) and `tests/test_ab.py` (a `variant_notes` cut).

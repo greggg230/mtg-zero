@@ -114,7 +114,7 @@ def run_starts(ckpt, starts=STARTS, sims=None, device='cpu', seed=1, conc=None, 
         raise SystemExit(f'{ckpt}: a sideboard census needs a constructed best-of-three spec with "start_game": 2')
     sims = int(sims or cfg.get('sims', 64))
     model, _ = load(ckpt, device)
-    game = model.config.get('game', 'mtg')
+    game = model.config['game']                    # (resolved by zero.net.build: mtg = layout v8, mtg_v7 = v7)
     ev = NetEvaluator(model, device)
     seat = search_seat(cfg, sims)
     t0 = time.time()

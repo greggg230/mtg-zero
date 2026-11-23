@@ -200,6 +200,16 @@
 //! matches' checks keep the pairing (`check_constructed_world`). With 200 games (90 matches, 20 post-sideboard
 //! matches) or more every cell (the post-sideboard matches: every mirror) must have been played.
 //!
+//! `FUZZ_POOL=meta_pair` (ENGINE.md 240): `meta` with a stew specialist's sideboarding settings in its matches - each
+//! seat dealt from its own 75 (`"dealt_decks"` per seat: by seed p 0.85 with swaps [0, 15], p 1 with [0, 15], or p 0.5
+//! with [2, 6]), a choice table per deck in two matches of three (each deck's own: random legal 60s of its 75, in its
+//! metagame entry, so it follows the deck to its seat), and the forced find (Doomsday for Thassa's Oracle at p 1, 0.5
+//! or 0.25 by seed) - in both its whole matches and its mirrors' post-sideboard matches; the games are `meta`'s. Every
+//! check of `meta`'s matches, the lockstep with each pairing's fixed match included (now with the dealt seats, the
+//! seats' tables - played as teacher decisions - and the forced find passed through `Metagame::pair_json`), every
+//! dealt 60 within the range of its own 75, every table seat's 60 its own deck's table's for its context; with 100
+//! matches or more table decisions, dealt 60s and Doomsday resolutions (the forced find's records) must have been seen.
+//!
 //! `FUZZ_POOL=meta_wheel` (ENGINE.md 180): the forced find. Games only: the best-of-one metagame of the three real mains
 //! with a Doomsday deck in every game and `"forced_find"` (Doomsday, Thassa's Oracle; p 1, 0.5 or 0.25 by seed,
 //! `unless_in_hand` false one seed in eight). Each game is played twice: by the default mode's loop on its `Game` (the
@@ -613,6 +623,8 @@ pub enum PoolMode {
     Meta,
     /// `FUZZ_POOL=meta_wheel` (ENGINE.md 180): the best-of-one metagame's Doomsday games with the forced find.
     MetaWheel,
+    /// `FUZZ_POOL=meta_pair` (ENGINE.md 240): `meta` with per-seat dealt decks, per-deck tables and the forced find.
+    MetaPair,
 }
 
 thread_local! {
@@ -649,7 +661,8 @@ pub fn pool_mode() -> PoolMode {
         Ok("delver_dealt2") => PoolMode::DelverDealtPerSeat,
         Ok("meta") => PoolMode::Meta,
         Ok("meta_wheel") => PoolMode::MetaWheel,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
+        Ok("meta_pair") => PoolMode::MetaPair,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_pair\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -756,12 +769,14 @@ fn swaps_vs(main: &[u16], deck: &[u16]) -> usize {
         .count()
 }
 
-/// A dealt match's checks (ENGINE.md 154): the registered main of seat `p` of spec `sp`, and the spec's swap range.
-fn dealt_main(sp: &crate::az::MtgSpec, p: usize) -> (Vec<u16>, (usize, usize)) {
+/// A dealt match's checks (ENGINE.md 154): the registered main of seat `p` of spec `sp` in match `seed` (a metagame's:
+/// the seat's pairing deck's, ENGINE.md 240), and the spec's swap range.
+fn dealt_main(sp: &crate::az::MtgSpec, p: usize, seed: u64) -> (Vec<u16>, (usize, usize)) {
     let dd = sp.dealt_decks.expect("a dealt spec");
     let main = match &sp.decks {
         crate::az::DeckMode::ListsWithSideboards(x) => x[p].0.clone(),
         crate::az::DeckMode::Lists(a, b) => if p == 0 { a.clone() } else { b.clone() },
+        crate::az::DeckMode::Metagame(_) => sp.seats(seed)[p].deck.clone(),
         _ => panic!("a dealt spec plays decklists"),
     };
     (main, (dd.swaps.0 as usize, dd.swaps.1 as usize))
@@ -871,7 +886,7 @@ fn wheel_walk(seed: u64) -> WheelSeen {
         let mut s = a.clone();
         s.g.strip_forced_find();
         for v in 0..2 {
-            assert!(Row::of_az(a, v) == Row::of_az(&s, v), "{}: P{v}'s row shows the forced find", what());
+            assert!(Row::of_az_v8(a, v) == Row::of_az_v8(&s, v), "{}: P{v}'s row shows the forced find", what());
         }
         seen.rows += 1;
     };
@@ -972,9 +987,34 @@ fn wheel_walk(seed: u64) -> WheelSeen {
     seen
 }
 
-/// `FUZZ_POOL=meta` (ENGINE.md 176).
+/// `FUZZ_POOL=meta` (ENGINE.md 176), or `meta_pair` (ENGINE.md 240: its matches with the per-deck settings).
 pub fn meta_mode() -> bool {
-    pool_mode() == PoolMode::Meta
+    matches!(pool_mode(), PoolMode::Meta | PoolMode::MetaPair)
+}
+
+/// `FUZZ_POOL=meta_pair` (ENGINE.md 240).
+pub fn pair_mode() -> bool {
+    pool_mode() == PoolMode::MetaPair
+}
+
+/// `FUZZ_POOL=meta_pair`'s per-deck settings of match `seed` merged into `v` (a best-of-three metagame spec value): each
+/// seat dealt from its own 75, a choice table per deck in two matches of three (random legal 60s of the deck's own 75:
+/// `fuzz_table`), the forced find (module docs).
+fn pair_settings(seed: u64, v: &mut serde_json::Value) {
+    v["dealt_decks"] = match seed % 3 {
+        0 => serde_json::json!({"p": 0.85, "swaps": [0, 15], "per_seat": true}),
+        1 => serde_json::json!({"p": 1.0, "swaps": [0, 15], "per_seat": true}),
+        _ => serde_json::json!({"p": 0.5, "swaps": [2, 6], "per_seat": true}),
+    };
+    let p = [1.0, 0.5, 0.25][((seed / 3) % 3) as usize];
+    v["forced_find"] = serde_json::json!({"spell": "Doomsday", "card": "Thassa's Oracle", "p": p});
+    if seed % 3 != 2 {
+        for (k, d) in v["metagame"]["decks"].as_array_mut().unwrap().iter_mut().enumerate() {
+            let names = |x: &serde_json::Value| -> Vec<String> { x.as_array().map_or(Vec::new(), |a| a.iter().map(|n| n.as_str().unwrap().to_string()).collect()) };
+            let (main, side) = (names(&d["main"]), names(&d["sideboard"]));
+            d["table"] = fuzz_table(seed ^ (k as u64) << 40, &main, &side);
+        }
+    }
 }
 
 /// `FUZZ_POOL=meta`'s metagame spec (JSON): the three real 75s (`real_75`, named by their files) - best-of-one their
@@ -1018,7 +1058,14 @@ fn meta_match_json(seed: u64, post: bool) -> String {
     if (seed / 2) % 4 == 3 {
         extra["max_turns"] = serde_json::json!(12);
     }
-    meta_json(true, post, extra)
+    let json = meta_json(true, post, extra);
+    if !pair_mode() {
+        return json;
+    }
+    // (`FUZZ_POOL=meta_pair`, ENGINE.md 240: the stew specialists' per-deck settings)
+    let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    pair_settings(seed, &mut v);
+    v.to_string()
 }
 
 /// A metagame game's (match's) pairing check (module docs, ENGINE.md 176): the game of `meta` (a metagame spec) with
@@ -1038,6 +1085,9 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
     assert_eq!(ms.pools(seed), fs.pools(seed), "seed {seed}: the seats are the pairing's lists");
     let mut b = MtgAz::new_game(&fs, 2, seed).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
     assert_eq!(b.m.pairing, None, "seed {seed}: a fixed spec's game has no pairing");
+    // (ENGINE.md 240: the per-deck settings follow the pairing - each seat's dealt flag and choice table)
+    assert_eq!([a.m.is_dealt(0), a.m.is_dealt(1)], [b.m.is_dealt(0), b.m.is_dealt(1)], "seed {seed}: the dealt seats");
+    assert_eq!(a.m.table, b.m.table, "seed {seed}: the seats' choice tables");
     assert_eq!(a.m.pools, b.m.pools, "seed {seed}: the match's pools are the pairing's 75s");
     let (ra, rb): (serde_json::Value, serde_json::Value) = (serde_json::from_str(&a.record_setup()).unwrap(), serde_json::from_str(&b.record_setup()).unwrap());
     assert_eq!((&ra["decks"], &ra["pairing"]), (&rb["decks"], &pairing.json()), "seed {seed}: the record");
@@ -1057,7 +1107,7 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
     loop {
         if step % 3 == 0 {
             for v in 0..2 {
-                assert!(Row::of_az(&a, v) == Row::of_az(&b, v), "{}: P{v}'s row differs from the pairing's fixed game", what(step));
+                assert!(Row::of_az_v8(&a, v) == Row::of_az_v8(&b, v), "{}: P{v}'s row differs from the pairing's fixed game", what(step));
             }
         }
         let Some(p) = a.to_move() else {
@@ -1101,14 +1151,18 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
                     let o = 1 - viewer;
                     assert_eq!(hd_deck(&da, o as u8), mains[o], "{}: the opponent's cards are its pairing's main", w());
                 }
-                assert!(Row::of_az(&da, viewer) == Row::of_az(&db, viewer), "{}: the viewer's row", w());
+                assert!(Row::of_az_v8(&da, viewer) == Row::of_az_v8(&db, viewer), "{}: the viewer's row", w());
                 worlds += 1;
             }
         }
         a.legal_actions(&mut la);
         b.legal_actions(&mut lb);
         assert_eq!(la, lb, "{}: the legal actions", what(step));
-        let act = la[rng.below(la.len() as u32) as usize];
+        // (ENGINE.md 240: a seat's choice table, the same in both games, played as a teacher decision; every other
+        // decision at random - no table, no change: `meta`'s draws as before)
+        let taught = a.table_action();
+        assert_eq!(taught, b.table_action(), "{}: the table's action", what(step));
+        let act = taught.unwrap_or_else(|| la[rng.below(la.len() as u32) as usize]);
         ka.clear();
         kb.clear();
         a.step(act, &mut ka).unwrap_or_else(|e| panic!("{}: {e}", what(step)));
@@ -2940,9 +2994,17 @@ fn v6_window(g: &Game) -> bool {
 /// zero-core's driver aborts such a game); the census (`FUZZ_CAP_CENSUS`).
 fn check_row(g: &Game, viewer: u8, row: &crate::az::tail_encode::Row, what: &dyn Fn() -> String) {
     use crate::az::encode::{v6_projection, NUM_FEATURES_V6};
+    use crate::az::tail_encode::seg;
     let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
     check_bounded(&vals, &|| format!("{} (viewer P{viewer})", what()));
-    if row.tail.is_empty() {
+    // Layout v8's row (ENGINE.md 236) is layout v7's plus its own segments' tokens and the overrides into
+    // `pay_options`: its v7 part is the v7 row exactly (a v7 network widened onto v8 reads it alike).
+    let r7 = crate::az::tail_encode::Row::of(g, viewer);
+    let tail7: Vec<_> = row.tail.iter().filter(|t| (t.0 as usize) < seg::N).cloned().collect();
+    let ov7: Vec<(u32, i64)> = row.ov.iter().copied().filter(|&(_, t)| t < 0 || zero_search::tail::unpack_tok(t).0 != seg::PAY_OPTIONS).collect();
+    assert!(r7.head == row.head && r7.tail == tail7 && r7.ov == ov7, "{}: layout v8's row is not layout v7's plus v8's segments (viewer P{viewer})", what());
+    V8_TOKENS.fetch_add(row.tail.len() as u64 - tail7.len() as u64, Ordering::Relaxed);
+    if r7.tail.is_empty() {
         let mut h = vec![0.0f32; crate::az::NUM_FEATURES];
         g.encode_features(viewer, &mut h);
         assert!(h.iter().zip(&row.head).all(|(a, b)| a.to_bits() == b.to_bits()), "{}: encode_features is not encode_row's head (viewer P{viewer})", what());
@@ -2958,7 +3020,7 @@ fn check_row(g: &Game, viewer: u8, row: &crate::az::tail_encode::Row, what: &dyn
         assert!(v6_window(g), "{}: the v6 projection of the v7 head differs from layout v6's encoding at v6 feature {i} outside a page (viewer P{viewer})", what());
         V6_PAGED.fetch_add(1, Ordering::Relaxed);
     }
-    let n = crate::az::tail_encode::check_pointers(g, viewer, row).unwrap_or_else(|e| panic!("{}: {e} (viewer P{viewer})", what()));
+    let n = crate::az::tail_encode::check_pointers_layout(g, viewer, row, true).unwrap_or_else(|e| panic!("{}: {e} (viewer P{viewer})", what()));
     POINTERS.fetch_add(n as u64, Ordering::Relaxed);
     let cap = row.capacity() as u64;
     MAX_CAPACITY.fetch_max(cap, Ordering::Relaxed);
@@ -2971,16 +3033,20 @@ fn check_row(g: &Game, viewer: u8, row: &crate::az::tail_encode::Row, what: &dyn
 /// `viewer`'s whole row of `g` (`buf`: the row as one vector, `Row::flat`, the head first), checked
 /// (`check_row`).
 fn check_encoding(g: &Game, viewer: u8, buf: &mut Vec<f32>, what: &dyn Fn() -> String) {
-    let row = crate::az::tail_encode::Row::of(g, viewer);
+    let row = crate::az::tail_encode::Row::of_v8(g, viewer);
     check_row(g, viewer, &row, what);
     *buf = row.flat();
 }
 
+/// Layout v8's own tokens in the rows checked (ENGINE.md 236).
+static V8_TOKENS: AtomicU64 = AtomicU64::new(0);
+
 /// The rows' report: pointers checked, v6 projections, the limit.
 fn rows_report() -> String {
     format!(
-        "rows: {} options' pointers checked; v6 projection equal on {} rows, {} on pages v6 showed as a window; the most tokens in a row {} (limit {}), {} rows past it",
+        "rows: {} options' pointers checked; layout v8's own tokens {}; v6 projection equal on {} rows, {} on pages v6 showed as a window; the most tokens in a row {} (limit {}), {} rows past it",
         POINTERS.load(Ordering::Relaxed),
+        V8_TOKENS.load(Ordering::Relaxed),
         V6_SAME.load(Ordering::Relaxed),
         V6_PAGED.load(Ordering::Relaxed),
         MAX_CAPACITY.load(Ordering::Relaxed),
@@ -3390,10 +3456,10 @@ pub fn play(seed: u64, checks: bool) -> Played {
             // 65.10).
             // (Layout v7, ENGINE.md 125: the whole row, every option's pointer.)
             let mover = g.to_move().unwrap();
-            let row = crate::az::tail_encode::Row::of(&g, mover);
+            let row = crate::az::tail_encode::Row::of_v8(&g, mover);
             check_row(&g, mover, &row, &|| format!("seed {seed} step {steps}"));
             if census::on() {
-                let other = crate::az::tail_encode::Row::of(&g, 1 - mover);
+                let other = crate::az::tail_encode::Row::of_v8(&g, 1 - mover);
                 census::record(&g, 1 - mover, &other);
             }
             check_graveyard_list(&g, &row, &|| format!("seed {seed} step {steps}"));
@@ -3852,7 +3918,7 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
             assert_eq!(a.outcome(), b.outcome(), "seed {seed} step {step}: same keys, different outcomes");
             return;
         }
-        let (ra, rb) = (crate::az::tail_encode::Row::of(&a, viewer), crate::az::tail_encode::Row::of(&b, viewer));
+        let (ra, rb) = (crate::az::tail_encode::Row::of_v8(&a, viewer), crate::az::tail_encode::Row::of_v8(&b, viewer));
         if let Some(d) = row_difference(&ra, &rb) {
             panic!("seed {seed} step {step}: same keys, different rows of P{viewer} ({d}); {}", tell(&a, &b, &path));
         }
@@ -4497,11 +4563,15 @@ pub fn check_matches(n: u64, t: &Totals) {
         // it about once in 35 matches and resolve it about once in 70)
         assert!(g("hogaak_massacre") > 0, "FUZZ_POOL=hogaak: no Massacre resolved in {n} matches");
     }
-    if dealt_mode() {
+    if dealt_mode() || pair_mode() {
         assert!(g("dealt_matches") > 0 && g("dealt_decks") > 0, "no dealt match");
     }
-    if per_seat_mode() {
+    if per_seat_mode() || pair_mode() {
         assert!(g("table_decisions") > 0, "no choice table decision (ENGINE.md 168.3)");
+    }
+    if pair_mode() && n >= 100 {
+        // (ENGINE.md 240: the forced find beside the dealt decks in best-of-three)
+        assert!(g("ff_res") > 0 && g("ff_forced") > 0, "FUZZ_POOL=meta_pair: no Doomsday resolution forced in {n} matches ({} resolutions)", g("ff_res"));
     }
     assert!(g("pk_new_games") > 0 && g("pk_new_game_keys") > 0, "the private-key check reached no game a world started (ENGINE.md 141)");
     assert!(g("sb") > 0 && g("changed") > 0 && g("three") > 0, "no sideboarding, changed deck or match of three");
@@ -4524,10 +4594,10 @@ pub fn check_post(n: u64, t: &Totals) {
         return;
     }
     let g = |k: &str| t.get(k);
-    if dealt_mode() {
+    if dealt_mode() || pair_mode() {
         assert!(g("dealt_matches") > 0 && g("dealt_decks") > 0, "post-sideboard matches: no dealt match");
     }
-    if per_seat_mode() {
+    if per_seat_mode() || pair_mode() {
         assert!(g("table_decisions") > 0, "post-sideboard matches: no choice table decision (ENGINE.md 168.3)");
     }
     meta_check(t, "p", n, 20, true);
@@ -4826,7 +4896,7 @@ fn check_constructed_world(g: &crate::az::MtgAz, d: &crate::az::MtgAz, viewer: u
     // between games its dealt next one) within the spec's swap range, from its dealt prior
     assert_eq!((d.m.dealt, d.m.dealt_both), (g.m.dealt, g.m.dealt_both), "{}: a world changed the dealt seats", what());
     if g.m.is_dealt(o) {
-        if let Some((main, (lo, hi))) = DEALT_SPEC.with(|s| s.borrow().as_ref().map(|sp| dealt_main(sp, ou))) {
+        if let Some((main, (lo, hi))) = DEALT_SPEC.with(|s| s.borrow().as_ref().map(|sp| dealt_main(sp, ou, seed))) {
             if g.deck_hidden(o) {
                 assert!((lo..=hi).contains(&swaps_vs(&main, &deck)), "{}: a dealt 60 of {} swaps", what(), swaps_vs(&main, &deck));
             }
@@ -4963,7 +5033,7 @@ fn check_match_information_set(g: &crate::az::MtgAz, viewer: usize, seed: u64, r
             assert!(!(a.to_move() == Some(viewer) && b.to_move() == Some(viewer)), "match {seed} step {step}: the viewer's options differ");
             return;
         }
-        let (ra, rb) = (crate::az::tail_encode::Row::of_az(&a, viewer), crate::az::tail_encode::Row::of_az(&b, viewer));
+        let (ra, rb) = (crate::az::tail_encode::Row::of_az_v8(&a, viewer), crate::az::tail_encode::Row::of_az_v8(&b, viewer));
         xa = ra.flat();
         xb = rb.flat();
         if let Some(i) = (0..xa.len().min(xb.len())).find(|&i| xa[i] != xb[i]).or((xa.len() != xb.len()).then(|| xa.len().min(xb.len()))) {
@@ -5024,6 +5094,10 @@ static MATCH_IS_STEPS: AtomicU64 = AtomicU64::new(0);
 static PK_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_MATCH_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
+/// The forced find's resolutions in matches (ENGINE.md 240, `FUZZ_POOL=meta_pair`): all, forced, forced in a game 2 or 3.
+static PAIR_FF_RES: AtomicU64 = AtomicU64::new(0);
+static PAIR_FF_FORCED: AtomicU64 = AtomicU64::new(0);
+static PAIR_FF_FORCED_LATER: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAMES: AtomicU64 = AtomicU64::new(0);
 static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
 /// Of `PK_HAND_LOOKS`, the looks in a step that ended the game and began the next (both seats dealt, ENGINE.md 168.1,
@@ -5257,10 +5331,18 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     } else {
         assert!(!g.m.any_dealt());
     }
-    // (ENGINE.md 168.3: the choice table's seats are those whose 75 is its list)
+    // (ENGINE.md 168.3: the choice table's seats are those whose 75 is its list; ENGINE.md 240: each seat's own table,
+    // a metagame seat its pairing deck's)
     for p in 0..2 {
-        let fits = sp.sideboard_table.as_ref().is_some_and(|t| t.fits(&g.m.pools[p]));
-        assert_eq!(g.m.table[p].is_some(), fits, "match {seed}: P{p}'s choice table");
+        let want = match (&sp.sideboard_table, &sp.decks) {
+            (Some(t), _) => t.fits(&g.m.pools[p]).then(|| t.clone()),
+            (None, crate::az::DeckMode::Metagame(mg)) => mg.decks[g.m.pairing.as_ref().unwrap().decks[p] as usize].table.clone(),
+            (None, _) => sp.seat_tables[p].clone(),
+        };
+        assert_eq!(g.m.table[p], want, "match {seed}: P{p}'s choice table");
+        if let Some(t) = &g.m.table[p] {
+            assert!(t.fits(&g.m.pools[p]), "match {seed}: P{p}'s table is not of its 75");
+        }
     }
     // (A post-sideboard match, ENGINE.md 130, starts at the sideboarding before game 2: game 1 drawn, never a
     // draw, its loser sideboarding first (CR 103.1). A dealt loser (ENGINE.md 154.1) is dealt at once - its 60
@@ -5371,7 +5453,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                 } else {
                     assert_eq!(d.to_move(), Some(p), "match {seed}: determinize changed the decider: {:?} -> {:?}", g.pending_decision(), d.pending_decision());
                 }
-                x1 = crate::az::tail_encode::Row::of_az(&g, viewer).flat();
+                x1 = crate::az::tail_encode::Row::of_az_v8(&g, viewer).flat();
                 x2 = az_row_checked(&d, viewer, &|| format!("match {seed}: a world determinized for P{viewer}"));
                 if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                     panic!("match {seed}: determinize changed the encoding of P{viewer} (mover P{p}) at {i}: {} -> {}", x1[i], x2[i]);
@@ -5398,7 +5480,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                     if viewer == p {
                         assert_eq!(legal, legal2, "match {seed}: a weighted deal changed the decider's actions");
                     }
-                    x2 = crate::az::tail_encode::Row::of_az(&dw, viewer).flat();
+                    x2 = crate::az::tail_encode::Row::of_az_v8(&dw, viewer).flat();
                     if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                         panic!("match {seed}: a weighted deal changed the encoding of P{viewer} at {i}");
                     }
@@ -5438,7 +5520,20 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
         }
         // (`FUZZ_POOL=hogaak`, ENGINE.md 220.4: a Massacre on top of the stack resolved by this pass, the game going on)
         let massacre_top = (hogaak_mode() && g.sideboarding().is_none()).then(|| hogaak_b_massacre_on_top(&g.g, a)).flatten().map(|id| (id, g.m.game_no));
+        // (the forced find in best-of-three, ENGINE.md 240: its records of the game's resolutions, each counted once)
+        let (ff_game, ff_seen) = (g.m.game_no, g.g.forced_finds().len());
         g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+        if g.m.game_no == ff_game {
+            for r in &g.g.forced_finds()[ff_seen.min(g.g.forced_finds().len())..] {
+                PAIR_FF_RES.fetch_add(1, Ordering::Relaxed);
+                if r.class == crate::forced_find::FfClass::Forced {
+                    PAIR_FF_FORCED.fetch_add(1, Ordering::Relaxed);
+                    if ff_game >= 2 {
+                        PAIR_FF_FORCED_LATER.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
         count_dropped_loop_records(&g.g, true);
         if let Some((id, game)) = massacre_top {
             if g.m.game_no == game && g.sideboarding().is_none() && !g.g.stack().iter().any(|s| s.id == id) {
@@ -5494,7 +5589,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                 }
                 // a dealt 60 (ENGINE.md 154): its swaps against the registered main within the spec's range
                 if g.m.is_dealt(q) {
-                    let (main, (lo, hi)) = dealt_main(sp, q as usize);
+                    let (main, (lo, hi)) = dealt_main(sp, q as usize, seed);
                     let n = swaps_vs(&main, &deck);
                     assert!((lo..=hi).contains(&n), "match {seed} game {game_no}: P{q}'s dealt 60 of {n} swaps (range {lo}..={hi})");
                     dealt_decks += 1;
@@ -5603,11 +5698,19 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         dealt_decks += p.dealt_decks as u64;
         hooks.passed(seed, &SeedOutcome { fingerprint: p.fingerprint, result: format!("{:?}", p.results), turns: p.games as u64, decisions: p.actions.len() as u64 });
     }
-    if dealt_mode() {
+    if dealt_mode() || pair_mode() {
         println!("dealt decks (ENGINE.md 154): {dealt_matches} of {n} matches with a dealt seat, {dealt_decks} dealt 60s checked");
-        if per_seat_mode() {
+        if per_seat_mode() || pair_mode() {
             println!("choice tables (ENGINE.md 168.3): {table_decisions} table decisions played, each table 60 reached");
         }
+    }
+    if pair_mode() {
+        println!(
+            "FUZZ_POOL=meta_pair (ENGINE.md 240): the forced find in best-of-three - {} Doomsday resolutions, {} forced ({} in a game 2 or 3)",
+            PAIR_FF_RES.load(Ordering::Relaxed),
+            PAIR_FF_FORCED.load(Ordering::Relaxed),
+            PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)
+        );
     }
     println!(
         "{n} matches: {games_played} games ({three} matches of three, {draws} drawn games, {aborted} aborted matches), mean decisions {:.1}, \
@@ -5654,6 +5757,9 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         ("table_decisions", table_decisions),
         ("pk_new_games", PK_NEW_GAMES.load(Ordering::Relaxed)),
         ("pk_new_game_keys", PK_NEW_GAME_KEYS.load(Ordering::Relaxed)),
+        ("ff_res", PAIR_FF_RES.load(Ordering::Relaxed)),
+        ("ff_forced", PAIR_FF_FORCED.load(Ordering::Relaxed)),
+        ("ff_forced_later", PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)),
         ("sb", sb),
         ("changed", changed),
         ("three", three),
@@ -5731,10 +5837,10 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         table_decisions += p.table_decisions as u64;
         dealt_decks += p.dealt_decks as u64;
     }
-    if dealt_mode() {
+    if dealt_mode() || pair_mode() {
         // (dealt decks refuse a keeper, ENGINE.md 154: the dealt seats instead)
         println!("post-sideboard dealt decks: {dealt_matches} of {n} matches with a dealt seat, {dealt_decks} dealt 60s checked");
-        if per_seat_mode() {
+        if per_seat_mode() || pair_mode() {
             println!("post-sideboard choice tables (ENGINE.md 168.3): {table_decisions} table decisions played, each table 60 reached");
         }
     }
@@ -5932,17 +6038,17 @@ const HD_LONG_TURN: u64 = 500;
 
 /// `viewer`'s whole row of match `a` as one vector (`Row::flat`; layout v7, ENGINE.md 125).
 fn az_encode(a: &crate::az::MtgAz, viewer: u8, buf: &mut Vec<f32>) {
-    *buf = crate::az::tail_encode::Row::of_az(a, viewer as usize).flat();
+    *buf = crate::az::tail_encode::Row::of_az_v8(a, viewer as usize).flat();
 }
 
 /// `viewer`'s whole row of match `a` as one vector, its values bounded; in a game (not between
 /// the games of a match, not the deck choice) the game's row checked (`check_row`).
 fn az_row_checked(a: &crate::az::MtgAz, viewer: usize, what: &dyn Fn() -> String) -> Vec<f32> {
-    let row = crate::az::tail_encode::Row::of_az(a, viewer);
+    let row = crate::az::tail_encode::Row::of_az_v8(a, viewer);
     let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
     check_bounded(&vals, &|| format!("{} (viewer P{viewer})", what()));
     if a.sideboarding().is_none() && a.deck_choice().is_none() && a.g.pending_decision().is_some() {
-        let r = crate::az::tail_encode::Row::of(&a.g, viewer as u8);
+        let r = crate::az::tail_encode::Row::of_v8(&a.g, viewer as u8);
         check_row(&a.g, viewer as u8, &r, what);
     }
     row.flat()
@@ -6076,7 +6182,7 @@ pub fn play_hidden(seed: u64) -> Played {
         let mover = a.to_move().unwrap() as u8;
         az_row_checked(&a, mover as usize, &|| format!("seed {seed} step {steps}"));
         if a.deck_choice().is_none() {
-            let row = crate::az::tail_encode::Row::of(&a.g, mover);
+            let row = crate::az::tail_encode::Row::of_v8(&a.g, mover);
             check_graveyard_list(&a.g, &row, &|| format!("seed {seed} step {steps}"));
         }
         if rng.below(checkpoint_every()) == 0 {

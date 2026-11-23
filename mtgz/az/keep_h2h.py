@@ -101,8 +101,8 @@ def keep_match(a, b=None, games=400, sims=64, chance_k=2, c_puct=1.0, seed=0, th
     spec = A.SPEC_DELVER_BO3 if spec is None else spec
     half_specs(spec)
     ma, mb, game = H._load_pair(a, b, device, None)
-    if game != 'mtg':
-        raise ValueError(f'keep_h2h: game mtg (constructed best-of-three), not {game}')
+    if game not in ('mtg', 'mtg_v7'):
+        raise ValueError(f'keep_h2h: game mtg or mtg_v7 (constructed best-of-three, layout v8 or v7), not {game}')
     sa, sb = H._seats(a, b, ma, mb, game, sims, c_puct, chance_k, seat_a, seat_b, None, None)
     evs = H._evaluators(ma, mb, device, None)
     sink = None

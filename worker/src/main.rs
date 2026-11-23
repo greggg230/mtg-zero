@@ -13,10 +13,15 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 static GAMES: &[zero_worker::GameEntry] = &[
     zero_worker::GameEntry::of::<zero_search::toy::ToyGame>("toy"),
-    zero_worker::GameEntry::of::<engine::az::MtgAz>("mtg"),
+    // `mtg` in layout v7: the compatibility game - settings and graphs naming `mtg` without a `game_layout` (made
+    // before layout v8) play it (zero-core docs/az.md 73; ENGINE.md 236.9)
+    zero_worker::GameEntry::of::<engine::az::MtgAz>("mtg_v7").before_of("mtg"),
     zero_worker::GameEntry::of::<engine::az::draft::TeamDraftAz>("team_draft"),
     // Edge of Eternities sealed: `mtg` on the EoE table, its own identity space (ENGINE.md 105)
     zero_worker::GameEntry::of::<engine::az::eoe::MtgEoeAz>("mtg_eoe"),
+    // `mtg`: layout v8 (ENGINE.md 236), `game_layout` 8: v7's rows plus the payment, last-known-information and
+    // find-group segments
+    zero_worker::GameEntry::of::<engine::az::v8::MtgV8Az>("mtg").layout(8),
 ];
 
 /// The game package's own run settings (`mtgz.az`'s `GamePackage.settings`: `mtgz.sealed.rolling.SETTINGS` and

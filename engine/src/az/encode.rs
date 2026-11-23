@@ -201,6 +201,9 @@ const _: () = assert!(NUM_FEATURES == 56_384 && O_MY_PERM == 24_260 && O_STACK =
 /// Layout v7's semantic revision (`layout_json`'s `revision`; ENGINE.md 142.7).
 pub const LAYOUT_V7_REVISION: u32 = 1;
 
+/// Layout v8's semantic revision (ENGINE.md 236; the rule of 142.7's `LAYOUT_V7_REVISION`).
+pub const LAYOUT_V8_REVISION: u32 = 1;
+
 /// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
 /// (`layout_eoe.json`); every one is a feature of layout v7 (`v6_projection`).
 pub const NUM_FEATURES_V6: usize = v6::NUM_FEATURES;
@@ -235,6 +238,8 @@ pub mod v6 {
 /// `mtg_eoe`: no tail, the v7 floats left out, pages shown as v6 showed them).
 pub struct Lay {
     pub v7: bool,
+    /// Layout v8 (ENGINE.md 236, the game `mtg`): v7's head and tail plus `tail_v8`'s segments.
+    pub v8: bool,
     pub features: usize,
     /// Each object segment's offset and slot width (tail-only segments: 0).
     pub off: [usize; super::tail_encode::seg::N],
@@ -246,6 +251,7 @@ pub struct Lay {
 
 pub const LAY7: Lay = Lay {
     v7: true,
+    v8: false,
     features: NUM_FEATURES,
     off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     w: super::tail_encode::SEG_W,
@@ -256,6 +262,7 @@ pub const LAY7: Lay = Lay {
 
 pub const LAY6: Lay = Lay {
     v7: false,
+    v8: false,
     features: v6::NUM_FEATURES,
     off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -263,6 +270,10 @@ pub const LAY6: Lay = Lay {
     o_globals_v5: v6::O_GLOBALS_V5,
     o_globals_v6: v6::O_GLOBALS_V6,
 };
+
+/// Layout v8 (ENGINE.md 236): layout v7's head (the same features, offsets and widths) and tail,
+/// plus the tail-only gated segments of `tail_v8`.
+pub const LAY8: Lay = Lay { v8: true, ..LAY7 };
 
 impl Lay {
     /// The layout of an encoding of `n` floats: v7's or v6's (a loud failure otherwise).
@@ -1603,6 +1614,13 @@ impl Game {
         self.encode_lay(viewer, head, &LAY7, Some(tail));
     }
 
+    /// Layout v8's whole row for `viewer` (ENGINE.md 236): layout v7's row (head and tail, the
+    /// same floats) and the tokens of v8's own segments, into a buffer of `tail_encode::TAILS_V8`.
+    pub fn encode_features_row_v8(&self, viewer: PlayerId, head: &mut [f32], tail: &mut TailBuf) {
+        assert_eq!(head.len(), NUM_FEATURES, "layout v8's row");
+        self.encode_lay(viewer, head, &LAY8, Some(tail));
+    }
+
     /// The encoding in layout `lay` (`tail`: layout v7's tail; None for v6).
     fn encode_lay(&self, viewer: PlayerId, out: &mut [f32], lay: &Lay, mut tail: Option<&mut TailBuf>) {
         use super::tail_encode::{put, seg};
@@ -1739,6 +1757,11 @@ impl Game {
         if let Some(t) = tail {
             let objs: Vec<Option<CardIdx>> = list.entries.iter().map(|e| e.and_then(|e| e.card)).collect();
             super::tail_encode::write_tail_segments(&cx, &objs, t);
+            // Layout v8's segments (ENGINE.md 236), after every v7 token: the stale references'
+            // keys of v7's tokens are as before, and the last known information is written last.
+            if lay.v8 {
+                super::tail_v8::write_v8_segments(&cx, t);
+            }
         }
     }
 
@@ -2098,13 +2121,31 @@ impl Game {
     /// The stack item at position `pos` from the top (the page's first
     /// position of the `STACK` range `first`) into its slot `x`.
     fn write_stack(&self, cx: &Cx, stack_targets: &[Target], pos: usize, first: usize, x: &mut [f32]) {
+        let item = &self.stack[self.stack.len() - 1 - pos];
+        let def = match item.kind {
+            StackKind::Spell { card } => self.objs[card.i()].def,
+            StackKind::Ability { ability, .. } => ability.def,
+        };
+        self.write_stack_item(cx, stack_targets, item, def, false, x);
+        let _ = first;
+    }
+
+    /// A gone spell's item (`Game::spell_lki`: CR 608.2h, "copy it") as a stack slot shows an item
+    /// (layout v8's `lki_spells` tokens, ENGINE.md 236): its definition as it last existed there,
+    /// and none of the facts its card now has (marks, "exile it instead", flashback, can't be
+    /// countered, targeted: the card is a new object, CR 400.7).
+    pub(crate) fn write_departed_item(&self, cx: &Cx, def: DefId, item: &crate::game::StackItem, x: &mut [f32]) {
+        self.write_stack_item(cx, &[], item, def, true, x);
+    }
+
+    /// A stack slot's floats of `item` (definition `def`): on the stack, or gone (`departed`).
+    fn write_stack_item(&self, cx: &Cx, stack_targets: &[Target], item: &crate::game::StackItem, def: DefId, departed: bool, x: &mut [f32]) {
         let ids = cx.ids;
         let (me, knower) = (cx.me, cx.knower);
         let slot_of = |c: CardIdx| -> Option<usize> { cx.perm_pos(c).map(|x| x.1) };
-        let item = &self.stack[self.stack.len() - 1 - pos];
-        let (def, kind) = match item.kind {
-            StackKind::Spell { card } => (self.objs[card.i()].def, 1),
-            StackKind::Ability { ability, .. } => (ability.def, if matches!(ability.slot, AbilitySlot::Trigger(_)) { 3 } else { 2 }),
+        let kind = match item.kind {
+            StackKind::Spell { .. } => 1,
+            StackKind::Ability { ability, .. } => if matches!(ability.slot, AbilitySlot::Trigger(_)) { 3 } else { 2 },
         };
         code(&mut x[..CODE], self.db, ids, def);
         let st = &mut x[CODE..];
@@ -2199,7 +2240,7 @@ impl Game {
                     }
                 }
             }
-            if let StackKind::Spell { card } = item.kind {
+            if let (StackKind::Spell { card }, false) = (item.kind, departed) {
                 let r = self.obj_ref(card);
                 let granter = self.marks.iter().find_map(|&(o, m)| match m {
                     Mark::AltGranted { granter, .. } if o == r => Some(granter),
@@ -2249,7 +2290,7 @@ impl Game {
                 }
             }
         }
-        if let StackKind::Spell { card } = item.kind {
+        if let (StackKind::Spell { card }, false) = (item.kind, departed) {
             st[stack::EXILED_AFTER] = self.gy_exile.contains(&card) as u8 as f32;
             st[stack::FLASHBACK] = self.objs[card.i()].flashback as u8 as f32;
         }
@@ -2258,9 +2299,13 @@ impl Game {
                 st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
                 // (Squashed: a u32 the row limit doesn't bound, ENGINE.md 142.4; exact as before below 512.)
                 st[stack::TIMES] = squash(item.times as f32 / 4.0);
-                st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
-                st[stack::UNCOUNTERABLE] = self.spell_uncounterable(card) as u8 as f32;
-                st[stack::TARGETED] = stack_targets.iter().any(|t| matches!(t, Target::Obj(r) if r.idx == card && self.live(*r))) as u8 as f32;
+                if departed {
+                    st[stack::BESTOWED] = self.db.def(def).bestowed as u8 as f32;
+                } else {
+                    st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
+                    st[stack::UNCOUNTERABLE] = self.spell_uncounterable(card) as u8 as f32;
+                    st[stack::TARGETED] = stack_targets.iter().any(|t| matches!(t, Target::Obj(r) if r.idx == card && self.live(*r))) as u8 as f32;
+                }
             }
             StackKind::Ability { ability, source } => {
                 st[stack::TARGETED] = stack_targets.contains(&Target::Stack(item.id)) as u8 as f32;
@@ -2308,7 +2353,6 @@ impl Game {
         }
         // Layout v7 (ENGINE.md 125): a triggered ability's event.
         cx.write_ev(&mut st[stack::EV..stack::EV + super::tail_encode::ev::W], &item.ev);
-        let _ = first;
     }
 
     /// The list block of the knower's decision (ENGINE.md 11, 65.10, 100.2;
@@ -3402,6 +3446,17 @@ pub fn deck_reader_json(lay: &Lay) -> String {
 /// for the widen of v5 and v4 networks, ENGINE.md 60.2, 100.5). `cards` (the name behind each
 /// identity of `db`, for analysis; null where none) is not read by the network.
 pub fn layout_json(db: &'static CardDb) -> String {
+    layout_json_lay(db, false)
+}
+
+/// Layout v8 (ENGINE.md 236, the game `mtg`): layout v7's JSON with `tail_v8`'s six tail-only
+/// gated segments appended (`pay_options` with a pointer column), version 8. Checked in as
+/// `mtgz/az/layout_v8.json`.
+pub fn layout_json_v8(db: &'static CardDb) -> String {
+    layout_json_lay(db, true)
+}
+
+fn layout_json_lay(db: &'static CardDb, v8: bool) -> String {
     use super::tail_encode::{self as te, seg as sg};
     use serde_json::json;
     let id = json!({"at": 0, "radix": [16, 8, 8]});
@@ -3477,9 +3532,26 @@ pub fn layout_json(db: &'static CardDb) -> String {
         segments.push(tail_only(sg::OPP_REVEALED, "opp_revealed", CODE + te::mr::PRESENT));
         // ENGINE.md 142.12: the cards found by a library search the other player tells apart.
         segments.push(tail_only(sg::FOUND, "found", CODE + te::fs::PRESENT));
+        if v8 {
+            // Layout v8 (ENGINE.md 236): a payment's state, its decisions' option meanings (pointed at),
+            // a gone object's last known information, a gone spell's item and relations, the find groups.
+            use super::tail_v8 as t8;
+            let seg8 = |k: u16, name: &str, present: usize| {
+                json!({"name": name, "offset": null, "count": 0, "width": te::seg_w(k), "present": present,
+                       "id": id.clone(), "actions": [], "tail": true, "gate": true})
+            };
+            segments.push(seg8(sg::PAYMENT, "payment", CODE + t8::pm::PRESENT));
+            let mut po = seg8(sg::PAY_OPTIONS, "pay_options", CODE + t8::po::PRESENT);
+            po["columns"] = json!(1);
+            segments.push(po);
+            segments.push(seg8(sg::LKI, "lki", CODE + t8::lk8::PRESENT));
+            segments.push(seg8(sg::LKI_SPELLS, "lki_spells", CODE));
+            segments.push(seg8(sg::LKI_RELATIONS, "lki_relations", CODE + te::sr::PRESENT));
+            segments.push(seg8(sg::FIND_GROUPS, "find_groups", CODE + t8::fg::PRESENT));
+        }
     }
     let mut v = json!({
-        "version": if eoe { 6 } else { 7 },
+        "version": if eoe { 6 } else if v8 { 8 } else { 7 },
         "features": lay.features,
         "vocab": D,
         "segments": segments,
@@ -3506,7 +3578,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
         // meaning of a float or a token's field changes without the shape changing (a float starting
         // to be written inside the layout), so that such a change is in the file a checkpoint is made
         // with. Revision 1: 142.7's `effects`, `counters` and `numbers` (the shape changed too).
-        v["revision"] = json!(LAYOUT_V7_REVISION);
+        v["revision"] = json!(if v8 { LAYOUT_V8_REVISION } else { LAYOUT_V7_REVISION });
     }
     // The EoE table's identity space (ENGINE.md 105): the same layout under the name `eoe`, so
     // zero-core's guard tells an EoE network from a cube one (the cube's layout has no name).

@@ -66,6 +66,13 @@ LAND_DROP_STEPS = frozenset({'untap', 'upkeep', 'draw', 'main1', 'begin_combat',
 ALL_STEPS = LAND_DROP_STEPS | {'setup', 'end', 'cleanup'}
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def _extra_land_drops():
     """{card name: extra land drops a turn} of every card the engine grants them to: its card data's
     `grants_additional_land_per_turn` (data/cards/*.ir.json, lowered into `CardDef::extra_lands`; Fastbond's "any
@@ -393,7 +400,7 @@ def spots(run, db, source, per_kind=6, log=print):
         acts = gamedb.actions_of(rec)
         sj = json.loads(spec)
         sj['log'] = True
-        g = E.Game('mtg', json.dumps(sj), int(rec['n']), int(rec['seed']))
+        g = E.Game(_lay().record_game(rec), json.dumps(sj), int(rec['n']), int(rec['seed']))
         k = r['action'] + 1                        # the target decision: the step after the activation
         for a in acts[:k]:
             g.step(int(a))

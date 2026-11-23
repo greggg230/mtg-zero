@@ -698,6 +698,7 @@ impl Game {
         self.lki_copy.clear();
         self.lki_attached.clear();
         self.lki_damage.clear();
+        self.lki_qualities.clear();
         self.lki_toughness.clear();
         self.prune_lki_power();
         self.prune_ref_lki();

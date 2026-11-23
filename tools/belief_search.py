@@ -42,6 +42,13 @@ import numpy as np                     # noqa: E402
 D = 1024    # the belief target's identities: aux_target's first segment (docs/ENGINE.md 66.2, 102.4)
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def full_pred(p):
     """A belief over the opponent's hand (D floats) as the prediction of every auxiliary target
     `determinize_with` takes (the deck target's, which the hand's deal does not read, uniform)."""
@@ -68,7 +75,7 @@ def low_priority(threads):
 def evaluator(path):
     from zero.infer import NetEvaluator
     from zero.net import load
-    m, _ = load(path, 'cpu', game='mtg')
+    m, _ = _lay().load_used(path, 'cpu')
     return NetEvaluator(m, 'cpu')
 
 
@@ -117,7 +124,7 @@ def rebuilt(pos_file):
     E = engine()
     d = json.load(gzip.open(pos_file, 'rt'))
     for row in d['rows']:
-        g = E.Game('mtg', d['spec'], 2, game_seed(d['seed'], row['gid']))
+        g = E.Game(_lay().current(), d['spec'], 2, game_seed(d['seed'], row['gid']))
         for k, (seat, a, legal) in enumerate(row['moves']):
             if g.over:
                 break
@@ -179,7 +186,7 @@ def cmd_deals(a):
             break
     # (the rows whole - their tails on a layout v7 engine: docs/ENGINE.md 125, tools/rowkit.py)
     import rowkit
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     rows = [rowkit.row(g, v, rk) for _, _, g, v, _ in pos]
     p = rowkit.aux(ev, [r[0] for r in rows], rk, [r[1] for r in rows])['belief']
     t0 = time.time()
@@ -304,8 +311,8 @@ def cmd_decisions(a):
     out = []
     for gid, k, g, v, casts, dec in found:
         import rowkit
-        x, rr = rowkit.row(g, v, rowkit.kind('mtg'))
-        p = rowkit.aux(ev, [x], rowkit.kind('mtg'), [rr])['belief'][0]
+        x, rr = rowkit.row(g, v, rowkit.kind(_lay().current()))
+        p = rowkit.aux(ev, [x], rowkit.kind(_lay().current()), [rr])['belief'][0]
         acts = list(g.legal())
         cast_a = casts[0]['a']
         pass_a = next((o['a'] for o in dec['options'] if o.get('t', '').startswith('Pass')), None)
@@ -344,7 +351,7 @@ def search(trees, g, ev, sims):
     """`sims` simulations of every tree of the same position in lockstep (one batch a step); the leaves' rows whole
     (tools/rowkit.py)."""
     import rowkit
-    rk = rowkit.kind('mtg')
+    rk = rowkit.kind(_lay().current())
     for _ in range(sims):
         rows, acts, rrs, owners = [], [], [], []
         for j, t in enumerate(trees):
@@ -382,7 +389,7 @@ def cmd_speed(a):
             # searches take the belief)
             seat = G.nn_seat('m', 64, selfplay=True, sims_fast=16, p_full=0.25, sims_minor=4, policy_target='cq',
                              cq_c_scale=0.3, temp_moves=60, chance_k=0, **kw)
-        drv = G.Driver('mtg', [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
+        drv = G.Driver(_lay().current(), [[seat, seat]] * a.games, spec=A.SPEC_DELVER, concurrency=a.games, seed=a.seed,
                        threads=a.threads, groups=2, max_steps=20000)
         t0 = time.time()
         ev.seconds, ev.calls, ev.leaves = 0.0, 0, 0

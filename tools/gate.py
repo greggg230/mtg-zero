@@ -10,8 +10,8 @@ ad-hoc shell script. It can never pass a check it did not perform:
     Every step needs its own positive marker ON TOP OF exit 0 (ENGINE.md 91 lists each one): a
     build's "mtgz._engine OK: <this checkout>/mtgz/..." line, cargo's "test result: ok. N passed"
     lines (N > 0, 0 failed), pytest's FINAL summary line (0 failed, 0 errors, N > 0 passed), the
-    digest line over the full 2,000 + 500 games, digest_formats' four lines (constructed, eoe, driver, metagame:
-    ENGINE.md 148.1, 157) and dealt_digests' line (154, 157), check_checkpoint_compat's {"identical": true}
+    digest line over the full 2,000 + 500 games, digest_formats' five lines (constructed, eoe, driver, metagame, pair:
+    ENGINE.md 148.1, 157, 176, 223) and dealt_digests' line (154, 157), check_checkpoint_compat's {"identical": true}
     with samples on both sides, a Mac step's "[mac] ... @ <this sha>" and "[mac] done @ <this sha>"
     lines (the Mac checkout's HEAD before and after the command), "0 failed of N
     configurations" with N the configurations asked for, ... A missing marker fails loudly.
@@ -39,7 +39,8 @@ ad-hoc shell script. It can never pass a check it did not perform:
     tier refuses unless --allow-skip suite-evidence, named in the final line.
   * **A timeout bounds the step** - the command and every process it started (tools/proctree.py).
   * **The core's own suite** (search-core, optin-core): zero-core's engine module built with its
-    tools/build_py.sh, then its pytest as its own step ("core pytest"). If the ONLY failures are in
+    tools/build_py.sh, then its pytest as its own step ("core pytest"; in --core-pytest-shards parallel steps over
+    disjoint parts, default 6: ENGINE.md 238). If the ONLY failures are in
     tests/test_remoteplay.py (it times real threads: zero-core AGENTS.md), each failed test is
     rerun alone once; the step passes only if every one passes alone, recorded as "flaky, passed
     on retry" in the report and the final line. Any other failure fails the step.
@@ -87,9 +88,10 @@ engine report (ENGINE.md 143) - (sha, zero-core pin, tier, options, the final li
 passed / failed / skipped / recorded / not needed - with its reason, command, log path + sha256 and
 seconds, digests, test counts, skips, flaky retries, the baseline checkout, the cargo target dir)
 and one log per step under `gates/logs/`. CPU only (CUDA_VISIBLE_DEVICES=-1, never ''),
-CARGO_BUILD_JOBS from the environment (else 4; --jobs), below normal process priority (idle when
-gate.py itself runs at idle); a Mac part of a tier (tools/mac.sh) runs in a thread alongside its
-desktop counterpart where the recipe says so.
+CARGO_BUILD_JOBS from the environment (else the machine's slots.conf `jobs`, else 4; --jobs), below normal process priority (idle when
+gate.py itself runs at idle); a tier's independent steps run at once (ENGINE.md 167) - on the Mac too: the commands
+of one commit share its checkout there (tools/mac.sh; the Mac's own tools/slotd.sh slots bound how many run), after
+one `mac-build` step that builds the module there (ENGINE.md 238).
 
 A checkout marker in the cargo target dir (`.gate_checkout.json`) records which checkout last
 built there; a second checkout pointed at the same CARGO_TARGET_DIR is refused instead of silently
@@ -254,18 +256,18 @@ def make_digest_checker(expect=None, record_only=False):
     return checker
 
 
-# engine/tests/digest_formats.rs's four digests (ENGINE.md 148.1; metagame: ENGINE.md 176)
-FORMATS = ('constructed', 'eoe', 'driver', 'metagame')
-FORMATS_RE = re.compile(r'^(constructed|eoe|driver|metagame): .*; combined digest ([0-9a-f]{16})\s*$', re.M)
+# engine/tests/digest_formats.rs's five digests (ENGINE.md 148.1; metagame: ENGINE.md 176; pair: ENGINE.md 240)
+FORMATS = ('constructed', 'eoe', 'driver', 'metagame', 'pair')
+FORMATS_RE = re.compile(r'^(constructed|eoe|driver|metagame|pair): .*; combined digest ([0-9a-f]{16})\s*$', re.M)
 FORMATS_ARGV = ['cargo', 'test', '--release', '-p', 'engine', '--test', 'digest_formats', '--', '--ignored',
                 '--nocapture']
 
 
 def check_digest_formats(output, rc):
-    """digest_formats' positive evidence (ENGINE.md 148.1, 157, 176): exactly four "<name>: ... combined digest <16
-    hex>" lines, one each of constructed, eoe, driver and metagame (each test compares its lines with the checkout's
+    """digest_formats' positive evidence (ENGINE.md 148.1, 157, 176, 223): exactly five "<name>: ... combined digest <16
+    hex>" lines, one each of constructed, eoe, driver, metagame and pair (each test compares its lines with the checkout's
     own tests/data/digests_<name>.txt and fails on a difference), no "wrote ...digests_" line (DIGEST_WRITE re-records
-    instead of comparing), exactly one "test result: ok. 4 passed" line + exit 0."""
+    instead of comparing), exactly one "test result: ok. 5 passed" line + exit 0."""
     ms = FORMATS_RE.findall(output)
     seen = {}
     for name, d in ms:
@@ -1179,10 +1181,28 @@ def check_tree(args):
 
 # ---------------------------------------------------------------------------- context
 
+def state_dir():
+    """The machine's state dir shared by every checkout (tools/slotd.sh's: $MTGZ_SLOTS_HOME, $ZERO_BIG_DISK/mtg-zero-state
+    on Windows, ~/.mtgz-state), or None when the machine has none."""
+    for d in (os.environ.get('MTGZ_SLOTS_HOME'), f'{BIG_DISK}/mtg-zero-state' if BIG_DISK else None,
+              os.path.expanduser('~/.mtgz-state')):
+        if d and os.path.isdir(d):
+            return d
+    return None
+
+
 def env_jobs():
+    """CARGO_BUILD_JOBS for the gate's builds: the environment's, else the machine's own setting for side work
+    (`jobs` in tools/slotd.sh's slots.conf - what slotd.sh gives a command whose caller set none; ENGINE.md 238), else 4."""
     try:
         return max(1, int(os.environ.get('CARGO_BUILD_JOBS', '')))
     except ValueError:
+        pass
+    try:
+        with open(os.path.join(state_dir() or '', 'slots.conf'), encoding='utf-8') as f:
+            found = re.findall(r'^[ \t]*jobs[ \t]*=[ \t]*(\d+)', f.read(), re.M)
+        return max(1, int(found[-1]))
+    except (OSError, IndexError, ValueError):
         return 4
 
 
@@ -1225,6 +1245,7 @@ class Ctx:
         self.throttle = False
         self.placement = None
         self.pytest_shards = max(1, args.pytest_shards)          # (ENGINE.md 167)
+        self.core_pytest_shards = max(1, args.core_pytest_shards)        # (ENGINE.md 238)
 
 
 def python_exe():
@@ -1453,6 +1474,16 @@ def place(ctx, args, steps):
             out.append(throttled(ctx, s))
         else:
             out.append(s)
+    # the Mac steps that import the module run at once (mac.sh: one commit's commands share the checkout): the module
+    # is built there once before the first group that holds such a step (mac_module_step)
+    uses = [k for k, s in enumerate(out) if s.placement == 'mac' and len(s.argv) == 3 and MAC_BUILT in s.argv[2]
+            and not s.skip_reason and not s.not_needed]
+    grouped = [k for k in uses if out[k].group is not None]
+    if grouped and len(uses) > 1:
+        k = grouped[0]
+        while k > 0 and out[k - 1].group == out[k].group:
+            k -= 1
+        out.insert(k, mac_module_step(ctx))
     n_mac = sum(1 for s in out if s.placement == 'mac')
     n_thr = sum(1 for s in out if s.placement == THROTTLED)
     summary = (f'{n_mac} step(s) on the Mac, {n_thr} on the desktop throttled (tools/slotd.sh), '
@@ -1473,10 +1504,39 @@ def build_step(ctx, name='build'):
                          f'this checkout) + exit 0')
 
 
+MAC_BUILT = 'bash tools/build_py.sh && '
+
+
 def mac_built(shell):
-    """A Mac command that needs this checkout's engine module there: tools/build_py.sh first (incremental after the
-    gate's first Mac step), then `shell`."""
-    return (['bash', '-c', f'bash tools/build_py.sh && {shell}'], None, None)
+    """A Mac command that needs this checkout's engine module there: tools/build_py.sh first (the artifact cache's
+    module after the gate's `mac-build` step: mac_module_step), then `shell`."""
+    return (['bash', '-c', f'{MAC_BUILT}{shell}'], None, None)
+
+
+MAC_MODULE_RE = re.compile(r'^mtgz\._engine OK: (\S.*[\\/]mtgz[\\/]_engine\.\w+) \| games: \[(.*\S.*)\]\s*$', re.M)
+
+
+def check_mac_module(output, rc):
+    """The Mac's module build: build_engine.sh's "mtgz._engine OK: <a checkout's mtgz/_engine.*> | games: [...]" line
+    (the module imported after its install, at least one game) + exit 0; mac.sh's lines say which commit's checkout."""
+    ms = MAC_MODULE_RE.findall(output)
+    if not ms:
+        return False, ('no "mtgz._engine OK: .../mtgz/_engine.* | games: [...]" line (the build, the copy or the import '
+                       'failed)'), {}
+    if rc != 0:
+        return False, f'exit {rc} after "mtgz._engine OK"', {}
+    return True, f'mtgz._engine built and imported from {ms[-1][0]} (games: {ms[-1][1]})', {'module': ms[-1][0]}
+
+
+def mac_module_step(ctx):
+    """The engine module built in the Mac's checkout once, before the Mac steps that import it (ENGINE.md 238): those
+    steps run at once since mac.sh lets the commands of one commit share the checkout, and each begins with
+    tools/build_py.sh - after this step that is the artifact cache's module, placed by a rename; without it the first
+    build's install (the old file removed, the new one copied) could land under a step that is importing it."""
+    return offload(ctx, Step('build on the Mac (mtgz._engine in its checkout, before the steps that import it)',
+                             ['bash', 'tools/build_py.sh'], id='mac-build', checker=check_mac_module, heavy=True,
+                             mac_cmd=True,
+                             evidence='"mtgz._engine OK: <the checkout>/mtgz/_engine.* | games: [...]" + exit 0'))
 
 
 PYTEST_ARGS = ['-q', '-p', 'no:cacheprovider', '-rs']      # (-rs: the skip reasons, the live-run fence's among them)
@@ -1489,11 +1549,7 @@ def durations_dir():
     """Where the pytest durations live: the machine's state dir shared by every checkout (tools/slotd.sh's:
     $MTGZ_SLOTS_HOME, $ZERO_BIG_DISK/mtg-zero-state on Windows, ~/.mtgz-state - a warm worktree's gates/ is its own),
     else gates/."""
-    for d in (os.environ.get('MTGZ_SLOTS_HOME'), f'{BIG_DISK}/mtg-zero-state' if BIG_DISK else None,
-              os.path.expanduser('~/.mtgz-state')):
-        if d and os.path.isdir(d):
-            return d
-    return GATES_DIR
+    return state_dir() or GATES_DIR
 
 
 def pytest_files(include_ir=True):
@@ -1535,18 +1591,18 @@ def ir_tests_needed(sha):
                    f'changed elsewhere)')
 
 
-def pytest_partition(files, n, weights):
+def pytest_partition(files, n, weights, root=None):
     """`files` into `n` shards of about equal time -> [(entries, deselected)]: `entries` the pytest arguments (files, or
     node ids of a split file), `deselected` node ids passed as --deselect. `weights` = seconds from earlier runs
     (durations_dir()'s pytest_durations.json: per file, and per test as "<file>::<test id>"); a file without one is
-    weighed by its size (1 s per 2 kB). A file longer than a shard's share with measured tests is split by its tests:
+    weighed by its size (1 s per 2 kB; under `root`, default this checkout). A file longer than a shard's share with measured tests is split by its tests:
     its first part runs the file with the other parts' tests deselected (so a test added since, unmeasured, runs there),
     the others name their tests. Then longest first, each unit to the lightest shard."""
     def w(f):
         if f in weights:
             return float(weights[f])
         try:
-            return os.path.getsize(os.path.join(ROOT, f)) / 2000.0
+            return os.path.getsize(os.path.join(root or ROOT, f)) / 2000.0
         except OSError:
             return 1.0
     target = sum(w(f) for f in files) / max(1, n)
@@ -1592,9 +1648,9 @@ def pytest_coverage(files, shards):
     return None
 
 
-def read_durations():
+def read_durations(name=PYTEST_DURATIONS):
     try:
-        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), encoding='utf-8') as f:
+        with open(os.path.join(durations_dir(), name), encoding='utf-8') as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
@@ -1611,43 +1667,103 @@ def junit_node(tc):
     return '::'.join([f, *parts[k + 1:], tc.get('name') or '']), f
 
 
-def record_durations(xml_path):
-    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s pytest_durations.json
-    (under a lock file: the shards finish at about the same time). Best effort: a missing or unreadable file changes
-    nothing. A split file's parts each add their tests; the file's own total is written by the part that ran it whole
-    or, for a split file, summed from its tests' latest seconds."""
+def junit_seconds(xml_path):
+    """A junit file -> {test node id: seconds}, or None when it is missing or unreadable."""
     import xml.etree.ElementTree as ET
     try:
         root = ET.parse(xml_path).getroot()
     except (OSError, ET.ParseError):
-        return
+        return None
     tests = {}
     for tc in root.iter('testcase'):
         node, _ = junit_node(tc)
         tests[node] = tests.get(node, 0.0) + float(tc.get('time') or 0)
-    lock = os.path.join(durations_dir(), PYTEST_DURATIONS + '.lock')
+    return tests
+
+
+def merge_durations(tests, name=PYTEST_DURATIONS):
+    """{test node id: seconds} into durations_dir()'s `name` (this repo's pytest_durations.json, the core suite's
+    CORE_PYTEST_DURATIONS), each touched file's total = the sum of its tests' latest seconds, under a lock file (the
+    shards finish at about the same time). Best effort: a failure changes nothing."""
+    if not tests:
+        return
+    lock = os.path.join(durations_dir(), name + '.lock')
     for _ in range(100):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
         except FileExistsError:
             time.sleep(0.1)
+        except OSError:
+            return
     else:
         return
     try:
-        d = read_durations()
-        d.update({k: round(v, 2) for k, v in tests.items()})
+        d = read_durations(name)
+        d.update({k: round(float(v), 2) for k, v in tests.items()})
         for f in {n.split('::')[0] for n in tests}:
             d[f] = round(sum(v for k, v in d.items() if k.startswith(f + '::')), 2)
-        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), 'w', encoding='utf-8') as fh:
+        with open(os.path.join(durations_dir(), name), 'w', encoding='utf-8') as fh:
             json.dump(d, fh, indent=1, sort_keys=True)
+    except (OSError, ValueError, TypeError):
+        pass
     finally:
         os.close(fd)
         os.remove(lock)
+
+
+def record_durations(xml_path, name=PYTEST_DURATIONS):
+    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s `name` (merge_durations);
+    the junit file is removed. Best effort: a missing or unreadable file changes nothing. A split file's parts each add
+    their tests; the file's own total is summed from its tests' latest seconds."""
+    tests = junit_seconds(xml_path)
+    if tests is None:
+        return
+    merge_durations(tests, name)
     try:
         os.remove(xml_path)
     except OSError:
         pass
+
+
+# A shard that ran on the Mac leaves its junit file there: its command prints the tests' seconds as one line after
+# pytest's own output (`python tools/gate.py --junit-seconds <file>`), and its checker records them once the shard
+# passed (ENGINE.md 238.9) - so the shards stay balanced beside a live run, when every shard runs on the Mac.
+SECONDS_PREFIX = 'GATE_PYTEST_SECONDS '
+
+
+def print_junit_seconds(xml_path):
+    """`gate.py --junit-seconds <file>`: the junit file's {test: seconds} as one SECONDS_PREFIX line (nothing when the
+    file is missing or unreadable: the shard's own result is pytest's summary, never this)."""
+    tests = junit_seconds(xml_path)
+    if tests:
+        print(SECONDS_PREFIX + json.dumps({k: round(v, 2) for k, v in tests.items()}, separators=(',', ':')), flush=True)
+    return 0
+
+
+def parse_seconds(output):
+    """The last SECONDS_PREFIX line of a step's output -> {test: seconds}, or {} (none, or not a JSON object of
+    numbers)."""
+    found = {}
+    for line in output.splitlines():
+        if line.startswith(SECONDS_PREFIX):
+            try:
+                d = json.loads(line[len(SECONDS_PREFIX):])
+            except ValueError:
+                continue
+            if isinstance(d, dict) and all(isinstance(v, (int, float)) for v in d.values()):
+                found = d
+    return found
+
+
+def recording(checker, name=PYTEST_DURATIONS):
+    """`checker`, and after a pass the seconds the step printed (parse_seconds) merged into the durations file."""
+    def check(output, rc):
+        res = checker(output, rc)
+        if res[0]:
+            merge_durations(parse_seconds(output), name)
+        return res
+    return check
 
 
 def pytest_step(name='pytest', step_id='pytest', ctx=None):
@@ -1687,13 +1803,20 @@ def pytest_step(name='pytest', step_id='pytest', ctx=None):
         xml = base + '.xml'
         on_mac = [e for e in entries if e.split('::')[0] not in files and e not in ids]
         mac_desel = [d for d in desel + ids if d.split('::')[0] in on_mac]
-        mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={d}' for d in mac_desel]])
+        # (its own --basetemp under the Mac checkout's gates/tmp, removed after: the shards run at once there too)
+        mac_base = f'gates/tmp/pytest-{ctx.sha_short}-{tag}-{uuid.uuid4().hex[:8]}'
+        mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={d}' for d in mac_desel],
+                          f'--basetemp={mac_base}', f'--junitxml={mac_base}.xml'])
+        # (pytest makes the basetemp itself, not its parents: a new Mac checkout has no gates/tmp yet; the tests'
+        # seconds printed for the durations file here: `recording`)
+        mac = (f'{{ mkdir -p gates/tmp && {mac}; rc=$?; python tools/gate.py --junit-seconds {mac_base}.xml; '
+               f'rm -rf {mac_base} {mac_base}.xml; exit $rc; }}')
         nfiles = len({e.split('::')[0] for e in entries})
         s = Step(f'{name} {tag} ({nfiles} files)',
                  [python_exe(), '-m', 'pytest', *entries, *PYTEST_ARGS, *[f'--deselect={d}' for d in desel],
                   f'--basetemp={base}', f'--junitxml={xml}'],
                  id=f'{step_id}-{tag}', checker=check_pytest, heavy=True,
-                 mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None,
+                 mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None, mac_checker=recording(check_pytest),
                  cleanup=lambda base=base, xml=xml: (record_durations(xml), shutil.rmtree(base, ignore_errors=True)),
                  evidence=ev)
         if on_mac and first:
@@ -1792,11 +1915,12 @@ def digest_format_steps():
     """The digests beyond the cube table's, each compared with the checkout's own recorded file (a change meant to
     alter play re-records them in its commit, as digests.txt; the caller's DIGEST_* never reach them: step_env):
     engine/tests/digest_formats.rs (ENGINE.md 148.1: constructed best-of-three, the legacy decks, EoE, zero-core's
-    driver; 176: the three-deck metagame) and dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
-    return [Step('digest formats (constructed, EoE, driver, metagame)', list(FORMATS_ARGV), id='digest-formats',
+    driver; 176: the three-deck metagame; 223: a stew specialist's pairing with per-deck tables) and
+    dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
+    return [Step('digest formats (constructed, EoE, driver, metagame, pair)', list(FORMATS_ARGV), id='digest-formats',
                  mac_cmd=True, checker=check_digest_formats,
-                 evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe, driver '
-                          'and metagame, no "wrote ...digests_" line, exactly one "test result: ok. 4 passed" + exit 0'),
+                 evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe, driver, '
+                          'metagame and pair, no "wrote ...digests_" line, exactly one "test result: ok. 5 passed" + exit 0'),
             Step('digest dealt (dealt decks: the dealt preset\'s self-play spec)', list(DEALT_ARGV), id='digest-dealt',
                  mac_cmd=True,
                  checker=check_digest_dealt,
@@ -1814,30 +1938,70 @@ def core_pytest_base(ctx):
     return os.path.join(GATES_DIR, 'tmp', f'pytest-{name}')
 
 
+CORE_PYTEST_DURATIONS = 'core_pytest_durations.json'    # the core suite's, beside this repo's PYTEST_DURATIONS
+
+
+def core_pytest_files():
+    """Every test file zero-core's `pytest tests` collects (tests/test_*.py of the core checkout; it has no test
+    packages below tests/)."""
+    found = glob.glob(os.path.join(CORE, 'tests', 'test_*.py'))
+    return sorted(os.path.relpath(p, CORE).replace('\\', '/') for p in found)
+
+
 def core_steps(ctx):
     """zero-core's own suite as its own steps (ENGINE.md 91): its engine module (python/zero/_engine, the
     toy games its tests import) built by its own tools/build_py.sh, then `python -m pytest tests -q` from
     the core checkout - how zero-core's AGENTS.md and smoke_all.sh run it - CPU only and below normal
-    priority like every step, with the FLAKY_FILE retry policy (FlakyRetry)."""
-    base = core_pytest_base(ctx)
+    priority like every step, with the FLAKY_FILE retry policy (FlakyRetry). -> [the build, the pytest step(s)].
 
-    def argv(target, tmp):
-        return [python_exe(), '-m', 'pytest', target, '-q', '-p', 'no:cacheprovider', '-rfEs',
-                '-W', 'ignore::pytest.PytestWarning', f'--basetemp={tmp}']
+    With ctx.core_pytest_shards > 1 (ENGINE.md 238; the suite is ~45 min in one process and stays on the desktop: its
+    search goldens are x86's) the suite runs as that many steps `core-pytest-K-of-N` over disjoint parts, as this
+    repo's pytest does (pytest_step): pytest_partition by the seconds of earlier runs (CORE_PYTEST_DURATIONS, from each
+    passed shard's junit file; a file without one by its size), every test exactly once (pytest_coverage, checked when
+    the plan is made), each its own process, --basetemp and junit file, each with the flaky policy for its own
+    failures. A core checkout without two test files to split keeps the one step."""
+    base = core_pytest_base(ctx)
+    ev = 'pytest\'s final summary line: 0 failed, 0 errors, N > 0 passed + exit 0'
+
+    def argv(targets, tmp, extra=()):
+        return [python_exe(), '-m', 'pytest', *targets, '-q', '-p', 'no:cacheprovider', '-rfEs',
+                '-W', 'ignore::pytest.PytestWarning', *extra, f'--basetemp={tmp}']
     zero_pkg = os.path.join(CORE, 'python', 'zero')
-    return [
-        # (tools/zcache.py core-pyd: the artifact cache by the pinned commit, else the core's own tools/build_py.sh,
-        # stored; ENGINE.md 167)
-        Step('core build (zero._engine)', [python_exe(), 'tools/zcache.py', 'core-pyd', '--root', ROOT], id='core-build',
-             heavy=True,
-             checker=make_build_checker('zero._engine', zero_pkg),
-             evidence=f'"zero._engine OK: {zero_pkg}{os.sep}_engine.* | games: [...]" + exit 0'),
-        Step('core pytest', argv('tests', base), cwd=CORE, id='core-pytest', checker=check_pytest, heavy=True,
-             flaky=FlakyRetry(FLAKY_FILE, lambda nid, k: argv(nid, f'{base}-retry{k}')),
-             prepare=lambda: os.makedirs(os.path.dirname(base), exist_ok=True),
-             cleanup=lambda: [shutil.rmtree(p, ignore_errors=True) for p in glob.glob(base + '*')],
-             evidence='pytest\'s final summary line: 0 failed, 0 errors, N > 0 passed + exit 0'),
-    ]
+    # (tools/zcache.py core-pyd: the artifact cache by the pinned commit, else the core's own tools/build_py.sh,
+    # stored; ENGINE.md 167)
+    build = Step('core build (zero._engine)', [python_exe(), 'tools/zcache.py', 'core-pyd', '--root', ROOT],
+                 id='core-build', heavy=True, checker=make_build_checker('zero._engine', zero_pkg),
+                 evidence=f'"zero._engine OK: {zero_pkg}{os.sep}_engine.* | games: [...]" + exit 0')
+    n = getattr(ctx, 'core_pytest_shards', 1)
+    files = core_pytest_files() if n > 1 else []
+    if n <= 1 or len(files) < 2:
+        return [build,
+                Step('core pytest', argv(['tests'], base), cwd=CORE, id='core-pytest', checker=check_pytest, heavy=True,
+                     flaky=FlakyRetry(FLAKY_FILE, lambda nid, k: argv([nid], f'{base}-retry{k}')),
+                     prepare=lambda: os.makedirs(os.path.dirname(base), exist_ok=True),
+                     cleanup=lambda: [shutil.rmtree(p, ignore_errors=True) for p in glob.glob(base + '*')],
+                     evidence=ev)]
+    shards = pytest_partition(files, n, read_durations(CORE_PYTEST_DURATIONS), root=CORE)
+    why = pytest_coverage(files, shards)
+    if why:
+        raise GateError(f'internal: the core pytest shards do not run every test exactly once ({why})')
+    steps = [build]
+    for k, (entries, desel) in enumerate(shards, 1):
+        tag = f'{k}-of-{len(shards)}'
+        sbase = f'{base}-{tag}'
+        xml = sbase + '.xml'
+        nfiles = len({e.split('::')[0] for e in entries})
+        steps.append(Step(
+            f'core pytest {tag} ({nfiles} files)',
+            argv(entries, sbase, [*[f'--deselect={d}' for d in desel], f'--junitxml={xml}']), cwd=CORE,
+            id=f'core-pytest-{tag}', checker=check_pytest, heavy=True,
+            flaky=FlakyRetry(FLAKY_FILE, lambda nid, j, sbase=sbase: argv([nid], f'{sbase}-retry{j}')),
+            prepare=lambda sbase=sbase: os.makedirs(os.path.dirname(sbase), exist_ok=True),
+            cleanup=lambda sbase=sbase, xml=xml: (
+                record_durations(xml, CORE_PYTEST_DURATIONS),
+                [shutil.rmtree(q, ignore_errors=True) for q in glob.glob(sbase + '*') if os.path.isdir(q)]),
+            evidence=ev))
+    return steps
 
 
 def check_baseline(ctx, path):
@@ -2146,7 +2310,7 @@ def split_list(value, default, flag):
 def tier_search_core(ctx, args):
     need_core()
     configs = split_list(args.configs, 'random,eval,match,nomull', '--configs')
-    core_build, core_pytest = core_steps(ctx)
+    core_build, *core_pytest = core_steps(ctx)
     return [
         build_step(ctx),
         worker_build_step(ctx),
@@ -2171,7 +2335,7 @@ def tier_search_core(ctx, args):
 def tier_optin_core(ctx, args):
     need_core()
     feature_tests = split_list(args.feature_tests, 'az,hidden', '--feature-tests')
-    core_build, core_pytest = core_steps(ctx)
+    core_build, *core_pytest = core_steps(ctx)
     checks = [Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
                    evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
               compat_step(ctx, args, 'checkpoint_compat byte identity'),
@@ -2179,7 +2343,7 @@ def tier_optin_core(ctx, args):
     for t in feature_tests:
         checks.append(cargo_step(f'feature tests: cargo test --test {t}', t, step_id=f'feature-{t}'))
     checks.append(build_only_step(ctx, args))
-    checks.append(core_pytest)
+    checks.extend(core_pytest)
     # the builds, then every check at once (ENGINE.md 167)
     return [build_step(ctx), worker_build_step(ctx), core_build,
             test_build_step(['digest_formats', 'dealt_decks', *feature_tests]), *in_parallel(*checks)]
@@ -2286,14 +2450,14 @@ TIERS = {
                'artifact cache when no Rust input changed) + pytest in --pytest-shards shards beside a tiny run-loop smoke '
                '(~5 min).'),
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
-                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s '
+                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s '
                  'recorded files + --test az + checkpoint-load (--checkpoint) + pytest + farm compat (the release worker built, '
                  'tools/farm_compat.py). NO search smoke (~11 min).'),
     'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + a sharded 2,000-game fuzz per '
               f'pool (--fuzz-pools, default {FUZZ_POOLS}; tools/fuzz_shards.py, --fuzz-shards) at once on this commit; its '
               'report gates/<sha>-suite.json is the engine tier\'s evidence for --tested-sha.'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
-               'digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
+               'digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
                'the sharded fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
                'with overlapping engine/card_ir files; the release worker built + farm compat (tools/farm_compat.py) (~13 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
@@ -2305,7 +2469,7 @@ TIERS = {
                    'driver) + feature tests + build-only of the other games + core build + core pytest + the release worker built + '
                    'farm compat (~29 min).'),
     'repin': (tier_repin, 're-pin onto an already-verified commit: own-target build + digest == main\'s recorded value '
-              '+ digest formats (constructed, EoE, driver, metagame, dealt) == the checkout\'s recorded files + the release worker built + farm compat + 1-config smoke on the run\'s --spec/--preset + mac.sh '
+              '+ digest formats (constructed, EoE, driver, metagame, pair, dealt) == the checkout\'s recorded files + the release worker built + farm compat + 1-config smoke on the run\'s --spec/--preset + mac.sh '
               '--eval-checkout, in parallel (~8 min).'),
 }
 
@@ -2382,7 +2546,7 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
         if r.extra.get('digest'):
             key = 'encoding_free' if 'encoding-free' in r.id else 'full'
             report['digests'][key] = {'value': r.extra['digest'], 'status': r.status}
-        for name, d in (r.extra.get('formats') or {}).items():          # (constructed, eoe, driver, metagame; dealt)
+        for name, d in (r.extra.get('formats') or {}).items():          # (constructed, eoe, driver, metagame, pair; dealt)
             report['digests'][name] = {'value': d, 'status': r.status}
         if 'passed' in r.extra and 'failed' in r.extra:
             report['test_counts'][r.name] = {k: r.extra[k] for k in ('passed', 'failed', 'errors', 'skipped', 'binaries')
@@ -2422,6 +2586,8 @@ def build_parser():
     ap.add_argument('--fuzz-shards', type=int, default=None, help='suite tier: shards per fuzz loop (default 8)')
     ap.add_argument('--pytest-shards', type=int, default=4, help='pytest as this many parallel steps over disjoint test '
                     'files (default 4; 1: one step)')
+    ap.add_argument('--core-pytest-shards', type=int, default=6, help='search-core/optin-core: zero-core\'s pytest as '
+                    'this many parallel steps over disjoint parts (default 6; 1: one step)')
     ap.add_argument('--expect-digest', type=hex16, default=None, help='encoding/engine/repin (required): the full '
                     'combined digest the digest step must equal')
     ap.add_argument('--expect-digest0', type=hex16, default=None, help='encoding/engine (required): the '
@@ -2456,7 +2622,7 @@ def build_parser():
     ap.add_argument('--allow-dirty', action='store_true', help='gate uncommitted changes to tracked files (refused '
                     'otherwise; named in the final line)')
     ap.add_argument('--jobs', type=int, default=env_jobs(), help='CARGO_BUILD_JOBS (default: the environment\'s '
-                    'CARGO_BUILD_JOBS, else 4)')
+                    'CARGO_BUILD_JOBS, else `jobs` of the machine\'s tools/slotd.sh slots.conf, else 4)')
     ap.add_argument('--target-dir', default=None, help='override CARGO_TARGET_DIR (default: the env var if set, '
                     'else $ZERO_BIG_DISK/cargo-target/mtg-zero/<this checkout\'s dir name> on Windows when the machine '
                     'names a big disk (~/.config/zero/local.env), else this checkout\'s target/)')
@@ -2478,6 +2644,9 @@ def build_parser():
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) == 2 and argv[0] == '--junit-seconds':         # (a Mac pytest shard's own call: no tier, no checkout)
+        return print_junit_seconds(argv[1])
     args = build_parser().parse_args(argv)
     try:
         check_options(args)

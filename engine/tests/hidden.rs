@@ -464,7 +464,7 @@ fn casting_a_known_card_is_keyed() {
 
 /// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn features_of(g: &Game, viewer: PlayerId) -> Vec<f32> {
-    engine::az::tail_encode::Row::of(g, viewer).flat()
+    engine::az::tail_encode::Row::of_v8(g, viewer).flat()
 }
 
 /// zero-core's root-view leaf values evaluate positions where the other
@@ -799,7 +799,7 @@ use zero_search::game::SearchGame;
 
 /// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn az_enc(a: &MtgAz, v: usize) -> Vec<f32> {
-    engine::az::tail_encode::Row::of_az(a, v).flat()
+    engine::az::tail_encode::Row::of_az_v8(a, v).flat()
 }
 
 fn az_legal(a: &MtgAz) -> Vec<u16> {

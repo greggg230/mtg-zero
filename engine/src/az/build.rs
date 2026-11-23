@@ -30,7 +30,12 @@
 //! earlier object of a card (a fetchland's ability whose source is now in the graveyard) is
 //! `{"ref": "g0.3", "stale": true}`; a token that ceased to exist is `{"gone": "Clue", "owner": 0}`.
 //! Either may carry what it shows (`Game::ref_lki`, ENGINE.md 95.11): `known_by` (who knew the object as
-//! it left; default both) and `was` (its identity then, where the viewer knew it; default the card's now).
+//! it left; default both) and `was` (its identity then, where the viewer knew it; default the card's now);
+//! and its last known information (ENGINE.md 236, layout v8's `lki` tokens): `"lki": {"copy": <name>, "dfc":
+//! <bool>, "mv": n, "power": n, "toughness": [n, <controller>], "qualities": {"controller", "deathtouch",
+//! "lifelink", "infect", "spell", "colors", "types"}, "attached": <reference>, "counters": [[<kind>, n]]}`, each
+//! key present where the game keeps that record (a copy's exceptions, keyword and named counters and a gone
+//! spell's item are not described: such a position is refused).
 //!
 //! The decks are the spec's lists (best-of-one, open decklists): every card of each list is placed
 //! exactly once - the named cards where the description says, the rest in the unknown slots (the
@@ -479,6 +484,58 @@ impl Describer<'_> {
                 }
             }
         }
+        // Its last known information (ENGINE.md 236: layout v8's `lki` tokens show it).
+        let l = super::tail_v8::lki_of(g, r);
+        if !l.is_empty() {
+            let mut x = serde_json::Map::new();
+            if let Some((_, vals, mv)) = l.copy {
+                if !vals.exc.is_empty() {
+                    return unsupported("a gone object's last known copiable values with a copy effect's exceptions");
+                }
+                x.insert("copy".into(), json!(g.db.def(vals.def).name));
+                x.insert("dfc".into(), json!(vals.dfc));
+                x.insert("mv".into(), json!(mv));
+            }
+            if let Some(p) = l.power {
+                x.insert("power".into(), json!(p));
+            }
+            if let Some((t, ctl)) = l.toughness {
+                x.insert("toughness".into(), json!([t, ctl]));
+            }
+            if let Some(d) = l.damage {
+                if d.obj.is_some_and(|o| o != r) {
+                    return unsupported("a gone object's last known qualities as a damage source naming another object");
+                }
+                x.insert(
+                    "qualities".into(),
+                    json!({"controller": d.controller, "deathtouch": d.deathtouch, "lifelink": d.lifelink, "infect": d.infect,
+                           "spell": d.spell, "colors": d.colors, "types": d.types, "itself": d.obj.is_some()}),
+                );
+            }
+            if let Some(a) = l.attached {
+                x.insert("attached".into(), self.obj(a)?);
+            }
+            if !l.counters.is_empty() {
+                let mut cs = Vec::new();
+                for &(k, n) in &l.counters {
+                    use crate::db::Counter as K;
+                    let name = match k {
+                        K::P1P1 => "+1/+1",
+                        K::M1M1 => "-1/-1",
+                        K::Stun => "stun",
+                        K::Loyalty => "loyalty",
+                        K::Lore => "lore",
+                        K::Kw(_) | K::Named(_) => return unsupported("a gone object's last known keyword or named counters"),
+                    };
+                    cs.push(json!([name, n]));
+                }
+                x.insert("counters".into(), json!(cs));
+            }
+            if l.spell.is_some() {
+                return unsupported("a gone spell's last known item (Game::spell_lki)");
+            }
+            v["lki"] = Value::Object(x);
+        }
         Ok(v)
     }
 
@@ -586,7 +643,7 @@ impl Describer<'_> {
             lki_counters: _, entering_escaped: _, entering_x: _, entering_sunburst: _, entering_exiled: _, entering_mods: _,
             entering_counters: _, entering_tapped: _, discard_entered: _, repl_decided: _, route_choice: _, cast_lock, pool_wild: _, entering_dash: _,
             entering_warp: _, miracle_cast, entering_face: _, day, done_once, discarded, temp_triggers, gy_exile, copies,
-            copy_objs, lki_copy: _, lki_damage: _, spell_lki: _, entering_copy: _, entering_times: _, enter_note: _, defer_enters: _,
+            copy_objs, lki_copy: _, lki_damage: _, lki_qualities: _, spell_lki: _, entering_copy: _, entering_times: _, enter_note: _, defer_enters: _,
             pile_moving: _, pile_shuffles: _, prepared, seen: _, initiative, dungeons, rules_srcs,
             choosing_for: _, marks, known_pools, log: _, log_mark: _, hand_looks: _, peeks,
             // (v6 engines: transient or derived - public_state.rs - or EoE-only, checked below)
@@ -596,7 +653,7 @@ impl Describer<'_> {
             // (layout v7 engines, ENGINE.md 95.11: the hidden decklists' sightings and a search's finds - kept only
             // where whole-deck clouds are -, the last known identities of gone objects - described with each stale
             // reference, `obj` -, a loop action's activation in progress)
-            sightings, sight_at: _, found, finds_told, sightings_lost: _, ref_lki: _, loop_open,
+            sightings, sight_at: _, found, finds_told, find_groups, sightings_lost: _, ref_lki: _, loop_open,
             // (ENGINE.md 180: the forced find's records, a self-play setting's; a described position's game has none)
             ff: _,
         } = g;
@@ -628,7 +685,7 @@ impl Describer<'_> {
             empty(known_pools.iter().filter(|k| k.is_some()).count(), "hidden decks (best-of-three)")?;
             empty(sightings.len(), "the hidden decklists' sightings (ENGINE.md 140.9)")?;
         }
-        empty(found.len() + finds_told.len(), "a library search's finds the other player tells apart (hidden decklists, ENGINE.md 140.9, 223)")?;
+        empty(found.len() + finds_told.len() + find_groups.len(), "a library search's finds the other player tells apart (hidden decklists, ENGINE.md 140.9, 223, 235)")?;
         empty(loop_open.is_some() as usize, "a loop action's activation in progress")?;
 
         let mut out = Map::new();
@@ -1380,7 +1437,7 @@ impl Builder<'_> {
                 Ok(ObjRef { idx: c, inc: self.g.objs[c.i()].inc })
             }
             Value::Object(o) if o.contains_key("gone") => {
-                keys(o, &["gone", "owner", "known_by", "was"], "a gone token")?;
+                keys(o, &["gone", "owner", "known_by", "was", "lki"], "a gone token")?;
                 let name = o["gone"].as_str().ok_or("build: gone must be a token name")?;
                 let owner = need_player(o, "owner", "a gone token")?;
                 let c = self.token(owner, name, Zone::Nowhere)?;
@@ -1389,11 +1446,11 @@ impl Builder<'_> {
                 Ok(r)
             }
             Value::Object(o) => {
-                keys(o, &["ref", "stale", "known_by", "was"], "a reference")?;
+                keys(o, &["ref", "stale", "known_by", "was", "lki"], "a reference")?;
                 let s = o.get("ref").and_then(|x| x.as_str()).ok_or_else(|| format!("build: a reference without ref: {v}"))?;
                 let c = *self.refs.get(s).ok_or_else(|| format!("build: no object {s:?}"))?;
                 if !boolean(o, "stale")? {
-                    if o.contains_key("known_by") || o.contains_key("was") {
+                    if o.contains_key("known_by") || o.contains_key("was") || o.contains_key("lki") {
                         return Err(format!("build: known_by and was are a stale reference's: {v}"));
                     }
                     return Ok(ObjRef { idx: c, inc: self.g.objs[c.i()].inc });
@@ -1441,9 +1498,71 @@ impl Builder<'_> {
                 if let Some(e) = entry {
                     self.g.ref_lki.push(e);
                 }
+                if let Some(x) = o.get("lki") {
+                    self.last_known(r, x)?;
+                }
                 Ok(())
             }
         }
+    }
+
+    /// A stale reference's last known information (module docs; ENGINE.md 236), into the game's records.
+    fn last_known(&mut self, r: ObjRef, v: &Value) -> Result<(), String> {
+        let o = v.as_object().ok_or("build: lki must be an object")?;
+        keys(o, &["copy", "dfc", "mv", "power", "toughness", "qualities", "attached", "counters"], "a gone object's last known information")?;
+        let int = |x: &Value, what: &str| x.as_i64().ok_or_else(|| format!("build: lki {what} must be an integer"));
+        if let Some(c) = o.get("copy") {
+            let def = lookup_any(self.db, c.as_str().ok_or("build: lki copy must be a card name")?)?;
+            let dfc = o.get("dfc").map_or(Ok(false), |x| x.as_bool().ok_or("build: lki dfc must be a boolean"))?;
+            let mv = o.get("mv").ok_or("build: lki copy without its mv")?.as_u64().ok_or("build: lki mv must be a number")?;
+            self.g.lki_copy.push((r, crate::copies::CopyVals { def, exc: Default::default(), dfc }, mv));
+        }
+        if let Some(p) = o.get("power") {
+            self.g.lki_power.push((r.idx, r.inc, int(p, "power")?));
+        }
+        if let Some(t) = o.get("toughness") {
+            let a = t.as_array().filter(|a| a.len() == 2).ok_or("build: lki toughness must be [toughness, controller]")?;
+            let ctl = a[1].as_u64().filter(|&p| p < 2).ok_or("build: lki toughness's controller must be a player")? as PlayerId;
+            self.g.lki_toughness.push((r, int(&a[0], "toughness")?, ctl));
+        }
+        if let Some(q) = o.get("qualities") {
+            let q = q.as_object().ok_or("build: lki qualities must be an object")?;
+            keys(q, &["controller", "deathtouch", "lifelink", "infect", "spell", "colors", "types", "itself"], "lki qualities")?;
+            let b = |k: &str| q.get(k).and_then(|x| x.as_bool()).ok_or_else(|| format!("build: lki qualities {k} must be a boolean"));
+            let n = |k: &str| q.get(k).and_then(|x| x.as_u64()).ok_or_else(|| format!("build: lki qualities {k} must be a number"));
+            let d = crate::game::DamageSource {
+                controller: n("controller")?.min(1) as PlayerId,
+                deathtouch: b("deathtouch")?,
+                lifelink: b("lifelink")?,
+                infect: b("infect")?,
+                spell: b("spell")?,
+                colors: n("colors")? as crate::mana::ManaMask,
+                types: n("types")? as u16,
+                obj: b("itself")?.then_some(r),
+            };
+            self.g.lki_qualities.push((r, d));
+        }
+        if let Some(a) = o.get("attached") {
+            let h = self.obj(a)?;
+            self.g.lki_attached.push((r, h));
+        }
+        if let Some(cs) = o.get("counters") {
+            use crate::db::Counter as K;
+            for c in cs.as_array().ok_or("build: lki counters must be a list")? {
+                let a = c.as_array().filter(|a| a.len() == 2).ok_or("build: an lki counter must be [kind, number]")?;
+                let k = match a[0].as_str() {
+                    Some("+1/+1") => K::P1P1,
+                    Some("-1/-1") => K::M1M1,
+                    Some("stun") => K::Stun,
+                    Some("loyalty") => K::Loyalty,
+                    Some("lore") => K::Lore,
+                    _ => return Err(format!("build: an lki counter's kind: {}", a[0])),
+                };
+                let n = a[1].as_u64().ok_or("build: an lki counter's number")?;
+                self.g.lki_counters.push((r, k, n as crate::num::Count));
+            }
+        }
+        Ok(())
     }
 
     fn opt_obj(&mut self, o: &Map<String, Value>, k: &str) -> Result<Option<ObjRef>, String> {

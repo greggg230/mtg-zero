@@ -710,6 +710,12 @@ pub struct Game {
     /// show them by place (`Game::finds_by_place`). Kept in every world too (unlike `found`): a search in a world
     /// marks its finds as the real game's would.
     pub(crate) finds_told: Vec<CardIdx>,
+    /// The public groups of places that hold search finds mixed with other cards (ENGINE.md 236, 223's
+    /// decision 4): a scramble that mixes told finds (or a group) with any other card makes one - "k of
+    /// these places hold their owner's search's finds" - where `finds_told` drops them. A group lasts
+    /// while its members keep their zone and the other player doesn't learn one (`move_card`, `learn`
+    /// end it); public moves shift its places. Layout v8's `find_groups` tokens.
+    pub(crate) find_groups: Vec<crate::hidden::FindGroup>,
     /// The state was changed by hand (tests' perturbations, `Game::lose_sightings`): the sightings no longer
     /// describe it, and the deals weigh every seen card blind (ENGINE.md 140.9).
     pub(crate) sightings_lost: bool,
@@ -928,6 +934,11 @@ pub struct Game {
     /// they last existed there (CR 608.2h, 113.7a; kept when
     /// `SEEN_LKI_DAMAGE`).
     pub(crate) lki_damage: Vec<(ObjRef, DamageSource)>,
+    /// The same qualities of every permanent that left the battlefield this turn, recorded whatever the cards
+    /// of the game (ENGINE.md 236): `lki_damage` is kept only when a card of the game reads it
+    /// (`SEEN_LKI_DAMAGE`, a bit of every card in the game, hidden ones too), so its presence would tell the
+    /// network of a hidden card; layout v8's `lki` tokens read this one. No rule reads it.
+    pub(crate) lki_qualities: Vec<(ObjRef, DamageSource)>,
     /// Permanents that left the battlefield this turn, their toughness and
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
@@ -1374,6 +1385,7 @@ impl Game {
             sight_at: 0,
             found: Vec::new(),
             finds_told: Vec::new(),
+            find_groups: Vec::new(),
             sightings_lost: false,
             ff: crate::forced_find::FfState::new(seed),
             tokens: 0,
@@ -1435,6 +1447,7 @@ impl Game {
             lki_copy: Vec::new(),
             lki_attached: Vec::new(),
             lki_damage: Vec::new(),
+            lki_qualities: Vec::new(),
             lki_toughness: Vec::new(),
             ref_lki: Vec::new(),
             lki_power: Vec::new(),
@@ -2528,6 +2541,10 @@ impl Game {
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
         let from = self.objs[idx.i()].zone;
+        // (A find group's member leaving its zone ends the group: ENGINE.md 236.)
+        if from != to && !self.find_groups.is_empty() {
+            self.end_find_group(idx);
+        }
         // Entering face down (manifest, CR 701.40a): its identity stays as
         // hidden as in the library it comes from.
         let fd_enter = to == Zone::Battlefield && std::mem::take(&mut self.moving_face_down);
@@ -2639,10 +2656,11 @@ impl Game {
             if let Some(h) = self.objs[idx.i()].attached {
                 self.lki_attached.push((old, h));
             }
+            let d = self.damage_source_of(idx);
             if self.seen & SEEN_LKI_DAMAGE != 0 {
-                let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
             }
+            self.lki_qualities.push((old, d));
             // (Its controller as it last existed too: "that creature's
             // controller", ENGINE.md 99.12.)
             if self.db.watch_toughness || self.db.watch_lki_controller {

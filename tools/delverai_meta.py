@@ -61,6 +61,13 @@ PROVENANCE = ('player', 'event', 'date', 'result', 'source', 'platform', 'archet
 OPP_POOL = 15
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def spec_of(cfg):
     try:
         s = json.loads(cfg.get('spec') or '{}')
@@ -463,7 +470,7 @@ def pairings(spec, driver_seed, n):
         r = random.Random(rng.randrange(1 << 30))
         r.randrange(1 << 30)
         r.randrange(1 << 30)
-        g = E.Game('mtg', spec, 2, r.getrandbits(63))
+        g = E.Game(_lay().current(), spec, 2, r.getrandbits(63))
         out.append(tuple(json.loads(g.export_state())['match']['pairing']['decks']))
     return out
 

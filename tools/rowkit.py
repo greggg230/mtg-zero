@@ -18,8 +18,8 @@ helper here takes the call of before. A tool never drops a row's tail or overrid
 import numpy as np
 
 
-def kind(game='mtg'):
-    """The game's variable-length rows (`zero.mcts.Rows`) on the active engine, None for an engine or game without
+def kind(game):
+    """The game's (layout v8 `mtg` or v7 `mtg_v7`: a network's own, mtgz.az.layouts, docs/ENGINE.md 236) variable-length rows (`zero.mcts.Rows`) on the active engine, None for an engine or game without
     them (the info of an older engine has no 'tails' key)."""
     from zero import games as G
     info = G.info(game)

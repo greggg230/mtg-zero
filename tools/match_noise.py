@@ -50,6 +50,13 @@ MASK64 = (1 << 64) - 1
 REGIMES = ('random', 'consensus')
 
 
+
+def _lay():
+    """mtgz.az.layouts (docs/ENGINE.md 236): the game - layout v8 `mtg` or v7 `mtg_v7` - of the checkpoints this tool loads
+    (`load_used`), every game it plays and encodes (`current`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return layouts
+
 def splitmix(x):
     x = (x + 0x9E3779B97F4A7C15) & MASK64
     z = x
@@ -317,7 +324,7 @@ def play(out, player, regimes, replays, model, conc, threads, groups, infer_work
                 raise SystemExit(f'play {player}: {max_lives} drivers failed; stopping')
             state['lives'] += 1
             rseed = seed * 7919 + len(done) + 1009 * state['lives'] + (104729 if player.startswith('net') else 0)
-            drv = G.Driver('mtg', [[seat, seat]], spec=c['spec'], concurrency=conc, seed=rseed, threads=threads,
+            drv = G.Driver(_lay().current(), [[seat, seat]], spec=c['spec'], concurrency=conc, seed=rseed, threads=threads,
                            groups=groups, record=False, max_steps=c['max_steps'], rolling=True, queue_only=True)
             drv.resume(BIG, 0)
             for tag, spec in todo:
@@ -383,7 +390,7 @@ def repro(out, tag, player, model, seed):
         seat = net_seat(G, c, player)
     else:
         evs, seat = {}, G.seat_dict(player)
-    drv = G.Driver('mtg', [[seat, seat]], spec=c['spec'], concurrency=1, seed=seed, threads=1, groups=1,
+    drv = G.Driver(_lay().current(), [[seat, seat]], spec=c['spec'], concurrency=1, seed=seed, threads=1, groups=1,
                    record=False, max_steps=c['max_steps'], rolling=True, queue_only=True)
     drv.resume(BIG, 0)
     drv.enqueue(tag, js)
@@ -405,7 +412,7 @@ def bench(out, model, matches, conc, threads, groups, infer_workers, torch_threa
     m, _ = load(model, 'cpu')
     ev = NetEvaluator(m, 'cpu', workers=infer_workers)
     seat = nn_selfplay_seat(G, c)
-    drv = G.Driver('mtg', [[seat, seat]], spec=c['spec'], concurrency=conc, seed=seed, threads=threads, groups=groups,
+    drv = G.Driver(_lay().current(), [[seat, seat]], spec=c['spec'], concurrency=conc, seed=seed, threads=threads, groups=groups,
                    record=record, max_steps=c['max_steps'], rolling=True)
     back = Backoff(out)
     samples = [0]

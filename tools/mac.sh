@@ -20,7 +20,10 @@
 # Uncommitted changes are NOT sent: commit first (a WIP commit is fine). The command travels
 # base64-encoded (quotes, pipes and semicolons arrive intact). The Mac: MTGZ_MAC=user@host, the machine's own
 # setting in ~/.config/zero/local.env (tools/local.env.example; the environment wins), never committed.
-# One command at a time per Mac checkout (a lock beside it: a second mac.sh on the same branch waits);
+# Commands of the SAME commit share a Mac checkout and run at once (a gate's parallel steps, several gates of one
+# commit: docs/ENGINE.md 238); a command of another commit waits until the checkout is free, then checks its own out
+# (a command that waits goes before later arrivals). --pin, --eval-checkout and MTGZ_MAC_EXCLUSIVE=1 take the
+# checkout alone. How many run at once on the Mac is tools/slotd.sh's there, for the callers that use it (the gate);
 # the "[mac] <host> <branch> @ <sha>" line and the "[mac] done @ <sha> (exit N)" line after the command
 # carry the Mac checkout's own HEAD, read there (tools/gate.py checks both; docs/ENGINE.md 143).
 #
@@ -93,6 +96,10 @@ else
   if [ $# -eq 1 ]; then CMD="$1"; else CMD="$(printf '%q ' "$@")"; fi
 fi
 SAFE="$(printf '%s' "$BRANCH" | tr '/' '_')"
+case "$1" in
+  --pin|--eval-checkout) MODE=excl ;;
+  *) if [ "${MTGZ_MAC_EXCLUSIVE:-0}" = 1 ]; then MODE=excl; else MODE=shared; fi ;;
+esac
 
 CORE="$ROOT/third_party/zero-core"
 if ! git -C "$CORE" cat-file -e "$PIN^{commit}" 2>/dev/null; then
@@ -101,9 +108,22 @@ if ! git -C "$CORE" cat-file -e "$PIN^{commit}" 2>/dev/null; then
 fi
 ssh -o BatchMode=yes "$HOST" '[ -d mtg-zero.git ] || git init -q --bare mtg-zero.git
 [ -d mtg-zero-core.git ] || git init -q --bare mtg-zero-core.git'
-git remote get-url mac >/dev/null 2>&1 || git remote add mac "$HOST:mtg-zero.git"
-git push -q -f mac "HEAD:refs/heads/$BRANCH"
-git -C "$CORE" push -q "$HOST:mtg-zero-core.git" "$PIN:refs/heads/pin-$PIN"
+git remote get-url mac >/dev/null 2>&1 || git remote add mac "$HOST:mtg-zero.git" 2>/dev/null \
+  || git remote get-url mac >/dev/null          # (another mac.sh of this checkout added it meanwhile)
+# several mac.sh of one checkout push the same refs at once (a gate's parallel steps): a push that lost the race for
+# the ref's lock is tried again
+push_retry() {
+  local k err
+  for k in 1 2 3 4 5; do
+    if err="$("$@" 2>&1)"; then return 0; fi
+    sleep $((k * 2))
+  done
+  printf '%s
+' "$err" >&2
+  "$@"
+}
+push_retry git push -q -f mac "HEAD:refs/heads/$BRANCH"
+push_retry git -C "$CORE" push -q "$HOST:mtg-zero-core.git" "$PIN:refs/heads/pin-$PIN"
 
 # Ship the command base64-encoded so quotes / pipes / semicolons in it reach the Mac intact
 # (it is spliced into the remote script below).
@@ -111,43 +131,114 @@ CMD_B64="$(printf '%s' "$CMD" | base64 | tr -d '\n')"
 ssh -o BatchMode=yes "$HOST" "bash -s" <<EOF
 set -euo pipefail
 export PATH="\$HOME/.venvs/dominion-zero/bin:\$HOME/.cargo/bin:/opt/homebrew/bin:\$PATH"
-if [ ! -d "\$HOME/mtg-zero/.git" ]; then
-  git clone -q --no-checkout "\$HOME/mtg-zero.git" "\$HOME/mtg-zero"
-fi
-cd "\$HOME/mtg-zero"
-git config submodule.third_party/zero-core.url "\$HOME/mtg-zero-core.git"
-git fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 if [ "$BRANCH" = main ]; then WT="\$HOME/mtg-zero"; else WT="\$HOME/mtg-zero-wt/$SAFE"; fi
-# One command at a time per checkout, from its checkout to its end (docs/ENGINE.md 143): a second mac.sh on the
-# same branch force-switched the sources under a running cargo test. The lock is a directory beside the checkout
-# holding its owner's pid; a lock whose owner is gone (an ssh that died) is taken over. (bash 3.2: macOS's own)
+# Who may use the checkout (docs/ENGINE.md 143, 238). A second mac.sh once force-switched the sources under a running
+# cargo test, so a command of ANOTHER commit waits for the checkout; commands of the SAME commit share it and run at
+# once. \$USERS holds one file per running command, named by its pid: "<sha> <shared|excl> <what>"; a file whose
+# process is gone is dropped. \$LOCK (a directory holding its owner's pid; one whose owner is gone is taken over) is
+# held only while a command looks at \$USERS and syncs the checkout - an older mac.sh holds it for its whole command,
+# and is waited for. \$WANT: the commands waiting for the checkout, "<since, epoch seconds> <what>" - they go in the
+# order they began to wait, and a later arrival goes after them even where it could share.
+# (bash 3.2: macOS's own)
 LOCK="\$WT.mac-lock"
-SAID=""
-mkdir -p "\$(dirname "\$LOCK")"
-while ! mkdir "\$LOCK" 2>/dev/null; do
-  [ -d "\$LOCK" ] || { echo "[mac] cannot create the lock \$LOCK" >&2; exit 1; }
-  OWNER="\$(cat "\$LOCK/pid" 2>/dev/null || true)"
-  if [ -n "\$OWNER" ] && ! kill -0 "\$OWNER" 2>/dev/null; then
-    echo "[mac] \$WT: taking over the lock of pid \$OWNER (gone)" >&2; rm -rf "\$LOCK"; continue
-  fi
-  if [ -z "\$OWNER" ] && [ -n "\$(find "\$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
-    echo "[mac] \$WT: taking over a lock without an owner" >&2; rm -rf "\$LOCK"; continue
-  fi
-  if [ -z "\$SAID" ]; then
-    echo "[mac] \$WT is in use (\$(cat "\$LOCK/what" 2>/dev/null || echo '?'), pid \${OWNER:-?}): waiting for it" >&2
-    SAID=1
-  fi
-  sleep 10
-done
-echo \$\$ > "\$LOCK/pid"
-printf '%s\n' "$BRANCH ${SHA:0:12} since \$(date '+%Y-%m-%d %H:%M:%S')" > "\$LOCK/what"
-trap 'rm -rf "\$LOCK"' EXIT
+USERS="\$WT.mac-users"
+WANT="\$WT.mac-want"
+ME=\$\$
+HOLD=""
+mkdir -p "\$USERS" "\$WANT"
+cleanup() {
+  rm -f "\$USERS/\$ME" "\$WANT/\$ME"
+  if [ -n "\$HOLD" ]; then rm -rf "\$LOCK"; fi
+}
+trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-if [ "$BRANCH" != main ] && [ ! -d "\$WT" ]; then git worktree add -q --detach "\$WT" $SHA; fi
-cd "\$WT" && git checkout -q -f --detach $SHA
-git -c protocol.file.allow=always submodule update -q --init third_party/zero-core
+take_lock() {
+  local owner said=""
+  while ! mkdir "\$LOCK" 2>/dev/null; do
+    [ -d "\$LOCK" ] || { echo "[mac] cannot create the lock \$LOCK" >&2; exit 1; }
+    owner="\$(cat "\$LOCK/pid" 2>/dev/null || true)"
+    if [ -n "\$owner" ] && ! kill -0 "\$owner" 2>/dev/null; then
+      echo "[mac] \$WT: taking over the lock of pid \$owner (gone)" >&2; rm -rf "\$LOCK"; continue
+    fi
+    if [ -z "\$owner" ] && [ -n "\$(find "\$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
+      echo "[mac] \$WT: taking over a lock without an owner" >&2; rm -rf "\$LOCK"; continue
+    fi
+    if [ -z "\$said" ] && [ -f "\$LOCK/what" ]; then       # (an older mac.sh: it holds the lock for its command)
+      echo "[mac] \$WT is in use (\$(cat "\$LOCK/what" 2>/dev/null || echo '?'), pid \${owner:-?}): waiting for it" >&2
+      said=1
+    fi
+    sleep 1
+  done
+  HOLD=1
+  echo \$ME > "\$LOCK/pid"
+}
+drop_lock() { rm -rf "\$LOCK"; HOLD=""; }
+live() {        # live <dir>: the pids of its files whose process is alive (the others' files are dropped)
+  local f p
+  for f in "\$1"/*; do
+    [ -e "\$f" ] || continue
+    p="\${f##*/}"
+    if kill -0 "\$p" 2>/dev/null; then echo "\$p"; else rm -f "\$f"; fi
+  done
+}
+SAID=""
+SINCE=""        # when this command began to wait (its \$WANT file), '' = it has not waited
+while :; do
+  take_lock
+  OTHERS=""
+  CLASH=""
+  for p in \$(live "\$USERS"); do
+    [ "\$p" = "\$ME" ] && continue
+    OSHA=""; OMODE=""; OWHAT=""
+    read -r OSHA OMODE OWHAT < "\$USERS/\$p" || true
+    OTHERS=1
+    if [ "$MODE" = excl ] || [ "\$OMODE" != shared ] || [ "\$OSHA" != "$SHA" ]; then CLASH="\$OWHAT, pid \$p"; fi
+  done
+  if [ -z "\$CLASH" ]; then           # whoever has waited longer goes first (a newcomer after every waiter)
+    for p in \$(live "\$WANT"); do
+      [ "\$p" = "\$ME" ] && continue
+      OSINCE=""; OWHAT=""
+      read -r OSINCE OWHAT < "\$WANT/\$p" || true
+      if [ -z "\$SINCE" ] || [ "\${OSINCE:-0}" -lt "\$SINCE" ]; then CLASH="\$OWHAT, pid \$p, waits for it and goes first"; fi
+    done
+  fi
+  [ -z "\$CLASH" ] && break
+  if [ -z "\$SINCE" ]; then
+    SINCE="\$(date +%s)"
+    printf '%s\n' "\$SINCE $BRANCH ${SHA:0:12}" > "\$WANT/\$ME"
+  fi
+  drop_lock
+  if [ -z "\$SAID" ]; then
+    echo "[mac] \$WT is in use (\$CLASH): waiting for it" >&2
+    SAID=1
+  fi
+  sleep 5
+done
+rm -f "\$WANT/\$ME"
+if [ -z "\$OTHERS" ]; then
+  # nobody runs in the checkout: bring it to this commit (the bare repos' refs, config and worktree list are written
+  # under the lock too: several mac.sh arrive at once)
+  if [ ! -d "\$HOME/mtg-zero/.git" ]; then
+    git clone -q --no-checkout "\$HOME/mtg-zero.git" "\$HOME/mtg-zero"
+  fi
+  cd "\$HOME/mtg-zero"
+  git config submodule.third_party/zero-core.url "\$HOME/mtg-zero-core.git"
+  git fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+  if [ "$BRANCH" != main ] && [ ! -d "\$WT" ]; then git worktree add -q --detach "\$WT" $SHA; fi
+  cd "\$WT" && git checkout -q -f --detach $SHA
+  git -c protocol.file.allow=always submodule update -q --init third_party/zero-core
+else
+  # commands of this commit run here: the checkout is theirs, untouched (its HEAD is checked, never moved)
+  cd "\$WT"
+  AT="\$(git rev-parse HEAD)"
+  if [ "\$AT" != "$SHA" ]; then
+    echo "[mac] \$WT is at \$AT while commands of $SHA run in it: refusing" >&2; exit 1
+  fi
+fi
+printf '%s\n' "$SHA $MODE $BRANCH ${SHA:0:12} since \$(date '+%Y-%m-%d %H:%M:%S')" > "\$USERS/\$ME"
+drop_lock
 export CARGO_TARGET_DIR="\$HOME/cargo-target/mtg-zero/$SAFE" PYTHON=python PYO3_PYTHON=python
 export CARGO_BUILD_JOBS=12 RUSTFLAGS="-C link-arg=-undefined -C link-arg=dynamic_lookup"
 CMD="\$(printf '%s' '$CMD_B64' | base64 --decode)"

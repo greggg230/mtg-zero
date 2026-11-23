@@ -133,8 +133,8 @@ def test_a_resolver_mirror_is_evaluated_after_the_same_check(tmp_path):
     from zero.cotrain import resolver_config
     from zero.net import save
     from zero.run import DEFAULTS, PRESETS, Run, model_path
-    rc = resolver_config(dict(DEFAULTS, **PRESETS['team_draft-smoke']))
-    assert rc['game'] == 'mtg' and rc['resolver'] == '' and rc['eval_remote'] == ''
+    rc = resolver_config(first_start(dict(DEFAULTS, **PRESETS['team_draft-smoke'])))
+    assert rc['game'] == 'mtg' and rc['game_layout'] == 8 and rc['resolver'] == '' and rc['eval_remote'] == ''
     mirror = tmp_path / 'mtgz-remote' / 'td.resolver'
     (mirror / 'models').mkdir(parents=True)
     cfg = dict(rc, eval_games=2, eval_random_games=2, ref_games=2, elo_games=2)
@@ -160,7 +160,7 @@ def test_an_eval_net_mirror_is_evaluated_after_the_same_check(tmp_path):
     from zero.cotrain import CoRun
     from zero.net import save
     from zero.run import DEFAULTS, PRESETS, model_path
-    cfg = dict(DEFAULTS, **PRESETS['team_draft-smoke'])
+    cfg = first_start(dict(DEFAULTS, **PRESETS['team_draft-smoke']))
     cfg.update(eval_games=2, draft_eval_net_every=1)
     mirror = tmp_path / 'mtgz-remote' / 'td'
     (mirror / 'models').mkdir(parents=True)
@@ -275,6 +275,14 @@ def test_a_selfplay_worker_refuses_other_code(tmp_path):
     assert os.listdir(mirror) == []
 
 
+def first_start(cfg):
+    """`cfg` (DEFAULTS + a preset) as a run's first start writes it, and so its mirrors (zero.run.resolve_run_game:
+    each game the name's current revision with its layout record - `mtg` layout 8). A mirror config naming `mtg`
+    without a record is a run's of before layout v8, the game `mtg_v7` (zero-core docs/az.md 73.2)."""
+    from zero.run import resolve_run_game
+    return resolve_run_game(cfg, {}, {})
+
+
 def _worker(mirror, cfg, mode):
     """zero-core's remote self-play worker for the mtgz package, as `python -m mtgz.az.remote selfplay`
     runs it after the checkout check (which needs the Mac's stamped checkout)."""
@@ -323,7 +331,7 @@ def test_a_worker_plays_mtg(tmp_path, mode):
     from zero.data import read_shard
     from zero.run import DEFAULTS, PRESETS
     from mtgz.az import SPEC_BO3
-    cfg = dict(DEFAULTS, **PRESETS['mtg-smoke'])
+    cfg = first_start(dict(DEFAULTS, **PRESETS['mtg-smoke']))
     cfg.update(conc=4, threads=2, shard_rows=64, max_steps=60_000)
     mirror = tmp_path / 'mtgz-selfplay' / 'r'
     p, events, send, wait_for = _worker(mirror, cfg, mode)

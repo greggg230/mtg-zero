@@ -37,6 +37,14 @@ in the macOS part (below), whose failure is recorded and leaves the published bu
    'dml=matmul@amd'),
    then `probe-providers --runtime-dir <DirectML pack> --providers dml,cpu --reps 2` on it: both must pass (this PC's
    GPU through DirectML, whatever its vendor). `--no-dml` skips it.
+6c. **torch** (when release.json sets `torch_runtime`, the torch runtime pack of `farm_build.py --runtime --pack torch`, and
+   `pyshim`, zero-farm's zf-pyshim.exe: the owner's opted-in machines, docs/ENGINE.md 244): `farm_build.py --root
+   <release worktree> --torch --runtime-id <torch pack> --pyshim <pyshim> --min-agent <torch_min_agent>` (the commit's
+   Python, its engine module, worker_main.py, zf-pyshim.exe; built for EVERY commit - Python changes count, unlike the
+   other builds' Rust inputs) and **torch-selftest**: the reference checkpoint as torch-weights/1 (the run's
+   `pool_variants` 'torch=weights') through the pack's Python on this PC's GPU (`worker_main.py selftest`: within the
+   reference precision's tolerance, twice bit for bit). The index entry's `torch` names the commit it was built for;
+   `lookup --pool-args` lists it first (`pool_alternates`, 'torch=weights') only for that commit. `--no-torch` skips it.
 7. **template**: zero.farm_pool.play_settings with the signed worker on the reference config (the farm pool's own path
    to a self-play template: the worker's check-config, with the declared setting classes when the build announces
    them, zero-core docs/az.md 61) - the refusal that once forced a rebuild shows here.
@@ -150,6 +158,9 @@ DEFAULTS = {
     'mac_runtime': None,                           # the macOS CPU pack (farm_build.py --runtime --pack macos-cpu)
     'dml_runtime': None,                           # the DirectML pack for AMD GPUs (farm_build.py --runtime --pack dml)
     'dml_min_agent': '0.3.11',                     # agents that use AMD GPUs through DirectML (PROTOCOL rev 22)
+    'torch_runtime': None,                         # the torch runtime pack (farm_build.py --runtime --pack torch; ENGINE.md 244)
+    'torch_min_agent': '0.3.18',                   # agents that run the torch worker (zero-farm's TORCH_AGENT, at least)
+    'pyshim': None,                                # zero-farm's zf-pyshim.exe: the torch worker build's entry
     'mac_min_agent': '0.3.0',                      # agents that know platforms (PROTOCOL 11)
     # the macOS part of every release (module docs, docs/ENGINE.md 216); each overridden by its flag for one run
     'mac': True,                                   # build it (and backfill entries without one)
@@ -400,6 +411,43 @@ class Release:
         out['gpu'] = (res['dml'].get('gpu') or {}).get('vendor')
         return out
 
+    def want_torch(self):
+        return bool(self.s.get('torch_runtime')) and bool(self.s.get('pyshim')) and not self.a.no_torch
+
+    def torch_part(self, sha):
+        """Steps torch and torch-selftest (module docs 6c) on the release worktree at `sha` -> the entry's `torch` part
+        (its build directory under `dir`)."""
+        rt = self.runtime_dir(self.s['torch_runtime'], 'torch')
+        tid, tdir = self.timed('torch', self.farm_build, 'torch', '--root', self.wt, '--torch', '--runtime-id',
+                               self.s['torch_runtime'], '--pyshim', self.s['pyshim'], '--min-agent', self.s['torch_min_agent'],
+                               '--check-runtime', rt)
+        st = self.timed('torch-selftest', self.torch_selftest, tdir, rt)
+        return {'build_id': tid, 'runtime': self.s['torch_runtime'], 'min_agent': self.s['torch_min_agent'], 'commit': sha,
+                'selftest': st, 'dir': tdir}
+
+    def torch_selftest(self, tdir, rt):
+        """The reference checkpoint as torch-weights/1 (exported by the release worktree's zero-core with the reference
+        config's inference settings), self-tested by the torch build through the pack's Python on this PC's GPU."""
+        ref = self.s['reference']
+        w = os.path.join(self.log_dir, 'torch-export', 'model-torch.pt')
+        os.makedirs(os.path.dirname(w), exist_ok=True)
+        code = ('import json, sys; sys.path[:0] = [".", "third_party/zero-core/python"]; import mtgz.az; '
+                'from zero import torch_weights as TW; TW.export(sys.argv[1], sys.argv[2], json.load(open(sys.argv[3])))')
+        self.run('torch-selftest', [self.s['python'], '-c', code, ref['checkpoint'], w, ref['config']], cwd=self.wt)
+        cmd = [os.path.join(rt, 'python', 'python.exe'), '-I', '-X', 'utf8', os.path.join(tdir, 'worker_main.py'), 'selftest',
+               '--model', w, '--reference', os.path.join(ref['export'], 'reference.npz'), '--device', 'cuda']
+        self.say(f'torch-selftest: {subprocess.list2cmdline(cmd)}')
+        p = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=900, cwd=tdir)
+        with open(os.path.join(self.log_dir, 'torch-selftest.log'), 'w', encoding='utf-8') as f:
+            f.write(p.stdout + '\n' + p.stderr)
+        try:
+            st = json.loads(p.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise Failed('torch-selftest', f'exit {p.returncode}: {p.stderr[-1500:]}') from None
+        if p.returncode or not st.get('ok'):
+            raise Failed('torch-selftest', f'{st} {p.stderr[-800:]}')
+        return {k: st.get(k) for k in ('provider', 'max_abs', 'means', 'deterministic', 'precision', 'rows')}
+
     def template(self, exe, bid):
         """zero.farm_pool.play_settings with the signed worker on the reference config (step 7)."""
         out = os.path.join(self.log_dir, 'template')
@@ -468,6 +516,16 @@ class Release:
             self.say(f'{sha[:12]} changed no Rust input since {same["commit"][:12]}: its build {same["build_id"]} is this commit\'s')
             e = {k: v for k, v in same.items() if k not in ('exact', 'asked')}
             e.update(commit=sha, reused_from=same.get('reused_from') or same['commit'], created=now(), seconds={})
+            e['torch'] = None
+            if self.want_torch():
+                # (the torch build is the commit's Python: built for this commit whatever its Rust inputs - module docs 6c)
+                self.dist = os.path.join(self.target_root(), 'farm-build', 'dist')
+                self.timed('checkout', self.checkout, sha)
+                self.timed('modules', self.modules)
+                t = self.torch_part(sha)
+                if not self.a.no_publish:
+                    t['worker'] = slash(os.path.join(self.timed('publish-torch', self.publish, t.pop('dir')), 'worker_main.py'))
+                e['torch'] = t
             if self.a.regate:
                 preflight(self.s, cuda=False)
                 self.timed('checkout', self.checkout, sha)
@@ -504,6 +562,7 @@ class Release:
             r['steps']['dml'] = {'build_id': did, 'dir': ddir}
             st = self.timed('dml-selftest', self.dml_selftest, ddir)
             dml = {'build_id': did, 'runtime': self.s['dml_runtime'], 'min_agent': self.s['dml_min_agent'], 'selftest': st}
+        torch_ = self.torch_part(sha) if self.want_torch() else None
         tpl = self.timed('template', self.template, exe, bid)
         gates = self.timed('gates', self.gates, exe)
         r['steps']['gates'] = gates
@@ -519,16 +578,18 @@ class Release:
             if self.a.mac:
                 mac = self.mac_backfill({'commit': sha, 'built_at': sha, 'build_id': bid, 'worker': exe, 'cuda': cuda},
                                         record=False)['mac']
-            return dict(r, build_id=bid, runtime=rt, cuda=cuda, dml=dml, mac=mac, template=tpl, gates=gates, speed=speed,
-                        published=False)
+            return dict(r, build_id=bid, runtime=rt, cuda=cuda, dml=dml, torch=torch_, mac=mac, template=tpl, gates=gates,
+                        speed=speed, published=False)
         worker = self.timed('publish', self.publish, bdir)
         if cuda:
             cuda['worker'] = slash(os.path.join(self.timed('publish-cuda', self.publish, r['steps']['cuda']['dir']), 'mtgz-worker.exe'))
         if dml:
             dml['worker'] = slash(os.path.join(self.timed('publish-dml', self.publish, r['steps']['dml']['dir']), 'mtgz-worker.exe'))
+        if torch_:
+            torch_['worker'] = slash(os.path.join(self.timed('publish-torch', self.publish, torch_.pop('dir')), 'worker_main.py'))
         e = {'commit': sha, 'built_at': sha, 'rust_key': key, 'core_commit': r['core_commit'], 'build_id': bid,
              'version': os.path.basename(os.path.normpath(bdir)), 'runtime': rt, 'worker': slash(os.path.join(worker, 'mtgz-worker.exe')),
-             'cuda': cuda, 'dml': dml, 'mac': None, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
+             'cuda': cuda, 'dml': dml, 'torch': torch_, 'mac': None, 'features': info.get('features') or [], 'zero_onnx': info.get('zero_onnx'), 'template': tpl,
              'gates': gates, 'speed': speed, 'reference': {k: local_config.portable_path(v) for k, v in self.s['reference'].items()},
              'url': self.s['url'], 'published': True, 'created': now(), 'seconds': r['seconds']}
         e = FB.add(e)
@@ -985,6 +1046,8 @@ def parser():
     r.add_argument('--no-publish', action='store_true', help='sign and check only (no publish, no index entry)')
     r.add_argument('--no-cuda', action='store_true', help='no CUDA alternate (and no GPU self-test)')
     r.add_argument('--no-dml', action='store_true', help='no DirectML alternate (AMD GPUs) even when dml_runtime is set')
+    r.add_argument('--no-torch', action='store_true', help='no torch worker build (the opted-in machines of the owner) even '
+                   'when torch_runtime and pyshim are set')
     r.add_argument('--no-slot', action='store_true', help='heavy steps without tools/slotd.sh')
     on_off = argparse.BooleanOptionalAction
     r.add_argument('--mac', action=on_off, default=None, help='the macOS part (module docs 11-17; default release.json '

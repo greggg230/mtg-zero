@@ -81,11 +81,13 @@ def spec_json(description=None, spec=None, p1_deck=None, describe=True):
     return json.dumps(sp, separators=(',', ':'))
 
 
-def build_game(description, seed=0, spec=None, p1_deck=None, describe=True):
+def build_game(description, seed=0, spec=None, p1_deck=None, describe=True, game=None):
     """An engine Game at the described position (ENGINE.md 95): its unknown cards dealt from `seed`
     (the description's `deal_seed`, if it has one, wins). A description that does not fit its decks, or
-    names something the schema does not build, is a ValueError naming it."""
-    return engine().Game('mtg', spec_json(description, spec, p1_deck, describe), 2, int(seed))
+    names something the schema does not build, is a ValueError naming it. `game`: the layout's game (a network's
+    own, mtgz.az.layouts; default the process's, `layouts.current()`: layout v8 until a checkpoint is loaded)."""
+    from mtgz.az import layouts
+    return engine().Game(game or layouts.current(), spec_json(description, spec, p1_deck, describe), 2, int(seed))
 
 
 def describe_from_engine(game, viewer):
