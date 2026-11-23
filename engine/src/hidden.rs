@@ -2325,4 +2325,55 @@ mod queue_1123_tests {
         assert_eq!(bits(&a.head), bits(&b.head), "the head (the hand slots, the stack slot's source)");
         assert!(a.tail == b.tail && a.ov == b.ov, "the tail tokens and the overrides");
     }
+
+    /// ENGINE.md 248.3 (queue entry f1eebdfda0a1, default game 100398690). An ability on the stack
+    /// whose source is gone shows no place for it in the view (CR 400.7): P0's Marsh Flats, sacrificed
+    /// for its ability, is shuffled back into P0's library while the ability waits (as Endurance
+    /// does); a second Marsh Flats then finds a Blood Crypt. In P0's worlds the first Flats' card
+    /// slot is dealt Blood Crypt or not, and the search - by definition - finds that slot or another:
+    /// equal keys, and one view. Before, the view named the gone source by where its card slot is now
+    /// (the battlefield in one world, the library in another).
+    #[test]
+    fn cr_400_7_a_gone_sources_ability_shows_no_place_of_its_card_slot() {
+        let mut g = Scenario::new(db())
+            .spec(|s| s.auto_single = false)
+            .battlefield(0, &["Marsh Flats", "Marsh Flats"])
+            .library(0, &["Blood Crypt", "Plains", "Plains", "Plains"])
+            .library(1, &["Island"; 8])
+            .at(Step::Main1, 0)
+            .start();
+        let flats: Vec<CardIdx> = g.battlefield.iter().copied().filter(|&c| g.name(c) == "Marsh Flats").collect();
+        let (a, b) = (flats[0], flats[1]);
+        g.choose(Choice::Ability(a, AbilitySlot::Activated(0)));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Priority) && g.stack.len() == 1);
+        assert_eq!(g.objs[a.i()].zone, Zone::Graveyard, "sacrificed for its ability");
+        g.move_card(a, Zone::Library, Pos::Top);
+        g.shuffle_library(0);
+        g.refresh_pending();
+        g.choose(Choice::Ability(b, AbilitySlot::Activated(0)));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Priority) && g.stack.len() == 2);
+        let crypt = g.db.id("Blood Crypt").unwrap();
+        let mut seen: Vec<(Vec<u64>, Vec<u64>)> = Vec::new();
+        let mut found_it = 0;
+        for s in 0..40 {
+            let mut w = g.clone();
+            w.determinize(0, &mut Rng::new(s));
+            let mut keys = w.drive_until(|g| g.kind() == Some(DecisionKind::SearchLibrary));
+            assert_eq!(w.kind(), Some(DecisionKind::SearchLibrary), "world {s}");
+            keys.extend(w.choose(Choice::Def(crypt)));
+            // (Blood Crypt's "pay 2 life?": no.)
+            while w.kind().is_some_and(|k| k != DecisionKind::Priority) {
+                let c = w.pending.as_ref().unwrap().options[0].choice;
+                keys.extend(w.choose(c));
+            }
+            assert_eq!(w.stack.len(), 1, "world {s}: the first Flats' ability still waits");
+            found_it += (w.objs[a.i()].zone == Zone::Battlefield) as u32;
+            seen.push((keys, w.view_of(0)));
+        }
+        assert!(found_it > 0 && found_it < 40, "the search found the gone source's card slot in some worlds only: {found_it}");
+        for (s, x) in seen.iter().enumerate() {
+            assert_eq!(x.0, seen[0].0, "world {s}: the keys");
+            assert_eq!(x.1, seen[0].1, "world {s}: P0's view");
+        }
+    }
 }

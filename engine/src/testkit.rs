@@ -698,7 +698,9 @@ impl Game {
                         crate::db::AbilitySlot::Hand(i) => 300 + i as u64,
                         crate::db::AbilitySlot::Graveyard(i) => 400 + i as u64,
                     };
-                    v.extend([2, ability.def as u64, slot, place(source.idx)])
+                    // (A gone source names no object, CR 400.7: where its card went since is not the ability's
+                    // to show - through a library it is another card in each world, ENGINE.md 248.3.)
+                    v.extend([2, ability.def as u64, slot, live_place(source)])
                 }
             }
             v.push(s.controller as u64);
@@ -720,7 +722,7 @@ impl Game {
                 v.push(r as u64);
                 v.push(match tg {
                     Target::Player(p) => p as u64,
-                    Target::Obj(o) => 100 + place(o.idx),
+                    Target::Obj(o) => 100 + live_place(o),
                     // An ability by its stack position (public).
                     Target::Stack(id) => 9000 + self.view_stack_pos(id, canon.is_some()),
                 });
@@ -750,7 +752,7 @@ impl Game {
             };
             v.extend([canon.map_or(e.ts as u64, |k| k.rank(e.ts)), e.controller as u64, until]);
             match &e.on {
-                crate::layers::Affected::Obj(r) => v.push(500 + place(r.idx)),
+                crate::layers::Affected::Obj(r) => v.push(500 + live_place(*r)),
                 crate::layers::Affected::Group(_) => v.push(1),
             }
             v.push(h64(&e.m));
