@@ -46097,6 +46097,7 @@ has hidden 60s), its run's margin_w / redet / eval_cache (`run_seat_keys`), max_
 (each its own process with its two networks). A job's result is reused only when its job hash matches (the networks'
 paths, the spec, the seed, the settings), so a judge phase resumed after a kill plays only what is missing.
 `judge.backend` 'local' only: farm campaigns (one backend per comparison) are not built yet and are refused by name.
+(Since 249: `judge.backend` 'farm' plays the same jobs as farm match campaigns, one backend per generation.)
 
 **Reports** (`reports/gen_NNN.json` / `.md`, written by both judge phases and at a hold): the generation's nets, each
 turn's matches / rows / rows a match / hours, each distillation's per-source weight, rows and held-out agreement (policy
@@ -46609,3 +46610,194 @@ this one's: the same Rust inputs, `farm_builds.lookup`).
 
 **Tests.** `tests/test_stew_control.py::test_farm_set_puts_the_whole_body_with_only_the_state_changed` (an alternate with
 `when.opt_in`, `model` and all four notes: the notes cut, the rest kept) and `tests/test_ab.py` (a `variant_notes` cut).
+
+## 249. The stew's judge on the farm: `recipe.judge.backend` 'farm' - judge jobs as match campaigns, the same matches as the local judge's, one backend per generation (branch `feat/stew-judge-farm`, 2026-11-23)
+
+**Why.** The owner wants the desktop to contribute only through the farm. The stew's training already runs on farm
+pools (239.2, 244); its judging did not: `recipe.judge.backend` took only 'local' (239.3: "farm campaigns ... are not
+built yet"), i.e. `judge.procs` processes on the desktop's GPU - 3,000 best-of-three matches a generation in the first
+stew (2,000 with 246's `deck_arms`), for which the stew pauses its yield runs. zero.h2h, the cells yardstick and
+`tools/ab.py judge` have played on the farm since 217; this section gives the stew the same backend, on the same
+campaign code (`mtgz.az.farm_campaign`, `mtgz.az.h2h_farm`'s conditions), with nothing of the play rules copied.
+
+### 249.1 What a campaign can play, and the mapping
+
+A farm eval job (zero-core `zero.farm_eval`, the worker's `evaljob`) plays game ids [0, N) of one spec between two
+seats; seats[0] sits in seat gid % 2 - **the worker always alternates** -, and every random stream of a game comes from
+(seed, gid), or with `paired` from (seed, gid / 2) (`zero_search::record::game_seed`, `driver::worker::init_slot`: the
+`paired` flag changes nothing else). A stew judge job (239.3, `judge.play_job`) is N matches of one spec with a layout:
+'paired' (gen over gen: seats alternate, pairs share their streams) or **fixed seats** ('a0': net A in seat 0 of every
+match, 'a1': in seat 1; one stream per match) - the deck follows the net, so a cell's pilot never changes seat. A fixed
+seat is not something an eval job has. `mtgz.stew.judge_farm.units` maps the jobs onto campaigns (a **unit** = one
+campaign and the jobs it answers) so that every match is still exactly the local job's:
+
+| job | campaign | the job's match k | wasted |
+|---|---|---|---|
+| G (gen over gen, 'paired', N matches) | paired, N games, seats [new, old], the job's seed | game k | none |
+| B (the specialist against itself, 'a0') | unpaired, N games, seats [net 1, net 1], the job's seed | game k (both seats are one seat: the alternation changes nothing) | none |
+| M of a pairing X != Y: the two jobs `M.x-y.s0.c` and `M.x-y.s1.c` (main in seat 0 / in seat 1 against the specialist; one spec, one seed: 239.3's common deals) | **one** paired campaign of 2 N games, seats [main, spec], the jobs' seed | s0: game 2k; s1: game 2k + 1 | none |
+| A (a deck stew as X against the specialist, 'a0' or 'a1'), and M of a mirror | a paired campaign of 2 N games, seats [pilot, spec], the job's seed | 'a0': game 2k; 'a1': game 2k + 1 | **N games** (the other half) |
+
+Why the paired campaign is exact for fixed seats: pair k of a paired campaign takes its streams from (seed, k), which
+is what match k of an unpaired driver with the same seed takes (`game_seed(seed, 2k, true)` = `game_seed(seed, 2k + 1,
+true)` = `game_seed(seed, k, false)`: the test checks it against the engine); its even game seats [A, B] (the 'a0'
+job's seats), its odd game [B, A] (the 'a1' job's). The two orientations of arm M on a pairing differ only in the seat
+of the main stew, so they are the two halves of one campaign. Arm A's orientations pilot **different deck stews** (X's
+and Y's), and a mirror's orientations have their own seeds (239.3), so each of those campaigns uses one half and
+discards the other: the price of exactness while the worker cannot fix seats. For the first stew's field (one
+candidate, three decks): `judge_deck_gap` is 31 jobs / 2,000 matches locally and 31 campaigns / 3,000 farm matches
+(1,000 discarded: the 20 arm-A campaigns); `judge` is 20 jobs / 1,000 matches and 12 campaigns / 1,200 farm matches
+(200 discarded: the mirror's four). With 246's `deck_arms` off after generation 0, a later generation discards only
+the mirror's 200. The plan (`tools/stew.py plan`) and the log say the numbers. A worker option to seat a job's games in
+fixed order would remove the waste (249.7).
+
+**The settings.** `judge_farm.unit_job`: `farm_campaign.match_settings` of the checkpoint whose run's rule every judge
+seat plays (`Stew.judge_rule_ckpt`: the first specialist's run, as `Stew.judge_play` reads it) with the job's
+simulations, c_puct 1, chance_k, spec and max_steps -> the eval job's settings (`eval_trace` 1, groups 1: 230); seats
+[net 1, net 2], or [net 1, net 1] when both checkpoints are one network (the same file or the same sha256). The farm's
+seats (`farm_campaign.farm_seats`: `Run.nn_seat` of those settings) are then compared **dict for dict with the seats
+the local process plays** - `judge.job_seats(play)`, now the one definition of a judge seat (the local `play_job` calls
+it too; no behaviour change) - and the build's own `check-config` must take the settings and seats
+(`farm_campaign.job_settings`). The spec is the job's spec text (the pairing's best-of-three `pair_spec` with
+`game_episodes` and the job's `chooser`), the seed the job's seed, so the deals, the chooser of game 1, the later
+games' choosers and the per-seat deck tilt are the local job's.
+
+**Checked against the real stew** (read only: the first stew's state and settings on the maintainer's machine, no
+campaign put): the planner maps its generation-0 jobs as above; `unit_job` accepts every kind of unit with its real
+settings (the 'cq' rule with 4 minimum visits and scale 0.3, the root leaf view, belief tilt 1 with mix 0.25, deck
+tilt 1, eval cache 8192, max_steps 60,000, 64 simulations, chance_k 2, layout v8's `mtg`); and the published worker of
+main 66288d93 (build f11abb5a) takes the job in its local `check-config` (36 play settings, `eval_trace` on) for both
+seat forms.
+
+### 249.2 What is refused, by name, before anything is put
+
+`judge_farm.run` checks **every** unit of the phase first and puts nothing if one is refused (`FarmRefused`; the
+runner's exit 2; the stew: `REFUSED: judge@g: the farm cannot play these judge jobs exactly: ...`, exit 2, the phase
+stays the next one):
+
+* `judge.precision` other than fp32 (also at config load): torch's arithmetic on this machine's GPU;
+* a judge seat that sets `view_samples` or `resign_t` in a unit that renumbers game ids (the fixed-seat units): those
+  streams hang on the game id itself (`view_pick`, `noresign_pick`), not on the game's stream. Evaluation seats carry
+  neither; the check is there so a later recipe cannot slip through;
+* seats the farm would play differently from the local judge's, naming each key and both values. One real case the
+  tests keep: a run whose config.json names only its preset - `zero.h2h.run_rule` (the local seat) reads the saved
+  file, the farm job the resolved settings, so the preset's root belief would be played on the farm only. A run saves
+  its resolved settings, so the stew's specialists do not hit it;
+* checkpoints of another game (layout) than the specialists' settings;
+* h2h_farm's machine conditions (217.1, conditions 3-5): no admin token / data key / farm-release, uncommitted
+  changes to tracked files in the stew's checkout, no published build for its commit (the reason names `python
+  tools/farm_release.py release <sha>`), the build's check-config refusing the job, a Python that cannot export a
+  network the campaign still needs;
+* a campaign of the unit's name that exists here with other inputs, or on the coordinator without a state here.
+
+### 249.3 What is not the same: the arithmetic (named, not hidden)
+
+The matches are the same - spec, seats, settings, deals, random streams. The **network arithmetic is not**: the local
+judge evaluates with torch on the desktop's GPU (fp32), the farm's workers with ONNX Runtime on their CPUs (float32)
+or GPUs (the CUDA route's float16 graph, DirectML's MatMul form: 215), in other batches. Outputs differ in their last
+bits, a search can then pick another move at a near tie, and a match can go another way - exactly 217.1's statement
+for every farm head-to-head ("the backends' games are not bit-identical"). So a farm-judged generation is an unbiased
+measurement of the same quantities on the same deals, not a replay of the local judge's games. Two smaller named
+differences in the result files: a row's `decisions` (the local driver's count of searched decisions) is `null` - a
+farm row does not carry it and nothing reads it; `seconds` is the campaign's wall time from its put (shared between a
+campaign's two jobs), which the report prints as "campaign-hours on the farm" instead of "process-hours". `games` (a
+match's games) is counted from the traced record's episode boundaries.
+
+### 249.4 One backend per generation
+
+A generation's arms are compared with each other on common deals (gaps A - B, M - A, M - B), and both judge phases of a
+generation write into one directory (`judge/gen_NNN/`). So the unit that keeps its backend is the **generation**
+(`judge_farm.claim_backend`, as `tools/ab.py judge` keeps one per experiment, 217.4):
+
+* the first judge phase of a generation writes `judge/gen_NNN/backend.json` {backend, since, first};
+* a generation without the file but with results is 'local' (every judge before this section played here);
+* a judge phase whose `recipe.judge.backend` is not the generation's is refused, naming both and the two ways out
+  (finish the generation on its backend, or move its judge directory aside and judge all of it on the other);
+* every result file names its backend (`"backend": "farm"`; none = local). A file of the other backend in the
+  directory is refused whatever backend.json says; `judge_farm.valid_result` wants the farm's name, so a local result
+  with the right job hash is never taken as a campaign's, and the local path refuses a directory holding farm results
+  before it would reuse one;
+* the report: `judge.backend` (the backends of the results it read) and a note for a farm-judged generation.
+
+Generations are not tied to each other: generation g + 1 may judge on the other backend (its own directory and
+record). The series across generations then changes backend at that point - the reports say which generation was
+judged where; gen-over-gen numbers are each within one generation and stay valid.
+
+### 249.5 The runner; stop, pause, resume
+
+`Ops.judge_farm` starts one process from the stew's code, `python -m mtgz.stew.judge_farm run
+judge/gen_NNN/farm/<phase>.plan.json` (the plan: the jobs, the rule checkpoint, the farm keys of the recipe), polled as
+every long process of the stew. It checks every unit (249.2), then keeps `judge.farm_at_once` (4) campaigns out:
+`farm_campaign.submit` (name `cmp-stew-<stew>-g<generation>-<arm>-<hash12>`, the hash over the stew, generation, unit,
+both networks' sha256, seats, spec, seed, pairing, games and build; every alternate of the release, 215; share
+`judge.farm_share`, default h2h_farm's 0.5), then `farm_campaign.collect(wait=False)` in turn - digests, spot replay,
+coverage, the local top-up at the deadline as every campaign - and each collected campaign's rows written as its jobs'
+result files (`write_results`: the rows' seats checked against the worker's seat rule first). The yield runs are not
+paused and other supervisors are not refused for a farm judge phase: it uses no GPU of this machine (the exports and a
+release's cached GPU self-tests aside).
+
+**Stop / pause: campaigns are left to finish and collected on resume.** The stew's STOP or PAUSE kills the runner
+(`Halt`: "judging stopped (its farm campaigns stay on the coordinator; the next run resumes and collects them)").
+Campaigns already put stay **active** on the coordinator and friends' PCs go on playing them; they are not paused
+there, because `farm_campaign` has no un-pause (its `stop_farm` is the end of a campaign) and a paused campaign would
+gain nothing: the results wait on the coordinator either way. Their state is under `~/.zero-farm/campaigns`. The next
+`run` plans the same jobs, hence the same units and names: a job with its result file is skipped, a campaign that
+exists is resumed by `submit` (nothing is put twice) and collected, a unit never put is put. Two things to know: a
+campaign's **deadline runs from its put** whether or not a runner is alive (default: 1 h + 0.25 s per game-simulation
+of its matches' up to three games, at most 12 h; `judge.farm_deadline_h` sets it) - a stew resumed after it plays the
+undelivered games on this machine at once, by the same worker on the CPU, each piece in a slot of `tools/slotd.sh`
+beside a live run (`topup_wrap`, `judge.farm_threads`); and a stew that is never resumed leaves its campaigns to
+expire with their definitions (30 days).
+
+### 249.6 Switching a stew
+
+* **Keys** (`recipe.judge` of stew.json): `"backend": "farm"`, and optionally `farm_share` (null = 0.5),
+  `farm_deadline_h` (null = the formula), `farm_at_once` (4), `farm_threads` (4). `device`, `threads`, `groups`,
+  `procs`, `est_s_per_match` are the local backend's and are ignored on the farm; `precision` must be null / fp32.
+* **A running stew can switch between generations**: stop it (`tools/stew.py stop DIR --pause`) at a generation
+  boundary - or anywhere before the generation's first judge phase -, re-pin its checkout to a commit that has this
+  section **and a published build** (a Python-only commit reuses its parent's release, `farm_builds.lookup`), edit
+  `recipe.judge.backend` in stew.json, remove PAUSE, run. A generation whose judging has started stays on its backend
+  (249.4). `code.python` must be an environment with onnx / onnxruntime / onnxscript (the exports).
+* **Setup cost on this machine**: each campaign needs its networks exported for its spec (the export cache is keyed
+  by checkpoint, spec and gen: 2.5 minutes of CPU a first export, 215.3) - a generation's specialists, deck stews and
+  main stew on four specs a pairing. Tens of exports a generation; the cache makes a resume free. Not measured here.
+
+### 249.7 Tests, checks, and what was not run
+
+* `tests/test_stew_judge_farm.py` (11): the units of both phases (counts, takes, discards, a duplicate refused); the
+  mapping's two facts against the engine (`game_seed_of` for four seeds x 50 matches; the worker's seat order) and
+  the rows a job takes; the farm job's seats = the local judge's dict for dict, with each refusal by name; the runner
+  on fake campaign steps (every check before the first put; the submit arguments; the result files valid for
+  `judge.valid_result` and read by `judge.summarize`; nothing done twice; a kill between the put and the results
+  resumes that campaign by name); the window of campaigns, the deadline and share keys; refusals putting nothing (each
+  machine condition); a campaign of other inputs / another machine's refused, names differing with the inputs; rows
+  that are not the unit's (a wrong seat order, a short campaign) failing loudly with no result written; one backend
+  per generation; `Ops.judge_farm` (the plan file, the runner's refusal and failure read from its log, a local result
+  not taken for a farm one, Interrupted); the command line's exit 2.
+* `tests/test_stew.py` (+3, 21 in all): a stew with `backend: farm` through generation 0 into generation 1 on the fake
+  runner (the plan handed over, the results, backend.json, the report's note and line, `plan`'s text, the other backend
+  refused mid-generation with no local match played, the next generation free to switch); a local generation refusing
+  the farm; a farm refusal and a stop leaving the phase to resume. The config's refusals (`precision` with the farm,
+  the farm keys).
+* The stew, farm head-to-head, ab and privacy test files together: 79 passed.
+* **Not run: a real campaign.** Nothing was put on the coordinator, no network was exported, no farm or GPU game was
+  played, and the runner process was not started against the real farm: the campaign steps are fakes in the tests (as
+  in tests/test_h2h_farm.py), and the real checks are 249.1's read-only ones (the real settings through `unit_job`,
+  the published worker's local check-config). The first real farm-judged generation is the end-to-end test: watch its
+  first campaign's collect (`spot`, `coverage`, `by_route`).
+
+**Open points.**
+
+* **The worker cannot fix seats.** An eval-job option (e.g. `"seats": "fixed"`: seats[0] in seat 0 of every game)
+  would let arm A and the mirrors play N games instead of 2 N. It is a worker change (zero-core `evaljob`, zero.farm_eval,
+  PROTOCOL 5.2) and so a release; the mapping here needs none.
+* **The local top-up** at a campaign's deadline is this machine's CPU (the same worker and graphs: the same games).
+  A stew that must never play here needs `farm_deadline_h` long enough; "never" is not offered, because
+  `farm_campaign.collect(local=False)` refuses the campaign for good when games are missing.
+* **Many campaigns at once**: `farm_at_once` 4 with share 0.5 each is a guess; the coordinator's treatment of several
+  campaigns' shares beside live self-play was not measured.
+* **246 (`deck_arms`)** is an unmerged branch touching the same planner; this section's units follow whatever jobs
+  `plan_jobs` returns, so the two compose, with a textual merge in config.py / judge.py.
+* The torch worker cannot take these campaigns (its build announces `kinds` ['selfplay'], 244): on the desktop a farm
+  judge campaign runs on the native ONNX worker.

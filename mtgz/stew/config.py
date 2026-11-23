@@ -39,8 +39,16 @@ DEFAULT_DISTILL = {'steps': 20000, 'batch': 512, 'lr': 5e-4, 'lr_min': 1e-5, 'wa
                    'ram_budget_gb': 20, 'seed': 1}
 DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims': 64, 'device': 'cuda', 'threads': 16,
                  'groups': 1, 'procs': 1, 'seed': 0, 'chance_k': 2, 'precision': None, 'gen_over_gen': True,
-                 'main_arms': True, 'est_s_per_match': 3.5}
-JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend per comparison)
+                 'main_arms': True, 'est_s_per_match': 3.5,
+                 # the farm backend's own (docs/ENGINE.md 249; inert with 'local'): a campaign's share of the farm's
+                 # run leases (None: h2h_farm.AUTO_SHARE), hours after its put before the games the farm has not
+                 # delivered are played here by the same worker (None: 1 h + 0.25 s per game-simulation of its
+                 # matches' up to three games, at most 12 h), campaigns out at once, the top-up's threads
+                 'farm_share': None, 'farm_deadline_h': None, 'farm_at_once': 4, 'farm_threads': 4}
+# where a generation's judge matches are played (docs/ENGINE.md 249): 'local' = this machine's processes
+# (mtgz.stew.judge play), 'farm' = zero-farm match campaigns (mtgz.stew.judge_farm). One backend per generation: its
+# judge directory records it (backend.json) and refuses the other.
+JUDGE_BACKENDS = ('local', 'farm')
 DEFAULT_RECIPE = {'game': 'mtg', 'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
                   'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
                   'distill_iters': 6, 'retention_share': 'field', 'judge': DEFAULT_JUDGE, 'hold_after': [], 'env': {},
@@ -271,7 +279,19 @@ def normalize(cfg, check_lists=True):
     if bad:
         raise ConfigError(f'recipe.judge: unknown keys {bad} ({sorted(DEFAULT_JUDGE)})')
     if j['backend'] not in JUDGE_BACKENDS:
-        raise ConfigError(f"recipe.judge.backend {j['backend']!r}: {JUDGE_BACKENDS} (farm campaigns are not built yet)")
+        raise ConfigError(f"recipe.judge.backend {j['backend']!r}: one of {JUDGE_BACKENDS}")
+    if j['backend'] == 'farm' and j['precision'] not in (None, 'fp32'):
+        raise ConfigError(f"recipe.judge.precision {j['precision']!r} with backend 'farm': torch's arithmetic on this "
+                          f"machine's GPU is local-only (the farm's workers play their own float32 / float16 graphs)")
+    if j['farm_share'] is not None and (isinstance(j['farm_share'], bool) or not isinstance(
+            j['farm_share'], (int, float)) or not 0 < j['farm_share'] <= 1):
+        raise ConfigError(f"recipe.judge.farm_share {j['farm_share']!r}: null or a number in (0, 1]")
+    if j['farm_deadline_h'] is not None and (isinstance(j['farm_deadline_h'], bool) or not isinstance(
+            j['farm_deadline_h'], (int, float)) or not j['farm_deadline_h'] > 0):
+        raise ConfigError(f"recipe.judge.farm_deadline_h {j['farm_deadline_h']!r}: null or hours > 0")
+    for k in ('farm_at_once', 'farm_threads'):
+        if isinstance(j[k], bool) or not isinstance(j[k], int) or j[k] < 1:
+            raise ConfigError(f'recipe.judge.{k} {j[k]!r}: a positive integer')
     for k, m in (('matches', 4), ('gen_matches', 2)):
         if not isinstance(j[k], int) or j[k] < m or j[k] % m:
             raise ConfigError(f'recipe.judge.{k} {j[k]!r}: a positive multiple of {m}')

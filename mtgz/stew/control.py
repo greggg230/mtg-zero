@@ -13,7 +13,8 @@ tools/ab.py does): runs never train from a checkout being edited (AGENTS.md "Liv
   as GET returns it with only `state` changed, alternates' GET-only `problems` dropped: tools/ab.py farm_pause);
   tools/farm_gates.py and the worker's check-config on a specialist's config and checkpoint (tools/ab.py farm_gates);
 * distill: tools/distill.py --sources FILE OUT.pt [recipe.distill_cli] (--resume when OUT.pt.partial exists);
-* the judge: `python -m mtgz.stew.judge play JOB OUT`, `judge.procs` at once.
+* the judge: `python -m mtgz.stew.judge play JOB OUT`, `judge.procs` at once; with `judge.backend` 'farm' one
+  runner process, `python -m mtgz.stew.judge_farm run PLAN` (farm match campaigns, docs/ENGINE.md 249).
 
 A long process is polled; `stop()` true (the stew's STOP or PAUSE) kills it with its tree and raises Interrupted -
 distill resumes from its partial file, a judge job is played again.
@@ -35,6 +36,10 @@ class Interrupted(Exception):
 
 class OpsError(RuntimeError):
     pass
+
+
+class FarmRefused(OpsError):
+    """The farm cannot play a phase's judge jobs exactly (the runner's reason); nothing was put."""
 
 
 def kill_tree(pid):
@@ -297,6 +302,37 @@ class Ops:
 
     def judge_cmd(self, job_path, out_path):
         return [self.py, '-m', 'mtgz.stew.judge', 'play', job_path, out_path]
+
+    def judge_farm_cmd(self, plan_path):
+        return [self.py, '-m', 'mtgz.stew.judge_farm', 'run', plan_path]
+
+    def judge_farm(self, plan, stop=None):
+        """A phase's judge jobs as farm campaigns (mtgz.stew.judge_farm, docs/ENGINE.md 249): the runner process on
+        `plan` (written to <judge dir>/farm/<phase>.plan.json) -> {id: result}. FarmRefused when the farm cannot play
+        the jobs exactly (the runner's exit 2: nothing was put), OpsError when a campaign failed, Interrupted on
+        `stop()` - the runner is killed, its campaigns stay on the coordinator and the next call resumes them."""
+        from . import judge_farm as JF
+        from .state import jload, jsave
+        jdir = plan['dir']
+        fdir = os.path.join(jdir, 'farm')
+        pp = os.path.join(fdir, f"{plan.get('phase') or 'judge'}.plan.json")
+        lp = os.path.join(fdir, f"{plan.get('phase') or 'judge'}.log")
+        jsave(pp, plan)
+        rc = self.run_long(self.judge_farm_cmd(pp), lp, stop, poll=2.0)
+        if rc != 0:
+            try:
+                with open(lp, encoding='utf-8', errors='replace') as f:
+                    tail = [x.strip() for x in f.read().splitlines() if x.strip()][-1][-900:]
+            except (OSError, IndexError):
+                tail = ''
+            if rc == 2:
+                raise FarmRefused(tail[len('REFUSED: '):] if tail.startswith('REFUSED: ') else tail)
+            raise OpsError(f'judge on the farm: exit {rc} (log {lp}): {tail}')
+        out = {j['id']: jload(os.path.join(jdir, j['id'] + '.json')) for j in plan['jobs']}
+        bad = [j['id'] for j in plan['jobs'] if not JF.valid_result(j, out[j['id']])]
+        if bad:
+            raise OpsError(f'judge on the farm: jobs without a valid farm result: {bad}')
+        return out
 
     def judge_jobs(self, jobs, jdir, procs, stop=None):
         """Every job without a valid result in `jdir` played (`procs` processes at once) -> {id: result}; a failed job

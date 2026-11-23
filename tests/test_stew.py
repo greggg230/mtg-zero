@@ -30,6 +30,8 @@ class FakeOps:
         self.status = {}
         self.distill_fail = 0
         self.judge_played = []
+        self.farm_plans = []
+        self.farm_error = None
         self.train_noop = False
         self.on_supervisor = None
         self.sources_of = {}
@@ -155,7 +157,34 @@ class FakeOps:
     def judge_cmd(self, job, out):
         return ['python', '-m', 'mtgz.stew.judge', 'play', job, out]
 
+    def judge_farm_cmd(self, plan):
+        return ['python', '-m', 'mtgz.stew.judge_farm', 'run', plan]
+
+    def judge_farm(self, plan, stop=None):
+        """The farm runner's stand-in (docs/ENGINE.md 249): `farm_error` raised once, else each job without a valid
+        farm result gets one (`backend` 'farm')."""
+        from mtgz.stew import judge_farm as JF
+        self.calls.append(('judge_farm', plan['phase'], plan['gen'], len(plan['jobs'])))
+        self.farm_plans.append(plan)
+        if self.farm_error is not None:
+            e, self.farm_error = self.farm_error, None
+            raise e
+        out = {}
+        for j in plan['jobs']:
+            p = os.path.join(plan['dir'], j['id'] + '.json')
+            r = jload(p)
+            if not JF.valid_result(j, r):
+                self.judge_played.append(j['id'])
+                rows = [{'gid': g, 'result': [1.0, 0.0] if (j['seed'] + g + (j['chooser'] or 0)) % 3 else [0.0, 1.0],
+                         'over': True, 'games': 2 + g % 2, 'decisions': None} for g in range(j['games'])]
+                r = {'v': 1, 'id': j['id'], 'hash': J.job_hash(j), 'rows': rows, 'seconds': 1.0, 'unfinished': 0,
+                     'backend': 'farm', 'farm': {'campaign': 'cmp-x'}}
+                jsave(p, r)
+            out[j['id']] = r
+        return out
+
     def judge_jobs(self, jobs, jdir, procs, stop=None):
+        self.calls.append(('judge_jobs', len(jobs)))
         out = {}
         for j in jobs:
             p = os.path.join(jdir, j['id'] + '.json')
@@ -256,13 +285,21 @@ def test_config_refusals(tmp_path):
            dict(good, recipe={'judge': {'matches': 6}}), dict(good, recipe={'hold_after': ['judge@x']}),
            dict(good, recipe={'format': 'bo1', 'game_episodes': True}), dict(good, recipe={'start_game': 2}),
            dict(good, seeds={f'{DD}|{SNS}': 'x.pt'}), dict(good, decks=['no_such_deck']),
-           dict(good, recipe={'judge': {'backend': 'farm'}}), dict(good, recipe={'distill': {'nope': 1}})]
+           dict(good, recipe={'judge': {'backend': 'mac'}}), dict(good, recipe={'distill': {'nope': 1}}),
+           # (the farm backend, docs/ENGINE.md 249: torch's precision is local-only; its own keys checked)
+           dict(good, recipe={'judge': {'backend': 'farm', 'precision': 'bf16'}}),
+           dict(good, recipe={'judge': {'backend': 'farm', 'farm_share': 2}}),
+           dict(good, recipe={'judge': {'farm_deadline_h': 0}}), dict(good, recipe={'judge': {'farm_at_once': 0}})]
     for b in bad:
         with pytest.raises(C.ConfigError):
             C.normalize(b)
     n = C.normalize(dict(good, seeds={f'{DEL}|{DEL}': 's.pt'}))
     assert n['recipe']['format'] == 'bo3' and n['recipe']['start_game'] == 1 and n['recipe']['game_episodes']
     assert n['recipe']['judge']['matches'] == 400 and n['recipe']['turn_iters'] == 32
+    assert n['recipe']['judge']['backend'] == 'local', 'the default backend stays this machine'
+    f = C.normalize(dict(good, recipe={'judge': {'backend': 'farm', 'farm_share': 0.25}}))['recipe']['judge']
+    assert (f['backend'], f['farm_share'], f['farm_deadline_h'], f['farm_at_once'], f['farm_threads']) == (
+        'farm', 0.25, None, 4, 4)
 
 
 # ------------------------------------------------------------------ init and the specialists' settings
@@ -578,3 +615,86 @@ def test_main_sources_with_a_deck_outside_the_archive(stew):
     # 16 cells: 7 covered, 9 uncovered of which 4 served (no Hogaak rows): retention 4 / (16 - 5)
     assert by['retention']['weight'] == pytest.approx(4 / 11, abs=1e-5)
     assert sum(s['weight'] for s in doc['sources']) == pytest.approx(1.0, abs=1e-4)
+
+
+# ------------------------------------------------------------------ the judge on the farm (docs/ENGINE.md 249)
+def farm_stew(tmp_path, monkeypatch, **judge):
+    src = make_source(tmp_path)
+    cfgp = make_cfg(tmp_path, src, judge=dict({'matches': 8, 'gen_matches': 4, 'backend': 'farm'}, **judge),
+                    hold_after=[])
+    ops = FakeOps(tmp_path)
+    ops.farm.update({'src': 'active', 'src-eval': 'active'})
+    monkeypatch.setattr(Stew, 'judge_play', lambda self: {'seat': {}, 'sims': 4})
+    s = Stew.init(os.path.join(str(tmp_path), 'stew'), cfgp, ops=ops, log=lambda m: None)
+    s.poll_s = 0.0
+    return s
+
+
+def test_the_judge_runs_as_farm_campaigns_and_keeps_its_backend(tmp_path, monkeypatch):
+    from mtgz.stew import judge_farm as JF
+    s = farm_stew(tmp_path, monkeypatch, farm_share=0.25, farm_at_once=2)
+    assert s.run(max_phases=3) == 'done' and s.st.tag() == 'distil_main@0'
+    ops = s.ops
+    # the phase went to the farm runner with its plan: the jobs of the local judge, the specialists' rule checkpoint
+    assert [c for c in ops.calls if c[0] in ('judge_farm', 'judge_jobs')] == [('judge_farm', 'judge_deck_gap', 0, 31)]
+    plan = ops.farm_plans[0]
+    jobs = J.plan_jobs('judge_deck_gap', s.st, 0, s.cfg['recipe']['judge'], s.pair_spec_json, s.judge_play())
+    assert plan['jobs'] == jobs and plan['dir'] == s.judge_dir(0) and plan['stew'] == 'tst' and plan['format'] == 'bo3'
+    assert (plan['share'], plan['deadline_h'], plan['at_once'], plan['threads']) == (0.25, None, 2, 4)
+    assert plan['rule_ckpt'] == s.judge_rule_ckpt() and plan['rule_ckpt'].replace(os.sep, '/').endswith(
+        C.spec_dir(DEL, DEL) + '/models/iter_0000.pt')
+    # the same result files, valid for the same jobs, each naming its backend; the generation's record
+    for j in jobs:
+        r = jload(os.path.join(s.judge_dir(0), j['id'] + '.json'))
+        assert J.valid_result(j, r) and JF.valid_result(j, r) and r['backend'] == 'farm'
+    assert jload(os.path.join(s.judge_dir(0), 'backend.json'))['backend'] == 'farm'
+    rep = jload(s.p('reports', 'gen_000.json'))
+    assert rep['judge']['backend'] == ['farm'] and 'gap_A_B' in rep['judge']['cells'][f'{DEL}|{DD}']
+    assert any('played on the farm' in n for n in rep['notes'])
+    assert 'campaign-hours on the farm' in open(s.p('reports', 'gen_000.md'), encoding='utf-8').read()
+    # the plan (dry run) names the campaigns and the runner's command
+    s.run(max_phases=1)
+    assert s.st.tag() == 'judge@0'
+    txt = s.plan()
+    assert 'backend farm' in txt and 'farm campaigns' in txt and 'mtgz.stew.judge_farm run' in txt
+    s.cfg['recipe']['judge']['backend'] = 'local'
+    with pytest.raises(Refused, match="backend 'farm' and recipe.judge.backend is 'local'"):
+        s.run(max_phases=1)
+    assert [c for c in ops.calls if c[0] == 'judge_jobs'] == [], 'no local match was played into a farm generation'
+    s.cfg['recipe']['judge']['backend'] = 'farm'
+    if os.path.exists(s.p('PAUSE')):
+        os.remove(s.p('PAUSE'))
+    s.st.d['errors'] = []
+    assert s.run(max_phases=1) == 'done' and s.st.d['round'] == 1
+    # the next generation may judge on the other backend: its own directory, its own record
+    s.cfg['recipe']['judge']['backend'] = 'local'
+    assert s.run(max_phases=3) == 'done'
+    assert jload(os.path.join(s.judge_dir(1), 'backend.json'))['backend'] == 'local'
+    assert jload(s.p('reports', 'gen_001.json'))['judge']['backend'] == ['local']
+
+
+def test_a_local_generation_refuses_farm_results(stew):
+    # generation 0 judged here (results without a backend key: every judge before the farm backend)
+    assert stew.run() == 'held'
+    os.remove(stew.p('PAUSE'))
+    assert jload(os.path.join(stew.judge_dir(0), 'backend.json'))['backend'] == 'local'
+    stew.cfg['recipe']['judge']['backend'] = 'farm'
+    stew.run(max_phases=1)                           # distil_main
+    with pytest.raises(Refused, match="backend 'local' and recipe.judge.backend is 'farm'"):
+        stew.run(max_phases=1)
+    assert stew.ops.farm_plans == [], 'nothing went to the farm'
+
+
+def test_a_farm_refusal_and_a_stop_leave_the_phase_to_resume(tmp_path, monkeypatch):
+    from mtgz.stew.control import FarmRefused, Interrupted
+    s = farm_stew(tmp_path, monkeypatch)
+    s.ops.farm_error = FarmRefused("G.x: seat A: the farm would play {'select': ('cq', 'visits')} (local judge vs farm)")
+    with pytest.raises(Refused, match='cannot play these judge jobs exactly.*would play'):
+        s.run(max_phases=3)
+    assert s.st.tag() == 'judge_deck_gap@0' and s.ops.judge_played == []
+    # a STOP / PAUSE while the runner waits: the stew halts, the phase stays, the next run goes on with it
+    s.st.d['errors'] = []
+    s.ops.farm_error = Interrupted('judge')
+    assert s.run(max_phases=1) in ('stopped', 'paused', 'halted')
+    assert s.st.tag() == 'judge_deck_gap@0'
+    assert s.run(max_phases=1) == 'done' and s.st.tag() == 'distil_main@0' and len(s.ops.judge_played) == 31

@@ -32,7 +32,9 @@ share(Y) x P(C beats Y), se in quadrature (the cells' deals are disjoint). The s
 stew as the candidate's pilot (arms A and M) beside it.
 
 The match process: `python -m mtgz.stew.judge play JOB.json OUT.json` (a job's matches, its result written
-atomically; the orchestrator runs `judge.procs` of them at once and reuses a result whose job hash matches).
+atomically; the orchestrator runs `judge.procs` of them at once and reuses a result whose job hash matches). With
+`judge.backend` 'farm' the same jobs are played as farm match campaigns and the same result files written
+(mtgz.stew.judge_farm, docs/ENGINE.md 249; one backend per generation).
 """
 import hashlib
 import json
@@ -133,6 +135,20 @@ def plan_jobs(phase, st, g, jcfg, spec_fn, play):
 
 
 # ------------------------------------------------------------------ the match process
+def job_seats(play):
+    """Both sides' driver seats of a job's play settings -> {'a': seat, 'b': seat}: games.nn_seat(key, sims, c_puct 1,
+    chance_k, the specialists' margin_w / redet / eval_cache) with their move rule over it. The one definition of a
+    judge seat: the local match process plays it, and the farm backend refuses a campaign whose seats are not these
+    (mtgz.stew.judge_farm, docs/ENGINE.md 249)."""
+    from zero import games as G
+    out = {}
+    for key in ('a', 'b'):
+        s = G.nn_seat(key, int(play['sims']), 1.0, chance_k=int(play['chance_k']), **play['seat_keys'])
+        s.update(play['seat'])
+        out[key] = s
+    return out
+
+
 def play_job(job):
     """A job's matches (the process's side; tests call it here) -> {'v', 'id', 'hash', 'rows', ...}."""
     from zero import games as G
@@ -145,13 +161,11 @@ def play_job(job):
     from zero import package
     game = package.record_game(ma.config, f'the judge net {job["a"]}', default='mtg')
     mb, _ = load(job['b'], p['device'], game=game)
-    seats = {}
+    seats = job_seats(p)
     for key, m, path in (('a', ma, job['a']), ('b', mb, job['b'])):
-        s = G.nn_seat(key, int(p['sims']), 1.0, chance_k=int(p['chance_k']), **p['seat_keys'])
-        s.update(p['seat'])
+        s = seats[key]
         if s.get('belief_tilt') or s.get('belief_tilts'):
             check_belief_head(m, game, f'the judge seat\'s belief of {path}')
-        seats[key] = s
     kw = {}
     if p.get('precision') and p['precision'] != 'fp32':
         kw['precision'] = p['precision']
@@ -291,6 +305,8 @@ def summarize(st, g, res, jobs_meta=None):
         nm += len(r['rows'])
         ng += sum(x.get('games', 1) for x in r['rows'])
     out['seconds'] = round(out['seconds'], 1)
+    # (where the matches were played, docs/ENGINE.md 249: a result without the key was played here)
+    out['backend'] = sorted({r.get('backend') or 'local' for r in res.values()})
     if nm:
         out['games_per_match'] = round(ng / nm, 3)
     for a, b in pairs:
@@ -400,8 +416,11 @@ def report_md(rep):
             L.append(f"| {c} | {_p(row.get('specialists'))} | {_p(row.get('deck stews'))} | {_p(row.get('main stew'))} |")
         L.append('')
     if j:
+        farm = 'farm' in (j.get('backend') or [])
         L += [f"Judging: {j.get('matches')} matches ({j.get('games_per_match')} games a match), "
-              f"{(j.get('seconds') or 0) / 3600:.2f} process-hours.", '']
+              f"{(j.get('seconds') or 0) / 3600:.2f} " + (
+                  "campaign-hours on the farm (each campaign's wall time from its put; the workers' ONNX arithmetic, "
+                  "docs/ENGINE.md 249)." if farm else 'process-hours.'), '']
     for n in rep.get('notes') or []:
         L.append(f'* {n}')
     return '\n'.join(L).rstrip() + '\n'

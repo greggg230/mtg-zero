@@ -186,16 +186,21 @@ class Stew:
             raise Refused(f'specialist {a}|{b}: recipe.farm but no pool_build (code.farm or the source\'s settings)')
         return out, notes
 
+    def judge_rule_ckpt(self):
+        """The checkpoint whose run's evaluation rule every judge seat plays (`judge_play`; the farm backend's settings
+        come from the same run, mtgz.stew.judge_farm): the first specialist's run's iteration 0."""
+        pairs = C.pairings(self.st.decks(), self.st.candidates())
+        run = self.st.abs(self.st.net(C.spec_name(*pairs[0]))['run'])
+        return os.path.join(run, 'models', 'iter_0000.pt')
+
     def judge_play(self):
         """Both sides' play settings in every judge match: the specialists' evaluation seat (zero.h2h.run_rule of a
         specialist's checkpoint - its config's eval_select, belief, leaf view; the deck tilt kept: best of three
         has hidden 60s), its margin_w / redet / eval_cache, max_steps and sparse batches; the judge's sims, device,
         threads, groups, chance_k, precision."""
         from zero import h2h
-        pairs = C.pairings(self.st.decks(), self.st.candidates())
-        sn = C.spec_name(*pairs[0])
-        run = self.st.abs(self.st.net(sn)['run'])
-        ck = os.path.join(run, 'models', 'iter_0000.pt')
+        ck = self.judge_rule_ckpt()
+        run = os.path.dirname(os.path.dirname(ck))
         cfg = jload(os.path.join(run, 'config.json'), {}) or {}
         j = self.cfg['recipe']['judge']
         return {'seat': h2h.run_rule(ck), 'seat_keys': h2h.run_seat_keys(ck), 'sims': j['sims'],
@@ -683,16 +688,38 @@ class Stew:
             raise Refused(f'{phase}@{g}: no judge job (nothing to measure)')
         if self.stop_requested():
             raise Halt(f'STOP / PAUSE before {phase}@{g}')
-        self.check_supervisors()
-        self.yield_machine()
-        from .control import Interrupted
+        from . import judge_farm as JF
+        from .control import FarmRefused, Interrupted
         n = sum(j['games'] for j in jobs)
-        self.say(f'{phase}@{g}: {len(jobs)} jobs, {n} matches ({jcfg["backend"]}, {jcfg["device"]}, '
-                 f'{jcfg["procs"]} at once)')
-        try:
-            res = self.ops.judge_jobs(jobs, self.judge_dir(g), jcfg['procs'], stop=self.stop_requested)
-        except Interrupted:
-            raise Halt(f'{phase}@{g}: judging stopped (finished jobs are kept)') from None
+        try:                                   # (one backend per generation, docs/ENGINE.md 249)
+            JF.claim_backend(self.judge_dir(g), jcfg['backend'], C.tag(phase, g))
+        except JF.BackendMix as e:
+            raise Refused(f'{phase}@{g}: {e}') from None
+        if jcfg['backend'] == 'farm':
+            # (no GPU of this machine: the yield runs keep training, other supervisors may be live)
+            us = JF.units(jobs)
+            self.say(f'{phase}@{g}: {len(jobs)} jobs, {n} matches (farm: {JF.plan_line(us)}, '
+                     f'{jcfg["farm_at_once"]} at once)')
+            plan = {'v': JF.UNIT_V, 'stew': self.cfg['name'], 'gen': g, 'phase': phase, 'dir': self.judge_dir(g),
+                    'rule_ckpt': self.judge_rule_ckpt(), 'format': self.cfg['recipe']['format'],
+                    'share': jcfg['farm_share'], 'deadline_h': jcfg['farm_deadline_h'],
+                    'at_once': jcfg['farm_at_once'], 'threads': jcfg['farm_threads'], 'jobs': jobs}
+            try:
+                res = self.ops.judge_farm(plan, stop=self.stop_requested)
+            except Interrupted:
+                raise Halt(f'{phase}@{g}: judging stopped (its farm campaigns stay on the coordinator; the next run '
+                           f'resumes and collects them)') from None
+            except FarmRefused as e:
+                raise Refused(f'{phase}@{g}: the farm cannot play these judge jobs exactly: {e}') from None
+        else:
+            self.check_supervisors()
+            self.yield_machine()
+            self.say(f'{phase}@{g}: {len(jobs)} jobs, {n} matches ({jcfg["backend"]}, {jcfg["device"]}, '
+                     f'{jcfg["procs"]} at once)')
+            try:
+                res = self.ops.judge_jobs(jobs, self.judge_dir(g), jcfg['procs'], stop=self.stop_requested)
+            except Interrupted:
+                raise Halt(f'{phase}@{g}: judging stopped (finished jobs are kept)') from None
         played = sum(len(r['rows']) for r in res.values())
         if played != n:
             raise Refused(f'{phase}@{g}: {played} matches of {n}')
@@ -887,6 +914,14 @@ class Stew:
                 rep['notes'].append(f'{k}: {v["note"]}')
             for nt in n.get('notes') or []:
                 rep['notes'].append(f'{k}: {nt}')
+        jb = (rep['judge'] or {}).get('backend') or []
+        if 'farm' in jb:
+            rep['notes'].append('judge: played on the farm (backend farm, docs/ENGINE.md 249): the same matches as the '
+                                "local judge's - spec, seats, deals - on the workers' ONNX arithmetic; not comparable "
+                                'game for game with a generation judged here')
+        if len(jb) > 1:
+            rep['notes'].append(f'judge: results of {jb} in one generation (one backend per generation: this report '
+                                f'mixes them)')
         rep['notes'] = sorted(set(rep['notes']))
         jsave(self.p('reports', f'gen_{g:03d}.json'), rep)
         text_save(self.p('reports', f'gen_{g:03d}.md'), J.report_md(rep))
@@ -986,6 +1021,13 @@ class Stew:
             kinds = {}
             for j in jobs:
                 kinds[j['id'].split('.')[0]] = kinds.get(j['id'].split('.')[0], 0) + j['games']
+            if jcfg['backend'] == 'farm':
+                from . import judge_farm as JF
+                L.append(f"{len(jobs)} jobs, {n} best-of-three matches {kinds}; backend farm: {JF.plan_line(JF.units(jobs))}, "
+                         f"{jcfg['farm_at_once']} at once (docs/ENGINE.md 249)")
+                if jobs:
+                    L.append('  ' + self.ops.cmdline(self.ops.judge_farm_cmd(f"judge/gen_{g:03d}/farm/{ph}.plan.json")))
+                return '\n'.join(L)
             L.append(f"{len(jobs)} jobs, {n} best-of-three matches {kinds}; ~{n * jcfg['est_s_per_match'] / 3600 / jcfg['procs']:.1f} "
                      f"h at {jcfg['est_s_per_match']} s a match, {jcfg['procs']} at once ({jcfg['device']})")
             if jobs:
