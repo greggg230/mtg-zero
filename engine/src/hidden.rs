@@ -510,7 +510,17 @@ impl Game {
     /// interchangeable as any.
     pub(crate) fn told_apart(&self, c: CardIdx) -> bool {
         let o = &self.objs[c.i()];
-        o.zone == Zone::Hand && self.for_each_public_ref(|r| r.idx == c && r.inc == o.inc)
+        o.zone == Zone::Hand && (self.for_each_public_ref(|r| r.idx == c && r.inc == o.inc) || self.miracle_asked(c))
+    }
+
+    /// Is hand card `c` the card a miracle question waiting on the agenda is about (CR 702.94a: "the first card
+    /// you drew this turn", `Task::MiracleReveal`)? Every player saw which card that is - the one just drawn -, so
+    /// it is told apart from its twins from the draw on, not only once its trigger names it (ENGINE.md 248.1):
+    /// `canon_hand_knowledge` would otherwise move what the other player knows of it (a card it saw on top of the
+    /// library) onto a twin with a lower card index, and the reveal would teach that player a second card - in the
+    /// worlds whose deal put a twin there, and in no other.
+    pub(crate) fn miracle_asked(&self, c: CardIdx) -> bool {
+        self.agenda.iter().any(|t| matches!(t, crate::flow::Task::MiracleReveal { card, .. } if *card == c))
     }
 
     /// Key that told-apart hand card `c` is the one a hand slot (`random`:
@@ -2210,5 +2220,109 @@ mod told_apart_tests {
         assert!(!g.knows(1, twin), "P1 lost track of the card it knew that is not told apart");
         let k = g.clouds.iter().find(|k| k.viewer == 1 && k.owner == 0 && k.hand).expect("a cloud over P0's hand");
         assert_eq!(k.defs, vec![g.objs[twin.i()].def], "the cloud lists the card P1 lost track of, not the revealed one");
+    }
+}
+
+#[cfg(test)]
+mod queue_1123_tests {
+    //! ENGINE.md 248: the hidden-information entries of the fuzz steward's queue of 2026-11-23, each
+    //! one's state built by hand (the seeds: `tests/fuzz.rs`, `info_set_walk_seeds_of_248`).
+    use super::*;
+    use crate::db::{AbilitySlot, CardDb};
+    use crate::decision::{act, Choice, Decision, DecisionKind, Opt, Stage};
+    use crate::fuzz::cards::db;
+    use crate::game::{Pos, Step};
+    use crate::ids::Target;
+    use crate::testkit::Scenario;
+
+    const FANATIC: &str = "Metamorphosis Fanatic";
+
+    /// P0 holds a Metamorphosis Fanatic P1 doesn't know and draws a second one, its first draw of the
+    /// turn: the miracle question waits (CR 702.94a). `drawn_low`: the drawn card has the lower card
+    /// index of the two; `seen`: P1 knew the card on top of P0's library (a tutor put it there
+    /// revealed). The game, the twin, the drawn card.
+    fn miracle_question(drawn_low: bool, seen: bool) -> (Game, CardIdx, CardIdx) {
+        let s = Scenario::new(CardDb::constructed()).spec(|s| s.auto_single = false);
+        let s = if drawn_low {
+            s.library(0, &[FANATIC, "Island", "Island"]).hand(0, &[FANATIC])
+        } else {
+            s.hand(0, &[FANATIC]).library(0, &[FANATIC, "Island", "Island"])
+        };
+        let mut g = s.battlefield(0, &["Swamp", "Swamp"]).library(1, &["Island"; 8]).turn_number(3).at(Step::Upkeep, 0).start();
+        let twin = g.card(0, FANATIC, Zone::Hand);
+        let drawn = g.card(0, FANATIC, Zone::Library);
+        assert_eq!(drawn.get() < twin.get(), drawn_low);
+        if seen {
+            g.objs[drawn.i()].known |= 1 << 1;
+        }
+        g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+        assert_eq!(g.objs[drawn.i()].zone, Zone::Hand, "the first draw, its miracle question asked");
+        (g, twin, drawn)
+    }
+
+    /// ENGINE.md 248.1 (queue entry f1eebdfda0a1, default games 100391600 and 100661596). The card a
+    /// miracle question asks about is the one just drawn, whatever its twins in the hand: what the
+    /// other player knows of it stays its own (`told_apart` through `miracle_asked`). Before,
+    /// `canon_hand_knowledge` gave P1's knowledge of the drawn card (seen on top of the library) to
+    /// the twin with the lower card index, and the reveal then taught P1 a second Fanatic: in the
+    /// game when the hand's twin had the lower index, and in each world of P1's by the index of the
+    /// slot its deal gave the twin's identity - equal keys, one known Fanatic or two.
+    #[test]
+    fn cr_702_94a_the_card_a_miracle_question_asks_about_keeps_what_the_other_player_knows_of_it() {
+        for drawn_low in [false, true] {
+            let (g, twin, drawn) = miracle_question(drawn_low, true);
+            assert!(g.told_apart(drawn) && !g.told_apart(twin), "the drawn card is told apart while its question waits");
+            assert!(g.knows(1, drawn) && !g.knows(1, twin), "drawn_low {drawn_low}: P1 knows the card it saw on top, not the twin");
+            let fanatic = g.objs[drawn.i()].def;
+            let known = |g: &Game| g.players[0].hand.iter().filter(|&&c| g.objs[c.i()].def == fanatic && g.knows(1, c)).count();
+            let mut real = g.clone();
+            real.choose(Choice::Yes);
+            assert_eq!(known(&real), 1, "drawn_low {drawn_low}: the reveal shows P1 the card it knew");
+            let view = real.view_of(1);
+            let mut twins = 0;
+            for s in 0..48 {
+                let mut w = g.clone();
+                w.determinize(1, &mut Rng::new(s));
+                twins += (w.objs[twin.i()].def == fanatic) as u32;
+                w.choose(Choice::Yes);
+                assert_eq!(known(&w), 1, "drawn_low {drawn_low}, world {s}");
+                assert_eq!(w.view_of(1), view, "drawn_low {drawn_low}, world {s}: P1's view");
+            }
+            assert!(twins > 0 && twins < 48, "worlds with and without a second Fanatic in P0's hand: {twins}");
+        }
+    }
+
+    /// The other way round: P1 did not know the drawn card, and comes to know it by the reveal; the
+    /// twin stays unknown (one known Fanatic, whichever index is lower).
+    #[test]
+    fn cr_702_94a_a_revealed_miracle_card_is_the_one_the_other_player_learns() {
+        for drawn_low in [false, true] {
+            let (mut g, twin, drawn) = miracle_question(drawn_low, false);
+            assert!(!g.knows(1, drawn) && !g.knows(1, twin));
+            g.choose(Choice::Yes);
+            assert!(g.knows(1, drawn) && !g.knows(1, twin), "drawn_low {drawn_low}");
+        }
+    }
+
+    /// ENGINE.md 248.1 (queue entry 106b63d67b1d, default game 100030136). The owner's row names a
+    /// told-apart hand card by its place in the hand (`rf::POS`); among twins that place is the
+    /// card's in the order a hand slot takes them (`hand_slot_order_in`), not the card indices':
+    /// two games that differ only in which of the two Fanatics has the lower index (in the
+    /// owner's worlds: which library slot held the drawn one) give the owner one row.
+    #[test]
+    fn a_told_apart_hand_cards_place_in_its_owners_row_does_not_read_card_indices() {
+        let row = |drawn_low: bool| {
+            let (mut g, _, drawn) = miracle_question(drawn_low, false);
+            g.choose(Choice::Yes);
+            g.drive_until(|g| g.kind() == Some(DecisionKind::Priority) && !g.stack().is_empty());
+            assert!(g.told_apart(drawn) && g.knows(1, drawn), "revealed, its trigger on the stack");
+            let first = g.hand_slot_order_in(0).iter().copied().find(|&c| g.objs[c.i()].def == g.objs[drawn.i()].def);
+            assert_eq!(first, Some(drawn));
+            crate::az::tail_encode::Row::of_v8(&g, 0)
+        };
+        let (a, b) = (row(false), row(true));
+        let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&a.head), bits(&b.head), "the head (the hand slots, the stack slot's source)");
+        assert!(a.tail == b.tail && a.ov == b.ov, "the tail tokens and the overrides");
     }
 }

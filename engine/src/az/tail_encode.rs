@@ -735,7 +735,10 @@ impl<'g> Cx<'g> {
             d,
             mine: g.permanents_of(me).collect(),
             theirs: g.permanents_of(op_).collect(),
-            hand: g.hand_sorted(me),
+            // (The order a hand slot takes its cards, `Game::hand_slot_order_in`: canonical, and within a
+            // definition a told-apart card the other player knows first - a reference's place among its twins
+            // is then the same whichever card index the card has, ENGINE.md 248.1.)
+            hand: g.hand_slot_order_in(me).to_vec(),
             fd: face_down_order(g, knower, me),
             picks: Picks::default(),
             stale: RefCell::new(Vec::new()),
