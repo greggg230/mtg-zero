@@ -1318,3 +1318,22 @@ c5c89b6e	a	other	Dryad Arbor changed into another basic land type (a Mountain un
 9da0e7ba	a	other	Forest is a land type and Dryad a creature type (CR 205.3i, 205.3m): fetchable as a Forest
 2c34d4ba	a	other	changed into another basic land type it is still a green Dryad creature (CR 305.7)
 c0965c9d	a	zones	flash would lift only the timing of a land play: never on another player's turn, never without a land play left (CR 305.2b, 305.3); no card of the tables gives a land flash
+7e0da1dd	a	other	Pithing Needle affects every zone: channel and cycling from the hand (CR 602.5)
+194bf700	a	other	Pithing Needle names any card, one without activated abilities too; a token's name only if it is a card's (CR 201.3)
+85cc0060	a	other	Pithing Needle gone, the named source's abilities can be activated again (CR 611.3a)
+258063a6	a	other	Pithing Needle stops activated abilities only: the named card's triggered and static abilities work (CR 602.1)
+7340e3ca	a	other	activated abilities contain a colon; keyword ones (crew, equip) are activated abilities (CR 602.1)
+ec03f345	a	other	Cursed Totem: a noncreature Vehicle crews; once a creature its abilities can't be activated (CR 702.122a)
+6e863b0a	a	other	Cursed Totem doesn't stop abilities of creature cards off the battlefield: cycling, a Spirit Guide's mana (CR 302.1)
+f4c6dda8	a	mana	Cursed Totem stops creatures' mana abilities (Birds of Paradise, Dryad Arbor, an animated land; CR 602.5)
+e974070e	a	triggers	Cursed Totem leaves creatures' static and triggered abilities (CR 603.2a)
+0e1c9f8a	a	mana	Damping Sphere's tax counts the spells cast this turn before it was there (CR 601.2f)
+73f3a5a5	a	mana	replacement effects on mana: one applies, then the others still applicable (two Damping Spheres: one {C}; CR 616.1f)
+b6f2bdbe	a	mana	total cost: the mana or alternative cost, plus increases, minus reductions; mana value unchanged (CR 601.2f, 202.3)
+0e210050	a	triggers	Torpor Orb leaves "as this enters" abilities (Anointed Peacekeeper's name; CR 614.12)
+d6538b6e	a	triggers	Torpor Orb entering with a creature: that creature entering triggers nothing (CR 603.6a)
+0ac2f0bc	a	triggers	Torpor Orb looks at the permanent as it is on the battlefield (a Metamorph copying a noncreature; CR 603.6b)
+d73b5f20	a	replacement	Torpor Orb leaves replacement effects: enters-with counters (CR 614.1c)
+d1f1a438	a	triggers	Torpor Orb: the trigger event needn't say creature (an artifact creature, a land creature entering; CR 603.6a)
+cf1f1651	a	triggers	Torpor Orb stops a creature's own and other permanents' enters triggers (CR 603.6a)
+b2cc8d3a	a	triggers	triggered abilities use when, whenever or at (CR 603.1): Torpor Orb stops only an entering creature's
