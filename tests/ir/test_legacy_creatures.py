@@ -37,7 +37,8 @@ def legacy():
 # (ENGINE.md 123; test_legacy_sneak.py); then the Delver 75's five sideboard
 # cards (ENGINE.md 122; test_legacy_delver_sb.py); then the Legacy Hogaak Tempo
 # deck's seven by lane (ENGINE.md 220.1-220.3): lane A's one (test_legacy_hogaak.py),
-# lane B's two (test_legacy_hogaak_b.py), lane C's four (test_legacy_hogaak_c.py).
+# lane B's two (test_legacy_hogaak_b.py), lane C's four (test_legacy_hogaak_c.py); Legacy Lands lane C's six
+# (test_legacy_lands_c.py).
 LEGACY_CARDS = {
     "Murktide Regent", "Prismari Charm",
     "Doomsday", "Pact of Negation", "Personal Tutor", "Flow State",
@@ -49,6 +50,7 @@ LEGACY_CARDS = {
     "Hogaak, Arisen Necropolis",
     "Mockingbird", "Massacre",
     "Stitcher's Supplier", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor",
+    "The Tabernacle at Pendrell Vale", "Pithing Needle", "Choke", "Cursed Totem", "Damping Sphere", "Torpor Orb",
 }
 
 

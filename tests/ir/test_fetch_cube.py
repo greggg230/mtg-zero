@@ -428,5 +428,6 @@ def test_committed_legacy_pool_matches_meta(fc):
         "Hogaak, Arisen Necropolis",
         "Mockingbird", "Massacre",
         "Stitcher's Supplier", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor",
+        "The Tabernacle at Pendrell Vale", "Pithing Needle", "Choke", "Cursed Totem", "Damping Sphere", "Torpor Orb",
     ]
-    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 30
+    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 36
