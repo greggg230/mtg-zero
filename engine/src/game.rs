@@ -3591,6 +3591,17 @@ impl Game {
                     self.note(|g| format!("damage to {} prevented (protection)", g.describe_target(t)));
                     return 0;
                 }
+                // "Prevent all combat damage that would be dealt to ... that
+                // creature this turn" (Maze of Ith, CR 615.1a; unless it
+                // can't be prevented, Questing Beast's: ENGINE.md 270.1).
+                if self.combat_damage_now
+                    && !self.effects.is_empty()
+                    && self.flags_of(r.idx).prevent_combat_damage_to
+                    && !self.combat_unpreventable(src.controller)
+                {
+                    self.note(|g| format!("combat damage to {} prevented", g.describe_target(t)));
+                    return 0;
+                }
                 let amt = self.exact_count(amount, "damage");
                 if walker {
                     // CR 120.3c: that many loyalty counters are removed.

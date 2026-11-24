@@ -244,6 +244,13 @@ pub enum Mod {
     /// combat damage that would be dealt this turn" on every creature, a
     /// rules effect; EoE lane D).
     PreventCombatDamage,
+    /// Combat damage that would be dealt to it and dealt by it is prevented
+    /// (CR 615.1a; Maze of Ith's "prevent all combat damage that would be
+    /// dealt to and dealt by that creature this turn": one object's
+    /// effect, ENGINE.md 270.1). Only on an object (`Affected::Obj`),
+    /// `PreventCombatDamage` only on a group (`Game::add_effect` asserts
+    /// both): the encoding tells them apart by what is affected.
+    PreventCombatDamageToAndBy,
     /// "It attacks that player this combat if able" (the effect
     /// controller's opponent, 2 players: never one of their planeswalkers;
     /// Ursine Monstrosity).
@@ -724,6 +731,14 @@ pub enum EventKind {
     /// at its end: `Game::gy_arrivals`). Subjects: the graveyard's owner, the
     /// card (as it is there).
     PutIntoGraveyard,
+    /// Never emitted: the trigger is a state-triggered ability (CR 603.8:
+    /// "when <the game state matches a condition>"), its condition the
+    /// predicate (`TrigPred::Source`: its source matches a filter; Dark
+    /// Depths' "when Dark Depths has no ice counters on it"). It triggers
+    /// whenever the condition holds and it hasn't triggered already and
+    /// left the stack since (`Game::check_state_triggers`; ENGINE.md
+    /// 270.1).
+    State,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -785,7 +800,7 @@ impl EventKind {
             E::AttackersUnblocked => (&[Slot::Player], &[Slot::Defender]),
             E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
             E::CardDiscarded | E::LeavesGraveyard | E::PutIntoGraveyard => (&[Slot::Player], &[Slot::Card]),
-            E::Delayed => (&[], &[]),
+            E::Delayed | E::State => (&[], &[]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
             E::BecomesTarget => (&[Slot::Target, Slot::TargetSpell], &[Slot::Controller]),
             E::PlaysLand => (&[Slot::Land, Slot::Obj], &[Slot::Controller, Slot::Player]),
@@ -2254,6 +2269,10 @@ pub struct CardDb {
     /// (`EoeW2::EventObjControllerGainsSource`): the game keeps it
     /// (`Game::lki_toughness`; ENGINE.md 99.12).
     pub(crate) watch_lki_controller: bool,
+    /// A definition of the table has a state-triggered ability (CR 603.8,
+    /// `EventKind::State`: Dark Depths and the definitions copying it): the
+    /// game checks them (`Game::check_state_triggers`; ENGINE.md 270.1).
+    pub(crate) state_triggers: bool,
     /// The table's positional graveyard readers (R17, ENGINE.md 125), found
     /// by the build's check over the final definitions and kept here: every
     /// v7 row reads them (`lower::graveyard_order::readers`), which a cache
@@ -2533,6 +2552,7 @@ impl CardDb {
         }
         db.w6 = crate::eoe_w6::W6Db::of(&db.defs);
         db.w6.kept = kept;
+        db.state_triggers = db.defs.iter().any(|d| d.trig_mask & (1u64 << EventKind::State as u32) != 0);
         // R17 (ENGINE.md 125): no card reads a graveyard order the layout leaves out; the
         // readers it can encode are the table's (ENGINE.md 145).
         db.gy_readers = crate::lower::graveyard_order::check_table(&db);

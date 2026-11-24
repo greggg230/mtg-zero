@@ -1318,3 +1318,19 @@ c5c89b6e	a	other	Dryad Arbor changed into another basic land type (a Mountain un
 9da0e7ba	a	other	Forest is a land type and Dryad a creature type (CR 205.3i, 205.3m): fetchable as a Forest
 2c34d4ba	a	other	changed into another basic land type it is still a green Dryad creature (CR 305.7)
 c0965c9d	a	zones	flash would lift only the timing of a land play: never on another player's turn, never without a land play left (CR 305.2b, 305.3); no card of the tables gives a land flash
+f01a8c16	a	mana	Dark Depths has no mana ability (its "{3}: remove an ice counter" is no mana ability, CR 605.1a)
+79635c14	a	triggers	Dark Depths gone before its trigger resolves: nothing is sacrificed, no Marit Lage (CR 701.21a, 608.2b)
+faf3075b	a	triggers	a state trigger doesn't trigger again while on the stack; countered with the condition still true, it triggers again at once (CR 603.8)
+6445c953	a	copies	Thespian's Stage copies copiable values only: no counters or other effects; an animated land is copied unanimated (CR 707.2)
+56b267d6	a	copies	Thespian's Stage becoming a copy doesn't enter: no enters abilities, no "as enters" or "enters with" (Dark Depths' counters) (CR 707.5, 614.12)
+7bf3dd51	a	copies	the Stage's copy effect has no duration and loses the Stage's first ability; another copy effect overwrites it (CR 707.9b, 613.2a, 613.7)
+d4cd124c	a	copies	the Stage doesn't untap as it becomes a copy (CR 707.2: status isn't copied)
+3f985fb3	a	mana	{X}{X} in an activation cost: twice X is paid (CR 107.3, 601.2f via 602.2b)
+fc7d2534	a	other	a token's mana value is 0 unless it copies something or was given a mana cost (CR 111.3, 202.3)
+3aa7df53	a	stack	Ghost Quarter targeting itself: sacrificed as a cost, its ability doesn't resolve, no search (CR 602.2b, 608.2b)
+962d2c28	a	stack	Ghost Quarter's target illegal on resolution: nothing happens, no search (CR 608.2b)
+a7f48de4	a	removal	the land's controller may search even if it wasn't destroyed (indestructible, regenerated)
+7d47c20c	a	combat	Maze of Ith may target an untapped attacking creature: its combat damage is still prevented (CR 615.1a)
+a5613231	a	mana	Maze of Ith has no mana ability
+ba3777e8	a	combat	a Mazed creature stays attacking until the combat phase ends; only its combat damage is prevented (CR 506.4)
+8abfa1d8	a	combat	Maze of Ith activated in the combat damage step or the end of combat step untaps the creature; damage dealt already stands (CR 615.1, 510.2)

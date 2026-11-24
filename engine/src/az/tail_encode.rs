@@ -1212,7 +1212,11 @@ pub fn mod_index(m: &crate::db::Mod) -> usize {
         M::Goad => 16,
         M::ExileIfLeaves => 17,
         M::ControlFrom(_) => 18,
-        M::PreventCombatDamage => 19,
+        // (A group's "prevent all combat damage that would be dealt", by its members, and an
+        // object's prevention of the combat damage dealt to and by it - Maze of Ith's -: one float,
+        // the effect's object or group telling them apart. `Game::add_effect` refuses the other two
+        // combinations, so the encoding is exact; ENGINE.md 270.1.)
+        M::PreventCombatDamage | M::PreventCombatDamageToAndBy => 19,
         M::MustAttackPlayer => 20,
         M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::PtPerGraveyardCards { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
             unreachable!("a static ability's mod {m:?} in an effect (Game::add_effect refuses it)")
@@ -1340,6 +1344,7 @@ fn write_effects(cx: &Cx, tail: &mut TailBuf) {
             | M::Goad
             | M::ExileIfLeaves
             | M::PreventCombatDamage
+            | M::PreventCombatDamageToAndBy
             | M::MustAttackPlayer => {}
             M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::PtPerGraveyardCards { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
                 unreachable!("a static ability's mod in an effect")

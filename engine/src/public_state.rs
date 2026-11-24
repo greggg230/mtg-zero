@@ -2279,6 +2279,10 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.add_effect(Affected::Group(f), Mod::CantBlock, Until::EndOfTurn, p);
             Some(format!("P{p}'s creatures"))
         }),
+        p!("combat damage to and by a creature is prevented this turn", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            effect(&mut a.g, c, Mod::PreventCombatDamageToAndBy)
+        }),
         p!("combat damage is prevented this turn (a rules effect)", "Game.effects", |a, r| {
             let p = player(r);
             a.g.add_effect(Affected::Group(crate::db::Filter::Type(types::CREATURE)), Mod::PreventCombatDamage, Until::EndOfTurn, p);
@@ -2643,7 +2647,7 @@ pub fn mark_variant(m: &crate::game::Mark) -> &'static str {
 /// have (ENGINE.md 142; the Fable review's B4: four had none): the variant, the perturbation that
 /// makes it. `mod_variant` is an exhaustive match, so a new variant is a compile error until it is
 /// here or in [`STATIC_ONLY_MODS`]; `tests/az.rs` checks the table.
-pub const MOD_PERTURBATIONS: [(&str, &str); 21] = [
+pub const MOD_PERTURBATIONS: [(&str, &str); 22] = [
     ("Types", "a permanent becomes an artifact too"),
     ("Colors", "a permanent's colour becomes another"),
     ("Keywords", "a creature gains flying"),
@@ -2666,6 +2670,8 @@ pub const MOD_PERTURBATIONS: [(&str, &str); 21] = [
     // (Darkness's "prevent all combat damage that would be dealt this turn": a group's rules
     // effect, the only kind the lowering makes, lower/effect_eoe_d.rs.)
     ("PreventCombatDamage", "combat damage is prevented this turn (a rules effect)"),
+    // (Maze of Ith's: an object's, ENGINE.md 270.1.)
+    ("PreventCombatDamageToAndBy", "combat damage to and by a creature is prevented this turn"),
     ("MustAttackPlayer", "a creature attacks the other player this combat if able"),
 ];
 
@@ -2709,6 +2715,7 @@ pub fn mod_variant(m: &Mod) -> &'static str {
         Mod::ExileIfLeaves => "ExileIfLeaves",
         Mod::ControlFrom(_) => "ControlFrom",
         Mod::PreventCombatDamage => "PreventCombatDamage",
+        Mod::PreventCombatDamageToAndBy => "PreventCombatDamageToAndBy",
         Mod::MustAttackPlayer => "MustAttackPlayer",
         Mod::PowerPlusGreatestMv { .. } => "PowerPlusGreatestMv",
     }
@@ -2742,6 +2749,7 @@ pub fn mod_samples() -> Vec<Mod> {
         Mod::ExileIfLeaves,
         Mod::ControlFrom(0),
         Mod::PreventCombatDamage,
+        Mod::PreventCombatDamageToAndBy,
         Mod::MustAttackPlayer,
         Mod::PowerPlusGreatestMv { types: 0 },
     ]

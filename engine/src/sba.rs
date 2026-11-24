@@ -261,6 +261,9 @@ impl Game {
         if let Some(Choice::Card(c)) = self.answer.take() {
             keep.push(c);
         }
+        // State-triggered abilities whose condition holds trigger (CR 603.8;
+        // ENGINE.md 270.1): they wait with the others.
+        self.check_state_triggers();
         // Ascend (CR 702.131b): the city's blessing, for the rest of the
         // game, once a player with an ascend permanent controls ten (a
         // static ability: noted here, before anyone gets priority).

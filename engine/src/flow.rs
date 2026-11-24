@@ -1116,7 +1116,7 @@ impl Game {
         }
         self.end_turn_effects();
         // CR 514.3a: an SBA or a trigger -> priority, then another cleanup.
-        if self.sba_needed() || !self.waiting.is_empty() {
+        if self.sba_needed() || !self.waiting.is_empty() || self.state_triggers_due() {
             self.turn.cleanup_again = true;
             self.agenda.push(Task::Priority);
         } else {

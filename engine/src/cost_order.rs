@@ -281,6 +281,7 @@ fn mod_change(m: &Mod) -> u8 {
         | Mod::AttackDespiteDefender
         | Mod::Goad
         | Mod::PreventCombatDamage
+        | Mod::PreventCombatDamageToAndBy
         | Mod::MustAttackPlayer => 0,
     }
 }

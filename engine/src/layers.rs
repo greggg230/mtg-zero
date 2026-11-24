@@ -74,6 +74,9 @@ pub struct Flags {
     pub exile_if_leaves: bool,
     /// Combat damage it would deal is prevented (EoE lane D).
     pub prevent_combat_damage: bool,
+    /// Combat damage that would be dealt to it is prevented (Maze of Ith,
+    /// ENGINE.md 270.1).
+    pub prevent_combat_damage_to: bool,
     /// It can attack as though it didn't have defender (CR 702.3b).
     pub attack_despite_defender: bool,
 }
@@ -545,6 +548,10 @@ impl Game {
                 Mod::ExileIfDies => f.exile_if_dies = true,
                 Mod::ExileIfLeaves => f.exile_if_leaves = true,
                 Mod::PreventCombatDamage => f.prevent_combat_damage = true,
+                Mod::PreventCombatDamageToAndBy => {
+                    f.prevent_combat_damage = true;
+                    f.prevent_combat_damage_to = true;
+                }
                 Mod::AttackDespiteDefender => f.attack_despite_defender = true,
                 _ => {}
             }
@@ -889,6 +896,14 @@ impl Game {
         // (No effect has a static ability's mod: the encoding reads statics through their
         // sources, ENGINE.md 142.)
         assert!(!m.static_only(), "a continuous effect with a static ability's mod {m:?}");
+        // (Combat damage prevention: a group's by its members, an object's to and by it; the
+        // encoding's one `Mod` float holds both, told apart by what is affected, ENGINE.md 270.1.)
+        match (&on, &m) {
+            (Affected::Obj(_), Mod::PreventCombatDamage) | (Affected::Group(_), Mod::PreventCombatDamageToAndBy) => {
+                panic!("a combat damage prevention {m:?} on {on:?}: the encoding holds a group's by its members and an object's to and by it only (ENGINE.md 270.1)")
+            }
+            _ => {}
+        }
         self.next_ts = self.exact_inc(self.next_ts, "timestamps");
         let ts = self.next_ts;
         self.effects.push(Effect { ts, until, on, m, controller });

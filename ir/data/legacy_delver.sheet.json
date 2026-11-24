@@ -28,5 +28,11 @@
   {"name": "Stitcher's Supplier", "scryfall_name": "Stitcher's Supplier"},
   {"name": "Dark Matter Manipulator", "scryfall_name": "Dark Matter Manipulator"},
   {"name": "Moonshadow", "scryfall_name": "Moonshadow"},
-  {"name": "Dryad Arbor", "scryfall_name": "Dryad Arbor"}
+  {"name": "Dryad Arbor", "scryfall_name": "Dryad Arbor"},
+  {"name": "Dark Depths", "scryfall_name": "Dark Depths"},
+  {"name": "Thespian's Stage", "scryfall_name": "Thespian's Stage"},
+  {"name": "Blast Zone", "scryfall_name": "Blast Zone"},
+  {"name": "Ghost Quarter", "scryfall_name": "Ghost Quarter"},
+  {"name": "Maze of Ith", "scryfall_name": "Maze of Ith"},
+  {"name": "Bojuka Bog", "scryfall_name": "Bojuka Bog"}
 ]
