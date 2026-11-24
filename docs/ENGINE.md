@@ -48313,3 +48313,17 @@ same harness.
   around the tables: the preset's pairing with a table per deck (20 matches), the Delver mirror (10) and the fixed two-75
   spec with its seat tables (10): combined **abf27a7e8f5bf50e** (recorded with `DIGEST_WRITE=1` for this test alone,
   re-run equal). `gate.py`'s `digest-formats` step now expects six lines and "6 passed" (`tests/test_gate.py`).
+
+### 261.7 The CPU smoke
+
+`python -m mtgz.az.run --run <scratch> --preset legacy-pair-bo3-varied-smoke --spec <pair_varied_specs(Delver,
+Doomsday, forced_find_p=1.0, dealt_decks={"p": 0.85, "swaps": [1, 4], "per_seat": true}, around="table")> --iters 4
+--matchup-table-min-gain -10 --matchup-swap-z 0` (the guard and the shrinkage off so that the tiny network's tables
+leave the main): iterations 1-3 self-played without tables (48 matches), the retrains published v0002 and v0003 with
+two tables each and `"dealt_around": "table"`, and iteration 4 self-played with v0002's (the spec lines carry
+`"around": "table"` and `"tables": ["v0002", "v0002"]`). In iteration 4 every one of the 56 dealt 60s (games 2 and 3;
+all 16 matches happened to deal both seats - the logged dealt flags are each seed's `dealt_seats`, recomputed
+independently: 64 of 64 matches; P(both) 0.72 a match) is within [1, 4] swaps of its deck's v0002 choice for the
+deal's context (1: 11, 2: 17, 3: 14, 4: 14), every base differs from the main, and the dealt 60s are 7-13 swaps from
+the main - the deal follows the plan, not the main. Read from the run's game log against the versions' tables by a
+script outside the repo.
