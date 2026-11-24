@@ -28,5 +28,9 @@
   {"name": "Stitcher's Supplier", "scryfall_name": "Stitcher's Supplier"},
   {"name": "Dark Matter Manipulator", "scryfall_name": "Dark Matter Manipulator"},
   {"name": "Moonshadow", "scryfall_name": "Moonshadow"},
-  {"name": "Dryad Arbor", "scryfall_name": "Dryad Arbor"}
+  {"name": "Dryad Arbor", "scryfall_name": "Dryad Arbor"},
+  {"name": "Life from the Loam", "scryfall_name": "Life from the Loam"},
+  {"name": "Exploration", "scryfall_name": "Exploration"},
+  {"name": "Carnivorous Cultivator // Enroot", "scryfall_name": "Carnivorous Cultivator // Enroot"},
+  {"name": "Yavimaya, Cradle of Growth", "scryfall_name": "Yavimaya, Cradle of Growth"}
 ]

@@ -2006,6 +2006,9 @@ pub struct CardDef {
     /// The printing facts lane B of the Legacy Doomsday deck adds (ENGINE.md
     /// 124.2).
     pub dd_b: crate::doomsday_b::DdBDef,
+    /// The printing facts lane B of the Legacy Lands cards adds (ENGINE.md
+    /// 270.2): dredge.
+    pub lands_b: crate::lands_b::LandsBDef,
     /// The printing facts of the Legacy Sneak and Show cards (ENGINE.md 123).
     pub sns: crate::sneak_show::SnsDef,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;

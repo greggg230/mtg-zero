@@ -1023,6 +1023,7 @@ fn eoe_support_report() {
 /// loudly otherwise); changing the list is deliberate.
 const SUPPORTED_LEGACY: &[&str] = &[
     "Brotherhood's End",
+    "Carnivorous Cultivator // Enroot",
     "Cavern of Souls",
     "Consign to Memory",
     "Dark Matter Manipulator",
@@ -1030,11 +1031,13 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Doomsday",
     "Dryad Arbor",
     "Edge of Autumn",
+    "Exploration",
     "Flow State",
     "Flusterstorm",
     "Hogaak, Arisen Necropolis",
     "Hydroblast",
     "Leyline of the Void",
+    "Life from the Loam",
     "Magus of the Moon",
     "Massacre",
     "Meltdown",
@@ -1052,6 +1055,7 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Show and Tell",
     "Stitcher's Supplier",
     "Street Wraith",
+    "Yavimaya, Cradle of Growth",
 ];
 
 /// The support report over the legacy cards alone (their own table): every

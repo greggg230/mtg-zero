@@ -59,6 +59,7 @@ pub mod doomsday_b;
 pub mod doomsday_c;
 pub mod sneak_show;
 mod hogaak_a;
+pub mod lands_b;
 pub mod delver_sb;
 mod eoe_w2;
 pub mod public_state;

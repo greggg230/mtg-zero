@@ -98,6 +98,9 @@
    "EachCardInStartingDeck",
    "StartingDeckDifferentNames"
   ],
+  "Dredge": [
+   "Dredge"
+  ],
   "Duration": [
    "EndOfTurn",
    "Permanent"
@@ -5329,6 +5332,7 @@
      "type": {
       "of": {
        "categories": [
+        "Dredge",
         "GraveyardExileInstead"
        ],
        "t": "ref"
@@ -9947,6 +9951,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_glue",
    "qualname": "DrawPerOpponentWhoLostLifeThisTurn"
+  },
+  "Dredge": {
+   "category": "Dredge",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "Dredge"
   },
   "DuringYourTurn": {
    "category": "Condition",
