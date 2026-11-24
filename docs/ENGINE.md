@@ -49281,6 +49281,13 @@ the floats zeroed reproduces main's recorded `pair_around` file exactly (and pai
 e2884dfcccf49ebe, constructed 68e6d9334d2fdfdf, main's values); so `digests_pair_around.txt` is re-recorded
 (`DIGEST_WRITE`, combined ebaa7f7e45dc8e32 -> the table with the sixteen).
 
+Gates on e16b0869: `gate.py suite --fuzz-pools default,default+hidden,delver_dealt,lands,cross --offload local
+--throttle on`: **GATE PASSED suite e16b0869a112**. `gate.py engine`: three desktop runs failed only on environment and
+load (Git Bash rewrote `MTGZ_MAC_HOME` for `test_the_macs_selfplay_settings` - `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`
+cures it, while `MSYS_NO_PATHCONV=1` breaks the build step; `test_a_worker_plays_mtg[matches]` timed out under the
+gate's own load, the known flake of 261.8, and passes alone); with `--offload mac` as in 261.8: **GATE PASSED WITH
+SKIPS engine e16b0869a112 in 466s** (one live-run-hazard test fenced by the live stew).
+
 **User decision (2026-11-24): best-of-three allows a main of at least 60** (270.4.4's open point): a format change,
 its own branch after this merge.
 
