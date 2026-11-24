@@ -65,6 +65,16 @@ proposed, pending the user's approval: docs/ENGINE.md 168.6.) The table goes int
 is not dealt sideboards to its context's 60 by teacher decisions, recorded as policy targets (zero-core docs/search.md
 3.19): the network's prior learns the table's choice.
 
+**Dealt around the table** (docs/ENGINE.md 261, the spec's `dealt_decks.around` `"table"`): a dealt seat's 60 is then
+dealt with its swaps counted from the 60 ITS OWN table picks for the deal's context (the main for a deck without a
+table), so the belief about a dealt opponent (`opp_dealt` 1) is exactly that: base = the opponent deck's choice in the
+version's own tables for its context - the same game, the other sideboarding position (it sideboards first exactly
+when the decider does not), the opposite lead, and its own `opp_dealt` 0 (the decider, choosing, is not dealt) -, then
+uniform over the swap counts of the range from it, then uniform over the 60s with that count (`sample_around`). Those
+contexts depend only on the tables' `opp_dealt` 0 contexts, so the job solves every deck's `opp_dealt` 0 contexts
+first, then its `opp_dealt` 1 contexts against the worlds around the other deck's (`choice_table` and
+`pair_choice_tables` with `around` "table"). `"around": "main"` (the default) is unchanged.
+
 Commands:
 
     python -m mtgz.az.matchup retrain RUN --iter B --from-iter LO [--val-iters 2] [--half-life 16] [--worlds 8000]
@@ -427,6 +437,31 @@ def contexts():
     return [(g, f, l, o) for g in (2, 3) for f in (0, 1) for l in (-1, 0, 1) for o in (0, 1)]
 
 
+def dealt_around(spec):
+    """The spec's `dealt_decks.around` (docs/ENGINE.md 261): 'main' (also without the key or without dealt decks) or
+    'table'; any other value raises (the engine refuses it too)."""
+    sp = json.loads(spec) if isinstance(spec, str) else spec
+    a = (sp.get('dealt_decks') or {}).get('around', 'main')
+    if a not in ('main', 'table'):
+        raise ValueError(f'dealt_decks.around {a!r}: "main" or "table" (docs/ENGINE.md 261)')
+    return a
+
+
+def opponent_context(game, first, lead):
+    """The context of a dealt opponent's deal when the decider is at (game, first, lead) with the opponent dealt
+    (docs/ENGINE.md 261): the same game, the other sideboarding position, the opposite lead, its own opp_dealt 0 (the
+    decider chooses: it is not dealt)."""
+    return (game, 1 - first, -lead, 0)
+
+
+def sample_around(copies, base, main, lo, hi, n, rng):
+    """n worlds of a dealt opponent's 60 around `base` (docs/ENGINE.md 261: the engine's `ConstructedPrior::dealt` with
+    `base` as its main - uniform over the swap counts lo..hi counted from `base`, then uniform over the 60s with that
+    count; exact, `sample_prior`) as copies minus the registered `main` -> (n x E) floats."""
+    import numpy as np
+    return (sample_prior(copies, list(base), lo, hi, n, rng) - np.asarray(main, dtype=np.float64)).astype(np.float64)
+
+
 class Objective:
     """F(A) for one context: the members' mean over the worlds B of sigmoid(z(A, B)); the decider sideboarding first
     takes the better of play and draw, second the worse (module docs)."""
@@ -522,19 +557,38 @@ def confident_climb(F, copies, main, z=2.0):
     return [int(x) for x in c], float(cur.mean()), swaps
 
 
-def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0):
-    """The 24 contexts' best 60s (module docs) -> (the spec's "sideboard_table", per-context detail)."""
+def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0,
+                 around='main'):
+    """The 24 contexts' best 60s (module docs) -> (the spec's "sideboard_table", per-context detail). `around` 'table'
+    (docs/ENGINE.md 261): a dealt opponent's worlds around this table's own choice for its context (`sample_around`),
+    the opp_dealt 0 contexts solved first."""
     import numpy as np
     rng = np.random.default_rng(seed)
     S = sum(copies) - sum(main)
     m = np.asarray(main, dtype=np.float64)
-    beliefs = {0: sample_prior(copies, main, 0, S, worlds, rng) - m,
-               1: sample_prior(copies, main, dealt_swaps[0], dealt_swaps[1], worlds, rng) - m}
-    choices, detail = [], []
+    if around == 'table':
+        beliefs = {0: sample_prior(copies, main, 0, S, worlds, rng) - m}
+        order = [c for c in contexts() if c[3] == 0] + [c for c in contexts() if c[3] == 1]
+    else:
+        beliefs = {0: sample_prior(copies, main, 0, S, worlds, rng) - m,
+                   1: sample_prior(copies, main, dealt_swaps[0], dealt_swaps[1], worlds, rng) - m}
+        order = contexts()
+    solved, by_base = {}, {}
     strong = strength_optimum(members, copies, main)        # (the strength term's exact argmax, unguarded: reported)
-    for (g, f, l, o) in contexts():
-        F = Objective(members, beliefs[o].astype(np.float64), g, f, l, o)
+    for (g, f, l, o) in order:
+        if around == 'table' and o == 1:
+            base = tuple(solved[opponent_context(g, f, l)][0])
+            if base not in by_base:
+                by_base[base] = sample_around(copies, base, main, dealt_swaps[0], dealt_swaps[1], worlds, rng)
+            B = by_base[base]
+        else:
+            B = beliefs[o].astype(np.float64)
+        F = Objective(members, B, g, f, l, o)
         c, fv, sw = confident_climb(F, copies, main, z)
+        solved[(g, f, l, o)] = (c, fv, sw, F)
+    choices, detail = [], []
+    for (g, f, l, o) in contexts():
+        c, fv, sw, F = solved[(g, f, l, o)]
         choices.append([g, f, l, o, c])
         detail.append({'context': [g, f, l, o], 'deck': c, 'F': fv, 'F_main': float(F((np.asarray(main) - m)[None, :])[0]),
                        'swaps': [{'out': names[a], 'in': names[b], 'gain': gm, 'se': gs} for a, b, gm, gs in sw],
@@ -837,11 +891,13 @@ class PairObjective:
         return self.per_member(d).mean(axis=0)
 
 
-def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0):
+def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0, around='main'):
     """Two different 75s (docs/ENGINE.md 240.3): one choice table PER DECK - each deck's 24 contexts' 60s by the same
     guarded climb (`confident_climb`, `z`) against the other deck's constructed prior (its full swap range; the spec's
     dealt range for a dealt opponent) -> ([C's table, D's table] - each the spec's {"version", "list", "choices"} of
-    its own 75 -, {deck name: per-context detail})."""
+    its own 75 -, {deck name: per-context detail}). `around` 'table' (docs/ENGINE.md 261): a dealt opponent's worlds
+    around the other deck's own choice in these tables for its context (`sample_around`), every deck's opp_dealt 0
+    contexts solved first."""
     import numpy as np
     rng = np.random.default_rng(seed)
     decks = P.decks
@@ -855,8 +911,31 @@ def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, lo
     for k in (1, 0):
         d, names, copies, main, S = info[k]
         m = np.asarray(main, dtype=np.float64)
-        beliefs[k] = {0: sample_prior(copies, main, 0, S, worlds, rng) - m,
-                      1: sample_prior(copies, main, dealt_swaps[0], dealt_swaps[1], worlds, rng) - m}
+        if around == 'table':
+            beliefs[k] = {0: sample_prior(copies, main, 0, S, worlds, rng) - m}
+        else:
+            beliefs[k] = {0: sample_prior(copies, main, 0, S, worlds, rng) - m,
+                          1: sample_prior(copies, main, dealt_swaps[0], dealt_swaps[1], worlds, rng) - m}
+    # (around the table, docs/ENGINE.md 261: both decks' opp_dealt 0 contexts first - a dealt opponent's base is the
+    # other deck's choice for an opp_dealt 0 context)
+    if around == 'table':
+        order = [(r, c) for r in (0, 1) for c in contexts() if c[3] == 0] + [(r, c) for r in (0, 1) for c in contexts() if c[3] == 1]
+    else:
+        order = [(r, c) for r in (0, 1) for c in contexts()]
+    solved, by_base = {}, {}
+    for role, (g, f, l, o) in order:
+        d, names, copies, main, S = info[role]
+        if around == 'table' and o == 1:
+            od, _, ocopies, omain, _ = info[1 - role]
+            base = tuple(solved[(1 - role, opponent_context(g, f, l))][0])
+            if (1 - role, base) not in by_base:
+                by_base[(1 - role, base)] = sample_around(ocopies, base, omain, dealt_swaps[0], dealt_swaps[1], worlds, rng)
+            B = by_base[(1 - role, base)]
+        else:
+            B = beliefs[1 - role][o].astype(np.float64)
+        F = PairObjective(members, B, role, g, f, l, o)
+        c, fv, sw = confident_climb(F, copies, main, z)
+        solved[(role, (g, f, l, o))] = (c, fv, sw, F)
     tables, details = [], {}
     for role in (0, 1):
         d, names, copies, main, S = info[role]
@@ -865,8 +944,7 @@ def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, lo
         strong = strength_optimum([{'w': x[key]} for x in members], copies, main)
         choices, detail = [], []
         for (g, f, l, o) in contexts():
-            F = PairObjective(members, beliefs[1 - role][o].astype(np.float64), role, g, f, l, o)
-            c, fv, sw = confident_climb(F, copies, main, z)
+            c, fv, sw, F = solved[(role, (g, f, l, o))]
             choices.append([g, f, l, o, c])
             detail.append({'context': [g, f, l, o], 'deck': c, 'F': fv, 'F_main': float(F((np.asarray(main) - m)[None, :])[0]),
                            'swaps': [{'out': names[a], 'in': names[b], 'gain': gm, 'se': gs} for a, b, gm, gs in sw],
@@ -1105,11 +1183,13 @@ def _mirror_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, thr
     members, rep = select_and_fit(games, main, val_iters, half_life, threads, seed=b, log=log, members_n=members_n)
     dd = json.loads(cfg['spec']).get('dealt_decks') or {}
     sw = tuple(dd.get('swaps') or (0, sum(copies) - sum(main)))
+    around = dealt_around(cfg['spec'])
     # (a model that does not beat play / draw on the held-out games by `min_gain` nats has not shown matchup
     # knowledge: its version publishes no table, and the chosen-60 seats sideboard by search until one does -
     # docs/ENGINE.md 168.4)
     if rep['gain_nats'] >= min_gain:
-        table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log, z=z)
+        table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log, z=z,
+                                     around=around)
         check_table(cfg['spec'], table)
     else:
         table, detail = None, []
@@ -1118,6 +1198,8 @@ def _mirror_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, thr
            'members': members, 'report': rep, 'table': table, 'table_detail': detail, 'worlds': worlds,
            'min_gain': min_gain, 'swap_z': z,
            'dealt_swaps': list(sw), 'time': time.time()}
+    if around != 'main':
+        out['dealt_around'] = around
     changes = [{'context': x['context'], 'in': x['in'], 'out': x['out']} for x in detail]
     return out, rep, (None if table is None else [table]), changes, dict(zip(names, rep['per_copy']))
 
@@ -1131,8 +1213,9 @@ def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threa
     dd = json.loads(cfg['spec']).get('dealt_decks') or {}
     S = [sum(int(x[1]) for x in d['list']) - sum(d['main']) for d in P.decks]
     sw = tuple(dd.get('swaps') or (0, min(S)))
+    around = dealt_around(cfg['spec'])
     if rep['gain_nats'] >= min_gain:
-        tables, detail = pair_choice_tables(members, P, sw, name, worlds=worlds, seed=b, log=log, z=z)
+        tables, detail = pair_choice_tables(members, P, sw, name, worlds=worlds, seed=b, log=log, z=z, around=around)
         check_tables(cfg['spec'], tables)
     else:
         tables, detail = None, {}
@@ -1140,6 +1223,8 @@ def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threa
     out = {'format': FORMAT, 'version': name, 'iter': b, 'window': [lo, b], 'pairing': P.json(), 'model': 'pair',
            'members': members, 'report': rep, 'table': None, 'tables': tables, 'table_detail': detail,
            'worlds': worlds, 'min_gain': min_gain, 'swap_z': z, 'dealt_swaps': list(sw), 'time': time.time()}
+    if around != 'main':
+        out['dealt_around'] = around
     changes = [{'deck': k, 'context': x['context'], 'in': x['in'], 'out': x['out']} for k, xs in detail.items() for x in xs]
     return out, rep, tables, changes, rep['per_copy']
 

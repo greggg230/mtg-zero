@@ -384,6 +384,7 @@ pub fn fields() -> Vec<Field> {
         table: Hidden "the seats that sideboard by the choice table (ENGINE.md 168.3): a seat's own policy, as keep; never encoded, the other player's worlds deal its 60 from the constructed prior",
         glog: Derived "the live match's game log record (ENGINE.md 168.2): never read by the rules, the encodings or the search; a clone carries none",
         dealt_seed: Hidden "seeds the dealt seat's later deals (ENGINE.md 154): chance not yet happened, determinize reseeds it in every world",
+        dealt_around: Derived "dealt decks around the choice tables (ENGINE.md 261): the spec's range, the dealt seats' registered mains and the prior of a dealt seat's next 60 around its table's 60 for the deal's public context - a function of the spec and the match's public course, the same in every world; never encoded (the deal itself is KEY_DEALT's, private)",
         test_panic: Derived "a test fault (ENGINE.md 172, MTGZ_TEST_PANIC): None in every real match; never read by the rules, the encodings or the search",
         pairing: Derived "a metagame match's pairing (ENGINE.md 176): which of the spec's 75s each seat plays, from the spec and the match's seed, the same in every world; never read by the rules, the encodings or the search - the 75s it names are the pools, public (OPP_POOL)",
     });

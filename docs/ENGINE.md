@@ -48189,3 +48189,127 @@ the weaker deck. The Doomsday and Sneak specialists' tables board 3-4 cards per 
 for Wasteland / Unholy Heat; Doomsday: Murktide and Flusterstorm in for Edge of Autumn and Lion's Eye Diamond).
 
 **260.6 Gate.** Python only (tier `python`).
+
+## 261. Dealt decks around the seat's choice table: `dealt_decks.around` (fix B of the stew's sideboarding plan; branch `feat/dealt-around`, 2026-11-24)
+
+Branch `feat/dealt-around` from main 06d04fd0 (260); zero-core pinned at 9538e15, unchanged. (Section number: the next
+free after 260 on 2026-11-24, claimed in the maintainer's thread notes.)
+
+**Why** (measured: 260.5, the first stew's sideboarding health; 168, 240 for the method). In pb3-style sideboarding a
+share p of the seats is dealt a random 60 of its 75 (154, 168.1) - today `swaps` one-for-one swaps away from the
+deck's MAIN, uniform over the range - and the other seats play the matchup model's choice table. In the first stew (p
+0.85, swaps [0, 15]) the dealt seats average 7.5 random swaps and win 47.5% against 64% for the table seats (all main):
+random 60s are junk decks, so the model learns that boarding is bad and the tables stay all main, and the dealt seats
+practise dead cards (Hydroblast against Doomsday wasted in 98% of its casts: Doomsday has no red). pb2, which taught
+the net to play the sideboard cards before pb3's model found a signal, dealt p 0.5 with swaps [1, 8]. Fix B: deal
+small perturbations of the seat's CURRENT PLAN - the 60 its table picks for the context - instead of the main.
+
+### 261.1 The option (engine)
+
+`"dealt_decks": {"p", "swaps": [lo, hi], "per_seat", "around": "main" | "table"}` (`DealtDecks::around`,
+`DealtAround`; `az/mod.rs`).
+
+* **`"main"`** (the default; the key left out): 154's deal exactly - every existing spec, digest and game log line is
+  what it was (the game log's spec line writes `"around"` only for `"table"`).
+* **`"table"`**: at each deal (`MtgAz::deal_dealt_deck`, the dealt seat's sideboarding before game 2 or 3) the BASE is
+  the 60 the seat's choice table picks for the deal's context - `table_action`'s context for a deciding seat (168.3):
+  the next game, whether the dealt seat sideboards first (CR 103.1: it is the next game's chooser), its game wins less
+  the other's, whether the other seat is dealt (`MtgAz::dealt_base`). A seat without a table (no table in the spec for
+  its deck, a pb3 table that does not fit its 75) has its registered main as the base. Then the 60 is dealt from
+  `ConstructedPrior::dealt` of the seat's 75 with the base as its main (`dealt_prior_around`): uniform over the swap
+  counts lo..=hi COUNTED FROM THE BASE, then uniform over the 60s of the 75 with that count - 154's sampler and its
+  exact table draws unchanged, only the main replaced by the base (each swap one copy out of the base's 60, one copy in
+  from the 75 less it; the copy counts and the 75 respected by the prior's slots). A base equal to the registered main
+  gives the very prior `set_dealt` made (no cache key of its own), so `"around": "table"` with no table anywhere plays
+  byte for byte as `"main"` (tested).
+* **Refusals**: `around` other than the two strings (case included) is refused loudly ("dealt_decks.around ...");
+  `"table"` without any table for a seat's deck is NOT an error (its base is the main). The range is checked against
+  each seat's sideboard as before; the base's complement in the 75 has the sideboard's size, so the range fits it too.
+* **Metagame / pairing specs**: `Metagame::pair_json` copies `dealt_decks` as it is, so `around` passes to each
+  pairing's fixed spec (176's lockstep holds: the fuzz's `meta_lockstep` compares both). `MtgSpec::eval_json` and
+  `evaldecks.eval_spec` drop `dealt_decks`, `around` with it.
+
+**State**: `MatchState::dealt_around` (None without `"table"`): the range, each dealt seat's registered main and the
+prior of each dealt seat's NEXT game's 60, from its deal until that game begins. `next_game` makes it the seat's
+`deck_priors` entry, so in a game the other player's worlds deal the dealt 60 from the prior around that game's base,
+and between the games `deal_constructed_between` deals the last game's 60 from `deck_priors` (the last game's base) and
+a dealt first sideboarder's next 60 from `dealt_around.next` (the next game's base). Classified Derived in the
+public-state gate: a function of the spec (its range and tables) and of the match's public course, the same in every
+world, never encoded.
+
+**The K-sample deal's cache** (102.8): its requests were keyed by the seat and what the viewer saw, not by the prior -
+one prior per seat per match until now. A seat dealt around its table has a prior per base, so `DeckPrior::cache_key`
+(0 by default) is mixed into `DealCache::key` when non-zero: `ConstructedPrior::with_cache_key(base)` for a base other
+than the main. Every other prior's key is 0, so every other deal's cache key and K decks are what they were. (The first
+run of this section's world test caught the missing override: the world's next 60 came 8 swaps from the next base -
+the K decks of an earlier base's request.)
+
+### 261.2 Information (154.2's rules, unchanged)
+
+* Public: which seats are dealt (154, 168.1) and the tables (the spec's, as in 168.3: a table is never encoded); so the
+  base is as public as the table - every world computes the same base from the same context.
+* Private: the deal itself, `KEY_DEALT` of the dealt seat with its 60's copies, `HIDDEN` (the same number of keys) for
+  the other observer. `determinize` reseeds `dealt_seed` in every world (`reseed_dealt`, unchanged).
+* The other player's worlds deal the dealt seat's 60s from the prior around the same base, untilted (154.2: a dealt 60
+  is no policy's choice, so the prior's posterior is exact). The aux `deck` target stays empty against a dealt 60.
+
+### 261.3 The matchup model's belief about a dealt opponent (`mtgz/az/matchup.py`)
+
+168.3's choice table scores a 60 against worlds of the other seat's next 60: a choosing opponent's from its
+constructed prior, a DEALT opponent's (`opp_dealt` 1) from the dealt prior. With `"around": "table"` the dealt
+opponent's 60 is dealt around ITS OWN table's choice for ITS context: the same game, the other sideboarding position
+(it sideboards first exactly when the decider does not), the opposite lead, and its own `opp_dealt` 0 (the decider,
+choosing, is not dealt) - `opponent_context`. The tables that will be played together are one version's, so the
+opponent's base is its choice in the version being computed. Its `opp_dealt` 0 contexts depend on no dealt belief, so
+the job solves every deck's `opp_dealt` 0 contexts first, then the `opp_dealt` 1 contexts against
+`sample_around(copies, base, main, lo, hi, N)` - `sample_prior` (exact big-integer draws, 168.3) with the base as its
+main, minus the registered main (the model's inputs are deltas from the main). Exact: the engine's distribution, no
+approximation (`choice_table` and `pair_choice_tables` with `around`, read from the run's spec by `dealt_around`;
+`_mirror_version` / `_pair_version` record `"dealt_around": "table"` in the version when so). `"main"`: the code path,
+its random draws and its tables unchanged (tested equal).
+
+### 261.4 Presets and helpers (no default changed)
+
+`decklists._dealt` and `mirror_bo3_spec` write `around` when given; `pair_varied_specs(..., around=None)` and
+`pair_varied_settings(..., dealt_decks=PAIR_DEALT, around=None)` set it on request (`DEALT_AROUND`: "main", "table");
+`PAIR_DEALT` and every preset are what they were (tested). A stew sets it through `recipe.spec_extra` (copied over the
+specialists' spec as it is), e.g. `"spec_extra": {"dealt_decks": {"p": 0.5, "swaps": [1, 4], "per_seat": true,
+"around": "table"}}`.
+
+### 261.5 The farm worker and the fuzz
+
+The release worker plays the engine crate, so it deals exactly as here with no code of its own; the gate's farm-compat
+step (the Delver dealt preset: around the main) is unchanged. `FUZZ_POOL=meta_pair` (240.6) now deals around the
+tables in half its matches (`(seed / 9) % 2 == 1`, every combination of the three ranges and the tables): every dealt
+60 - in the real match and in every world of the other player (the game's, between games the last and the next) - is
+checked within the range from its base, computed by the harness from the match's course (`dealt_base_vs`,
+`lead_before`: not the engine's `dealt_base`); the lockstep with the pairing's fixed spec covers `around`; with 100
+matches or more some dealt 60 must have been checked around a table (`dealt_around_table`). The worker's fuzz runs the
+same harness.
+
+### 261.6 Tests and digests
+
+* **Engine** (`engine/tests/dealt_around.rs` in `misc_suite`, 4 tests): `around_is_main_or_table_and_anything_else_is_refused`
+  (the parse, five refused values, no table not an error, `pair_json` carries it, `eval_json` drops it);
+  `around_main_and_around_table_without_tables_are_the_old_deal_byte_for_byte` (every step's action, keys and decks
+  equal to the spec without the key - fixed two-75 and metagame specs, three ranges, one and two dealt seats);
+  `a_dealt_60_is_within_the_range_of_its_tables_choice_for_the_context` (Delver-Doomsday metagame, p 0.7, swaps [1, 4]:
+  162 dealt 60s with both tables, 163 with Delver's only, every one within [1, 4] of its base - computed by the test -, the counts ~uniform
+  (42 / 44 / 37 / 39 of 162), 78 of them more than 4 swaps from the main, 23 contexts; a deck without a table dealt
+  around its main); `the_other_players_worlds_deal_around_the_same_base_and_key_the_deal_hidden` (one dealt seat with
+  seat tables: the deal's keys its 60 exactly, `HIDDEN` in the other player's world and in full in its own; 1,128
+  in-game worlds, 58 last 60s and 38 next 60s between games within [1, 3] of their bases; 1,186 of 1,186 worlds
+  reseeded the dealt seed).
+* **Python** (`tests/test_dealt_around.py`, 5 tests): the helpers write `around` only when asked (presets, `PAIR_DEALT`
+  unchanged; the engine parses and refuses); **the sampler against the engine's deals on a fixed context**: the Delver
+  mirror post-sideboard, p 1, swaps [1, 4], around pb3's one table, 3,000 matches through the bindings with the game
+  log on: the game-2 deals of the context (2, first, lead -1, opp dealt) - every one within [1, 4] of its base, the swap
+  counts uniform, every entry's mean copies equal to `sample_around`'s 20,000 worlds within 5 standard errors (and
+  away from the main's); the game log's deal contexts of a dealt opponent are `opponent_context` of the choosing seat's;
+  the mirror's and the pair's tables draw their `opp_dealt` 1 worlds around exactly the other deck's `opp_dealt` 0
+  choices for `opponent_context` (one world set per distinct base), and `around` "main" gives the old tables exactly.
+* **Digests: every existing one EQUAL** (no spec of theirs has `around`): the gates below. **New**:
+  `digest_formats.rs::pair_around_digests`, `tests/data/digests_pair_around.txt` - the pair digest's specs dealing
+  around the tables: the preset's pairing with a table per deck (20 matches), the Delver mirror (10) and the fixed two-75
+  spec with its seat tables (10): combined **abf27a7e8f5bf50e** (recorded with `DIGEST_WRITE=1` for this test alone,
+  re-run equal). `gate.py`'s `digest-formats` step now expects six lines and "6 passed" (`tests/test_gate.py`).

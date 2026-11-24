@@ -485,6 +485,10 @@ pub struct MatchState {
     /// game's deal independent): a later game's deal is chance that has not happened, so `determinize`
     /// reseeds it in every world (`MtgAz::reseed_dealt`), as it reseeds `rng`. Unused (0) without a dealt seat.
     pub dealt_seed: u64,
+    /// Dealt decks around the seat's choice table (ENGINE.md 261, `dealt_decks.around` `"table"`): the range, each dealt
+    /// seat's registered main and the prior of its next game's dealt 60 (dealt, the game not begun). None in every
+    /// other match (`"around": "main"`, the default: ENGINE.md 154's deals, unchanged).
+    pub dealt_around: Option<Arc<DealtAround>>,
     /// A test fault only (ENGINE.md 172, `test_panic_of`): Some((game seed, turn)) in a match `MtgAz::new_game` started
     /// while MTGZ_TEST_PANIC named its seed - its every game (and every search clone of it) panics at a step from that
     /// turn on. None in every other match: never read by the rules, the encodings or the search.
@@ -533,6 +537,21 @@ pub fn dealt_seats(seed: u64, p: f64) -> [bool; 2] {
     let mut u = || (r.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
     let a = u() < p;
     [a, u() < p]
+}
+
+/// A match's dealt decks around the seats' choice tables (ENGINE.md 261; `MatchState::dealt_around`). Public: a
+/// function of the spec (its range and tables) and of the match's public course (each deal's context), the same in
+/// every world.
+#[derive(Clone)]
+pub struct DealtAround {
+    /// The spec's swap range (inclusive), counted from the base.
+    pub swaps: (u8, u8),
+    /// Each dealt seat's registered main, copies per entry of its 75 (None: not dealt).
+    pub mains: [Option<Arc<[u8]>>; 2],
+    /// The prior that dealt a seat's 60 for the next game, from its deal until that game begins (`next_game` makes it
+    /// the seat's `deck_priors` entry): between the games the other player's worlds deal that next 60 from it, and the
+    /// last game's 60 from `deck_priors` (the last game's base).
+    pub next: [Option<Arc<dyn super::hidden_decks::DeckPrior>>; 2],
 }
 
 /// The extra salt of seat 1's deal streams when both seats are dealt (ENGINE.md 168.1): the two seats' deals of a
@@ -625,6 +644,7 @@ impl MatchState {
             table: [None, None],
             glog: Default::default(),
             dealt_seed: 0,
+            dealt_around: None,
             test_panic: None,
             pairing: None,
         })
@@ -991,6 +1011,17 @@ impl super::MtgAz {
         for p in 0..2 {
             m.decks[p] = sb.done[p].clone().expect("both decks chosen");
         }
+        // (ENGINE.md 261: a seat dealt around its table plays this game's deal, from the prior that dealt it)
+        if let Some(a) = m.dealt_around.as_mut() {
+            if a.next.iter().any(|x| x.is_some()) {
+                let a = Arc::make_mut(a);
+                for p in 0..2 {
+                    if let Some(x) = a.next[p].take() {
+                        m.deck_priors[p] = Some(x);
+                    }
+                }
+            }
+        }
         m.game_no += 1;
         m.seen = [[0; 16]; 2];
         let decks = [m.deck(0), m.deck(1)];
@@ -1076,7 +1107,9 @@ impl super::MtgAz {
     /// sideboarding): the seed of its deals from the match's seed (`dealt_deal_seed`), and its deck prior - as the
     /// other player deals its 60s, and as its own deals are made - the constructed prior of its 75 (`seat`'s main
     /// and sideboard) restricted to `swaps` (`ConstructedPrior::dealt`).
-    pub(crate) fn set_dealt(&mut self, d: PlayerId, swaps: (u8, u8), seat: &Seat, seed: u64) {
+    /// `around` (ENGINE.md 261): `Table` deals each 60 around the seat's choice table's 60 for the deal's context
+    /// (`dealt_base`); `Main` deals around the main, ENGINE.md 154's deal exactly.
+    pub(crate) fn set_dealt(&mut self, d: PlayerId, swaps: (u8, u8), seat: &Seat, seed: u64, around: super::DealtAround) {
         use super::hidden_decks::{ConstructedPrior, DeckPrior};
         assert!(self.m.constructed_bo3, "dealt decks: a constructed best-of-three (ENGINE.md 154)");
         assert!(!self.m.is_dealt(d), "P{d} dealt twice");
@@ -1090,6 +1123,49 @@ impl super::MtgAz {
             self.m.dealt = Some(d);
         }
         self.m.dealt_seed = dealt_deal_seed(seed);
+        if around == super::DealtAround::Table {
+            let (_, main) = MatchPool::constructed(&seat.deck, &seat.sideboard);
+            let mut a = self.m.dealt_around.as_deref().cloned().unwrap_or(DealtAround { swaps, mains: [None, None], next: [None, None] });
+            assert_eq!(a.swaps, swaps, "dealt decks around: one range for both seats");
+            a.mains[d as usize] = Some(Arc::from(main));
+            self.m.dealt_around = Some(Arc::new(a));
+        }
+    }
+
+    /// The base of dealt seat `d`'s deal at its sideboarding in progress (ENGINE.md 261; `d` the decider): with
+    /// `"around": "table"` its choice table's 60 for the deal's context - the next game, whether `d` sideboards first,
+    /// its game wins less the other's, whether the other seat is dealt (`table_action`'s context for a deciding seat,
+    /// ENGINE.md 168.3) -, or its registered main when it has no table. None without `"around": "table"` (ENGINE.md
+    /// 154's deal around the main, the prior `set_dealt` gave). Public: the tables are the spec's.
+    pub(crate) fn dealt_base(&self, d: PlayerId) -> Option<Arc<[u8]>> {
+        let a = self.m.dealt_around.as_ref()?;
+        let main = a.mains[d as usize].clone().expect("a dealt seat's main");
+        let sb = self.m.sb.as_ref().expect("a deal at a sideboarding");
+        assert_eq!(sb.decider(), d, "P{d}'s deal at another seat's sideboarding");
+        let Some(t) = self.m.table[d as usize].as_ref() else { return Some(main) };
+        let o = 1 - d;
+        let lead = self.m.wins[d as usize] as i8 - self.m.wins[o as usize] as i8;
+        Some(t.choice(self.m.game_no + 1, sb.turn == 0, lead, self.m.is_dealt(o)).clone())
+    }
+
+    /// The dealt prior around `base` (ENGINE.md 261): `ConstructedPrior::dealt` of seat `d`'s 75 with `base` as its
+    /// main - uniform over the swap counts of the range counted from `base`, then uniform over the 60s with that count;
+    /// a base equal to the registered main gives the prior `set_dealt` made (the same tables, no cache key of its own).
+    fn dealt_prior_around(&self, d: PlayerId, base: &[u8]) -> Arc<dyn super::hidden_decks::DeckPrior> {
+        use super::hidden_decks::{ConstructedPrior, DeckPrior};
+        let a = self.m.dealt_around.as_ref().expect("dealt decks around");
+        let pool = &self.m.pools[d as usize];
+        assert!(pool.n_cards == pool.list.len() && base.len() == pool.list.len(), "P{d}'s base is not of its 75");
+        let (mut deck, mut side) = (Vec::new(), Vec::new());
+        for (&(def, t), &n) in pool.list.iter().zip(base) {
+            assert!(n <= t, "P{d}'s base holds more copies than its 75");
+            deck.extend(std::iter::repeat_n(def, n as usize));
+            side.extend(std::iter::repeat_n(def, (t - n) as usize));
+        }
+        let p = ConstructedPrior::dealt(&deck, &side, a.swaps.0 as usize, a.swaps.1 as usize);
+        let main = a.mains[d as usize].as_deref().expect("a dealt seat's main");
+        let p = if base == main { p } else { p.with_cache_key(base) };
+        Arc::new(p) as Arc<dyn DeckPrior>
     }
 
     /// The sideboarding's decider is the dealt seat (ENGINE.md 154): its 60 for the next game is dealt
@@ -1139,7 +1215,17 @@ impl super::MtgAz {
     /// branches on it (ENGINE.md 10), and the dealt seat's own tree does.
     pub(crate) fn deal_dealt_deck(&mut self, d: PlayerId, chance: Option<&mut Vec<u64>>) -> Arc<[u8]> {
         use super::hidden_decks::{Dealt, DeckWant};
-        let prior = self.m.deck_priors[d as usize].clone().expect("a dealt seat's prior");
+        let prior = match self.dealt_base(d) {
+            // (ENGINE.md 261: around the seat's table's 60 for the context; kept for the other player's worlds between
+            // the games, and the next game's prior from its start, `next_game`)
+            Some(base) => {
+                let p = self.dealt_prior_around(d, &base);
+                let a = Arc::make_mut(self.m.dealt_around.as_mut().expect("dealt decks around"));
+                a.next[d as usize] = Some(p.clone());
+                p
+            }
+            None => self.m.deck_priors[d as usize].clone().expect("a dealt seat's prior"),
+        };
         let game = self.m.game_no as u64 + 1;
         // (both seats dealt, ENGINE.md 168.1: seat 1's deals from a stream of their own)
         let salt = if self.m.dealt_both && d == 1 { DEALT_SEAT1_SALT } else { 0 };

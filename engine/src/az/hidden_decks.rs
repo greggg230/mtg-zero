@@ -301,6 +301,12 @@ pub trait DeckPrior: Send + Sync {
     fn check_own(&self, _want: &DeckWant, _s: &SampledDeck) -> Result<(), String> {
         Ok(())
     }
+    /// What tells this prior's K-sample deals apart from another prior's of the same seat in one match (`DealCache`,
+    /// ENGINE.md 102.8): 0 for every prior but a dealt prior around a base other than the main (ENGINE.md 261: the
+    /// seat's prior changes with each deal's context), so every other deal's cache keys are what they were.
+    fn cache_key(&self) -> u64 {
+        0
+    }
 }
 
 /// The stub prior until S2's sealed builder lands (ENGINE.md 102.1): FUZZ_POOL=eoe's random deck
@@ -864,6 +870,10 @@ impl MtgAz {
         let done = self.m.sb.as_ref().expect("between games").done[o as usize].is_some();
         if done {
             let want = DeckWant { db, n: sizes[o as usize], shown: &[], companion: None, tilt: None, pick: None, seen: None };
+            // (ENGINE.md 261: a seat dealt around its table - its next 60 from the prior that dealt it, around the next
+            // game's base; its last 60 above from the last game's)
+            let next = self.m.dealt_around.as_ref().and_then(|a| a.next[o as usize].clone());
+            let prior: &dyn DeckPrior = next.as_deref().unwrap_or(prior);
             let d = self.deal_one(prior, o, &want, rng);
             self.m.sb.as_mut().expect("between games").done[o as usize] = Some(d.counts.clone());
         }
@@ -948,7 +958,7 @@ impl MtgAz {
             Some(t) if self.m.deal.k > 0 && !kn.slots.is_empty() => {
                 let ess = self.m.deal.ess;
                 let decks = self.m.deal.decks(&*prior, o, &want);
-                let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
+                let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want, &*prior), &kn, &t, ess), || {
                     let ids = identity::identities(db);
                     tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t, ess)
                 });
@@ -1049,7 +1059,7 @@ impl MtgAz {
         let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: pick.as_ref(), seen: seen.as_deref() };
         let decks = self.m.deal.decks(&*prior, o, &want);
         let ess = self.m.deal.ess;
-        let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
+        let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want, &*prior), &kn, &t, ess), || {
             let ids = identity::identities(db);
             tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t, ess)
         });
@@ -1421,6 +1431,9 @@ pub struct ConstructedPrior {
     by_swaps: Vec<f64>,
     /// The swap range of the base prior (inclusive): 0..=S, or a dealt deck's (`ConstructedPrior::dealt`).
     swaps: (usize, usize),
+    /// `DeckPrior::cache_key`: 0, or a digest of the base of a dealt prior around a base other than the registered main
+    /// (`with_cache_key`, ENGINE.md 261).
+    cache_key: u64,
 }
 
 /// One entry of the constructed prior's table: the counts it may take, the main's, the shown ones
@@ -1577,7 +1590,7 @@ impl ConstructedPrior {
         let slots: Vec<Slot> = list.iter().zip(&counts).map(|(&(_, t), &m)| Slot::new(0, t, m, 0, 1.0)).collect();
         let last = swap_table(&slots, side, false).pop().expect("a layer");
         let by_swaps = (0..=side).map(|s| last[s * (side + 1) + s]).collect();
-        ConstructedPrior { list, main: counts, n: main.len(), side, support, by_swaps, swaps: (0, side) }
+        ConstructedPrior { list, main: counts, n: main.len(), side, support, by_swaps, swaps: (0, side), cache_key: 0 }
     }
 
     /// The base prior's number of legal decks with s swaps, s = 0..=S (ENGINE.md 120.2): of a dealt
@@ -1608,6 +1621,23 @@ impl ConstructedPrior {
     /// The swap range of the base prior (inclusive): 0..=S, or a dealt prior's (ENGINE.md 154).
     pub fn swap_range(&self) -> (usize, usize) {
         self.swaps
+    }
+
+    /// This prior with a K-sample cache key of its own (`DeckPrior::cache_key`), a digest of `base` (copies per entry):
+    /// a dealt prior around a base other than the registered main (ENGINE.md 261), whose K decks for a request must
+    /// not be another base's of the same seat. Never 0.
+    pub fn with_cache_key(mut self, base: &[u8]) -> ConstructedPrior {
+        let mut h = crate::rng::split64(0xBA5E_0261_0000_0001 ^ base.len() as u64);
+        for &n in base {
+            h = crate::rng::split64(h ^ n as u64);
+        }
+        self.cache_key = h | 1;
+        self
+    }
+
+    /// The registered main's copies per entry of the 75 (a dealt prior around a base: the base's; ENGINE.md 261).
+    pub fn main_counts(&self) -> &[u8] {
+        &self.main
     }
 
     /// The deck's swaps: its cards beyond the main's counts (0..=S).
@@ -1840,6 +1870,11 @@ impl ConstructedPrior {
 }
 
 impl DeckPrior for ConstructedPrior {
+    /// 0, or around a base other than the main its base's digest (`with_cache_key`, ENGINE.md 261).
+    fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+
     fn name(&self) -> &'static str {
         if self.swaps == (0, self.side) {
             "constructed"
@@ -2001,8 +2036,13 @@ impl DealCache {
 
     /// The request's key: the seat, the size, the companion and R; and a face-down pick (ENGINE.md
     /// 129.3: its kind and its chance's terms) when the request carries one.
-    fn key(o: PlayerId, want: &DeckWant) -> u64 {
+    fn key(o: PlayerId, want: &DeckWant, prior: &dyn DeckPrior) -> u64 {
         let mut h = crate::rng::split64(0x0DEA_15A1_0000 ^ o as u64 ^ (want.n as u64) << 8 ^ (want.companion.map_or(0xFFFF, |c| c as u64)) << 24);
+        // (ENGINE.md 261: a dealt prior around another base than the main - 0, no change, for every other prior)
+        let ck = prior.cache_key();
+        if ck != 0 {
+            h = crate::rng::split64(h ^ ck);
+        }
         for &d in want.shown {
             h = crate::rng::split64(h ^ d as u64);
         }
@@ -2035,7 +2075,7 @@ impl DealCache {
 
     /// The K decks of `want` for seat `o` (drawn once per request, from the salt and the request alone).
     pub fn decks(&self, prior: &dyn DeckPrior, o: PlayerId, want: &DeckWant) -> Arc<Vec<Arc<Dealt>>> {
-        let key = Self::key(o, want);
+        let key = Self::key(o, want, prior);
         let mut m = self.memo.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((_, v)) = m.entries.iter().find(|e| e.0 == key) {
             return v.clone();
