@@ -315,3 +315,21 @@ Carnivorous Cultivator, the Tabernacle and Marit Lage: the integration's.)
 | Choke x lands | Island, Volcanic Island, Mountain, Forest, Magus of the Moon, Force of Vigor, Nissa's untap | `cr_502_3_choke_*`, `cr_305_7_choke_reads_land_types_after_magus_of_the_moon` | tested |
 | The Tabernacle x creatures | Thalia, Guide of Souls, Lotus Cobra, Birds of Paradise, Dryad Arbor, an Urza's Saga Construct, Delver's Dragon's Rage Channeler and Murktide Regent under Choke | `cr_503_1a_the_tabernacle_*`, `cr_118_3_the_tabernacle_without_mana_the_creature_is_destroyed`, `cr_605_3a_the_tabernacle_a_creature_pays_for_itself`, `choke_and_the_tabernacle_lock_delvers_islands` | tested |
 | The Tabernacle x the rules | Karakas bouncing the source, Magus of the Moon, The Wondrous Wasp (timestamps), two Tabernacles | `cr_400_7_the_tabernacle_the_source_gone_nothing_happens`, `cr_305_7_the_tabernacle_under_magus_of_the_moon_grants_nothing`, `cr_613_7_the_tabernacle_and_losing_all_abilities_by_timestamp`, `cr_704_5j_the_tabernacle_two_grants_trigger_twice` | tested |
+
+## The Legacy Lands deck, the lanes together (ENGINE.md 270.4)
+
+Constructed play's table; every test in `engine/tests/cards_lands_int.rs`. (Lane A, 270.1, has no matrix of its own:
+its pairs are its tests' names.)
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Pithing Needle x Dark Depths, Thespian's Stage | Needle naming Dark Depths (its {3} stopped, a Stage's copy's state trigger and Marit Lage not), naming Thespian's Stage (a Stage stopped, a Stage that is a Ghost Quarter not) | `cr_602_5_pithing_needle_naming_dark_depths_stops_its_ability_not_its_state_trigger`, `cr_201_2_pithing_needle_naming_thespians_stage_reads_the_name_it_has_now` | tested |
+| Torpor Orb x Dark Depths, Cultivator | the state trigger, Marit Lage entering (Guide of Souls stopped), the Cultivator entering prepared | `cr_603_8_torpor_orb_doesnt_stop_dark_depths_state_trigger`, `cr_723_3a_torpor_orb_leaves_the_cultivator_entering_prepared` | tested |
+| Cursed Totem x Enroot | the prepared Cultivator's Enroot copy cast (a spell, not an ability) | `cr_723_3c_cursed_totem_leaves_the_enroot_copy_castable` | tested |
+| The Tabernacle x Marit Lage, Cultivator | the opponent's Tabernacle; Marit Lage indestructible, the Cultivator destroyed and its copy gone | `cr_702_12b_the_tabernacle_marit_lage_survives_the_cultivator_doesnt` | tested |
+| Yavimaya x Choke, Dark Depths, Thespian's Stage, Ghost Quarter | Islands only held; Dark Depths a Forest with {G} and its trigger; a Stage copy of Yavimaya granting after the original is destroyed | `cr_502_3_choke_and_yavimaya_only_islands_stay_tapped`, `cr_305_7_dark_depths_under_yavimaya_is_a_forest_with_its_abilities`, `cr_707_2_a_stage_copy_of_yavimaya_grants_forest_after_the_original_leaves` | tested |
+| Life from the Loam x Dark Depths, Wasteland, Bojuka Bog | returned, Dark Depths replayed with ten ice counters, the Loam dredging the next draw; Bojuka Bog exiling a Loam (no dredge) | `cr_400_7_loam_returns_dark_depths_wasteland_and_bojuka_bog_and_dredges_again`, `cr_406_2_bojuka_bog_exiles_a_loam_no_dredge` | tested |
+| Damping Sphere x Yavimaya's Forests, Ancient Tomb, Otawara | a Forest's {G} one mana (undamped), Ancient Tomb's {C}{C} damped; channel untaxed, paid by Forests | `cr_106_12b_damping_sphere_leaves_a_yavimaya_forests_one_green`, `cr_602_2b_damping_sphere_doesnt_tax_otawaras_channel_paid_by_forests` | tested |
+| Crop Rotation x Dark Depths, the Tabernacle | ten ice counters as it enters; the opponent's creature taxed | `cr_614_1c_crop_rotation_into_dark_depths_and_the_tabernacle` | tested |
+| Karakas, Ghost Quarter, Maze of Ith x Marit Lage, Stage copies | a Stage-made Marit Lage bounced (ceases to exist); a Stage copy destroyed and its controller's search; Maze of Ith on an attacking Marit Lage | `cr_111_7_karakas_bounces_a_stage_made_marit_lage`, `cr_701_23_ghost_quarter_on_a_stage_copy`, `cr_615_1a_maze_of_ith_stops_marit_lage` | tested |
+| Dredge, miracle x the encoding | the draw instruction in progress (context floats 251-252) | `the_draw_instruction_in_progress_reaches_both_players_inputs` | tested |
