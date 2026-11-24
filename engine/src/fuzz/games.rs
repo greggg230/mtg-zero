@@ -5798,7 +5798,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / lands_b / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
