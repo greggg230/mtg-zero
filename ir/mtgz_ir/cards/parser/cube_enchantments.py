@@ -328,7 +328,9 @@ def build_cube_enchantment(card: dict) -> CardPrinting | None:
     """Claim a cube enchantment (non-creature, non-land, non-artifact,
     single-faced) whose every oracle line is recognized."""
     name = card.get("name", "")
-    if name not in CUBE_ENCHANTMENT_NAMES:
+    from mtgz_ir.cards.parser.legacy_lands_c import LEGACY_LANDS_C_ENCHANTMENTS
+
+    if name not in CUBE_ENCHANTMENT_NAMES and name not in LEGACY_LANDS_C_ENCHANTMENTS:
         return None
     if card.get("card_faces") or card.get("layout", "normal") != "normal":
         return None

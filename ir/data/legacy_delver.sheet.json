@@ -28,5 +28,11 @@
   {"name": "Stitcher's Supplier", "scryfall_name": "Stitcher's Supplier"},
   {"name": "Dark Matter Manipulator", "scryfall_name": "Dark Matter Manipulator"},
   {"name": "Moonshadow", "scryfall_name": "Moonshadow"},
-  {"name": "Dryad Arbor", "scryfall_name": "Dryad Arbor"}
+  {"name": "Dryad Arbor", "scryfall_name": "Dryad Arbor"},
+  {"name": "The Tabernacle at Pendrell Vale", "scryfall_name": "The Tabernacle at Pendrell Vale"},
+  {"name": "Pithing Needle", "scryfall_name": "Pithing Needle"},
+  {"name": "Choke", "scryfall_name": "Choke"},
+  {"name": "Cursed Totem", "scryfall_name": "Cursed Totem"},
+  {"name": "Damping Sphere", "scryfall_name": "Damping Sphere"},
+  {"name": "Torpor Orb", "scryfall_name": "Torpor Orb"}
 ]

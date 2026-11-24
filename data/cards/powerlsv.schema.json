@@ -98,6 +98,9 @@
    "EachCardInStartingDeck",
    "StartingDeckDifferentNames"
   ],
+  "DoesntUntap": [
+   "DoesntUntap"
+  ],
   "Duration": [
    "EndOfTurn",
    "Permanent"
@@ -225,6 +228,7 @@
    "DestroyAllCreatures",
    "DestroyEachNonlandPermanentWithMVEqualToSourceChargeCounters",
    "DestroyEnchantedPermanent",
+   "DestroySourceUnlessPay",
    "DestroyTargetArtifact",
    "DestroyTargetArtifactEnchantmentOrFlyingCreature",
    "DestroyTargetArtifactOrTappedCreature",
@@ -628,6 +632,9 @@
    "YourPermanentsBecomeCreaturesUEOT",
    "ZeroPointBalladEffect"
   ],
+  "EnteringDoesntCauseTriggers": [
+   "EnteringDoesntCauseTriggers"
+  ],
   "EventPattern": [
    "EventPattern"
   ],
@@ -656,6 +663,9 @@
    "ResolvingX",
    "Scaled"
   ],
+  "GrantsTriggerToCreatures": [
+   "GrantsTriggerToCreatures"
+  ],
   "GraveyardExileInstead": [
    "GraveyardExileInstead"
   ],
@@ -679,6 +689,9 @@
   ],
   "ManaCost": [
    "ManaCost"
+  ],
+  "MultiManaLandsProduceColorless": [
+   "MultiManaLandsProduceColorless"
   ],
   "ObjectPredicate": [
    "ControlledByOpponent",
@@ -756,6 +769,9 @@
   ],
   "SpellTax": [
    "SpellTax"
+  ],
+  "SpellTaxPerOtherSpellThisTurn": [
+   "SpellTaxPerOtherSpellThisTurn"
   ],
   "StatePredicate": [
    "AnyPlayerControlsNoCreatures",
@@ -5867,7 +5883,14 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "DoesntUntap",
+        "EnteringDoesntCauseTriggers",
+        "GrantsTriggerToCreatures",
+        "MultiManaLandsProduceColorless",
+        "SpellTaxPerOtherSpellThisTurn"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -9282,6 +9305,23 @@
    "module": "mtg_bot.effects.generic.destroy",
    "qualname": "DestroyEnchantedPermanent"
   },
+  "DestroySourceUnlessPay": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "cost",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_board",
+   "qualname": "DestroySourceUnlessPay"
+  },
   "DestroyTargetArtifact": {
    "category": "Effect",
    "fields": [
@@ -9709,6 +9749,36 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "DoThenReflexive"
+  },
+  "DoesntUntap": {
+   "category": "DoesntUntap",
+   "fields": [
+    {
+     "annotation": "object",
+     "name": "permanent_filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "str",
+     "default": "permanents",
+     "name": "label",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.roto_board_statics",
+   "qualname": "DoesntUntap"
   },
   "DomainPT": {
    "category": "PTFormula",
@@ -10414,6 +10484,36 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "EnteredViaCast"
+  },
+  "EnteringDoesntCauseTriggers": {
+   "category": "EnteringDoesntCauseTriggers",
+   "fields": [
+    {
+     "annotation": "object",
+     "name": "permanent_filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "str",
+     "default": "creatures",
+     "name": "label",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_lands_c",
+   "qualname": "EnteringDoesntCauseTriggers"
   },
   "EnteringWithXAtLeast": {
    "category": "TriggerPredicate",
@@ -11963,6 +12063,26 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.grant_keywords",
    "qualname": "GrantUnblockableUEOT"
+  },
+  "GrantsTriggerToCreatures": {
+   "category": "GrantsTriggerToCreatures",
+   "fields": [
+    {
+     "annotation": "object",
+     "name": "ability",
+     "required": true,
+     "type": {
+      "categories": [
+       "TriggeredAbility"
+      ],
+      "t": "ref"
+     },
+     "type_source": "observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.roto_board_statics",
+   "qualname": "GrantsTriggerToCreatures"
   },
   "GraveyardExileInstead": {
    "category": "GraveyardExileInstead",
@@ -14161,6 +14281,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.counters",
    "qualname": "MoveSelfCountersToTargetCreatureYouControl"
+  },
+  "MultiManaLandsProduceColorless": {
+   "category": "MultiManaLandsProduceColorless",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_lands_c",
+   "qualname": "MultiManaLandsProduceColorless"
   },
   "MultiplyCount": {
    "category": "EventTransform",
@@ -20348,6 +20475,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.roto_restrictions",
    "qualname": "SpellTax"
+  },
+  "SpellTaxPerOtherSpellThisTurn": {
+   "category": "SpellTaxPerOtherSpellThisTurn",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_lands_c",
+   "qualname": "SpellTaxPerOtherSpellThisTurn"
   },
   "SpellWasKicked": {
    "category": "Condition",

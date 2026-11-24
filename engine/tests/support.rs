@@ -1024,7 +1024,10 @@ fn eoe_support_report() {
 const SUPPORTED_LEGACY: &[&str] = &[
     "Brotherhood's End",
     "Cavern of Souls",
+    "Choke",
     "Consign to Memory",
+    "Cursed Totem",
+    "Damping Sphere",
     "Dark Matter Manipulator",
     "Disruptor Flute",
     "Doomsday",
@@ -1046,12 +1049,15 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Omniscience",
     "Pact of Negation",
     "Personal Tutor",
+    "Pithing Needle",
     "Price of Progress",
     "Prismari Charm",
     "Rough // Tumble",
     "Show and Tell",
     "Stitcher's Supplier",
     "Street Wraith",
+    "The Tabernacle at Pendrell Vale",
+    "Torpor Orb",
 ];
 
 /// The support report over the legacy cards alone (their own table): every

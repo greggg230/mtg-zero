@@ -92,7 +92,7 @@ impl Game {
                 if matches!(mp.prod, ManaProd::LandsCouldProduce) {
                     continue;
                 }
-                for v in crate::pay::productions(self, p, &mp.prod, Some(c)) {
+                for v in crate::pay::productions(self, p, &mp.prod, Some(c), a.cost.tap) {
                     for (t, &k) in v.iter().enumerate() {
                         if k > 0 {
                             m |= 1 << t;

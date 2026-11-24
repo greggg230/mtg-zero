@@ -751,7 +751,22 @@ fn one(t: usize, n: u8) -> [u8; 6] {
 
 /// Every production of `prod` of source `src` for player `p`, in canonical
 /// order.
-pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<CardIdx>) -> Vec<[u8; 6]> {
+/// The productions a mana ability of `src` (`tap`: its cost has {T}) can
+/// make now, each the mana of all its types, with the replacement "if a land
+/// is tapped for two or more mana, it produces {C} instead" applied when it
+/// applies (CR 106.12b; also what a land "could produce", 106.7:
+/// `Game::damps`, ENGINE.md 270.3).
+pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<CardIdx>, tap: bool) -> Vec<[u8; 6]> {
+    let v = productions_raw(g, p, prod, src);
+    if g.damps(src, tap) {
+        Game::damped(v)
+    } else {
+        v
+    }
+}
+
+/// The productions of a mana ability before any replacement.
+fn productions_raw(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<CardIdx>) -> Vec<[u8; 6]> {
     match prod {
         ManaProd::One(m) => (0..6).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect(),
         ManaProd::Linked => {
@@ -1303,6 +1318,9 @@ impl Game {
                         && cl.members[0].slot == src.slot
                         && cl.sac_self == sac_self
                         && (!bonuses || extra_of(cl.members[0].card) == extra)
+                        // (A land tapped for two or more mana under a
+                        // damping replacement makes {C}: ENGINE.md 270.3.)
+                        && (!self.db.lc.damp_lands || self.damps(Some(cl.members[0].card), ad.cost.tap) == self.damps(Some(c), ad.cost.tap))
                         && home.is_none_or(|(hd, hs)| {
                             let (d2, s2, _) = self.activated_home(cl.members[0].card, src.slot);
                             (d2, s2) == (hd, AbilitySlot::Activated(hs))
@@ -1324,7 +1342,7 @@ impl Game {
                 let yld = if ad.x {
                     Yield::Multi { prods: vec![[0; 6]], units: Some(Vec::new()) }
                 } else {
-                    match self.yield_with(p, &m.prod, mana_life(ad), extra, Some(c)) {
+                    match self.yield_with(p, &m.prod, mana_life(ad), extra, Some(c), ad.cost.tap) {
                         // (One mana with a mana cost, Chromatic Star: its
                         // mana joins the virtual pool like a several-mana
                         // source's, its type chosen.)
@@ -1425,7 +1443,7 @@ impl Game {
                         cl.members.push(src);
                         continue;
                     }
-                    let Some(yld) = self.yield_of(p, &m.prod, mana_life(ad), Some(c)) else { continue };
+                    let Some(yld) = self.yield_of(p, &m.prod, mana_life(ad), Some(c), ad.cost.tap) else { continue };
                     out.push(Class { dmg: m.damage_to_you, only: self.spend_of_source(c, m.only), ..Class::of(def, src, yld) });
                 }
             }
@@ -1550,8 +1568,8 @@ impl Game {
     /// A source's yield with `extra` mana its tapping adds (a triggered
     /// mana ability; none for a land whose ability costs life: none in the
     /// cube has both).
-    fn yield_with(&self, p: PlayerId, prod: &ManaProd, life: u8, extra: [u8; 6], src: Option<CardIdx>) -> Option<Yield> {
-        let base = self.yield_of(p, prod, life, src)?;
+    fn yield_with(&self, p: PlayerId, prod: &ManaProd, life: u8, extra: [u8; 6], src: Option<CardIdx>, tap: bool) -> Option<Yield> {
+        let base = self.yield_of(p, prod, life, src, tap)?;
         if extra == [0; 6] || life > 0 {
             return Some(base);
         }
@@ -1581,7 +1599,23 @@ impl Game {
         })
     }
 
-    fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8, src: Option<CardIdx>) -> Option<Yield> {
+    fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8, src: Option<CardIdx>, tap: bool) -> Option<Yield> {
+        // "If a land is tapped for two or more mana, it produces {C} instead"
+        // (CR 106.12b; ENGINE.md 270.3): an ability of two or more mana makes
+        // one {C}; one of one mana is unchanged.
+        if self.damps(src, tap) {
+            let raw = productions_raw(self, p, prod, src);
+            if raw.iter().any(|v| v.iter().map(|&x| x as u32).sum::<u32>() >= 2) {
+                let prods = Game::damped(raw);
+                return Some(if let [v] = prods[..] {
+                    // (One mana: one of one type.)
+                    let t = v.iter().position(|&x| x == 1).expect("one mana");
+                    Yield::One(Unit { life, ..Unit::free((1 as crate::mana::ManaMask) << t) })
+                } else {
+                    Yield::Multi { prods, units: None }
+                });
+            }
+        }
         match prod {
             ManaProd::One(m) => Some(Yield::One(Unit { life, ..Unit::free(*m) })),
             // (Its {X} is announced with priority only, never while paying.)
@@ -1608,7 +1642,7 @@ impl Game {
             }
             _ => {
                 debug_assert!(life == 0, "lowering keeps life costs to one-mana abilities");
-                let prods = productions(self, p, prod, src);
+                let prods = productions(self, p, prod, src, tap);
                 if prods.is_empty() {
                     return None;
                 }
@@ -3592,7 +3626,7 @@ impl Game {
                 a = [1; 6];
             }
             _ => {
-                for v in productions(self, p, prod, Some(src)) {
+                for v in productions(self, p, prod, Some(src), tap) {
                     makes = true;
                     for t in 0..6 {
                         a[t] = a[t].max(v[t] as u64);
@@ -3602,6 +3636,12 @@ impl Game {
         }
         if !makes {
             return 0;
+        }
+        // "If a land is tapped for two or more mana, it produces {C}
+        // instead" (CR 106.12b; ENGINE.md 270.3): a count of two or more is
+        // one {C}.
+        if self.damps(Some(src), tap) && a.iter().copied().max().unwrap_or(0) >= 2 && matches!(prod, ManaProd::SameTypeCounters { .. } | ManaProd::PerPermanent { .. }) {
+            a = [0, 0, 0, 0, 0, 1];
         }
         let b = self.tap_bonus_wide(src, tap);
         (0..6).map(|t| a[t] + b[t]).max().unwrap_or(0)

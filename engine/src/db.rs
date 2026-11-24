@@ -2008,6 +2008,9 @@ pub struct CardDef {
     pub dd_b: crate::doomsday_b::DdBDef,
     /// The printing facts of the Legacy Sneak and Show cards (ENGINE.md 123).
     pub sns: crate::sneak_show::SnsDef,
+    /// The printing facts of the Legacy Lands cards of lane C (ENGINE.md
+    /// 270.3).
+    pub lc: crate::lands_c::LcDef,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
     /// `Game::moon_on`, ENGINE.md 99.12).
     pub nonbasic_lands_are_mountains: bool,
@@ -2267,6 +2270,9 @@ pub struct CardDb {
     /// (ENGINE.md 147.11). `refresh_mana_bounds` computes them.
     pub(crate) mana_fixed_max: u32,
     pub(crate) tap_bonus_max: u32,
+    /// Which of the Legacy Lands lane C rules the table has (ENGINE.md
+    /// 270.3).
+    pub(crate) lc: crate::lands_c::LcDb,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2533,6 +2539,7 @@ impl CardDb {
         }
         db.w6 = crate::eoe_w6::W6Db::of(&db.defs);
         db.w6.kept = kept;
+        db.lc = crate::lands_c::LcDb::of(&db.defs);
         // R17 (ENGINE.md 125): no card reads a graveyard order the layout leaves out; the
         // readers it can encode are the table's (ENGINE.md 145).
         db.gy_readers = crate::lower::graveyard_order::check_table(&db);

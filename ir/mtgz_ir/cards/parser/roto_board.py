@@ -116,6 +116,11 @@ def permanent_phrase(np: str, *, plural: bool = False):
         np = m.group("rest")
     base = parse_permanent_phrase(np, plural=plural)
     if base is None:
+        # A plural basic land type ("Islands", Choke; ENGINE.md 270.3).
+        from mtgz_ir.cards.parser.legacy_lands_c import basic_land_type_phrase
+
+        base = basic_land_type_phrase(np, plural=plural)
+    if base is None:
         return None
     for q in quals:
         base = base & q
@@ -1359,6 +1364,13 @@ def _trigger_with_quoted_tail(line: str) -> BoardLine | None:
 
 from mtgz_ir.cards.parser.roto_layers import LAYER_LINE_RECOGNIZERS  # noqa: E402
 
+
+def _lands_c_board_line(line: str):
+    from mtgz_ir.cards.parser.legacy_lands_c import lands_c_board_line
+
+    return lands_c_board_line(line)
+
+
 _LINE_RECOGNIZERS = (
     _activated_with_and_joined_sacrifice,
     _trigger_with_quoted_tail,
@@ -1376,6 +1388,9 @@ _LINE_RECOGNIZERS = (
     # Card types and colors (CR 613 layers 4 / 5): Mycosynth Lattice,
     # Unable to Scream (``cards.parser.roto_layers``).
     *LAYER_LINE_RECOGNIZERS,
+    # Torpor Orb, Damping Sphere (``cards.parser.legacy_lands_c``; ENGINE.md
+    # 270.3): last, so no earlier claim changes.
+    _lands_c_board_line,
 )
 
 

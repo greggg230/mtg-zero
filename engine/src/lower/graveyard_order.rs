@@ -168,7 +168,7 @@ fn op(x: &crate::program::Op) -> Option<&Filter> {
     }
 }
 
-/// `crate::program::Ext`: every variant (199), the positional graveyard readers named.
+/// `crate::program::Ext`: every variant (200), the positional graveyard readers named.
 fn ext(x: &crate::program::Ext) -> Option<&Filter> {
     use crate::program::Ext as E;
     match x {
@@ -371,6 +371,7 @@ fn ext(x: &crate::program::Ext) -> Option<&Filter> {
         E::DoomsdayB(e) => doomsday_b(e),
         E::SnS(e) => sns(e),
         E::DelverSb(e) => delver_sb(e),
+        E::LandsC(e) => lands_c(e),
     }
 }
 
@@ -536,6 +537,14 @@ fn sns(x: &crate::sneak_show::SnS) -> Option<&Filter> {
     match x {
         E::EachPlayerPutsFromHand { .. } => None,
         E::NextSpellUncounterable => None,
+    }
+}
+
+/// Legacy Lands, lane C (ENGINE.md 270.3): destroying the source reads no graveyard.
+fn lands_c(x: &crate::lands_c::LC) -> Option<&Filter> {
+    use crate::lands_c::LC as E;
+    match x {
+        E::DestroySource => None,
     }
 }
 

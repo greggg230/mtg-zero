@@ -384,7 +384,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_discard_alternative_cost", grants_discard_alternative_cost);
         l.deny("CardPrinting.tapped_for_mana_triggers", tapped_for_mana_triggers);
         l.deny("CardPrinting.extra_mana_when_you_tap_nonland_for_mana", extra_mana_when_you_tap_nonland_for_mana);
-        l.deny("CardPrinting.board_rules", board_rules);
+        // (`board_rules`: lowered below, ENGINE.md 270.3.)
         l.deny("CardPrinting.escape_exile_card_types", escape_exile_card_types);
         l.deny("CardPrinting.conspiracy_rules", conspiracy_rules);
         l.deny("CardPrinting.replacement_statics", replacement_statics);
@@ -1271,6 +1271,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.watched_in_graveyard(without a \"from anywhere\" ability)");
     }
     triggers.extend(keyword_triggers);
+    // Board rules (ENGINE.md 270.3): the facts, and the triggered abilities
+    // the card gives every creature ("All creatures have ..."), its
+    // definition's triggers that aren't its own (`LcDef::granted_to_creatures`).
+    let (mut lc, granted) = super::lands_c::printing_board_rules(l, board_rules, ty);
+    for t in granted {
+        lc.granted_to_creatures.push(triggers.len() as u8);
+        triggers.push(t);
+    }
     let trig_mask = triggers.iter().fold(0u64, |m, t| m | 1 << t.event as u32);
     // Sagas (CR 714): the final chapter number is the greatest of its
     // chapter abilities' (714.2d); the IR also states it (`chapter_count`),
@@ -1936,6 +1944,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         blocks_only_flyers: *can_only_block_creatures_with_flying,
         unblockable_by,
         no_untap: *doesnt_untap_during_untap_step,
+        lc,
         enters_counters,
         trig_mask,
         protection,
