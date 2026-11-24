@@ -169,7 +169,7 @@
 //! other lanes' cards (Dark Depths, Thespian's Stage, Ghost Quarter, Maze of Ith, Bojuka Bog, The Tabernacle at
 //! Pendrell Vale, Pithing Needle, Blast Zone) out and lane B's four each (`LANDS_B_DECK`: Life from the Loam,
 //! Exploration, Carnivorous Cultivator // Enroot, Yavimaya, Cradle of Growth) beside the deck's supported cards, more
-//! Forests and sideboard cards (Endurance, Force of Vigor, Dismember), against the Delver 60 in either seat, one game
+//! Forests and sideboard cards (Force of Vigor, Dismember), against the Delver 60 in either seat, one game
 //! in three the mirror; constructed play's table; every check of the default mode, and with 200 games or more each of
 //! the four cast or played, a draw dredged and a dredge declined, a second land played in a turn, Enroot cast, the
 //! Cultivator's combat trigger, and a land a Forest by Yavimaya alone (`LANDS_B_SEEN`). Games only (best-of-one).
@@ -1630,15 +1630,17 @@ fn lands_b_mode() -> bool {
 
 /// The deck of `FUZZ_POOL=lands_b` (ENGINE.md 270.2): the Legacy Lands 61 (MTGGoldfish 8027955) with the other
 /// lanes' cards out (Dark Depths 3, Thespian's Stage 3, Ghost Quarter, Maze of Ith, Bojuka Bog, The Tabernacle at
-/// Pendrell Vale, Pithing Needle, Blast Zone), Life from the Loam 3 -> 4 and Yavimaya 3 -> 4, four more Forests and
-/// the sideboard's Endurance 2, Force of Vigor 2 and a Dismember in: lane B's four cards four each, 60 cards.
+/// Pendrell Vale, Pithing Needle, Blast Zone), Life from the Loam 3 -> 4 and Yavimaya 3 -> 4, six more Forests and
+/// the sideboard's Force of Vigor 2 and a Dismember in: lane B's four cards four each, 60 cards. (Not the sideboard's
+/// Endurance: against the Delver 60 its random bottom order under Murktide Regent's triggers is a hidden-information
+/// finding outside these cards, ENGINE.md 270.2.7.)
 const LANDS_B_DECK: &[(u32, &str)] = &[
     (4, "Life from the Loam"),
     (4, "Exploration"),
     (4, "Carnivorous Cultivator // Enroot"),
     (4, "Yavimaya, Cradle of Growth"),
     (1, "Otawara, Soaring City"),
-    (7, "Forest"),
+    (9, "Forest"),
     (2, "Disruptor Flute"),
     (1, "Icetill Explorer"),
     (1, "Karakas"),
@@ -1651,7 +1653,6 @@ const LANDS_B_DECK: &[(u32, &str)] = &[
     (4, "Urza's Saga"),
     (4, "Boseiju, Who Endures"),
     (1, "Expedition Map"),
-    (2, "Endurance"),
     (2, "Force of Vigor"),
     (1, "Dismember"),
 ];
@@ -6326,6 +6327,8 @@ pub fn play_hidden(seed: u64) -> Played {
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
     let (mut actions, mut keys) = (Vec::new(), Vec::new());
     let (mut names_named, mut names_seen): (Vec<crate::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
+    // (`FUZZ_POOL=lands_b`'s counts with hidden decklists too, ENGINE.md 270.2.)
+    let mut lands_b_seen = LandsBSeen::default();
     let mut steps = 0usize;
     let mut mc = MatchCheck::new();
     rules_match_step(&mut mc, &a, &|| format!("seed {seed} (its first state)"));
@@ -6358,6 +6361,9 @@ pub fn play_hidden(seed: u64) -> Played {
         if complete_now(&a.g, &mut crng) {
             check_options_complete(&a.g, seed, "the game");
         }
+        if lands_b_mode() {
+            count_lands_b_choice(&a.g, act);
+        }
         a.step(act, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         count_dropped_loop_records(&a.g, false);
         a.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
@@ -6365,6 +6371,9 @@ pub fn play_hidden(seed: u64) -> Played {
         rules_match_step(&mut mc, &a, &|| format!("seed {seed} step {steps} (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1)"));
         if names_mode() {
             count_names(&a.g, &mut names_named, &mut names_seen);
+        }
+        if lands_b_mode() {
+            count_lands_b(&a.g, &mut lands_b_seen);
         }
         actions.push(act);
         steps += 1;
