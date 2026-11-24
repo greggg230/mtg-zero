@@ -3479,13 +3479,37 @@ impl Game {
 
     /// Put cards on the bottom of `p`'s library in a random order. Nobody
     /// knows the order (ENGINE.md 10).
-    pub(crate) fn put_on_bottom_randomly(&mut self, p: PlayerId, mut cards: Vec<CardIdx>) {
+    ///
+    /// The cards move in the order given - a public one where the cards are
+    /// public (a graveyard's, an exile's, a revealed pile's) - and only then
+    /// take the random order (ENGINE.md 271; lane C's 336aaa8b). So everything
+    /// the moves do one card at a time - each card's leave event and the
+    /// triggers it sets off, in their order on the stack (Murktide Regent's
+    /// once per instant or sorcery leaving a graveyard: Endurance), its last
+    /// known information, the order nobody knows recorded by `forget_order` -
+    /// comes in that order, the same in every world of either player's, and
+    /// not in the random one, which the move must keep hidden from everyone.
+    /// The random order is drawn as before and the library ends the same: the
+    /// cards that reached it take, bottom first, the places the moves gave
+    /// them, in the random order's reverse (a move to the bottom goes under
+    /// the one before).
+    pub(crate) fn put_on_bottom_randomly(&mut self, p: PlayerId, cards: Vec<CardIdx>) {
         if cards.is_empty() {
             return;
         }
-        self.rng.shuffle(&mut cards);
+        let mut random = cards.clone();
+        self.rng.shuffle(&mut random);
         for &c in &cards {
             self.move_card(c, Zone::Library, Pos::Bottom);
+        }
+        // (A card a replacement sent elsewhere, or whose replacement choice is pending, keeps no place here; the
+        // others' places are wherever the moves put them.)
+        let lib = &mut self.players[p as usize].library;
+        let places: Vec<usize> = (0..lib.len()).filter(|&i| cards.contains(&lib[i])).collect();
+        let landed: Vec<CardIdx> = random.iter().rev().copied().filter(|c| lib.contains(c)).collect();
+        assert_eq!(places.len(), landed.len(), "put_on_bottom_randomly: the cards in P{p}'s library");
+        for (&i, &c) in places.iter().zip(&landed) {
+            lib[i] = c;
         }
         self.forget_order(p, &cards);
     }

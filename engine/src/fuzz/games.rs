@@ -158,6 +158,11 @@
 //! Show 60 (colourless spells, Emrakul's cast trigger), by seed. Constructed play's card table;
 //! every check of the default mode, and with 200 games or more each of the five must have been
 //! cast and a Consign to Memory aimed at a triggered ability. Games only (best-of-one).
+//! `FUZZ_POOL=endurance` (ENGINE.md 271): Endurance (`ENDURANCE_DECK`: four, in a Delver 60 with four
+//! Murktide Regents and Tropical Islands) against the Delver 60 in either seat, one game in three
+//! the mirror: a random order onto the bottom of a library that triggers Murktide Regent once per
+//! card. With 200 games or more Endurance must have been cast and a Regent trigger's card put into a
+//! library. Constructed play's table; games only.
 //! `FUZZ_POOL=hogaak_c` (ENGINE.md 220.3): lane C of the Legacy Hogaak Tempo deck (MTGGoldfish 8027954): its 60
 //! with the other lanes' cards (Hogaak, Mockingbird) out and lane C's four each (`HOGAAK_C_DECK`: Stitcher's
 //! Supplier, Dark Matter Manipulator, Moonshadow, Dryad Arbor) beside the deck's fetch lands, Wasteland, Orcish
@@ -625,6 +630,8 @@ pub enum PoolMode {
     MetaWheel,
     /// `FUZZ_POOL=meta_pair` (ENGINE.md 240): `meta` with per-seat dealt decks, per-deck tables and the forced find.
     MetaPair,
+    /// `FUZZ_POOL=endurance` (ENGINE.md 271): Endurance in a Delver shell against the Delver 60 and itself.
+    Endurance,
 }
 
 thread_local! {
@@ -662,7 +669,8 @@ pub fn pool_mode() -> PoolMode {
         Ok("meta") => PoolMode::Meta,
         Ok("meta_wheel") => PoolMode::MetaWheel,
         Ok("meta_pair") => PoolMode::MetaPair,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_pair\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
+        Ok("endurance") => PoolMode::Endurance,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_pair\", \"meta_wheel\", \"endurance\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -794,7 +802,7 @@ fn dd_b_mode() -> bool {
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
 /// `doomsday`, `sneak_show`, `sns`, `hogaak_a`, `hogaak_b`, `hogaak_c`, `hogaak`, `names`, `delver_sb`,
-/// `cross` or `meta`).
+/// `endurance`, `cross` or `meta`).
 pub fn constructed_mode() -> bool {
     delver_mode()
         || dd_a_mode()
@@ -808,6 +816,7 @@ pub fn constructed_mode() -> bool {
         || hogaak_mode()
         || names_mode()
         || delver_sb_mode()
+        || endurance_mode()
         || cross_mode()
         || meta_mode()
         || wheel_mode()
@@ -1480,6 +1489,69 @@ fn count_delver_sb(g: &Game, seen: &mut Vec<u32>) {
                     DELVER_SB_AT_ABILITY.fetch_add(1, Ordering::Relaxed);
                 }
             }
+        }
+    }
+}
+
+/// `FUZZ_POOL=endurance` (ENGINE.md 271).
+fn endurance_mode() -> bool {
+    pool_mode() == PoolMode::Endurance
+}
+
+/// The deck of `FUZZ_POOL=endurance` (ENGINE.md 271): the Delver 60 with four Endurance (for two Unholy Heat, Prismari
+/// Charm and Urza's Bauble), four Murktide Regent (two more, for two Cori-Steel Cutters) and green mana (four
+/// Tropical Islands for Thundering Falls, an Island and two Wastelands; Polluted Delta two, Scalding Tarn two).
+const ENDURANCE_DECK: &[(u32, &str)] = &[
+    (4, "Endurance"),
+    (4, "Murktide Regent"),
+    (4, "Brainstorm"),
+    (1, "Cori-Steel Cutter"),
+    (4, "Daze"),
+    (4, "Dragon's Rage Channeler"),
+    (4, "Force of Will"),
+    (4, "Lightning Bolt"),
+    (4, "Mishra's Bauble"),
+    (4, "Ponder"),
+    (4, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (4, "Volcanic Island"),
+    (4, "Tropical Island"),
+    (2, "Flooded Strand"),
+    (2, "Misty Rainforest"),
+    (2, "Polluted Delta"),
+    (2, "Scalding Tarn"),
+    (2, "Wasteland"),
+    (1, "Island"),
+];
+
+fn endurance_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = ENDURANCE_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = crate::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    crate::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("ENDURANCE_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=endurance`: Endurance spells seen on the stack, and Murktide Regent triggers whose event's card is in a
+/// library (each stack item once, by its id): a card Endurance's random order put there (the pool's one way from a
+/// graveyard to a library).
+static ENDURANCE_SEEN: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+const ENDURANCE_KINDS: [&str; 2] = ["Endurance cast", "Murktide Regent triggers of a card put into a library"];
+
+fn count_endurance(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            crate::game::StackKind::Spell { card } if g.name(card) == "Endurance" => {
+                ENDURANCE_SEEN[0].fetch_add(1, Ordering::Relaxed);
+            }
+            crate::game::StackKind::Ability { source, .. }
+                if g.name(source.idx) == "Murktide Regent" && it.ev.obj.is_some_and(|r| g.obj(r.idx).zone == crate::Zone::Library) =>
+            {
+                ENDURANCE_SEEN[1].fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
         }
     }
 }
@@ -3356,6 +3428,15 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
             _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
         };
     }
+    if endurance_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = endurance_deck();
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
+    }
     if delver_sb_mode() {
         // Against Delver in either seat, the sideboarded mirror, or Sneak and Show.
         let sb = delver_sb_deck();
@@ -3543,6 +3624,9 @@ pub fn play(seed: u64, checks: bool) -> Played {
         }
         if delver_sb_mode() && !g.stack().is_empty() {
             count_delver_sb(&g, &mut stack_seen);
+        }
+        if endurance_mode() && !g.stack().is_empty() {
+            count_endurance(&g, &mut stack_seen);
         }
         if hogaak_c_mode() || hogaak_mode() {
             count_hogaak_c(&g, &mut hogaak_c_seen);
@@ -4234,6 +4318,10 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             DELVER_SB_SPELLS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
         );
     }
+    if endurance_mode() {
+        let seen: Vec<u64> = ENDURANCE_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        println!("FUZZ_POOL=endurance: {}", ENDURANCE_KINDS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", "));
+    }
     if cross_mode() {
         let seen: Vec<u64> = CROSS_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
         println!(
@@ -4357,7 +4445,7 @@ fn games_totals(companions_used: u64) -> Totals {
     ] {
         t.set(k, v);
     }
-    let arrays: [(&str, &[AtomicU64]); 10] = [
+    let arrays: [(&str, &[AtomicU64]); 11] = [
         ("dd_a_cast", &DD_A_CASTS),
         ("doomsday_cast", &DOOMSDAY_CASTS),
         ("doomsday_ability", &DOOMSDAY_ABILITY_COUNTS),
@@ -4368,6 +4456,7 @@ fn games_totals(companions_used: u64) -> Totals {
         ("hogaak_b", &HOGAAK_B_COUNTS),
         ("hogaak_c_seen", &HOGAAK_C_SEEN),
         ("hogaak_seen", &HOGAAK_SEEN),
+        ("endurance_seen", &ENDURANCE_SEEN),
     ];
     for (name, a) in arrays {
         for (i, x) in a.iter().enumerate() {
@@ -4543,6 +4632,10 @@ pub fn check_games(n: u64, t: &Totals) {
         let seen = totals_vec(t, "delver_sb_seen", DELVER_SB_SEEN.len());
         let at = g("delver_sb_at_ability");
         assert!(seen[..5].iter().all(|&c| c > 0) && at > 0, "the five cards weren't played: {seen:?} {at}");
+    }
+    if endurance_mode() && n >= 200 {
+        let seen = totals_vec(t, "endurance_seen", ENDURANCE_SEEN.len());
+        assert!(seen.iter().all(|&c| c > 0), "FUZZ_POOL=endurance: {:?}", ENDURANCE_KINDS.iter().zip(&seen).collect::<Vec<_>>());
     }
     if cross_mode() && n >= 200 {
         let seen = totals_vec(t, "cross_seen", CROSS_SEEN.len());
@@ -5632,7 +5725,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / names / delver_sb / endurance / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
