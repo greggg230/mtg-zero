@@ -205,6 +205,92 @@ def _plan_jobs(phase, st, g, jcfg, spec_fn, play):
     return out
 
 
+# ------------------------------------------------------------------ plan vs no plan (docs/ENGINE.md 260)
+def _seat75(decks, s):
+    from collections import Counter
+    return dict(Counter(list(decks[f'p{s}']) + list(decks.get(f'p{s}_sideboard') or [])))
+
+
+def _with_seat_tables(spec, tabs, start_game=None):
+    """`spec` (JSON, a fixed pair spec) with each seat's choice table (`tabs` {seat: table or None}) on that seat
+    (`decks.pN_table`; a table that is not the seat's 75 is refused) and `start_game` (2: post-board only, no chooser)."""
+    sp = json.loads(spec)
+    for s, t in tabs.items():
+        if t is None:
+            continue
+        if {n: int(k) for n, k in t['list']} != _seat75(sp['decks'], s):
+            raise ValueError(f"plan arm: table {t['version']} is not seat {s}'s 75")
+        sp['decks'][f'p{s}_table'] = t
+    if start_game is not None:
+        sp['start_game'] = int(start_game)
+        sp.pop('chooser', None)
+    return json.dumps(sp, separators=(',', ':'))
+
+
+def plan_arm_jobs(st, g, jcfg, spec_fn, play, tables):
+    """`recipe.judge.plan_arm`: per specialist of round g that trained (its version g + 1 not `skipped`) with a choice
+    table, its newest net on both seats, one seat its table (the plan), the other the all-main table of the same 75 (no
+    plan); `jcfg['plan_matches']` matches an arm. `tables`: {specialist: {deck: {'table', 'main'}}} (the newest matchup
+    version at its checkpoint, sbhealth.newest_tables). -> (jobs, arms: what sbhealth.plan_stats reads).
+
+    A mirror: post-board only (`start_game` 2, no chooser: the engine refuses one there), the plan in seat 0 on one
+    job and in seat 1 on the other, one deal seed (the seats swapped on common deals: paired). Two different 75s (the
+    engine refuses start_game 2 there, ENGINE.md 147.4): an arm per deck X with a table - X's table against X all main
+    on the same deals (game 1, the mains, is the same match in both), the other deck Y on its own table (all main when
+    it has none), both orientations x both game-1 choosers."""
+    from .sbhealth import all_main_table, main_only_table
+    al = {d['name']: d['alias'] for d in st.decks()}
+    n = int(jcfg['plan_matches'])
+    jobs, arms = [], []
+    for a, b in C.pairings(st.decks(), st.candidates()):
+        sn = C.spec_name(a, b)
+        v = st.version(sn, g + 1)
+        tb = tables.get(sn) or {}
+        if v is None or v.get('skipped'):
+            continue
+        net = st.abs(v['path'])
+        lab = f"{sn} v{g + 1}"
+        seed = seed_of('stew-plan', jcfg['seed'], a, b, g)
+        if a == b:
+            t = (tb.get(a) or {}).get('table')
+            if t is None:
+                continue
+            none = all_main_table(t, tb[a]['main'])
+            ids = []
+            for s in (0, 1):
+                tabs = {s: t, 1 - s: none}
+                jid = f'P.{al[a]}-{al[a]}.o{s}'
+                ids.append(jid)
+                jobs.append(_job(jid, 'plan', net, net, (a, a), None, 'a0', n // 2, seed,
+                                 _with_seat_tables(spec_fn(a, a, None), tabs, start_game=2), play,
+                                 f'{lab}: its table in seat {s}, all main in seat {1 - s} (post-board)', nets=(lab, lab)))
+            arms.append({'name': f'{sn} {a}', 'kind': 'mirror', 'deck': a, 'jobs': ids})
+            continue
+        for x, y in ((a, b), (b, a)):
+            t = (tb.get(x) or {}).get('table')
+            if t is None:
+                continue
+            none = all_main_table(t, tb[x]['main'])
+            ty = (tb.get(y) or {}).get('table')
+            if ty is None:                         # (Y without a table of its own: a fixed opponent, all main)
+                ty = main_only_table(f"{t['version']}-{y}", tb[y]['names'], tb[y]['counts'], tb[y]['main'])
+            pairs = []
+            for p, q, xs in orientations(x, y):
+                for c in (0, 1):
+                    base = spec_fn(p, q, c)
+                    js = []
+                    for what, tx in (('plan', t), ('none', none)):
+                        jid = f'P.{al[x]}-{al[y]}.s{xs}.c{c}.{what}'
+                        js.append(jid)
+                        jobs.append(_job(jid, 'plan', net, net, (p, q), c, 'a0', n // 4, cell_seed(seed, p, q, xs),
+                                         _with_seat_tables(base, {xs: tx, 1 - xs: ty}), play,
+                                         f"{lab}: {x} {'with its table' if what == 'plan' else 'all main'} vs {y} "
+                                         f"(chooser seat {c})", nets=(lab, lab)))
+                    pairs.append((js[0], js[1], xs))
+            arms.append({'name': f'{sn} {x}', 'kind': 'pair', 'deck': x, 'pairs': pairs})
+    return jobs, arms
+
+
 # ------------------------------------------------------------------ the match process
 def play_job(job):
     """A job's matches (the process's side; tests call it here) -> {'v', 'id', 'hash', 'rows', ...}."""
@@ -537,6 +623,9 @@ def report_md(rep):
     if j:
         L += [f"Judging: {j.get('matches')} matches ({j.get('games_per_match')} games a match), "
               f"{(j.get('seconds') or 0) / 3600:.2f} process-hours.", '']
+    if rep.get('sb_health'):
+        from .sbhealth import md_lines
+        L += md_lines(rep['sb_health'])
     for n in rep.get('notes') or []:
         L.append(f'* {n}')
     return '\n'.join(L).rstrip() + '\n'

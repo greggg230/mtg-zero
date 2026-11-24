@@ -39,6 +39,7 @@ import time
 
 from . import config as C
 from . import judge as J
+from . import sbhealth as SB
 from . import sources as S
 from .state import State, jload, jsave, new, now, sha256, stamp, text_save
 
@@ -1032,6 +1033,9 @@ class Stew:
     def _judge_once(self, phase, g, jcfg, stall, parts):
         jobs = J.plan_jobs(phase, self.st, g, jcfg, self.pair_spec_json, self.judge_play(),
                            records=self.p('judge', 'records') if jcfg['records'] else None, stall=stall, parts=parts)
+        if jcfg.get('plan_arm') and phase in ('judge_deck_gap', C.SKIP_PHASE):
+            pj, _ = J.plan_arm_jobs(self.st, g, jcfg, self.pair_spec_json, self.judge_play(), self.plan_tables(g))
+            jobs += J.with_records(pj, self.p('judge', 'records') if jcfg['records'] else None, g)
         if not jobs:
             if phase == C.SKIP_PHASE:
                 self.write_report(g)
@@ -1226,6 +1230,25 @@ class Stew:
                 self.release_lock()
         return how
 
+    # ---------------------------------------------------------------- sideboarding health (docs/ENGINE.md 260)
+    def plan_tables(self, g):
+        """{specialist: {deck: its newest choice table, names, 75 and main}} at version g + 1's checkpoint (the plan
+        arm's tables; a specialist without a matchup version: {})."""
+        out = {}
+        for a, b, sn in self._pairs_named():
+            v = self.st.version(sn, g + 1)
+            if v is None:
+                continue
+            out[sn] = SB.newest_tables(self.st.abs(self.st.net(sn)['run']), a if a == b else None, v['iter'])
+        return out
+
+    def sb_health(self, g):
+        """The report's sideboarding health (None: recipe.sb_health off); never fails the report."""
+        try:
+            return SB.section(self, g)
+        except Exception as e:                 # noqa: BLE001 - said in the report, the stew goes on
+            return {'error': f'{type(e).__name__}: {e}', 'alerts': [f'the sideboarding health failed: {e}']}
+
     # ---------------------------------------------------------------- reports
     def write_report(self, g):
         st = self.st
@@ -1252,6 +1275,9 @@ class Stew:
         sw = self.distil_summary(g)
         if sw is not None:
             rep['stews'] = sw
+        sb = self.sb_health(g)
+        if sb is not None:
+            rep['sb_health'] = sb
         jsave(self.p('reports', f'gen_{g:03d}.json'), rep)
         text_save(self.p('reports', f'gen_{g:03d}.md'), J.report_md(rep))
         return rep
@@ -1294,6 +1320,7 @@ class Stew:
             L.append(f"  farm runs to pause: {st.d['farm_to_pause']}")
         if st.d.get('errors'):
             L.append(f"  last error: {st.d['errors'][-1]}")
+        L += SB.status_lines(self)
         reps = sorted(os.listdir(self.p('reports'))) if os.path.isdir(self.p('reports')) else []
         if reps:
             L.append(f"  last report: {self.p('reports', reps[-1])}")

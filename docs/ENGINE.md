@@ -48094,3 +48094,98 @@ events tagged with their game (sideboarding choices only in games 2-3, without a
 their game, light rows equal to full rows, ingest idempotent (a second ingest, `--redo`, a state with `chained_skipped`),
 an older database's files read as single games, a match whose boundary is falsified fails loudly. The existing gamedb
 tests pass unchanged. Gate: python tier (below).
+
+## 260. Sideboarding health in every stew report: the choice tables, play by game number and deck mode, the colour-conditional answers' aim, plan vs no plan (`mtgz/stew/sbhealth.py`, `recipe.sb_health`, `recipe.judge.plan_arm`; branch `feat/stew-sb-health`, 2026-11-24)
+
+**Why.** The stew's specialists learn sideboarding pb3's way (240): 85% of post-board seats are dealt a random 60 of
+their 75 and the rest play the per-pairing matchup model's choice table. On the first stew the Delver-mirror
+specialist's tables have been all main in every context since its first version, while a forced A/B of pb3's own table
+against the all-main table on that specialist's net scored 55.7% +- 2.5 for pb3's plan, and ~20-27% of its Pyroblast /
+Hydroblast casts target the wrong colour (the spell does nothing). This is fix "C" of the sideboarding plan: standing
+numbers that every generation's report shows, so the later fixes (exploring sideboard plans, dealing decks near
+candidate plans) are judged by them.
+
+**260.1 What the section holds** (`sbhealth.section`, per specialist, at the generation's version: the newest matchup
+version at or before its version g + 1's iteration; play and card use over the window of its newest `iters`
+iterations, default `recipe.turn_iters`):
+* **Choice tables**: per deck of the pairing, the newest version's state (`all main`: the main 60 in all 24 contexts;
+  `no table`: the version published none, its seats choose by search; `boards`), its **streak** (consecutive versions,
+  newest first, in that state), the swaps per context (min / mean / max), each card's mean copies in / out and the most
+  common 60s as changes against the main.
+* **Play by game and deck mode**: per deck, game number and mode (`main` / `dealt` / `table` / `chosen`) the seats,
+  their mean score and the mean cards brought in - from the game database (259) when it holds the window's
+  iterations, else from the run's own best-of-three game log (`<run>/games/*.jsonl`, local self-play only; the source is
+  named in the table).
+* **Card use**: every cast of a colour-conditional answer - a spell whose every mode is `only_if HasColor` in the card
+  IR (`conditional_answers`: Pyroblast, Hydroblast; Red / Blue Elemental Blast when the pools carry them) - per casting
+  deck and game number: right colour / **wrong colour** (the target lacks the colour the chosen mode needs; a land is
+  colourless) / unknown / no target, and the counter mode's share (the mode whose effect is `CounterSpell`). The target
+  is the first `target` event after the cast and before the next cast, activation or trigger; the mode its `mode N`
+  line. Colours come from the IR printings (`colour_map`): face colours or colour indicator, else the mana cost's
+  coloured symbols; a split card's name its faces' together (CR 709.4) and each face its own; a double-faced card's name
+  its front's (CR 712.8a), its back face's name its own; tokens as their creating effect prints them (Cori-Steel
+  Cutter's Monk is white, Tamiyo's Clue colourless). A name the IR does not know, or knows with two different colours,
+  is **unknown**, counted apart, never guessed. Card use needs the database: a run not ingested says "not ingested"
+  (and why) in the table and as an alert, never a zero.
+* **Reference** (`sbhealth.REFERENCE`, the maintainer's notes blast_targeting_pb3_2026-11-16 and
+  sideboard_play_analysis_2026-11-15): the Delver best-of-three lineage's do-nothing casts (wrong colour or a land) -
+  pb2 at iteration 96: Pyroblast 32%, Hydroblast 37%; pb3 at 88: 15%, 13% - and counter-mode shares (pb2 12% / 5%, pb3
+  20% / 20%), shown beside each card's numbers; each rate's level is `pb3-like` (at or below pb3's), `pb2-like` (at or
+  above pb2's) or between. The user's hypothesis, supported there: pb3's matchup model found a signal at once because
+  pb2 had practised the sideboard cards on dealt decks first (dealt p 0.5, swaps [1, 8], 166 iterations); the stew's
+  mirror was seeded from pb1@262 and skipped that stage - so the misaim rate is the matchup model's readiness signal.
+* **Alerts**: a deck's table all main for `all_main_versions` (2) or more consecutive versions; a card's wrong-colour
+  rate above its line over at least `min_casts` (30) casts - `misaim_alert` 'reference' (default: the pb2 rate, the
+  fallback 15% for a card without a reference) or one rate for every card; card use not ingested. Alerts head the
+  section.
+
+**260.2 Options.** `recipe.sb_health` (default true; false: off - the report and `status` exactly as before):
+{`iters`, `misaim_alert`, `misaim_fallback`, `min_casts`, `all_main_versions`, `gamedb` (the databases' root; null:
+tools/gamedb.py's)}. The section never fails the stew loop: a missing or failing database or log is said in the
+section (`Stew.sb_health` catches everything). A database is used only when its `state.json` exists and holds no
+iteration past the run's newest checkpoint + 1 (a database of another run of the same name - the fakes' runs share the
+live specialists' names - is refused as not ingested). `tools/stew.py status` adds one line per specialist: its newest
+table's state and streak per deck (no database read).
+
+**260.3 Plan vs no plan** (`recipe.judge.plan_arm`, default false: the judging's cost unchanged; `plan_matches` 200, a
+multiple of 4). In `judge_deck_gap` and `judge_specialists`, per specialist that trained this round (version g + 1 not
+`skipped`) with a choice table: its version g + 1 net on both seats, one seat its newest table (the plan), the other the
+all-main table of the same 75 (`sbhealth.all_main_table`: the same list and contexts, the main 60 in each).
+`judge.plan_arm_jobs` (ids `P.`; the stew's job hashing, result reuse and records like every judge job):
+* a **mirror**: post-board only (`start_game` 2, no `chooser` key - the engine refuses one there, 130), two jobs of
+  `plan_matches / 2` on one deal seed with the plan in seat 0 and in seat 1 (paired) -> the plan side's score +- se and
+  Elo (`gen_stats` over the pairs);
+* **two different 75s** (the engine refuses `start_game` 2 there, 147.4): an arm per deck X with a table - X's table
+  against X all main on the same deals (game 1, both mains, is the same match in both jobs), the other deck Y on its own
+  newest table (an all-main table when it has none: `main_only_table`), both orientations x both game-1 choosers,
+  `plan_matches / 4` a job -> X's match score with its table minus all main, paired +- se.
+
+The tables go on the seats as `decks.pN_table` (each checked against its seat's 75). The report's "Plan vs no plan"
+table lists the arms (`sbhealth.plan_stats`).
+
+**260.4 Tests** (`tests/test_stew_sbhealth.py`, fakes, no process): table stats and streaks from synthetic mirror and
+two-75 versions (a version without a table), the alerts (all main, misaim against the reference and a numeric line,
+min casts, not ingested), the reference values, the colour map (split, double-faced, tokens, two sources disagreeing)
+and the classification, card-use counting per game number with the counter share, the real IR's blasts, the game-log
+fallback and the no-log / no-database notes, a database of another run refused, the plan arm's jobs (a mirror: tables
+on the right seats, `start_game` 2, no chooser, one seed, the engine's spec check; two 75s: plan / none on common
+deals, the chooser kept, Y's fixed table; a table of the wrong 75 refused), the plan statistics, the section's
+Markdown, the options and the config's checks, the orchestrator's report with the plan arm on the fakes, and
+`sb_health` false (no section, no `P.` job, no status line).
+
+**260.5 Measured: the first stew, generation 2** (read-only: the section computed against the stew's state, its three
+specialist runs' matchup versions and their game databases, iterations 33-64 for the mirror - it sat out generation 2
+- and 65-96 for the others, all ingested; 2.7 s). Alerts:
+* the Delver mirror's table all main for 3 consecutive versions (v0016-v0048, every version it has);
+* Sneak and Show's table all main for 4 consecutive versions (v0016-v0064) in the Sneak specialist;
+* Delver's Hydroblast against Doomsday wrong colour in 98.1% of 1,273 casts (Doomsday has no red: Hydroblast is a
+  dead card there; the dealt 60s carry it);
+* Delver's Pyroblast against Sneak and Show 33.2% of 7,293 (pb2-like), Hydroblast 46.5% of 4,561 (pb2-like).
+
+The mirror: Pyroblast 25.7% wrong (14,587 casts, counter mode 24.1%), Hydroblast 20.2% (9,846; 20.9%) - between pb3
+and pb2. Against Doomsday Delver's Pyroblast is at 17.6% (counter 38.1%). Play: in the mirror the table seats (all
+main) score 63.9% in game 2 and 63.0% in game 3 against the dealt seats' 47.5% (7.5 cards in): a random dealt 60 is
+the weaker deck. The Doomsday and Sneak specialists' tables board 3-4 cards per context (Delver: Force of Negation in
+for Wasteland / Unholy Heat; Doomsday: Murktide and Flusterstorm in for Edge of Autumn and Lion's Eye Diamond).
+
+**260.6 Gate.** Python only (tier `python`).

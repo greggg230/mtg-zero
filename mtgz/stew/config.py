@@ -44,7 +44,11 @@ DEFAULT_DISTILL = {'steps': 20000, 'batch': 512, 'lr': 5e-4, 'lr_min': 1e-5, 'wa
                    'ram_budget_gb': 20, 'seed': 1}
 DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims': 64, 'device': 'cuda', 'threads': 16,
                  'groups': 1, 'procs': 1, 'seed': 0, 'chance_k': 2, 'precision': None, 'gen_over_gen': True,
-                 'main_arms': True, 'est_s_per_match': 3.5, 'records': False, 'between': []}
+                 'main_arms': True, 'est_s_per_match': 3.5, 'records': False, 'between': [],
+                 'plan_arm': False, 'plan_matches': 200}
+# recipe.judge.plan_arm (docs/ENGINE.md 260; off: the judging's cost unchanged): per specialist that trained, its newest
+# net on both seats, one seat its newest choice table, the other all main, `plan_matches` matches an arm
+# (mtgz.stew.judge.plan_arm_jobs); the report's "plan vs no plan".
 # The stall rule (docs/ENGINE.md 251): after a specialist's turn the judge plays its new version against its version of
 # `window` turns before (paired, `matches` matches; extended by `matches` at a time up to `max_matches` while the gain is
 # positive but not significant); no gain significant at one-sided z >= `z` = the algorithm's recommendation STALLED, and a
@@ -55,7 +59,9 @@ JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend 
 DEFAULT_RECIPE = {'game': 'mtg', 'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
                   'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
                   'distill_iters': 6, 'retention_share': 'field', 'judge': DEFAULT_JUDGE, 'hold_after': [], 'env': {},
-                  'archive': 'copy', 'stall': DEFAULT_STALL, 'distill_every': 1}
+                  'archive': 'copy', 'stall': DEFAULT_STALL, 'distill_every': 1, 'sb_health': True}
+# recipe.sb_health (docs/ENGINE.md 260, mtgz.stew.sbhealth): the report's sideboarding health - true (the defaults,
+# sbhealth.DEFAULT), {options} or false (off).
 DEFAULT_CODE = {'worktree': None, 'sha': None, 'python': None, 'farm': None, 'farm_gates': True}
 FARM_KEYS = ('pool_build', 'pool_runtime', 'pool_worker', 'pool_alternates', 'pool_variants', 'pool_min_agent')
 
@@ -302,6 +308,16 @@ def normalize(cfg, check_lists=True):
     if not isinstance(j['records'], bool):
         raise ConfigError(f"recipe.judge.records {j['records']!r}: true (every judged match's game record is kept: "
                           f"judge/records/, docs/ENGINE.md 250) or false")
+    if not isinstance(j['plan_arm'], bool):
+        raise ConfigError(f"recipe.judge.plan_arm {j['plan_arm']!r}: true (plan vs no plan, docs/ENGINE.md 260) or false")
+    if isinstance(j['plan_matches'], bool) or not isinstance(j['plan_matches'], int) or j['plan_matches'] < 4             or j['plan_matches'] % 4:
+        raise ConfigError(f"recipe.judge.plan_matches {j['plan_matches']!r}: a positive multiple of 4")
+    if j['plan_arm'] and r['format'] != 'bo3':
+        raise ConfigError('recipe.judge.plan_arm: sideboarding plans are a best-of-three matter (format "bo3")')
+    from .sbhealth import check_options
+    e = check_options(r['sb_health'])
+    if e:
+        raise ConfigError(e)
     bt = j['between']
     if not isinstance(bt, list) or [x for x in bt if x not in BETWEEN] or len(set(bt)) != len(bt):
         raise ConfigError(f"recipe.judge.between {bt!r}: a list of {BETWEEN} (what a generation without distillation "
