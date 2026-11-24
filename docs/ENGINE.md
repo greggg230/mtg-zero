@@ -48014,3 +48014,28 @@ trained again, stall tests not replayed, one log entry); the stall rule's first 
 add-deck with the newest main stew three generations old, and with a request at the same start; a hold after
 `judge_specialists`; `judge_specialists` interrupted mid-extension and resumed; PAUSE and a crash around a
 distillation asked for, a request then STOP inside a turn. tests/test_stew.py is unchanged and passes.
+
+## 258. No local burst at a trainer's start, and the torch worker's out-of-memory says which memory (zero-core pin c10104d -> 9538e15, docs/az.md 83 + 84; branch `feat/pin-pool-live-start`, 2026-11-24)
+
+**Why.** The first stew's specialists run with `selfplay_local` 0 (the desktop plays its self-play only through the
+farm), but every trainer start - each specialist turn, each re-pin - played a full local burst at `games`' concurrency
+until the farm's first game was accepted (10-25 minutes: the generation's export and registration, the coordinator's
+first lease, the worker's pack, the first best-of-three match), on the GPU the farm's own worker on the desktop wanted,
+and the trainer then kept that memory (zero-core docs/az.md 84). Separately the farm's torch worker reported "CUDA out
+of memory" with most of the card free when its Windows job object hit its commit limit (docs/az.md 83).
+
+**258.1 The pin.** `third_party/zero-core` c10104d -> 9538e15 (`fix/pool-live-start`: main c10104d + the run setting
+`pool_live_start` (az.md 84) + a merge of `fix/torch-worker-1124` (az.md 83)). What changes for a run of this package:
+nothing unless its config sets `pool_live_start` true (default false: `Pool.live` exactly as before); the torch
+worker's fatal error on an out-of-memory now names host or device memory (`host_memory`, `oom_note`) - its message
+only, no game, row or result changes. `crates/worker/src/run_settings.json` gains the trainer-class entry
+`pool_live_start`, so the worker build's Rust inputs move and this commit needs its own farm release.
+
+**258.2 Using it.** In a specialist's or run's `config.json` (after a re-pin onto this commit or later):
+`"pool_live_start": true` beside `"selfplay_local": 0`. The first stew's specialists get it at their re-pin onto this
+release (the owner's go, 2026-11-23).
+
+**Tests and gates.** zero-core: tests/test_farm_pool.py `test_pool_live_start_plays_no_burst_while_the_farm_starts`
+(new) and `test_selfplay_local_0_leaves_the_games_to_a_delivering_farm` (unchanged, the default); the whole zero-core
+suite on 9538e15; the worker crate's classify tests. This repo: the optin-core and python gates on this commit (results
+below when they finish). **Measured**: not yet - the first stew's generation-2 specialist turns.
