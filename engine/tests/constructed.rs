@@ -261,6 +261,137 @@ fn the_hogaak_75_plays_best_of_one_and_best_of_three() {
     }
 }
 
+/// The Legacy Lands 76 (ENGINE.md 270): its provenance, the export it was read from (MTGGoldfish's export field, a
+/// `sideboard` line before the 15; Carnivorous Cultivator by its front face there), 61 main as listed - legal, CR
+/// 100.2a's minimum is 60 - and 15 sideboard, every card supported in constructed play, the deck rules over both
+/// together (CR 100.2a, 100.4a: Disruptor Flute two and one), and the legacy cards in it - the sixteen of ENGINE.md
+/// 270.1-270.3 and the Delver sideboard's Disruptor Flute - in the registry's order.
+#[test]
+fn the_lands_75_and_its_provenance() {
+    let d = Decklist::legacy_lands();
+    assert_eq!(d.name, "Lands");
+    assert_eq!(
+        (d.player.as_str(), d.event.as_str(), d.date.as_str()),
+        ("juubs", "North American Eternal Weekend - Legacy Championship", "2026-10-31")
+    );
+    assert_eq!(d.source, "https://www.mtggoldfish.com/deck/8027955");
+    assert_eq!(d.main.iter().map(|e| e.0).sum::<u32>(), 61);
+    assert_eq!(d.sideboard.iter().map(|e| e.0).sum::<u32>(), 15);
+    let (main, side) = d.parse_export(constructed::LEGACY_LANDS_EXPORT).unwrap();
+    assert_eq!(main, d.main);
+    assert_eq!(side, d.sideboard);
+    assert!(constructed::LEGACY_LANDS_EXPORT.lines().any(|l| l.trim_end() == "4 Carnivorous Cultivator"));
+    assert!(d.main.contains(&(4, "Carnivorous Cultivator // Enroot".to_string())));
+    assert!(d.unsupported_sideboard(db()).is_empty());
+    let (ids, sb) = (Decklist::ids(db(), &d.main).unwrap(), Decklist::ids(db(), &d.sideboard).unwrap());
+    assert_eq!((ids.len(), sb.len()), (61, 15));
+    assert!(ids.len() <= constructed::MAX_DECK);
+    constructed::check(db(), &ids, &sb).unwrap();
+    // Disruptor Flute is two in the deck and one in the sideboard: two more in the sideboard make five over both
+    // (100.4a).
+    let flute = db().expect_id("Disruptor Flute").unwrap();
+    let mut five = sb.clone();
+    five[..2].fill(flute);
+    assert!(constructed::check(db(), &ids, &five).unwrap_err().contains("5 copies of Disruptor Flute"));
+    // A best-of-three's decks are exactly 60 (the user's format restriction, ENGINE.md 120): the registered 61 is
+    // refused there (ENGINE.md 270.4: open, the user's call), played in best-of-one.
+    let (m, sbn) = (d.main_names(), d.sideboard.iter().flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect::<Vec<_>>());
+    let bo3 = serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": m, "p1": m, "p0_sideboard": sbn, "p1_sideboard": sbn}});
+    assert!(MtgSpec::parse(&bo3.to_string()).unwrap_err().contains("exactly 60"));
+    MtgSpec::parse(&serde_json::json!({"constructed": true, "decks": {"p0": m, "p1": m}}).to_string()).unwrap();
+    let has = |list: &[(u32, String)], n: &str| list.iter().any(|e| e.1 == n);
+    let reg = identity::legacy_registry();
+    let in_main: Vec<&str> = reg.iter().copied().filter(|n| has(&d.main, n)).collect();
+    assert_eq!(
+        in_main,
+        [
+            "Disruptor Flute",
+            "Exploration",
+            "Ghost Quarter",
+            "The Tabernacle at Pendrell Vale",
+            "Pithing Needle",
+            "Maze of Ith",
+            "Life from the Loam",
+            "Bojuka Bog",
+            "Dark Depths",
+            "Carnivorous Cultivator // Enroot",
+            "Yavimaya, Cradle of Growth",
+            "Thespian's Stage",
+            "Blast Zone"
+        ]
+    );
+    let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
+    assert_eq!(side_only, ["Choke", "Cursed Totem", "Damping Sphere", "Torpor Orb"]);
+    // The sixteen new cards are the registry's lines after Massacre, in the deck's order - main then sideboard, each
+    // at its first appearance (identities 576-591; ENGINE.md 270.4).
+    let k = reg.iter().position(|&n| n == "Exploration").unwrap();
+    assert_eq!(reg[k - 1], "Massacre");
+    assert_eq!(reg.len(), k + 16);
+    let mut order: Vec<&str> = Vec::new();
+    for (_, n) in d.main.iter().chain(&d.sideboard) {
+        if reg[k..].contains(&n.as_str()) && !order.contains(&n.as_str()) {
+            order.push(n);
+        }
+    }
+    assert_eq!(reg[k..], order[..]);
+}
+
+/// The Lands deck plays: best-of-one games of its 61 against the Delver, Doomsday, Sneak and Show and Hogaak 60s and
+/// itself, and - its main less one Forest, a best-of-three's decks being exactly 60 (ENGINE.md 120, 270.4) -
+/// constructed best-of-three matches with its real sideboard (Endurance too) against each 75, each by random actions
+/// to its end; the network's row finite at every decision.
+#[test]
+fn the_lands_75_plays_best_of_one_and_best_of_three() {
+    let l = Decklist::legacy_lands();
+    let others = [
+        delver(),
+        Decklist::legacy_doomsday(),
+        Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap(),
+        Decklist::legacy_hogaak(),
+        l.clone(),
+    ];
+    let side = |d: &Decklist| -> Vec<String> { d.sideboard.iter().flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect() };
+    let sixty = |d: &Decklist| -> Vec<String> {
+        let mut m = d.main_names();
+        if m.len() == 61 {
+            let i = m.iter().position(|n| n == "Forest").unwrap();
+            m.remove(i);
+        }
+        m
+    };
+    let play = |spec: &MtgSpec, seed: u64| -> (u32, usize) {
+        let mut g = MtgAz::new_game(spec, 2, seed).unwrap();
+        let mut rng = Rng::new(seed ^ 0x1A2D5);
+        let (mut keys, mut steps) = (Vec::new(), 0usize);
+        while g.to_move().is_some() {
+            let lg = legal(&g);
+            let p = g.to_move().unwrap();
+            assert!(engine::az::tail_encode::Row::of_az(&g, p).flat().iter().all(|x| x.is_finite()));
+            g.step(lg[rng.below(lg.len() as u32) as usize], &mut keys).unwrap();
+            steps += 1;
+            assert!(steps < 200_000, "seed {seed}: no end");
+        }
+        (g.m.game_no as u32, steps)
+    };
+    for (k, o) in others.iter().enumerate() {
+        for seat in 0..2u64 {
+            let (p0, p1) = if seat == 0 { (l.main_names(), o.main_names()) } else { (o.main_names(), l.main_names()) };
+            let bo1 = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": p0, "p1": p1}}).to_string()).unwrap();
+            play(&bo1, 20 * k as u64 + seat);
+            let (p0, p1) = if seat == 0 { (sixty(&l), sixty(o)) } else { (sixty(o), sixty(&l)) };
+            let (s0, s1) = if seat == 0 { (side(&l), side(o)) } else { (side(o), side(&l)) };
+            let bo3 = MtgSpec::parse(
+                &serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",
+                    "decks": {"p0": p0, "p1": p1, "p0_sideboard": s0, "p1_sideboard": s1}})
+                .to_string(),
+            )
+            .unwrap();
+            let (games, _) = play(&bo3, 200 + 20 * k as u64 + seat);
+            assert!((2..=3).contains(&games), "a best-of-three of {games} games");
+        }
+    }
+}
+
 #[test]
 fn cr_100_2a_and_100_4a_constructed_deck_rules() {
     let db = db();

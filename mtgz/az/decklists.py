@@ -38,6 +38,9 @@ SNEAK_SHOW = 'sneak_show_8014220'
 # (12-3); https://www.mtggoldfish.com/deck/8027954. Every spec here takes it by name (`mirror_spec`, `mirror_bo3_spec`,
 # `pair_spec`, `metagame_spec(decks=META3 + (LEGACY_HOGAAK,))`); no preset plays it (a run's metagame is the user's call).
 LEGACY_HOGAAK = 'hogaak_tempo_8027954'
+# The Legacy Lands deck (ENGINE.md 270): MTGGoldfish 8027955, 61 main (as listed) + 15; by name in every spec helper
+# like the Hogaak deck; no preset plays it.
+LEGACY_LANDS = 'lands_8027955'
 
 # The three-deck Legacy metagame (docs/ENGINE.md 176): Izzet Delver, Doomsday, Sneak and Show.
 META3 = (IZZET_DELVER, LEGACY_DOOMSDAY, SNEAK_SHOW)

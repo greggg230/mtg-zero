@@ -61,6 +61,29 @@ def test_the_hogaak_deck_and_its_loader():
     assert not any(decklists.LEGACY_HOGAAK in p.get('spec', '') for p in A.PRESETS.values())
 
 
+def test_the_lands_deck_and_its_loader():
+    # ENGINE.md 270: the Legacy Lands deck, 61 main as listed (legal: CR 100.2a's minimum is 60) and 15, by name in every
+    # spec helper's best-of-one; best-of-three refuses its 61 (a best-of-three's decks are exactly 60, ENGINE.md 120:
+    # the user's call, 270.4). No preset plays it.
+    d = decklists.load(decklists.LEGACY_LANDS)
+    assert (d['player'], d['event'], d['date'], d['result']) == (
+        'juubs', 'North American Eternal Weekend - Legacy Championship', '2026-10-31', '6th place, 12-3')
+    assert d['source'] == 'https://www.mtggoldfish.com/deck/8027955'
+    main, side = decklists.names(d['main']), decklists.names(d['sideboard'])
+    assert len(main) == 61 and len(side) == 15
+    assert main.count('Dark Depths') == 3 and side.count('Endurance') == 2
+    E = G.engine()
+    for spec in (decklists.mirror_spec(decklists.LEGACY_LANDS),
+                 decklists.pair_spec(decklists.LEGACY_LANDS, decklists.IZZET_DELVER),
+                 decklists.metagame_spec(decks=decklists.META3 + (decklists.LEGACY_LANDS,))):
+        g = E.Game('mtg', spec, 2, 1)
+        assert not g.over
+    with pytest.raises(ValueError, match='exactly 60'):
+        decklists.pair_spec(decklists.LEGACY_LANDS, decklists.IZZET_DELVER, fmt='bo3')
+    import mtgz.az as A
+    assert not any(decklists.LEGACY_LANDS in p.get('spec', '') for p in A.PRESETS.values())
+
+
 def test_the_presets():
     import mtgz.az as A
     for name in ('delver-mirror', 'delver-smoke'):

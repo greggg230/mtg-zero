@@ -60,6 +60,15 @@ pub const LEGACY_HOGAAK: &str = include_str!("../../../data/decks/hogaak_tempo_8
 /// read 2026-11-21; `/deck/download/8027954` returns 403), a `sideboard` line
 /// before the sideboard.
 pub const LEGACY_HOGAAK_EXPORT: &str = include_str!("../../../data/decks/hogaak_tempo_8027954.txt");
+/// The Legacy Lands deck (ENGINE.md 270): MTGGoldfish's archetype "Legacy
+/// Lands" (paper), its representative list, deck 8027955: "Lands" by juubs,
+/// North American Eternal Weekend - Legacy Championship, 2026-10-31, 6th
+/// place (12-3), paper; <https://www.mtggoldfish.com/deck/8027955>. 61 main
+/// (as listed: legal, CR 100.2a) and 15 sideboard.
+pub const LEGACY_LANDS: &str = include_str!("../../../data/decks/lands_8027955.json");
+/// Its export, verbatim: the archetype page's export field (`deck_input[deck]`,
+/// read 2026-11-24), a `sideboard` line before the sideboard.
+pub const LEGACY_LANDS_EXPORT: &str = include_str!("../../../data/decks/lands_8027955.txt");
 
 /// A basic land card (CR 205.4c, 100.2a: any number in a deck).
 pub fn is_basic_land(d: &CardDef) -> bool {
@@ -173,6 +182,11 @@ impl Decklist {
     /// The Legacy Hogaak Tempo 75 (ENGINE.md 220).
     pub fn legacy_hogaak() -> Decklist {
         Decklist::parse(LEGACY_HOGAAK).expect("data/decks/hogaak_tempo_8027954.json")
+    }
+
+    /// The Legacy Lands 76 (ENGINE.md 270: 61 main, 15 sideboard).
+    pub fn legacy_lands() -> Decklist {
+        Decklist::parse(LEGACY_LANDS).expect("data/decks/lands_8027955.json")
     }
 
     /// An export ("4 Brainstorm" lines; then the sideboard after a blank line,
