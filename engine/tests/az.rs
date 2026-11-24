@@ -1521,6 +1521,127 @@ fn lands_a_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The Legacy Lands lane B positions (ENGINE.md 270.2): dredge questions (a turn's draw, Brainstorm's draws with draws
+/// left, the 616.1 order question with Quantum Riddler and the forced question after it), a prepared Carnivorous
+/// Cultivator with its Enroot copy in exile (castable at priority), Yavimaya making both players' lands Forests (with
+/// and without Magus of the Moon), Exploration with one land played.
+fn lands_b_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    const LOAM: &str = "Life from the Loam";
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [(LOAM, 4), ("Exploration", 4), ("Carnivorous Cultivator // Enroot", 4), ("Yavimaya, Cradle of Growth", 4), ("Brainstorm", 4), ("Forest", 20), ("Island", 20)] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 270).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let lib = ["Island", "Forest", LOAM, "Island", "Forest", "Island", "Forest", "Island"];
+    let mut out = Vec::new();
+    // The turn's draw, a dredge question (two Loams: two options).
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &lib)
+        .library(1, &lib)
+        .graveyard(0, &[LOAM, "Forest", LOAM])
+        .battlefield(0, &["Yavimaya, Cradle of Growth", "Island", "Exploration"])
+        .battlefield(1, &["Island", "Forest"])
+        .hand(0, &["Brainstorm", "Forest"])
+        .at(Step::Upkeep, 0)
+        .start();
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::ChooseGraveyardCard) {
+            break;
+        }
+        g.pass();
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard), "the turn's dredge question");
+    out.push(("lands_b", wrap(&g)));
+    let loam = g.player(0).graveyard[0];
+    g.choose(Choice::Card(loam));
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::Priority) && g.turn().step == Step::Main1 {
+            break;
+        }
+        g.pass();
+    }
+    // Exploration, one land played; Yavimaya's Forests.
+    let f = g.card(0, "Forest", Zone::Hand);
+    g.choose(Choice::Play(f));
+    out.push(("lands_b", wrap(&g)));
+    // Brainstorm: its three draws, each a dredge question while a Loam is in the graveyard.
+    let bs = g.card(0, "Brainstorm", Zone::Hand);
+    g.choose(Choice::Cast(bs));
+    for _ in 0..60 {
+        let Some(d) = g.pending_decision() else { break };
+        if d.kind == DecisionKind::ChooseHandCard {
+            break;
+        }
+        if d.kind == DecisionKind::ChooseGraveyardCard {
+            out.push(("lands_b", wrap(&g)));
+            let c = d.options[0].choice;
+            g.choose(c);
+            continue;
+        }
+        if d.kind == DecisionKind::Priority {
+            g.pass();
+            continue;
+        }
+        let c = d.options[0].choice;
+        g.choose(c);
+    }
+    // The 616.1 order question (Quantum Riddler, one card in hand), then the forced question.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &lib)
+        .library(1, &lib)
+        .graveyard(0, &[LOAM])
+        .battlefield(0, &["Quantum Riddler", "Yavimaya, Cradle of Growth"])
+        .battlefield(1, &["Magus of the Moon", "Island"])
+        .at(Step::Upkeep, 0)
+        .start();
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::ChooseReplacement) {
+            break;
+        }
+        g.pass();
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseReplacement), "the order question");
+    out.push(("lands_b", wrap(&g)));
+    g.choose(Choice::Number(7));
+    out.push(("lands_b", wrap(&g)));
+    // A prepared Cultivator, its Enroot castable.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &lib)
+        .library(1, &lib)
+        .battlefield(0, &["Forest", "Forest", "Forest"])
+        .hand(0, &["Carnivorous Cultivator // Enroot"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Carnivorous Cultivator // Enroot", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    for _ in 0..40 {
+        let Some(d) = g.pending_decision() else { break };
+        if d.kind == DecisionKind::Priority && g.stack().is_empty() {
+            break;
+        }
+        if d.kind == DecisionKind::Priority {
+            g.pass();
+            continue;
+        }
+        let c = d.options[0].choice;
+        g.choose(c);
+    }
+    assert!(g.is_prepared(c), "the Cultivator prepared");
+    out.push(("lands_b", wrap(&g)));
+    out
+}
+
 /// The 601.2g step's positions (ENGINE.md 231): Hogaak castable only through a Chromatic Star activated while it is
 /// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
 /// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
@@ -1685,6 +1806,7 @@ fn public_state_reaches_the_encoding() {
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(lands_b_positions());
     pos.extend(cast_mana_positions());
     pos.extend(eoe_exile_positions());
     pos.extend(v8_positions());
@@ -1946,6 +2068,7 @@ fn public_states_encode_apart() {
     pos.extend(enclosing_picks_positions());
     pos.extend(found_positions());
     pos.extend(hogaak_positions());
+    pos.extend(lands_b_positions());
     pos.extend(cast_mana_positions());
     pos.extend(eoe_exile_positions());
     pos.extend(v8_positions());
@@ -3078,7 +3201,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
     // prediction at tilt 1, from a stream of its own)
     let (mut trng, mut tilted) = (Rng::new(106), 0);
-    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()).chain(lands_a_positions()) {
+    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()).chain(lands_a_positions()).chain(lands_b_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };

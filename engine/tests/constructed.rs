@@ -211,10 +211,11 @@ fn the_hogaak_75_and_its_provenance() {
     assert_eq!(in_main, ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor"]);
     let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
     assert_eq!(side_only, ["Consign to Memory", "Massacre"]);
-    // The seven new cards are the registry's lines 23-29, in the deck's order (identities 569-575; the Legacy Lands
-    // deck's follow, ENGINE.md 270).
+    // The seven new cards are seven consecutive lines of the registry, in the deck's order (identities 569-575;
+    // the Legacy Lands cards follow them, ENGINE.md 270).
+    let first = reg.iter().position(|&n| n == "Hogaak, Arisen Necropolis").unwrap();
     assert_eq!(
-        reg[23..30],
+        reg[first..first + 7],
         ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor", "Massacre"]
     );
 }
@@ -367,18 +368,22 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let t = con_ff - con.num_cards() as u16 - cube_tokens;
     let legacy_tokens: Vec<&str> = (con.num_cards() as u16 + cube_tokens..con_ff).map(|i| con.def(i).name.as_str()).collect();
     assert_eq!(legacy_tokens, ["Marit Lage"], "the legacy cards' tokens");
-    // The legacy cards' faces are Rough // Tumble's two halves (a split card,
+    // The legacy cards' faces are Carnivorous Cultivator's prepare spell Enroot
+    // (CR 723, ENGINE.md 270.2) and Rough // Tumble's two halves (a split card,
     // ENGINE.md 122), each with its card's identity, after the cube's faces.
     let rt = con.id("Rough // Tumble").unwrap();
+    let cc = con.id("Carnivorous Cultivator // Enroot").unwrap();
     let ik_all = identity::identities(con);
     let faces: Vec<usize> = (cube.len() - 1 + (k + t) as usize..con.face_down_def() as usize).collect();
     let names: Vec<&str> = faces.iter().map(|&i| con.def(i as u16).name.as_str()).collect();
-    assert_eq!(names, ["Rough", "Tumble"]);
-    for &i in &faces {
-        assert!(con.is_face(i as u16) && !con.def(i as u16).token && con.def(i as u16).front == Some(rt));
-        assert_eq!(ik_all[i], ik_all[rt as usize], "a face has its card's identity");
+    assert_eq!(names, ["Enroot", "Rough", "Tumble"]);
+    for (j, &i) in faces.iter().enumerate() {
+        let card = if j == 0 { cc } else { rt };
+        assert!(con.is_face(i as u16) && !con.def(i as u16).token && con.def(i as u16).front == Some(card));
+        assert_eq!(ik_all[i], ik_all[card as usize], "a face has its card's identity");
     }
-    assert_eq!(con.def(rt).halves, Some((faces[0] as u16, faces[1] as u16)));
+    assert_eq!(con.def(cc).prepare, Some(faces[0] as u16));
+    assert_eq!(con.def(rt).halves, Some((faces[1] as u16, faces[2] as u16)));
     // Then Thespian's Stage's "becomes a copy of target land, except it has
     // this ability" (CR 707.9b; EoE W6's `add_kept_ability_defs`, ENGINE.md
     // 270.1): one definition a definition of the table that lacks the ability
@@ -397,7 +402,9 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
         assert_eq!(ik_all[i], ik_all[o as usize], "{}: its original's identity", con.def(o).name);
     }
     let latent = (0..con.len()).filter(|&i| con.def(i as u16).latent > 0 && !con.def(i as u16).name.is_empty()).count();
-    assert_eq!(con.len(), fd + 1 + kept.len() + 1 + latent, "the legacy faces; the made definitions; the Mountain's definitions");
+    // (And the five basic land types' intrinsic mana abilities, which Yavimaya, Cradle of Growth's Forest grant
+    // brings: `CardDb::basic_abilities`, CR 305.6, ENGINE.md 270.2; the cube's table has none.)
+    assert_eq!(con.len(), fd + 1 + kept.len() + 1 + latent + 5, "the legacy faces; the made definitions; the Mountain's definitions; the basic land types' abilities");
     // (the Mountain's definitions: no name, a registered key, as in the EoE table)
     for i in fd + 1 + kept.len()..con.len() {
         assert!(con.def(i as u16).name.is_empty() && ik_all[i] != identity::UNKNOWN, "definition {i}");

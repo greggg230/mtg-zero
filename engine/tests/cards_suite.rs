@@ -156,3 +156,5 @@ mod cards_m7c_tail3;
 mod cards_m7d;
 #[path = "cards_sneak_show.rs"]
 mod cards_sneak_show;
+#[path = "cards_lands_b.rs"]
+mod cards_lands_b;

@@ -4927,5 +4927,578 @@
       "cardmarket": "https://www.cardmarket.com/en/Magic/Products?idProduct=881696&referrer=scryfall&utm_campaign=card_prices&utm_medium=text&utm_source=scryfall",
       "cardhoarder": "https://www.cardhoarder.com/cards/149191?affiliate_id=scryfall&ref=card-profile&utm_campaign=affiliate&utm_medium=card&utm_source=scryfall"
     }
+  },
+  {
+    "object": "card",
+    "id": "cdb6432f-3f56-4c92-b09a-2a5b64620c04",
+    "oracle_id": "ac8fba34-512c-4f24-999a-ab72f1ce4acb",
+    "multiverse_ids": [
+      696185
+    ],
+    "mtgo_id": 138135,
+    "tcgplayer_id": 624487,
+    "cardmarket_id": 818711,
+    "name": "Life from the Loam",
+    "lang": "en",
+    "released_at": "2025-04-11",
+    "uri": "https://api.scryfall.com/cards/cdb6432f-3f56-4c92-b09a-2a5b64620c04",
+    "scryfall_uri": "https://scryfall.com/card/tdc/96/life-from-the-loam?utm_source=api",
+    "layout": "normal",
+    "highres_image": false,
+    "image_status": "lowres",
+    "image_updated_at": "2026-07-13T01:45:37Z",
+    "image_uris": {
+      "small": "https://cards.scryfall.io/small/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.jpg?1783907137",
+      "normal": "https://cards.scryfall.io/normal/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.jpg?1783907137",
+      "large": "https://cards.scryfall.io/large/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.jpg?1783907137",
+      "png": "https://cards.scryfall.io/png/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.png?1783907137",
+      "art_crop": "https://cards.scryfall.io/art_crop/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.jpg?1783907137",
+      "border_crop": "https://cards.scryfall.io/border_crop/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.jpg?1783907137",
+      "thumb": "https://cards.scryfall.io/thumb/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.webp?1783907137",
+      "grid": "https://cards.scryfall.io/grid/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.webp?1783907137",
+      "display": "https://cards.scryfall.io/display/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.webp?1783907137",
+      "art": "https://cards.scryfall.io/art/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.webp?1783907137",
+      "crop": "https://cards.scryfall.io/crop/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.webp?1783907137",
+      "jpeg": "https://cards.scryfall.io/normal/front/c/d/cdb6432f-3f56-4c92-b09a-2a5b64620c04.jpg?1783907137"
+    },
+    "mana_cost": "{1}{G}",
+    "cmc": 2.0,
+    "type_line": "Sorcery",
+    "oracle_text": "Return up to three target land cards from your graveyard to your hand.\nDredge 3 (If you would draw a card, you may mill three cards instead. If you do, return this card from your graveyard to your hand.)",
+    "colors": [
+      "G"
+    ],
+    "color_identity": [
+      "G"
+    ],
+    "keywords": [
+      "Dredge",
+      "Mill"
+    ],
+    "legalities": {
+      "standard": "not_legal",
+      "future": "not_legal",
+      "historic": "not_legal",
+      "timeless": "not_legal",
+      "gladiator": "not_legal",
+      "pioneer": "not_legal",
+      "modern": "legal",
+      "legacy": "legal",
+      "pauper": "not_legal",
+      "vintage": "legal",
+      "penny": "not_legal",
+      "commander": "legal",
+      "oathbreaker": "legal",
+      "standardbrawl": "not_legal",
+      "brawl": "not_legal",
+      "competitivebrawl": "not_legal",
+      "alchemy": "not_legal",
+      "paupercommander": "not_legal",
+      "duel": "legal",
+      "oldschool": "not_legal",
+      "premodern": "not_legal",
+      "predh": "legal",
+      "tlr": "legal"
+    },
+    "games": [
+      "paper",
+      "mtgo"
+    ],
+    "reserved": false,
+    "game_changer": false,
+    "foil": false,
+    "nonfoil": true,
+    "finishes": [
+      "nonfoil"
+    ],
+    "oversized": false,
+    "promo": false,
+    "reprint": true,
+    "variation": false,
+    "set_id": "bca9779c-0a0b-4ac1-8794-f3fc25549cf4",
+    "set": "tdc",
+    "set_name": "Tarkir: Dragonstorm Commander",
+    "set_type": "commander",
+    "set_uri": "https://api.scryfall.com/sets/bca9779c-0a0b-4ac1-8794-f3fc25549cf4",
+    "set_search_uri": "https://api.scryfall.com/cards/search?order=set&q=e%3Atdc&unique=prints",
+    "scryfall_set_uri": "https://scryfall.com/sets/tdc?utm_source=api",
+    "rulings_uri": "https://api.scryfall.com/cards/cdb6432f-3f56-4c92-b09a-2a5b64620c04/rulings",
+    "prints_search_uri": "https://api.scryfall.com/cards/search?order=released&q=oracleid%3Aac8fba34-512c-4f24-999a-ab72f1ce4acb&unique=prints",
+    "collector_number": "96",
+    "digital": false,
+    "rarity": "rare",
+    "flavor_text": "\"On a good day, I am not Fangkeeper, war hero, or sibsig, but a farmer again.\"\n\u2014Kotis, the Fangkeeper",
+    "card_back_id": "0aeebaf5-8c7d-4636-9e82-8c27447861f7",
+    "artist": "Carlos Palma Cruchaga",
+    "artist_ids": [
+      "f0c43e1b-1853-4abc-8a1b-d7dda6c1d592"
+    ],
+    "illustration_id": "82a66d6b-9e85-4f97-ae1a-532d67ebab70",
+    "border_color": "black",
+    "frame": "2015",
+    "security_stamp": "oval",
+    "full_art": false,
+    "textless": false,
+    "booster": false,
+    "story_spotlight": false,
+    "edhrec_rank": 712,
+    "prices": {
+      "usd": "5.43",
+      "usd_foil": null,
+      "usd_etched": null,
+      "eur": "5.46",
+      "eur_foil": null,
+      "tix": "3.67"
+    },
+    "related_uris": {
+      "gatherer": "https://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=696185&printed=false",
+      "tcgplayer_infinite_articles": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Farticles&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Farticles%3FproductLineName%3Dmagic%26q%3DLife%2Bfrom%2Bthe%2BLoam",
+      "tcgplayer_infinite_decks": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Fdecks&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Fdecks%3FproductLineName%3Dmagic%26q%3DLife%2Bfrom%2Bthe%2BLoam",
+      "edhrec": "https://edhrec.com/route/?cc=Life+from+the+Loam"
+    },
+    "purchase_uris": {
+      "tcgplayer": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&u=https%3A%2F%2Fwww.tcgplayer.com%2Fproduct%2F624487%3Fpage%3D1",
+      "cardmarket": "https://www.cardmarket.com/en/Magic/Products?idProduct=818711&referrer=scryfall&utm_campaign=card_prices&utm_medium=text&utm_source=scryfall",
+      "cardhoarder": "https://www.cardhoarder.com/cards/138135?affiliate_id=scryfall&ref=card-profile&utm_campaign=affiliate&utm_medium=card&utm_source=scryfall"
+    }
+  },
+  {
+    "object": "card",
+    "id": "188bd186-18f8-4e61-8f85-9487126a1c4d",
+    "oracle_id": "0c2841bb-038c-4fbf-8360-bc0a1522b58d",
+    "multiverse_ids": [],
+    "resource_id": "29E5659BAFA745C8BF98E0249F1E6B6B379AF65FCA9C36ED4B40E419DF1C45C7",
+    "mtgo_id": 157140,
+    "tcgplayer_id": 727635,
+    "cardmarket_id": 920258,
+    "name": "Exploration",
+    "lang": "en",
+    "released_at": "2026-11-13",
+    "uri": "https://api.scryfall.com/cards/188bd186-18f8-4e61-8f85-9487126a1c4d",
+    "scryfall_uri": "https://scryfall.com/card/trc/461/exploration?utm_source=api",
+    "layout": "normal",
+    "highres_image": true,
+    "image_status": "highres_scan",
+    "image_updated_at": "2026-10-29T13:42:55Z",
+    "image_uris": {
+      "small": "https://cards.scryfall.io/small/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.jpg?1793281375",
+      "normal": "https://cards.scryfall.io/normal/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.jpg?1793281375",
+      "large": "https://cards.scryfall.io/large/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.jpg?1793281375",
+      "png": "https://cards.scryfall.io/png/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.png?1793281375",
+      "art_crop": "https://cards.scryfall.io/art_crop/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.jpg?1793281375",
+      "border_crop": "https://cards.scryfall.io/border_crop/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.jpg?1793281375",
+      "thumb": "https://cards.scryfall.io/thumb/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.webp?1793281375",
+      "grid": "https://cards.scryfall.io/grid/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.webp?1793281375",
+      "display": "https://cards.scryfall.io/display/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.webp?1793281375",
+      "art": "https://cards.scryfall.io/art/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.webp?1793281375",
+      "crop": "https://cards.scryfall.io/crop/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.webp?1793281375",
+      "jpeg": "https://cards.scryfall.io/normal/front/1/8/188bd186-18f8-4e61-8f85-9487126a1c4d.jpg?1793281375"
+    },
+    "mana_cost": "{G}",
+    "cmc": 1.0,
+    "type_line": "Enchantment",
+    "oracle_text": "You may play an additional land on each of your turns.",
+    "colors": [
+      "G"
+    ],
+    "color_identity": [
+      "G"
+    ],
+    "keywords": [],
+    "legalities": {
+      "standard": "not_legal",
+      "future": "not_legal",
+      "historic": "legal",
+      "timeless": "legal",
+      "gladiator": "legal",
+      "pioneer": "not_legal",
+      "modern": "not_legal",
+      "legacy": "legal",
+      "pauper": "not_legal",
+      "vintage": "legal",
+      "penny": "not_legal",
+      "commander": "legal",
+      "oathbreaker": "legal",
+      "standardbrawl": "not_legal",
+      "brawl": "legal",
+      "competitivebrawl": "legal",
+      "alchemy": "not_legal",
+      "paupercommander": "not_legal",
+      "duel": "legal",
+      "oldschool": "not_legal",
+      "premodern": "legal",
+      "predh": "legal",
+      "tlr": "legal"
+    },
+    "games": [
+      "paper",
+      "mtgo"
+    ],
+    "reserved": false,
+    "game_changer": false,
+    "foil": true,
+    "nonfoil": true,
+    "finishes": [
+      "nonfoil",
+      "foil"
+    ],
+    "oversized": false,
+    "promo": false,
+    "reprint": true,
+    "variation": false,
+    "set_id": "a38c10be-90b1-4bb9-bd74-46784a751ac3",
+    "set": "trc",
+    "set_name": "Star Trek Commander",
+    "set_type": "commander",
+    "set_uri": "https://api.scryfall.com/sets/a38c10be-90b1-4bb9-bd74-46784a751ac3",
+    "set_search_uri": "https://api.scryfall.com/cards/search?order=set&q=e%3Atrc&unique=prints",
+    "scryfall_set_uri": "https://scryfall.com/sets/trc?utm_source=api",
+    "rulings_uri": "https://api.scryfall.com/cards/188bd186-18f8-4e61-8f85-9487126a1c4d/rulings",
+    "prints_search_uri": "https://api.scryfall.com/cards/search?order=released&q=oracleid%3A0c2841bb-038c-4fbf-8360-bc0a1522b58d&unique=prints",
+    "collector_number": "461",
+    "digital": false,
+    "rarity": "rare",
+    "flavor_text": "To boldly go where no one has gone before.",
+    "card_back_id": "0aeebaf5-8c7d-4636-9e82-8c27447861f7",
+    "artist": "Jonas De Ro",
+    "artist_ids": [
+      "561ebf9e-8d93-4b57-8156-8826d0c19601"
+    ],
+    "illustration_id": "4f8b0f96-5e09-4a70-bff0-ea871f36b99c",
+    "border_color": "black",
+    "frame": "2015",
+    "frame_effects": [
+      "enchantment"
+    ],
+    "security_stamp": "oval",
+    "full_art": false,
+    "textless": false,
+    "booster": false,
+    "story_spotlight": false,
+    "promo_types": [
+      "surgefoil",
+      "universesbeyond"
+    ],
+    "edhrec_rank": 303,
+    "preview": {
+      "source": "Good Luck High Five",
+      "source_uri": "https://www.youtube.com/watch?v=io9Eaz6kBP0",
+      "previewed_at": "2026-10-29"
+    },
+    "prices": {
+      "usd": "12.28",
+      "usd_foil": null,
+      "usd_etched": null,
+      "eur": "11.70",
+      "eur_foil": null,
+      "tix": "4.21"
+    },
+    "related_uris": {
+      "tcgplayer_infinite_articles": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Farticles&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Farticles%3FproductLineName%3Dmagic%26q%3DExploration",
+      "tcgplayer_infinite_decks": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Fdecks&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Fdecks%3FproductLineName%3Dmagic%26q%3DExploration",
+      "edhrec": "https://edhrec.com/route/?cc=Exploration"
+    },
+    "purchase_uris": {
+      "tcgplayer": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&u=https%3A%2F%2Fwww.tcgplayer.com%2Fproduct%2F727635%3Fpage%3D1",
+      "cardmarket": "https://www.cardmarket.com/en/Magic/Products?idProduct=920258&referrer=scryfall&utm_campaign=card_prices&utm_medium=text&utm_source=scryfall",
+      "cardhoarder": "https://www.cardhoarder.com/cards/157140?affiliate_id=scryfall&ref=card-profile&utm_campaign=affiliate&utm_medium=card&utm_source=scryfall"
+    }
+  },
+  {
+    "object": "card",
+    "id": "79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45",
+    "oracle_id": "db655c5a-06f6-42bc-8180-d9ca1c1d939a",
+    "multiverse_ids": [],
+    "resource_id": "90516D39ED2F366C366C5866375B1351A82346F2BE9AD4B937FB99F811293F6A",
+    "mtgo_id": 155906,
+    "tcgplayer_id": 717027,
+    "cardmarket_id": 909242,
+    "name": "Carnivorous Cultivator // Enroot",
+    "lang": "en",
+    "released_at": "2026-10-02",
+    "uri": "https://api.scryfall.com/cards/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45",
+    "scryfall_uri": "https://scryfall.com/card/fra/100/carnivorous-cultivator-enroot?utm_source=api",
+    "layout": "prepare",
+    "highres_image": true,
+    "image_status": "highres_scan",
+    "image_updated_at": "2026-09-14T11:39:27Z",
+    "image_uris": {
+      "small": "https://cards.scryfall.io/small/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.jpg?1789385967",
+      "normal": "https://cards.scryfall.io/normal/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.jpg?1789385967",
+      "large": "https://cards.scryfall.io/large/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.jpg?1789385967",
+      "png": "https://cards.scryfall.io/png/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.png?1789385967",
+      "art_crop": "https://cards.scryfall.io/art_crop/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.jpg?1789385967",
+      "border_crop": "https://cards.scryfall.io/border_crop/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.jpg?1789385967",
+      "thumb": "https://cards.scryfall.io/thumb/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.webp?1789385967",
+      "grid": "https://cards.scryfall.io/grid/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.webp?1789385967",
+      "display": "https://cards.scryfall.io/display/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.webp?1789385967",
+      "art": "https://cards.scryfall.io/art/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.webp?1789385967",
+      "crop": "https://cards.scryfall.io/crop/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.webp?1789385967",
+      "jpeg": "https://cards.scryfall.io/normal/front/7/9/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45.jpg?1789385967"
+    },
+    "mana_cost": "{1}{G} // {G}",
+    "cmc": 2.0,
+    "type_line": "Creature \u2014 Elf Warlock // Sorcery",
+    "power": "2",
+    "toughness": "3",
+    "colors": [
+      "G"
+    ],
+    "color_identity": [
+      "G"
+    ],
+    "keywords": [
+      "Prepared",
+      "Deathtouch"
+    ],
+    "card_faces": [
+      {
+        "object": "card_face",
+        "name": "Carnivorous Cultivator",
+        "mana_cost": "{1}{G}",
+        "type_line": "Creature \u2014 Elf Warlock",
+        "oracle_text": "Deathtouch\nThis creature enters prepared.\nWhenever this creature deals combat damage to a player, return target land card from your graveyard to your hand.",
+        "power": "2",
+        "toughness": "3",
+        "artist": "Martina Fa\u010dkov\u00e1",
+        "artist_id": "6338124e-8e53-498d-8bf9-93a55db2f61c",
+        "illustration_id": "a0b36cb6-9786-4098-b908-49eb76478c2a"
+      },
+      {
+        "object": "card_face",
+        "name": "Enroot",
+        "mana_cost": "{G}",
+        "type_line": "Sorcery",
+        "oracle_text": "Search your library for a land card, put it into your graveyard, then shuffle.",
+        "artist": "Martina Fa\u010dkov\u00e1",
+        "artist_id": "6338124e-8e53-498d-8bf9-93a55db2f61c"
+      }
+    ],
+    "legalities": {
+      "standard": "legal",
+      "future": "legal",
+      "historic": "legal",
+      "timeless": "legal",
+      "gladiator": "legal",
+      "pioneer": "legal",
+      "modern": "legal",
+      "legacy": "legal",
+      "pauper": "not_legal",
+      "vintage": "legal",
+      "penny": "not_legal",
+      "commander": "legal",
+      "oathbreaker": "legal",
+      "standardbrawl": "legal",
+      "brawl": "legal",
+      "competitivebrawl": "legal",
+      "alchemy": "legal",
+      "paupercommander": "not_legal",
+      "duel": "legal",
+      "oldschool": "not_legal",
+      "premodern": "not_legal",
+      "predh": "not_legal",
+      "tlr": "legal"
+    },
+    "games": [
+      "paper",
+      "mtgo",
+      "arena"
+    ],
+    "reserved": false,
+    "game_changer": false,
+    "foil": true,
+    "nonfoil": true,
+    "finishes": [
+      "nonfoil",
+      "foil"
+    ],
+    "oversized": false,
+    "promo": false,
+    "reprint": false,
+    "variation": false,
+    "set_id": "6595985e-39cf-4ca3-b43d-dd3e64749fdc",
+    "set": "fra",
+    "set_name": "Reality Fracture",
+    "set_type": "expansion",
+    "set_uri": "https://api.scryfall.com/sets/6595985e-39cf-4ca3-b43d-dd3e64749fdc",
+    "set_search_uri": "https://api.scryfall.com/cards/search?order=set&q=e%3Afra&unique=prints",
+    "scryfall_set_uri": "https://scryfall.com/sets/fra?utm_source=api",
+    "rulings_uri": "https://api.scryfall.com/cards/79dd5c54-5ea5-47b5-8f9b-50ed57a5ea45/rulings",
+    "prints_search_uri": "https://api.scryfall.com/cards/search?order=released&q=oracleid%3Adb655c5a-06f6-42bc-8180-d9ca1c1d939a&unique=prints",
+    "collector_number": "100",
+    "digital": false,
+    "rarity": "rare",
+    "card_back_id": "0aeebaf5-8c7d-4636-9e82-8c27447861f7",
+    "artist": "Martina Fa\u010dkov\u00e1",
+    "artist_ids": [
+      "6338124e-8e53-498d-8bf9-93a55db2f61c"
+    ],
+    "illustration_id": "a0b36cb6-9786-4098-b908-49eb76478c2a",
+    "border_color": "black",
+    "frame": "2015",
+    "security_stamp": "oval",
+    "full_art": false,
+    "textless": false,
+    "booster": false,
+    "story_spotlight": false,
+    "edhrec_rank": 12287,
+    "prices": {
+      "usd": "1.31",
+      "usd_foil": "1.38",
+      "usd_etched": null,
+      "eur": "0.69",
+      "eur_foil": "1.05",
+      "tix": "2.22"
+    },
+    "related_uris": {
+      "tcgplayer_infinite_articles": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Farticles&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Farticles%3FproductLineName%3Dmagic%26q%3DCarnivorous%2BCultivator%2B%252F%252F%2BEnroot",
+      "tcgplayer_infinite_decks": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Fdecks&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Fdecks%3FproductLineName%3Dmagic%26q%3DCarnivorous%2BCultivator%2B%252F%252F%2BEnroot",
+      "edhrec": "https://edhrec.com/route/?cc=Carnivorous+Cultivator"
+    },
+    "purchase_uris": {
+      "tcgplayer": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&u=https%3A%2F%2Fwww.tcgplayer.com%2Fproduct%2F717027%3Fpage%3D1",
+      "cardmarket": "https://www.cardmarket.com/en/Magic/Products?idProduct=909242&referrer=scryfall&utm_campaign=card_prices&utm_medium=text&utm_source=scryfall",
+      "cardhoarder": "https://www.cardhoarder.com/cards/155906?affiliate_id=scryfall&ref=card-profile&utm_campaign=affiliate&utm_medium=card&utm_source=scryfall"
+    }
+  },
+  {
+    "object": "card",
+    "id": "4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c",
+    "oracle_id": "8dd5f5af-d2d8-4356-8617-8381081b930c",
+    "multiverse_ids": [
+      522337
+    ],
+    "mtgo_id": 90903,
+    "tcgplayer_id": 240045,
+    "cardmarket_id": 566626,
+    "name": "Yavimaya, Cradle of Growth",
+    "lang": "en",
+    "released_at": "2021-06-18",
+    "uri": "https://api.scryfall.com/cards/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c",
+    "scryfall_uri": "https://scryfall.com/card/mh2/261/yavimaya-cradle-of-growth?utm_source=api",
+    "layout": "normal",
+    "highres_image": true,
+    "image_status": "highres_scan",
+    "image_updated_at": "2026-07-13T07:13:11Z",
+    "image_uris": {
+      "small": "https://cards.scryfall.io/small/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.jpg?1783926791",
+      "normal": "https://cards.scryfall.io/normal/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.jpg?1783926791",
+      "large": "https://cards.scryfall.io/large/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.jpg?1783926791",
+      "png": "https://cards.scryfall.io/png/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.png?1783926791",
+      "art_crop": "https://cards.scryfall.io/art_crop/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.jpg?1783926791",
+      "border_crop": "https://cards.scryfall.io/border_crop/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.jpg?1783926791",
+      "thumb": "https://cards.scryfall.io/thumb/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.webp?1783926791",
+      "grid": "https://cards.scryfall.io/grid/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.webp?1783926791",
+      "display": "https://cards.scryfall.io/display/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.webp?1783926791",
+      "art": "https://cards.scryfall.io/art/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.webp?1783926791",
+      "crop": "https://cards.scryfall.io/crop/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.webp?1783926791",
+      "jpeg": "https://cards.scryfall.io/normal/front/4/e/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c.jpg?1783926791"
+    },
+    "mana_cost": "",
+    "cmc": 0.0,
+    "type_line": "Legendary Land",
+    "oracle_text": "Each land is a Forest in addition to its other land types.",
+    "colors": [],
+    "color_identity": [],
+    "keywords": [],
+    "produced_mana": [
+      "G"
+    ],
+    "legalities": {
+      "standard": "not_legal",
+      "future": "not_legal",
+      "historic": "legal",
+      "timeless": "legal",
+      "gladiator": "legal",
+      "pioneer": "not_legal",
+      "modern": "legal",
+      "legacy": "legal",
+      "pauper": "not_legal",
+      "vintage": "legal",
+      "penny": "not_legal",
+      "commander": "legal",
+      "oathbreaker": "legal",
+      "standardbrawl": "not_legal",
+      "brawl": "legal",
+      "competitivebrawl": "legal",
+      "alchemy": "not_legal",
+      "paupercommander": "not_legal",
+      "duel": "legal",
+      "oldschool": "not_legal",
+      "premodern": "not_legal",
+      "predh": "not_legal",
+      "tlr": "legal"
+    },
+    "games": [
+      "paper",
+      "mtgo"
+    ],
+    "reserved": false,
+    "game_changer": false,
+    "foil": true,
+    "nonfoil": true,
+    "finishes": [
+      "nonfoil",
+      "foil"
+    ],
+    "oversized": false,
+    "promo": false,
+    "reprint": false,
+    "variation": false,
+    "set_id": "c1c7eb8c-f205-40ab-a609-767cb296544e",
+    "set": "mh2",
+    "set_name": "Modern Horizons 2",
+    "set_type": "draft_innovation",
+    "set_uri": "https://api.scryfall.com/sets/c1c7eb8c-f205-40ab-a609-767cb296544e",
+    "set_search_uri": "https://api.scryfall.com/cards/search?order=set&q=e%3Amh2&unique=prints",
+    "scryfall_set_uri": "https://scryfall.com/sets/mh2?utm_source=api",
+    "rulings_uri": "https://api.scryfall.com/cards/4e4b6e22-93b2-4896-bba5-0ceaa5d8ea3c/rulings",
+    "prints_search_uri": "https://api.scryfall.com/cards/search?order=released&q=oracleid%3A8dd5f5af-d2d8-4356-8617-8381081b930c&unique=prints",
+    "collector_number": "261",
+    "digital": false,
+    "rarity": "rare",
+    "flavor_text": "\"Multani's heart is a seed, and all of Yavimaya is its flower. There is as much life here as in the rest of Dominaria together.\"\n\u2014Karn",
+    "card_back_id": "0aeebaf5-8c7d-4636-9e82-8c27447861f7",
+    "artist": "Sarah Finnigan",
+    "artist_ids": [
+      "e31f5891-08f7-4e5a-bac9-8b4570b8c1ab"
+    ],
+    "illustration_id": "1b1c4ae2-4c7b-4dbe-b19c-590418d93c40",
+    "border_color": "black",
+    "frame": "2015",
+    "frame_effects": [
+      "legendary"
+    ],
+    "security_stamp": "oval",
+    "full_art": false,
+    "textless": false,
+    "booster": true,
+    "story_spotlight": false,
+    "edhrec_rank": 80,
+    "penny_rank": 123,
+    "preview": {
+      "source": "Levunga",
+      "source_uri": "https://twitter.com/levunga/status/1397929928511803397",
+      "previewed_at": "2021-05-27"
+    },
+    "prices": {
+      "usd": "14.21",
+      "usd_foil": "26.45",
+      "usd_etched": null,
+      "eur": "13.56",
+      "eur_foil": "18.02",
+      "tix": "0.35"
+    },
+    "related_uris": {
+      "gatherer": "https://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=522337&printed=false",
+      "tcgplayer_infinite_articles": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Farticles&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Farticles%3FproductLineName%3Dmagic%26q%3DYavimaya%252C%2BCradle%2Bof%2BGrowth",
+      "tcgplayer_infinite_decks": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&trafcat=tcgplayer.com%2Fsearch%2Fdecks&u=https%3A%2F%2Fwww.tcgplayer.com%2Fsearch%2Fdecks%3FproductLineName%3Dmagic%26q%3DYavimaya%252C%2BCradle%2Bof%2BGrowth",
+      "edhrec": "https://edhrec.com/route/?cc=Yavimaya%2C+Cradle+of+Growth"
+    },
+    "purchase_uris": {
+      "tcgplayer": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api&u=https%3A%2F%2Fwww.tcgplayer.com%2Fproduct%2F240045%3Fpage%3D1",
+      "cardmarket": "https://www.cardmarket.com/en/Magic/Products?idProduct=566626&referrer=scryfall&utm_campaign=card_prices&utm_medium=text&utm_source=scryfall",
+      "cardhoarder": "https://www.cardhoarder.com/cards/90903?affiliate_id=scryfall&ref=card-profile&utm_campaign=affiliate&utm_medium=card&utm_source=scryfall"
+    }
   }
 ]

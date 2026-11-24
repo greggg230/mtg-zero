@@ -150,6 +150,10 @@ pub(crate) const SEEN_W3_HOST: u8 = 1;
 pub(crate) const SEEN_W3_GRANT_ACT: u8 = 2;
 /// `W3State::seen`: a card gives other permanents a subtype.
 pub(crate) const SEEN_W3_SUBTYPE: u8 = 4;
+/// `W3State::seen`: the subtype a card gives is a basic land type, which brings
+/// a land its intrinsic mana ability (CR 305.6; Yavimaya, Cradle of Growth,
+/// ENGINE.md 270.2): the grant changes abilities too.
+pub(crate) const SEEN_W3_BASIC_TYPE: u8 = 8;
 
 /// The `SEEN_W3_*` bits of a definition (`W3Def::seen`, set as it is
 /// lowered).
@@ -658,11 +662,21 @@ impl Game {
     /// (613.8a), which applies first whatever the timestamps; it changes
     /// only subtypes, so nothing recurses. (A layer 4 effect of a static
     /// ability applies even if its source loses its abilities in layer 6,
-    /// 613.6: the card's own definition.)
+    /// 613.6: the card's own definition.) But a source that is a nonbasic
+    /// land made a Mountain by a "nonbasic lands are Mountains" effect has no
+    /// such ability at all: that effect removes the abilities of its rules
+    /// text in layer 4 too (CR 305.7), so the grant depends on it (613.8a:
+    /// same layer, applying it changes the grant's existence) and waits for
+    /// it whatever the timestamps (613.8b), then doesn't exist (Yavimaya,
+    /// Cradle of Growth under Magus of the Moon: no land is a Forest by it,
+    /// ENGINE.md 270.2).
     pub(crate) fn granted_subtype_ts(&self, c: CardIdx, s: u16) -> Vec<u32> {
         let mut out = Vec::new();
         for &g in &self.battlefield {
             let d = self.db.def(self.objs[g.i()].def);
+            if d.w3.grants_subtype.is_empty() || self.moon_game && self.moon_on(g) {
+                continue;
+            }
             for (f, k) in &d.w3.grants_subtype {
                 if *k != s {
                     continue;

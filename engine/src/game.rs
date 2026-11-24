@@ -571,7 +571,7 @@ pub(crate) enum Drew {
     /// It stopped after a card its owner is asked about revealing for
     /// miracle (CR 702.94a), with this many draws left.
     Miracle(CardIdx, u32),
-    /// It waits for a question it queued (`Task::DrawOrder`).
+    /// It waits for a question it queued (`Task::DrawOrder`, `Task::Dredge`).
     Asked,
 }
 
@@ -3253,19 +3253,24 @@ impl Game {
     /// draws).
     pub(crate) fn draw_instruction(&mut self, p: PlayerId, n: u32, step: bool) -> Drew {
         let mut n = n;
-        // One card, which an opponent's Hullbreacher would replace too, and
-        // Quantum Riddler's "draw that many plus one": both replace the same
-        // draw, and the drawer chooses the order (CR 616.1;
-        // `Task::DrawOrder`). (To more than one card Quantum Riddler applies
-        // first, to the instruction, its ruling: then Hullbreacher to each
-        // draw.)
-        if n == 1 && self.seen & SEEN_DRAW_REPL != 0 && self.opp_draw_token(p).is_some() {
+        // One card, which an opponent's Hullbreacher or the drawer's dredge
+        // ability would replace too, and Quantum Riddler's "draw that many
+        // plus one": they replace the same draw, and the drawer chooses the
+        // order (CR 616.1; `Task::DrawOrder`). (To more than one card Quantum
+        // Riddler applies first, to the instruction, its ruling: then
+        // Hullbreacher and dredge to each draw.)
+        if n == 1 && self.seen & SEEN_DRAW_REPL != 0 {
+            let token = self.opp_draw_token(p).is_some();
             let plus = self.draw_plus(p);
-            if plus > 0 {
+            if plus > 0 && (token || self.dredge_due(p)) {
                 self.agenda.push(crate::flow::Task::DrawOrder { p, plus, ev: self.ev_seq, step });
                 return Drew::Asked;
             }
-            return self.draw(p).map_or(Drew::Done, |c| Drew::Miracle(c, 0));
+            if token {
+                // (A dredge ability of the drawer's may replace it first: the
+                // drawer's order, CR 616.1.)
+                return self.draw_seq(p, 1, step);
+            }
         }
         if n > 0 && self.seen & SEEN_DRAW_REPL != 0 {
             let plus = self.draw_plus(p);
@@ -3274,7 +3279,7 @@ impl Game {
                 n = self.exact_u32(n as crate::num::Wide + plus as crate::num::Wide, "cards to draw");
             }
         }
-        self.draw_seq(p, n).map_or(Drew::Done, |(c, left)| Drew::Miracle(c, left))
+        self.draw_seq(p, n, step)
     }
 
     /// "If you would draw one or more cards, you draw that many plus d
@@ -3288,50 +3293,78 @@ impl Game {
             .sum()
     }
 
-    /// CR 616.1: `p` orders an opponent's "create a token instead" and
-    /// their own "draw that many plus `plus` instead" on one draw: `NUMBER`
+    /// CR 616.1: `p` orders an opponent's "create a token instead", their
+    /// own dredge ability (CR 702.52a: `NUMBER` 7 = dredge first, then which
+    /// card, `Task::Dredge` with `forced`; ENGINE.md 270.2) and their own
+    /// "draw that many plus `plus` instead" on one draw: `NUMBER`
     /// 5 = the token first (no draw is left to add to: one token), 6 = the
     /// added draws first (each draw then replaced). Then as the draw
     /// instruction would go on (`ev`, `step`: `draw_rest`'s).
     pub(crate) fn draw_order(&mut self, p: PlayerId, plus: u32, ev: u32, step: bool) {
         match self.answer.take() {
             Some(Choice::Number(k)) => {
+                if k == 7 {
+                    self.agenda.push(crate::flow::Task::Dredge { p, ev, step, forced: true });
+                    return;
+                }
                 let saved = self.ev_seq;
                 self.ev_seq = ev;
                 let cut = if k == 5 {
-                    self.draw(p).map(|c| (c, 0))
+                    // (The token replaces the draw: no draw is left for a
+                    // dredge ability to replace.)
+                    self.draw(p).map_or(Drew::Done, |c| Drew::Miracle(c, 0))
                 } else {
                     self.note(|_| format!("P{p} draws {plus} more (a replacement)"));
                     let n = self.exact_u32(1 + plus as crate::num::Wide, "cards to draw");
-                    self.draw_seq(p, n)
+                    self.draw_seq(p, n, step)
                 };
-                match cut {
-                    Some((card, left)) => self.queue_miracle(p, card, left, step),
-                    None if step => self.event(Event::player(EventKind::BeginningOfDrawStep, p)),
-                    None => {}
-                }
+                self.draw_cut(p, cut, step);
                 self.ev_seq = saved;
             }
             Some(other) => unreachable!("draw order answer {other:?}"),
             None => {
-                let opts = [5u8, 6]
+                // (The token first only when an opponent's would apply; dredge
+                // first only with a dredge ability that would.)
+                let token = self.opp_draw_token(p).is_some();
+                let dredge = self.dredge_due(p);
+                let opts = [(5u8, token), (6, true), (7, dredge)]
                     .iter()
-                    .map(|&k| crate::decision::Opt { action: crate::decision::act::NUMBER + k as u16, choice: Choice::Number(k) })
+                    .filter(|x| x.1)
+                    .map(|&(k, _)| crate::decision::Opt { action: crate::decision::act::NUMBER + k as u16, choice: Choice::Number(k) })
                     .collect();
                 self.ask(crate::flow::Task::DrawOrder { p, plus, ev, step }, p, crate::decision::DecisionKind::ChooseReplacement, opts);
             }
         }
     }
 
-    /// `p` draws `n` cards one at a time, stopping after one a miracle
-    /// question is due for: that card and the draws left.
-    fn draw_seq(&mut self, p: PlayerId, n: u32) -> Option<(CardIdx, u32)> {
+    /// `p` draws `n` cards one at a time (CR 121.2), stopping after one a
+    /// miracle question is due for (that card and the draws left), or before
+    /// one a dredge ability of theirs may replace (CR 702.52a, 121.6b: the
+    /// question, then the draws left and, `step`, the draw step's beginning
+    /// event, queued: `Drew::Asked`).
+    fn draw_seq(&mut self, p: PlayerId, n: u32, step: bool) -> Drew {
         for k in 0..n {
+            if self.dredge_due(p) {
+                self.queue_dredge(p, n - k - 1, step);
+                return Drew::Asked;
+            }
             if let Some(c) = self.draw(p) {
-                return Some((c, n - k - 1));
+                return Drew::Miracle(c, n - k - 1);
             }
         }
-        None
+        Drew::Done
+    }
+
+    /// Carry on after part of a draw instruction run from a task
+    /// (`draw_order`, `draw_rest`, `dredge_choice`): a miracle question due
+    /// and the draws left, or the draw step's beginning event (`step`) once
+    /// its draws are done; nothing when it queued a question of its own.
+    pub(crate) fn draw_cut(&mut self, p: PlayerId, cut: Drew, step: bool) {
+        match cut {
+            Drew::Miracle(card, left) => self.queue_miracle(p, card, left, step),
+            Drew::Done if step => self.event(Event::player(EventKind::BeginningOfDrawStep, p)),
+            Drew::Done | Drew::Asked => {}
+        }
     }
 
     /// Queue the miracle question about `card`, then the `left` draws of
@@ -3349,12 +3382,8 @@ impl Game {
     pub(crate) fn draw_rest(&mut self, p: PlayerId, n: u32, ev: u32, step: bool) {
         let saved = self.ev_seq;
         self.ev_seq = ev;
-        let cut = self.draw_seq(p, n);
-        match cut {
-            Some((card, left)) => self.queue_miracle(p, card, left, step),
-            None if step => self.event(Event::player(EventKind::BeginningOfDrawStep, p)),
-            None => {}
-        }
+        let cut = self.draw_seq(p, n, step);
+        self.draw_cut(p, cut, step);
         self.ev_seq = saved;
     }
 
@@ -3380,15 +3409,19 @@ impl Game {
         self.permanents_of(opp(p)).find_map(|c| self.abilities(c).opp_draw_token)
     }
 
+    /// "Each opponent can't draw more than one card each turn" (Narset,
+    /// Leovold) stops `p`'s next draw (CR 121.2b): no replacement can replace
+    /// it either (their rulings: dredge, Laboratory Maniac).
+    pub(crate) fn draw_disallowed(&self, p: PlayerId) -> bool {
+        self.players[p as usize].drawn >= 1 && self.turn.number > 0 && self.permanents_of(opp(p)).any(|c| self.abilities(c).opp_draw_limit)
+    }
+
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.
     /// The card, when its owner is asked about revealing it for miracle
     /// (`draw_cards` asks before the next draw).
     pub(crate) fn draw(&mut self, p: PlayerId) -> Option<CardIdx> {
         // "Each opponent can't draw more than one card each turn" (Narset).
-        if self.players[p as usize].drawn >= 1
-            && self.turn.number > 0
-            && self.permanents_of(opp(p)).any(|c| self.abilities(c).opp_draw_limit)
-        {
+        if self.draw_disallowed(p) {
             self.note(|_| format!("P{p} can't draw another card this turn"));
             return None;
         }

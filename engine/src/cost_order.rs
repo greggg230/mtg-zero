@@ -774,6 +774,11 @@ impl Game {
             if w3 & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 {
                 out.0 |= kind::TYPES;
             }
+            // (A basic land type's grant brings its mana ability, CR 305.6:
+            // Yavimaya leaving takes the lands' {G}, ENGINE.md 270.2.)
+            if w3 & crate::eoe_w3::SEEN_W3_BASIC_TYPE != 0 {
+                out.0 |= kind::ABILITIES;
+            }
             if w3 & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
                 out.0 |= kind::ABILITIES;
             }

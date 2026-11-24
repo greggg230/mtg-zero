@@ -703,5 +703,154 @@
   "name": "Bojuka Bog",
   "oracle_id": "04b7362d-0490-4cb0-b5d7-2a7732f659ce",
   "rulings": []
+ },
+ {
+  "name": "Life from the Loam",
+  "oracle_id": "ac8fba34-512c-4f24-999a-ab72f1ce4acb",
+  "rulings": [
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Dredge can replace any card draw, not only the one during your draw step."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "If an effect puts a card into your hand without specifically using the word \"draw,\" you're not drawing a card. Dredge can't replace this event."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "If you're drawing multiple cards, each draw is performed one at a time. For example, if you're instructed to draw two cards and you replace the first draw with a dredge ability, another card with a dredge ability (including one that was milled by the first dredge ability) may be used to replace the second draw."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "Once you've announced that you're applying a card's dredge ability to replace a draw, players can't take any actions until you've put that card into your hand and milled cards."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "One card draw can't be replaced by multiple dredge abilities."
+   },
+   {
+    "date": "2024-01-12",
+    "source": "wotc",
+    "text": "You can't attempt to use a dredge ability if you don't have enough cards in your library."
+   }
+  ]
+ },
+ {
+  "name": "Exploration",
+  "oracle_id": "0c2841bb-038c-4fbf-8360-bc0a1522b58d",
+  "rulings": [
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Exploration's ability is cumulative with other effects that allow you to play additional lands, including ones created by other Explorations you control."
+   }
+  ]
+ },
+ {
+  "name": "Carnivorous Cultivator // Enroot",
+  "oracle_id": "db655c5a-06f6-42bc-8180-d9ca1c1d939a",
+  "rulings": [
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "A creature with a prepare spell can't become prepared more than once at the same time. For example, say Bloodline Recollector is on the battlefield and is prepared. During the current turn, three creatures die. At the beginning of the end step, Bloodline Recollector's last ability triggers. When that ability resolves, since Bloodline Recollector is already prepared, the ability won't cause it to become prepared a second time or create a second copy of Ancestral Craving in exile."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "A creature without a prepare spell can't become prepared."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "A preparation card is a creature card in every zone. For example, while it's in your graveyard, Diviner of Victory is a blue creature card whose mana value is 1. It can't be the target of Stingcaster Mage's triggered ability (\"When this creature enters, target instant or sorcery card in your graveyard gains flashback until end of turn. The flashback cost is equal to its mana cost.\")."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "As an effect causes a creature with a prepare spell to become prepared (including effects that state that a creature \"enters prepared\"), that creature's controller creates a copy of that creature's prepare spell in exile. That copy remains in exile for as long as that permanent is on the battlefield and is prepared. That creature's controller may cast that copy as long as it remains in exile. As they cast it, that creature stops being prepared."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "Being prepared isn't a copiable value. If a permanent becomes a copy of a prepared creature, it won't be prepared. That permanent will have the alternative characteristics, though, and some other effect could cause it to become prepared later."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "Casting a copy of a prepare spell from exile isn't casting it for an alternative cost. Effects that allow you to cast a spell for an alternative cost or without paying its mana cost may allow you to apply those to a copy of a prepare spell cast from exile."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "Creating a copy of a creature's prepare spell in exile ignores copy exceptions applied to that creature that would affect the copiable values of that spell. For example, say a player casts Croaking Counterpart (a sorcery that says \"Create a token that's a copy of target non-Frog creature, except it's a 1/1 green Frog\") targeting Diviner of Victory. The token copy of Diviner of Victory will enter prepared as a 1/1 green Frog creature, but the copy of Unwind History in exile will still be a blue sorcery. The copy of Unwind History won't be green, a creature, or a Frog, and it won't have power or toughness."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "If a prepare spell with one or more targets has no legal targets when it tries to resolve, it won't resolve and none of its effects will happen. Since the spell was cast, the associated permanent will still not be prepared."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "If a prepared creature loses all abilities, it won't stop being prepared, and nothing will happen to its alternative characteristics or to the copy of its prepare spell in exile."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "If a prepared creature stops being a creature, it will still be prepared, and the copy of its prepare spell will remain in exile. That permanent's controller will still be able to cast it. The same is true if a prepared creature becomes a copy of something else, even if it's then a permanent without a prepare spell."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "If an effect causes a creature to become unprepared, a prepared creature stops being prepared and the associated copy of its prepare spell in exile ceases to exist. If it wasn't prepared at that time, nothing happens."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "If an effect instructs you to choose a card name, you may choose the alternative prepare spell's name. Consider only the alternative characteristics to determine whether that is an appropriate name to choose."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "Only the current controller of a prepared creature can cast the copy of its prepare spell in exile. It doesn't matter who owns that creature or who controlled it when it became prepared."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "Preparation cards can be cast only with their base characteristics."
+   },
+   {
+    "date": "2026-08-21",
+    "source": "wotc",
+    "text": "While copies of spells in zones other than the stack cease to exist when state-based actions are checked, this does not apply to copies of prepare spells in exile that were created as a creature became prepared."
+   }
+  ]
+ },
+ {
+  "name": "Yavimaya, Cradle of Growth",
+  "oracle_id": "8dd5f5af-d2d8-4356-8617-8381081b930c",
+  "rulings": [
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Land cards not on the battlefield aren't Forests while Yavimaya is on the battlefield."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Yavimaya's ability causes each land on the battlefield to have the land type Forest. Any land that's a Forest has the ability \"{T}: Add {G}.\" Nothing else changes about those lands, including their names, other subtypes, and whether they're legendary, basic, or snow."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Yavimaya, Cradle of Growth isn't a Forest while it's not on the battlefield."
+   }
+  ]
  }
 ]

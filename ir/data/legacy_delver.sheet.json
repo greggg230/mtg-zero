@@ -34,5 +34,9 @@
   {"name": "Blast Zone", "scryfall_name": "Blast Zone"},
   {"name": "Ghost Quarter", "scryfall_name": "Ghost Quarter"},
   {"name": "Maze of Ith", "scryfall_name": "Maze of Ith"},
-  {"name": "Bojuka Bog", "scryfall_name": "Bojuka Bog"}
+  {"name": "Bojuka Bog", "scryfall_name": "Bojuka Bog"},
+  {"name": "Life from the Loam", "scryfall_name": "Life from the Loam"},
+  {"name": "Exploration", "scryfall_name": "Exploration"},
+  {"name": "Carnivorous Cultivator // Enroot", "scryfall_name": "Carnivorous Cultivator // Enroot"},
+  {"name": "Yavimaya, Cradle of Growth", "scryfall_name": "Yavimaya, Cradle of Growth"}
 ]

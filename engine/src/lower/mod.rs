@@ -40,6 +40,7 @@ pub mod graveyard_order;
 pub mod hogaak_a;
 pub mod hogaak_c;
 pub mod lands_a;
+pub mod lands_b;
 pub mod printing;
 pub mod statics;
 pub mod support;

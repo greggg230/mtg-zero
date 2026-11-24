@@ -274,3 +274,24 @@ Mockingbird and Massacre with these cards: the integration's.)
 | Dryad Arbor x Magus of the Moon, Painter's Servant | a Mountain Dryad creature; colours | `cr_305_7_dryad_arbor_under_magus_of_the_moon`, `cr_204_1_dryad_arbor_is_green_in_every_zone` | tested |
 | Dryad Arbor x removal | Lightning Bolt, Orcish Bowmasters, Fatal Push, Wasteland; Karakas can't | `dryad_arbor_is_a_creature_and_a_nonbasic_land_for_removal`, `karakas_cant_return_dryad_arbor` | tested |
 | The deck's line | Moonshadow, Verdant Catacombs for Dryad Arbor, Stitcher's Supplier | `the_decks_line_moonshadow_a_fetch_for_dryad_arbor_and_stitchers_supplier` | tested |
+
+## Legacy Lands, lane B: Life from the Loam, Exploration, Carnivorous Cultivator // Enroot, Yavimaya (ENGINE.md 270.2)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_lands_b.rs`. (The other lanes'
+cards - Dark Depths, Thespian's Stage, Choke, Pithing Needle, Torpor Orb, Cursed Totem, The Tabernacle at Pendrell
+Vale, ... - with these: the integration's.)
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Dredge x draws | the draw step, Brainstorm (three draws, a Loam the first dredge milled), Street Wraith's cycling, Expedition Map (no draw) | `cr_702_52a_dredge_replaces_the_draw_step_draw`, `cr_702_52a_dredge_replaces_any_draw`, `cr_121_6b_each_draw_of_brainstorm_may_be_dredged_by_a_card_the_first_dredge_milled`, `cr_121_1_a_card_put_into_a_hand_is_no_draw_no_dredge` | tested |
+| Dredge x draw replacements | Hullbreacher, Quantum Riddler, both at once (616.1 order), Jace, Wielder of Mysteries (empty library) | `cr_616_1_dredge_or_an_opponents_hullbreacher`, `cr_616_1_dredge_or_quantum_riddler_first`, `cr_616_1_hullbreacher_quantum_riddler_and_dredge_on_one_draw`, `cr_121_6a_an_empty_library_draw_with_jace_is_no_dredge` | tested |
+| Dredge x draw limits | Narset, Parter of Veils, Leovold (a disallowed draw isn't dredged; a dredged one isn't counted) | `cr_121_2b_a_disallowed_draw_isnt_dredged_but_a_dredged_one_doesnt_count` | tested |
+| Dredge x miracle | Metamorphosis Fanatic (the first card drawn after a dredged draw) | `cr_702_94a_a_dredged_draw_is_not_the_first_card_drawn` | tested |
+| Dredge x replacement of the mill | an opponent's Leyline of the Void | `cr_702_52a_dredge_under_an_opponents_leyline_of_the_void` | tested |
+| Exploration x land plays | another Exploration, Fastbond, Crucible of Worlds, Crop Rotation (not a play), the other player's turn | `cr_305_2_*`, `cr_305_2b_305_3_*`, `cr_305_4_exploration_counts_plays_not_lands_put_onto_the_battlefield` | tested |
+| Yavimaya x land types | basics (still basic: Wasteland can't target them), Wasteland, Urza's Saga, Dryad Arbor (no second {G}), the other player's lands, fetch lands' searches (cards off the battlefield) | `cr_305_7_each_land_is_a_forest_in_addition`, `cr_305_6_*`, `cr_305_7_only_lands_on_the_battlefield_are_forests`, `cr_305_7_wasteland_still_sees_basics_under_yavimaya` | tested |
+| Yavimaya x Magus of the Moon | either timestamp order (613.8 dependency), the Magus leaving | `cr_613_8_yavimaya_under_magus_of_the_moon_makes_no_forest` | tested |
+| Cultivator x copies | Phyrexian Metamorph (enters prepared), Saheeli's -2 (not prepared), Mockingbird (its exceptions not on the Enroot copy) | `cr_723_3a_prepared_once_at_a_time`, `cr_707_2_being_prepared_isnt_copiable`, `cr_723_3c_the_enroot_copy_ignores_mockingbirds_exceptions` | tested |
+| Cultivator x abilities and control | Oko's +1 (an Elk, still prepared), Oko's exchange (the new controller casts Enroot) | `cr_613_1f_a_prepared_cultivator_losing_its_abilities_stays_prepared`, `cr_723_3c_only_the_controller_casts_the_enroot_copy` | tested |
+| Enroot x costs and names | Thalia's tax, Omniscience (no free cast from exile), Disruptor Flute naming Enroot | `cr_601_2f_the_enroot_copy_costs_its_mana_cost_and_increases`, `cr_201_3_disruptor_flute_may_name_enroot` | tested |
+| The deck's lines | Loam + Exploration + Wasteland, Enroot then Loam, the draw-step dredge loop | `life_from_the_loam_with_exploration_replays_two_lands`, `enroot_then_life_from_the_loam`, `the_loam_loop_over_a_turn` | tested |

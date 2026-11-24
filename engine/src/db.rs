@@ -2018,6 +2018,9 @@ pub struct CardDef {
     /// The printing facts lane B of the Legacy Doomsday deck adds (ENGINE.md
     /// 124.2).
     pub dd_b: crate::doomsday_b::DdBDef,
+    /// The printing facts lane B of the Legacy Lands cards adds (ENGINE.md
+    /// 270.2): dredge.
+    pub lands_b: crate::lands_b::LandsBDef,
     /// The printing facts of the Legacy Sneak and Show cards (ENGINE.md 123).
     pub sns: crate::sneak_show::SnsDef,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
@@ -2257,6 +2260,8 @@ pub struct CardDb {
     /// control this turn (`CardDef::etb_counter_per_land_entered`): the game
     /// keeps the count (`Game::lands_entered`).
     pub(crate) watch_lands_entered: bool,
+    /// Some card of the table has dredge (CR 702.52; `Game::dredgers`).
+    pub(crate) dredge: bool,
     /// The intrinsic mana abilities of the basic land types (CR 305.6:
     /// "{T}: Add <its mana>"), (the subtype, a definition holding the
     /// ability), when a card of the table gives a basic land type
@@ -2538,6 +2543,7 @@ impl CardDb {
         db.land_subtypes = crate::eoe_w2::LAND_TYPES.iter().filter_map(|n| db.subtype_id(n)).collect();
         db.mountain = db.subtype_id("Mountain");
         db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
+        db.dredge = db.defs.iter().any(|d| d.lands_b.dredge > 0);
         db.watch_lki_controller = db.defs.iter().any(crate::eoe_w2::reads_lki_controller);
         if db.defs.iter().any(|d| d.gives_basic_land_type) {
             for (name, t) in [("Plains", crate::mana::W), ("Island", crate::mana::U), ("Swamp", crate::mana::B), ("Mountain", crate::mana::R), ("Forest", crate::mana::G)] {

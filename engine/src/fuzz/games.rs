@@ -165,6 +165,14 @@
 //! the mirror; constructed play's table; every check of the default mode, and with 200 games or more each of the four
 //! must have been cast (Dryad Arbor played as a land), a Moonshadow -1/-1 counter removed by its trigger, a Dark
 //! Matter Manipulator at +2/+0 or more, and a Dryad Arbor attacking and tapped for mana. Games only (best-of-one).
+//! `FUZZ_POOL=lands_b` (ENGINE.md 270.2): lane B of the Legacy Lands deck (MTGGoldfish 8027955): its 61 with the
+//! other lanes' cards (Dark Depths, Thespian's Stage, Ghost Quarter, Maze of Ith, Bojuka Bog, The Tabernacle at
+//! Pendrell Vale, Pithing Needle, Blast Zone) out and lane B's four each (`LANDS_B_DECK`: Life from the Loam,
+//! Exploration, Carnivorous Cultivator // Enroot, Yavimaya, Cradle of Growth) beside the deck's supported cards, more
+//! Forests and sideboard cards (Force of Vigor, Dismember), against the Delver 60 in either seat, one game
+//! in three the mirror; constructed play's table; every check of the default mode, and with 200 games or more each of
+//! the four cast or played, a draw dredged and a dredge declined, a second land played in a turn, Enroot cast, the
+//! Cultivator's combat trigger, and a land a Forest by Yavimaya alone (`LANDS_B_SEEN`). Games only (best-of-one).
 //! `FUZZ_POOL=hogaak` (ENGINE.md 220.4): the Legacy Hogaak Tempo deck (MTGGoldfish 8027954,
 //! `data/decks/hogaak_tempo_8027954.json`, `Decklist::legacy_hogaak`). Games: its real 60 against the real Delver,
 //! Doomsday and Sneak and Show 60s in either seat, one game in four the mirror (`seed % 8`), best-of-one, constructed
@@ -624,6 +632,9 @@ pub enum PoolMode {
     /// 60 against the Delver, Doomsday and Sneak and Show 60s and its mirror;
     /// best-of-three between its 75 and theirs.
     Hogaak,
+    /// `FUZZ_POOL=lands_b` (ENGINE.md 270.2): the Legacy Lands deck's lane B
+    /// cards four each against the Delver 60 and itself.
+    LandsB,
     /// `FUZZ_POOL=cross` (ENGINE.md 148): the deck pairs no other pool plays -
     /// Doomsday against Sneak and Show, and best-of-three between the real 75s.
     Cross,
@@ -669,13 +680,14 @@ pub fn pool_mode() -> PoolMode {
         Ok("hogaak_c") => PoolMode::HogaakC,
         Ok("lands_a") => PoolMode::LandsA,
         Ok("hogaak") => PoolMode::Hogaak,
+        Ok("lands_b") => PoolMode::LandsB,
         Ok("cross") => PoolMode::Cross,
         Ok("delver_dealt") => PoolMode::DelverDealt,
         Ok("delver_dealt2") => PoolMode::DelverDealtPerSeat,
         Ok("meta") => PoolMode::Meta,
         Ok("meta_wheel") => PoolMode::MetaWheel,
         Ok("meta_pair") => PoolMode::MetaPair,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"lands_a\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_pair\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"lands_a\", \"lands_b\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_pair\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -806,7 +818,7 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show`, `sns`, `hogaak_a`, `hogaak_b`, `hogaak_c`, `hogaak`, `names`, `delver_sb`,
+/// `doomsday`, `sneak_show`, `sns`, `hogaak_a`, `hogaak_b`, `hogaak_c`, `hogaak`, `lands_a`, `lands_b`, `names`, `delver_sb`,
 /// `cross` or `meta`).
 pub fn constructed_mode() -> bool {
     delver_mode()
@@ -820,6 +832,7 @@ pub fn constructed_mode() -> bool {
         || hogaak_c_mode()
         || lands_a_mode()
         || hogaak_mode()
+        || lands_b_mode()
         || names_mode()
         || delver_sb_mode()
         || cross_mode()
@@ -1741,6 +1754,132 @@ fn count_hogaak_c(g: &Game, s: &mut HogaakCSeen) {
                 HOGAAK_C_ARBOR_ATTACKS.fetch_add(1, Ordering::Relaxed);
             }
             _ => {}
+        }
+    }
+}
+
+/// `FUZZ_POOL=lands_b` (ENGINE.md 270.2).
+fn lands_b_mode() -> bool {
+    pool_mode() == PoolMode::LandsB
+}
+
+/// The deck of `FUZZ_POOL=lands_b` (ENGINE.md 270.2): the Legacy Lands 61 (MTGGoldfish 8027955) with the other
+/// lanes' cards out (Dark Depths 3, Thespian's Stage 3, Ghost Quarter, Maze of Ith, Bojuka Bog, The Tabernacle at
+/// Pendrell Vale, Pithing Needle, Blast Zone), Life from the Loam 3 -> 4 and Yavimaya 3 -> 4, six more Forests and
+/// the sideboard's Force of Vigor 2 and a Dismember in: lane B's four cards four each, 60 cards. (Not the sideboard's
+/// Endurance: against the Delver 60 its random bottom order under Murktide Regent's triggers is a hidden-information
+/// finding outside these cards, ENGINE.md 270.2.7.)
+const LANDS_B_DECK: &[(u32, &str)] = &[
+    (4, "Life from the Loam"),
+    (4, "Exploration"),
+    (4, "Carnivorous Cultivator // Enroot"),
+    (4, "Yavimaya, Cradle of Growth"),
+    (1, "Otawara, Soaring City"),
+    (9, "Forest"),
+    (2, "Disruptor Flute"),
+    (1, "Icetill Explorer"),
+    (1, "Karakas"),
+    (4, "Wasteland"),
+    (4, "Crop Rotation"),
+    (1, "Ancient Tomb"),
+    (1, "Skateboard"),
+    (4, "Malevolent Rumble"),
+    (4, "Mox Diamond"),
+    (4, "Urza's Saga"),
+    (4, "Boseiju, Who Endures"),
+    (1, "Expedition Map"),
+    (2, "Force of Vigor"),
+    (1, "Dismember"),
+];
+
+fn lands_b_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = LANDS_B_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = crate::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    crate::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("LANDS_B_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=lands_b`'s counters (`LANDS_B_KINDS`): spells seen on the stack (each stack item once, by its id), a
+/// dredge question answered by dredging or by drawing (`Task::Dredge`, before the answer is applied), a land played
+/// as the second or later of a turn, Yavimaya played, the Cultivator's combat-damage trigger put on the stack, and a
+/// land that is a Forest by Yavimaya alone (no printed Forest type; each object once a turn).
+static LANDS_B_SEEN: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+const LANDS_B_KINDS: [&str; 10] = [
+    "Life from the Loam cast",
+    "draws dredged",
+    "dredges declined",
+    "Exploration cast",
+    "second lands of a turn played",
+    "Carnivorous Cultivator cast",
+    "Enroot cast",
+    "Cultivator combat triggers",
+    "Yavimaya played",
+    "lands a Forest by Yavimaya",
+];
+
+/// One game's `FUZZ_POOL=lands_b` bookkeeping: the stack items counted, the (land, turn) Forests counted.
+#[derive(Default)]
+struct LandsBSeen {
+    items: Vec<u32>,
+    forests: Vec<(crate::ids::ObjRef, u32)>,
+}
+
+/// Before action `a` is applied: a dredge question's answer, a land played.
+fn count_lands_b_choice(g: &Game, a: u16) {
+    let Some(d) = g.pending_decision() else { return };
+    let Some(o) = d.options.iter().find(|o| o.action == a) else { return };
+    let dredge = matches!(g.agenda.last(), Some(crate::flow::Task::Dredge { .. }));
+    match (d.kind, o.choice) {
+        (DecisionKind::ChooseGraveyardCard, Choice::Card(_)) if dredge => {
+            LANDS_B_SEEN[1].fetch_add(1, Ordering::Relaxed);
+        }
+        (DecisionKind::ChooseGraveyardCard, Choice::Pass) if dredge => {
+            LANDS_B_SEEN[2].fetch_add(1, Ordering::Relaxed);
+        }
+        (DecisionKind::Priority | DecisionKind::ChooseGraveyardCard, Choice::Play(c) | Choice::PlayFace(c)) => {
+            if g.player(d.player).lands_played >= 1 {
+                LANDS_B_SEEN[4].fetch_add(1, Ordering::Relaxed);
+            }
+            if g.name(c) == "Yavimaya, Cradle of Growth" {
+                LANDS_B_SEEN[8].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn count_lands_b(g: &Game, s: &mut LandsBSeen) {
+    for it in g.stack() {
+        if s.items.contains(&it.id) {
+            continue;
+        }
+        s.items.push(it.id);
+        match it.kind {
+            crate::game::StackKind::Spell { card } => {
+                let k = match g.name(card) {
+                    "Life from the Loam" => 0,
+                    "Exploration" => 3,
+                    "Carnivorous Cultivator" | "Carnivorous Cultivator // Enroot" => 5,
+                    "Enroot" => 6,
+                    _ => continue,
+                };
+                LANDS_B_SEEN[k].fetch_add(1, Ordering::Relaxed);
+            }
+            crate::game::StackKind::Ability { ability, .. } if g.db().def(ability.def).name == "Carnivorous Cultivator // Enroot" => {
+                LANDS_B_SEEN[7].fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+    let Some(forest) = g.db().subtype_id("Forest") else { return };
+    let turn = g.turn().number;
+    for &c in g.battlefield() {
+        if g.is_type(c, crate::db::types::LAND) && !g.def_of(c).subtypes.contains(&forest) && g.has_subtype(c, forest) {
+            let r = g.obj_ref(c);
+            if !s.forests.contains(&(r, turn)) {
+                s.forests.push((r, turn));
+                LANDS_B_SEEN[9].fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -3491,6 +3630,15 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
             _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
         };
     }
+    if lands_b_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = lands_b_deck();
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
+    }
     if hogaak_c_mode() {
         // Against Delver in either seat; one game in three the mirror.
         let mine = hogaak_c_deck();
@@ -3575,6 +3723,8 @@ pub fn play(seed: u64, checks: bool) -> Played {
     let mut lands_a_seen = LandsASeen::default();
     // (`FUZZ_POOL=hogaak`'s Stitcher's Supplier triggers counted, ENGINE.md 220.4.)
     let mut hogaak_stitchers: Vec<u32> = Vec::new();
+    // (`FUZZ_POOL=lands_b`'s counts, ENGINE.md 270.2.)
+    let mut lands_b_seen = LandsBSeen::default();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     // The rules checks (ENGINE.md 150), after every step.
     let mut rc = checks.then(|| RulesCheck::new(&g));
@@ -3633,6 +3783,9 @@ pub fn play(seed: u64, checks: bool) -> Played {
         let stitcher_top = if hogaak_mode() { hogaak_stitcher_on_top(&g, a) } else { None };
         if hogaak_c_mode() || hogaak_mode() {
             count_hogaak_c_choice(&g, a);
+        }
+        if lands_b_mode() {
+            count_lands_b_choice(&g, a);
         }
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         count_dropped_loop_records(&g, false);
@@ -3695,6 +3848,9 @@ pub fn play(seed: u64, checks: bool) -> Played {
         }
         if lands_a_mode() {
             count_lands_a(&g, &mut lands_a_seen);
+        }
+        if lands_b_mode() {
+            count_lands_b(&g, &mut lands_b_seen);
         }
         if cross_mode() && !g.stack().is_empty() {
             count_cross(&g, &mut stack_seen);
@@ -4365,6 +4521,12 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             LANDS_A_KINDS.iter().zip(&LANDS_A_SEEN).map(|(n, c)| format!("{n} {}", l(c))).collect::<Vec<_>>().join(", ")
         );
     }
+    if lands_b_mode() {
+        println!(
+            "FUZZ_POOL=lands_b (ENGINE.md 270.2): {}",
+            LANDS_B_KINDS.iter().zip(&LANDS_B_SEEN).map(|(n, c)| format!("{n} {}", c.load(Ordering::Relaxed))).collect::<Vec<_>>().join(", ")
+        );
+    }
     if hogaak_mode() {
         let l = |x: &AtomicU64| x.load(Ordering::Relaxed);
         println!(
@@ -4513,7 +4675,7 @@ fn games_totals(companions_used: u64) -> Totals {
     ] {
         t.set(k, v);
     }
-    let arrays: [(&str, &[AtomicU64]); 11] = [
+    let arrays: [(&str, &[AtomicU64]); 12] = [
         ("dd_a_cast", &DD_A_CASTS),
         ("doomsday_cast", &DOOMSDAY_CASTS),
         ("doomsday_ability", &DOOMSDAY_ABILITY_COUNTS),
@@ -4525,6 +4687,7 @@ fn games_totals(companions_used: u64) -> Totals {
         ("hogaak_c_seen", &HOGAAK_C_SEEN),
         ("hogaak_seen", &HOGAAK_SEEN),
         ("lands_a_seen", &LANDS_A_SEEN),
+        ("lands_b_seen", &LANDS_B_SEEN),
     ];
     for (name, a) in arrays {
         for (i, x) in a.iter().enumerate() {
@@ -4683,6 +4846,10 @@ pub fn check_games(n: u64, t: &Totals) {
     if lands_a_mode() && n >= 200 {
         let seen = totals_vec(t, "lands_a_seen", LANDS_A_SEEN.len());
         assert!(seen.iter().all(|&c| c > 0), "FUZZ_POOL=lands_a: lane A's cards weren't played: {:?}", LANDS_A_KINDS.iter().zip(&seen).collect::<Vec<_>>());
+    }
+    if lands_b_mode() && n >= 200 {
+        let seen = totals_vec(t, "lands_b_seen", LANDS_B_SEEN.len());
+        assert!(seen.iter().all(|&c| c > 0), "lane B's cards weren't played: {:?}", LANDS_B_KINDS.iter().zip(&seen).collect::<Vec<_>>());
     }
     if hogaak_mode() && n >= 200 {
         // (ENGINE.md 220.4: the seven cards; Massacre, a sideboard card, is the matches')
@@ -5793,7 +5960,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / lands_a / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / lands_a / lands_b / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
@@ -6321,6 +6488,8 @@ pub fn play_hidden(seed: u64) -> Played {
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
     let (mut actions, mut keys) = (Vec::new(), Vec::new());
     let (mut names_named, mut names_seen): (Vec<crate::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
+    // (`FUZZ_POOL=lands_b`'s counts with hidden decklists too, ENGINE.md 270.2.)
+    let mut lands_b_seen = LandsBSeen::default();
     let mut steps = 0usize;
     let mut mc = MatchCheck::new();
     rules_match_step(&mut mc, &a, &|| format!("seed {seed} (its first state)"));
@@ -6353,6 +6522,9 @@ pub fn play_hidden(seed: u64) -> Played {
         if complete_now(&a.g, &mut crng) {
             check_options_complete(&a.g, seed, "the game");
         }
+        if lands_b_mode() {
+            count_lands_b_choice(&a.g, act);
+        }
         a.step(act, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         count_dropped_loop_records(&a.g, false);
         a.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
@@ -6360,6 +6532,9 @@ pub fn play_hidden(seed: u64) -> Played {
         rules_match_step(&mut mc, &a, &|| format!("seed {seed} step {steps} (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1)"));
         if names_mode() {
             count_names(&a.g, &mut names_named, &mut names_seen);
+        }
+        if lands_b_mode() {
+            count_lands_b(&a.g, &mut lands_b_seen);
         }
         actions.push(act);
         steps += 1;

@@ -309,7 +309,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // below, with the card types (ENGINE.md 99.2).
         let aura_gy = *aura_enchant_type == enums::EnchantKind::CreatureCardInGraveyard;
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
-        l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
+        // (`grants_basic_land_type_to_all_lands`: lowered below, ENGINE.md 270.2.)
         l.deny("CardPrinting.all_permanents_gain_card_type", all_permanents_gain_card_type);
         l.deny("CardPrinting.all_objects_colorless", all_objects_colorless);
         l.deny("CardPrinting.mana_spendable_as_any_color", mana_spendable_as_any_color);
@@ -361,7 +361,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
-        // (`zone_abilities`: lowered below, ENGINE.md 124.3.)
+        // (`zone_abilities`: lowered below, ENGINE.md 124.3, 270.2.)
         // `miracle_cost_str`: the printed `miracle_cost`, checked against it where
         // that is lowered (`lower_printed_cost`); without the cost, nothing.
         if miracle_cost.is_none() {
@@ -1893,6 +1893,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // The Legacy Sneak and Show cards (ENGINE.md 123): Omniscience's free
     // casts from hand, Disruptor Flute's name and its two statics.
     let (sns, sns_name, sns_tax) = super::sneak_show::printing_sns(l, roto_statics, *grants_free_casts_from_hand, ty, *chooses_card_name_as_enters);
+    // Leyline of the Void's replacement and dredge (ENGINE.md 124.3, 270.2).
+    let (zone_exile, dredge) = super::lands_b::lower_zone_abilities(l, zone_abilities, ty);
     let mut def = CardDef {
         sns,
         nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
@@ -1911,7 +1913,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         levels,
         reconfigure,
         void_exile,
-        opp_gy_exile: super::doomsday_c::lower_zone_abilities(l, zone_abilities, ty),
+        opp_gy_exile: zone_exile,
         opening,
         name: name.clone(),
         types: ty,
@@ -2079,6 +2081,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             ..Default::default()
         },
         dd_b: Default::default(),
+        lands_b: crate::lands_b::LandsBDef { dredge },
     };
     // "As this enters, choose a creature type" (CR 614.12, 205.3m; ENGINE.md
     // 124.2): a permanent's.
@@ -2087,8 +2090,13 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.enters_choosing_creature_type(not a permanent)");
     }
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
+    // "Each land is a Forest in addition to its other land types" (Yavimaya; ENGINE.md 270.2).
+    let basic_grant = super::lands_b::lower_land_type_grant(l, &mut def, grants_basic_land_type_to_all_lands);
     super::eoe_w6::printing_w6_grants(&mut def, *grants_blue_mana_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);
+    if basic_grant {
+        def.w3.seen |= crate::eoe_w3::SEEN_W3_BASIC_TYPE;
+    }
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     crate::eoe_w6::finish_def(&mut def);
     // "Mana of the chosen color": a colour chosen as it enters (or, for a

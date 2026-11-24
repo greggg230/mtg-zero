@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1707 | 1335 |
-| class a | 1330 | 1056 |
+| fetched | 1732 | 1349 |
+| class a | 1359 | 1074 |
 | class b | 195 | 147 |
-| class c | 182 | 132 |
-| a, tested (passing) | 1330 | 1056 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 950 | 781 |
-| a, tested only by an earlier test (Oracle or rules) | 380 | 275 |
+| class c | 178 | 128 |
+| a, tested (passing) | 1359 | 1074 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 955 | 781 |
+| a, tested only by an earlier test (Oracle or rules) | 404 | 293 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 187/187, stack 142/142, triggers 142/142, zones 132/132, other 111/111, copies 106/106, dfc 67/67, replacement 63/63, combat 56/56, protection 27/27, facedown 13/13, walkers 9/9, removal 1/1 (tested/all).
+Class a by area (distinct texts): mana 187/187, stack 142/142, triggers 142/142, zones 133/133, other 114/114, copies 108/108, dfc 70/70, replacement 69/69, combat 56/56, protection 27/27, facedown 13/13, walkers 9/9, tested 3/3, removal 1/1 (tested/all).
 
 ## Per card
 
@@ -2073,21 +2073,21 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `912d01f2` | a | triggers | a creature can't become prepared a second time simultaneously; a redundant trigger doesn't create a second exiled copy | `rulings_copies2::emeritus_already_prepared_isnt_prepared_again_cr_722_3a` |
-| `513b768f` | c | NR | a creature without an associated alternate spell can never become 'prepared' [part 3, was a/other: Emeritus of Abundance is the cube's only card with a prepare spell] | not reachable with the cube's cards |
+| `513b768f` | a | tested | a creature without an associated alternate spell can never become 'prepared' [part 3, was a/other: Emeritus of Abundance is the cube's only card with a prepare spell] (triaged c NR; tested) | `cards_lands_b::cr_723_3a_no_prepare_spell_no_preparing` |
 | `1a88f316` | a | dfc | a card with this alternate spell is just its base creature card except while cast as that alternate spell | `rulings_faces2::a_preparation_card_is_a_creature_card_everywhere_and_casts_only_as_one_cr_722_1` |
-| `4afe6989` | a | dfc | becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared | `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
-| `30549a2b` | a | copies | being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics | `rulings_copies2::being_prepared_isnt_copiable_cr_722_2b_707_2` |
-| `a5afe2a8` | c | NR | casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply [part 3, was a/mana: no cube effect offers an alternative cost for a prepare copy cast from exile] | not reachable with the cube's cards |
+| `4afe6989` | a | dfc | becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared | `cards_lands_b::cr_723_3c_cultivator_enters_prepared_and_casts_enroot`; `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
+| `30549a2b` | a | copies | being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics | `cards_lands_b::cr_707_2_being_prepared_isnt_copiable`; `rulings_copies2::being_prepared_isnt_copiable_cr_722_2b_707_2` |
+| `a5afe2a8` | a | tested | casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply [part 3, was a/mana: no cube effect offers an alternative cost for a prepare copy cast from exile] (triaged c NR; tested) | `cards_lands_b::cr_601_2f_the_enroot_copy_costs_its_mana_cost_and_increases` |
 | `4d9f48c8` | a | copies | making the exiled alternate-spell copy ignores any copy-exceptions; it keeps its own original characteristics | `cards_m7b_copies2::a_metamorph_copying_emeritus_enters_prepared_cr_722_2b` |
 | `41772f5d` | a | triggers | a land-count-gated ability checks the count both when it triggers and again at resolution, failing either check | `rulings_copies2::emeritus_the_land_count_is_checked_again_on_resolution_cr_603_4` |
-| `4c9245c3` | a | stack | an alternate spell with no legal targets left at resolution fails, and the creature stays unprepared | `rulings_stack3::abilities_and_reflexive_effects_with_their_targets_gone_cr_608_2b` |
-| `f028f400` | a | copies | losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy | `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
-| `b775049c` | a | copies | losing creature status or copying something else doesnt undo being prepared; the copy stays castable | `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
-| `c6772882` | c | NR | an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared [part 3, was a/replacement: no cube effect makes a creature unprepared (only casting the prepared spell, tested)] | not reachable with the cube's cards |
-| `8c23b69e` | c | NR | choosing a card name may select this kind of alternate spell's name [part 3, was a/dfc: the cube's naming cards look at cards outside the stack, where a prepare spell's name never matches; naming it is naming a card that isn't there] | not reachable with the cube's cards |
-| `341b5cd9` | a | other | only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner | `rulings_copies2::only_the_prepared_creatures_controller_may_cast_its_copy_cr_722_3c` |
+| `4c9245c3` | a | stack | an alternate spell with no legal targets left at resolution fails, and the creature stays unprepared | `cards_lands_b::cr_608_2b_enroot_without_a_land_finds_nothing_and_the_cultivator_stays_unprepared`; `rulings_stack3::abilities_and_reflexive_effects_with_their_targets_gone_cr_608_2b` |
+| `f028f400` | a | copies | losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy | `cards_lands_b::cr_613_1f_a_prepared_cultivator_losing_its_abilities_stays_prepared`; `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
+| `b775049c` | a | copies | losing creature status or copying something else doesnt undo being prepared; the copy stays castable | `cards_lands_b::cr_613_1f_a_prepared_cultivator_losing_its_abilities_stays_prepared`; `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
+| `c6772882` | a | tested | an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared [part 3, was a/replacement: no cube effect makes a creature unprepared (only casting the prepared spell, tested)] (triaged c NR; tested) | `cards_lands_b::cr_723_3c_cultivator_enters_prepared_and_casts_enroot` |
+| `8c23b69e` | a | dfc | choosing a card name may select a prepare spell's name: Disruptor Flute (constructed play's table) names Enroot, taxing the prepare copy (CR 201.3, 723; ENGINE.md 270.2) [was c NR in part 3: the cube's naming cards named only cards outside the stack] | `cards_lands_b::cr_201_3_disruptor_flute_may_name_enroot` |
+| `341b5cd9` | a | other | only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner | `cards_lands_b::cr_723_3c_only_the_controller_casts_the_enroot_copy`; `rulings_copies2::only_the_prepared_creatures_controller_may_cast_its_copy_cr_722_3c` |
 | `81739185` | a | dfc | a card with this kind of alternate spell can only be cast with its base characteristics, unless it's prepared | `rulings_faces2::a_preparation_card_is_a_creature_card_everywhere_and_casts_only_as_one_cr_722_1` |
-| `94077065` | a | copies | copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception | `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
+| `94077065` | a | copies | copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception | `cards_lands_b::cr_723_3c_the_enroot_copy_stays_in_exile_while_prepared`; `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
 
 ### Endurance
 
@@ -3739,6 +3739,51 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a5613231` | a | mana | Maze of Ith has no mana ability | `cards_lands_a::cr_615_1a_maze_of_ith_prevents_an_unblocked_attacker_s_damage` |
 | `ba3777e8` | a | combat | a Mazed creature stays attacking until the combat phase ends; only its combat damage is prevented (CR 506.4) | `cards_lands_a::cr_506_4_a_mazed_creature_stays_in_combat_and_neither_deals_nor_takes_damage` |
 | `8abfa1d8` | a | combat | Maze of Ith activated in the combat damage step or the end of combat step untaps the creature; damage dealt already stands (CR 615.1, 510.2) | `cards_lands_a::cr_615_1_maze_of_ith_after_combat_damage_untaps_and_changes_nothing_dealt` |
+
+### Life from the Loam (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `d3cba85a` | a | replacement | dredge replaces any draw, not only the draw step's (CR 702.52a) | `cards_lands_b::cr_702_52a_dredge_replaces_the_draw_step_draw`; `cards_lands_b::cr_702_52a_dredge_replaces_any_draw` |
+| `cb6b05ff` | a | replacement | a card put into a hand without the word draw is no draw: no dredge (CR 121.1) | `cards_lands_b::cr_121_1_a_card_put_into_a_hand_is_no_draw_no_dredge` |
+| `43bacf7c` | a | replacement | draws one at a time: each may be dredged, by a card an earlier dredge milled too (CR 121.2, 121.6b) | `cards_lands_b::cr_121_6b_each_draw_of_brainstorm_may_be_dredged_by_a_card_the_first_dredge_milled` |
+| `ea37d02f` | a | replacement | dredging is done at once: no action between the choice, the mill and the return (CR 702.52a) | `cards_lands_b::cr_702_52a_dredging_is_done_at_once` |
+| `41dfb0fe` | a | replacement | one draw is replaced by one dredge ability at most (CR 614.5) | `cards_lands_b::cr_614_5_one_draw_is_replaced_by_one_dredge_ability` |
+| `ebef1beb` | a | replacement | no dredge with fewer than N cards in the library (CR 702.52b) | `cards_lands_b::cr_702_52b_dredge_needs_at_least_n_cards_in_the_library` |
+
+### Exploration (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `08f2525f` | a | zones | additional land plays are cumulative, Explorations' with each other's and Fastbond's (CR 305.2) | `cards_lands_b::cr_305_2_explorations_are_cumulative` |
+
+### Carnivorous Cultivator // Enroot (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `689c6d88` | a | copies | a permanent already prepared isn't prepared again: no second copy (CR 723.3a) | `cards_lands_b::cr_723_3a_prepared_once_at_a_time` |
+| `513b768f` | a | tested | a creature without an associated alternate spell can never become 'prepared' [part 3, was a/other: Emeritus of Abundance is the cube's only card with a prepare spell] (triaged c NR; tested) | `cards_lands_b::cr_723_3a_no_prepare_spell_no_preparing` |
+| `2d0caf19` | a | dfc | a preparation card is a creature card in every zone, its own mana value and colour (CR 723.2) | `cards_lands_b::cr_723_2_cultivator_is_a_creature_card_in_every_zone` |
+| `4afe6989` | a | dfc | becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared | `cards_lands_b::cr_723_3c_cultivator_enters_prepared_and_casts_enroot`; `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
+| `30549a2b` | a | copies | being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics | `cards_lands_b::cr_707_2_being_prepared_isnt_copiable`; `rulings_copies2::being_prepared_isnt_copiable_cr_722_2b_707_2` |
+| `a5afe2a8` | a | tested | casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply [part 3, was a/mana: no cube effect offers an alternative cost for a prepare copy cast from exile] (triaged c NR; tested) | `cards_lands_b::cr_601_2f_the_enroot_copy_costs_its_mana_cost_and_increases` |
+| `3e90518e` | a | copies | the prepare copy ignores the creature's copy exceptions (CR 723.3c) | `cards_lands_b::cr_723_3c_the_enroot_copy_ignores_mockingbirds_exceptions` |
+| `4c9245c3` | a | stack | an alternate spell with no legal targets left at resolution fails, and the creature stays unprepared | `cards_lands_b::cr_608_2b_enroot_without_a_land_finds_nothing_and_the_cultivator_stays_unprepared`; `rulings_stack3::abilities_and_reflexive_effects_with_their_targets_gone_cr_608_2b` |
+| `f028f400` | a | copies | losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy | `cards_lands_b::cr_613_1f_a_prepared_cultivator_losing_its_abilities_stays_prepared`; `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
+| `b775049c` | a | copies | losing creature status or copying something else doesnt undo being prepared; the copy stays castable | `cards_lands_b::cr_613_1f_a_prepared_cultivator_losing_its_abilities_stays_prepared`; `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
+| `c6772882` | a | tested | an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared [part 3, was a/replacement: no cube effect makes a creature unprepared (only casting the prepared spell, tested)] (triaged c NR; tested) | `cards_lands_b::cr_723_3c_cultivator_enters_prepared_and_casts_enroot` |
+| `8c23b69e` | a | dfc | choosing a card name may select a prepare spell's name: Disruptor Flute (constructed play's table) names Enroot, taxing the prepare copy (CR 201.3, 723; ENGINE.md 270.2) [was c NR in part 3: the cube's naming cards named only cards outside the stack] | `cards_lands_b::cr_201_3_disruptor_flute_may_name_enroot` |
+| `341b5cd9` | a | other | only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner | `cards_lands_b::cr_723_3c_only_the_controller_casts_the_enroot_copy`; `rulings_copies2::only_the_prepared_creatures_controller_may_cast_its_copy_cr_722_3c` |
+| `eeba768b` | a | dfc | a preparation card is cast only with its base characteristics (CR 723.3) | `cards_lands_b::cr_723_3_cultivator_is_cast_only_as_the_creature` |
+| `94077065` | a | copies | copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception | `cards_lands_b::cr_723_3c_the_enroot_copy_stays_in_exile_while_prepared`; `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
+
+### Yavimaya, Cradle of Growth (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `6466518a` | a | other | land cards not on the battlefield aren't Forests by Yavimaya (CR 305.7, 611.3) | `cards_lands_b::cr_305_7_only_lands_on_the_battlefield_are_forests` |
+| `5bfb8e33` | a | other | each land on the battlefield is a Forest with {T}: Add {G}, nothing else changes (CR 305.6, 305.7) | `cards_lands_b::cr_305_7_each_land_is_a_forest_in_addition` |
+| `7bbd22d4` | a | other | Yavimaya isn't a Forest off the battlefield (CR 305.7) | `cards_lands_b::cr_305_7_only_lands_on_the_battlefield_are_forests` |
 
 ## Cards without rulings (182)
 
