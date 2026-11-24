@@ -58,6 +58,7 @@ pub mod eoe_w5;
 pub mod doomsday_b;
 pub mod doomsday_c;
 pub mod sneak_show;
+pub mod lands_c;
 mod hogaak_a;
 mod lands_a;
 pub mod lands_b;

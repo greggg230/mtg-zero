@@ -868,7 +868,8 @@ impl Game {
             }
             Op::AddManaChoice { who, ref prod } => {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
-                let prods = crate::pay::productions(self, p, prod, Some(f.source.idx));
+                // (An instruction, not a land's mana ability tapping it: CR 106.12.)
+                let prods = crate::pay::productions(self, p, prod, Some(f.source.idx), false);
                 match self.answer.take() {
                     Some(Choice::Number(k)) => {
                         self.add_mana(p, &prods[k as usize]);

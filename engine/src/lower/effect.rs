@@ -1018,6 +1018,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::delver_sb::lower_effect_delver_sb(l, b, other)
                 && !super::hogaak_c::lower_effect_hogaak_c(l, b, other)
                 && !super::lands_a::lower_effect_lands_a(l, b, other)
+                && !super::lands_c::lower_effect_lands_c(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

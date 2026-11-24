@@ -795,7 +795,13 @@ impl Game {
                             continue;
                         }
                     }
-                    if self.objs[c.i()].tapped && !self.abilities(c).no_untap && !(self.w6.seen & crate::eoe_w6::SEEN_W6_NO_UNTAP != 0 && self.w6_no_untap(c)) {
+                    // ("<Permanents> don't untap during their controllers'
+                    // untap steps", Choke: ENGINE.md 270.3.)
+                    if self.objs[c.i()].tapped
+                        && !self.abilities(c).no_untap
+                        && !(self.w6.seen & crate::eoe_w6::SEEN_W6_NO_UNTAP != 0 && self.w6_no_untap(c))
+                        && !self.untap_prevented(c)
+                    {
                         self.untap(c);
                     }
                 }

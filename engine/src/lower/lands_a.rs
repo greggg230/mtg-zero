@@ -21,10 +21,21 @@ use card_ir::{cats, nodes};
 /// "When <its source has no <kind> counters on it>, <effect>" -> a
 /// [`TriggerDef`] of [`EventKind::State`] whose predicate is its source's
 /// condition (`TrigPred::Source`), checked by `Game::check_state_triggers`.
-pub(crate) fn lower_board_rules(l: &mut Lowerer, rules: &[cats::StateTrigger]) -> Vec<TriggerDef> {
+/// (The category's other rules are static abilities, lowered by
+/// `lands_c::printing_board_rules`, ENGINE.md 270.3, 270.4.)
+pub(crate) fn lower_board_rules(l: &mut Lowerer, rules: &[cats::DoesntUntapOrEnteringDoesntCauseTriggersOrGrantsTriggerToCreaturesOrMultiManaLandsProduceColorlessOrSpellTaxPerOtherSpellThisTurnOrStateTrigger]) -> Vec<TriggerDef> {
+    use cats::DoesntUntapOrEnteringDoesntCauseTriggersOrGrantsTriggerToCreaturesOrMultiManaLandsProduceColorlessOrSpellTaxPerOtherSpellThisTurnOrStateTrigger as R;
     let mut out = Vec::new();
     for r in rules {
-        let cats::StateTrigger::StateTrigger(nodes::StateTrigger { condition, ability }) = r;
+        let st = match r {
+            R::StateTrigger(st) => st,
+            R::DoesntUntap(_)
+            | R::EnteringDoesntCauseTriggers(_)
+            | R::GrantsTriggerToCreatures(_)
+            | R::MultiManaLandsProduceColorless(_)
+            | R::SpellTaxPerOtherSpellThisTurn(_) => continue,
+        };
+        let nodes::StateTrigger { condition, ability } = st;
         let cats::HasNoCountersOfKind::HasNoCountersOfKind(nodes::HasNoCountersOfKind { kind }) = &**condition;
         if kind.is_empty() {
             l.unsupported("HasNoCountersOfKind.kind(empty)");

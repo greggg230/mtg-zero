@@ -127,16 +127,20 @@ def test_best_of_three_matches_are_counted_from_their_records_episodes(tmp_path)
                    rolling=True)
     drv.set_trace(True)
     rows, texts = [], []
-    # (Matches 0-3, however many later ones a rolling driver finishes before them: which finish first follows the
-    # constructed table's games, and the table's prior moves with every card added to it, ENGINE.md 270.2.)
-    while not {0, 1, 2, 3} <= {int(json.loads(t)['gid']) for t in texts}:
-        drv.resume(1 if texts else 4, 0)
+    # Matches 0-3 (the campaign below credits those ids). Which of the rolling driver's matches finish first depends
+    # on the games (a change of the constructed table's definitions, ENGINE.md 270.2, 270.3, finished 0, 2, 3 and 5
+    # first): more are played until those four are done, and only they are kept.
+    done = lambda: {int(json.loads(t)['gid']) for t in texts}  # noqa: E731
+    for _ in range(50):
+        if {0, 1, 2, 3} <= done():
+            break
+        drv.resume(max(4 - len(texts), 1), 0)
         drive(drv, {'m': Uniform()})
         r, t, _ = drv.take_game_records()
         rows += r
         texts += t
-    rows = [r for r in rows if int(r['gid']) < 4]
     texts = [t for t in texts if int(json.loads(t)['gid']) < 4]
+    rows = [r for r in rows if int(r['gid']) < 4]
     recs = [json.loads(t) for t in texts]
     counts = {int(r['gid']): G.single_games('mtg', spec, r) for r in recs}
     assert sorted(counts) == [0, 1, 2, 3] and all(1 <= n <= 2 for n in counts.values())

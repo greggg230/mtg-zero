@@ -380,7 +380,7 @@ impl Game {
                 return false;
             }
             let prod = &ad.mana().unwrap().prod;
-            return matches!(prod, crate::db::ManaProd::SacrificedLand) || !productions(self, p, prod, Some(card)).is_empty();
+            return matches!(prod, crate::db::ManaProd::SacrificedLand) || !productions(self, p, prod, Some(card), ad.cost.tap).is_empty();
         }
         let with_bending;
         let classes = if ad.cost.waterbend {
@@ -1654,7 +1654,7 @@ impl Game {
             if (k.life as crate::num::Wide) > life || (life_after > 0 && life - spent < life_after as crate::num::Wide) {
                 continue;
             }
-            if productions(self, p, &m.prod, Some(c)).is_empty() {
+            if productions(self, p, &m.prod, Some(c), ad.cost.tap).is_empty() {
                 continue;
             }
             out.push(i as u8);
@@ -1820,7 +1820,7 @@ impl Game {
                 // of permanents or the "additional" mana its tapping adds
                 // past the pool's u8 aborts.)
                 self.check_mana_bound(p, src.card, ad.cost.tap, prod);
-                productions(self, p, prod, Some(src.card))
+                productions(self, p, prod, Some(src.card), ad.cost.tap)
             }
         };
         // "Whenever you tap a creature for mana, add an additional {G}",
@@ -1941,8 +1941,8 @@ impl Game {
             .filter(|&(i, _)| d.latent == 0 || self.has_activated(c, i))
             .map(|(_, a)| a)
             .chain(granted.iter().map(|g| self.db.def(g.def).activated_def(crate::db::AbilitySlot::Activated(g.slot))))
-            .filter_map(|a| a.mana())
-            .flat_map(|m| productions(self, p, &m.prod, Some(c)))
+            .filter_map(|a| a.mana().map(|m| (m, a.cost.tap)))
+            .flat_map(|(m, tap)| productions(self, p, &m.prod, Some(c), tap))
             .fold(0, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)))
     }
 
@@ -2187,7 +2187,7 @@ impl Game {
             return false;
         }
         let prod = &ad.mana().expect("a mana ability").prod;
-        matches!(prod, crate::db::ManaProd::SacrificedLand) || !productions(self, p, prod, Some(card)).is_empty()
+        matches!(prod, crate::db::ManaProd::SacrificedLand) || !productions(self, p, prod, Some(card), ad.cost.tap).is_empty()
     }
 
     /// The mana abilities `p` may activate now through `ActivateMana` (CR

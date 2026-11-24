@@ -254,6 +254,14 @@ impl Game {
     /// ("when you cast this spell"). Leave-the-battlefield events are
     /// recorded before the object moves, so they see the game as it was.
     pub(crate) fn event(&mut self, ev: Event) {
+        // "Creatures entering don't cause abilities to trigger" (Torpor Orb;
+        // ENGINE.md 270.3): an `Enters` event of such a permanent triggers
+        // nothing, its own abilities and every other's (CR 603.6a: the
+        // event that matches them; replacement effects and "as this enters"
+        // applied already, 614.1c, 614.12).
+        if self.entering_silenced(&ev) {
+            return;
+        }
         let bit = 1u64 << ev.kind as u32;
         let mut obs: Vec<Observer> = Vec::new();
         // Permanents (not one that lost all its abilities, CR 613.1f), then
@@ -346,6 +354,14 @@ impl Game {
             // (Delayed and temporary abilities, from `delayed_base` on,
             // trigger only as such.)
             for (i, t) in def.triggers.iter().enumerate().take(def.delayed_base as usize) {
+                // ("All creatures have '<triggered ability>'": every
+                // creature's, not the granting permanent's; below.)
+                if !def.lc.granted_to_creatures.is_empty() && def.lc.granted_to_creatures.contains(&(i as u8)) {
+                    if t.event == ev.kind && !o.spell && !o.gy {
+                        self.fire_granted_to_creatures(o, i as u8, &ev, ctx);
+                    }
+                    continue;
+                }
                 if t.event != ev.kind
                     || def.gy_triggers && o.gy != in_graveyard(&t.pred)
                     || o.spell && !names_this_spell(&t.pred)
@@ -471,6 +487,46 @@ impl Game {
         }
         self.leaving_to = saved;
         m
+    }
+
+    /// "All creatures have '<triggered ability>'" (The Tabernacle at
+    /// Pendrell Vale; ENGINE.md 270.3): trigger `slot` of granting permanent
+    /// `g`'s definition is an ability of every creature on the battlefield
+    /// (CR 113.7, 604.1), unless the creature lost its abilities after the
+    /// static ability's timestamp (613.1f, 613.7: a later "loses all
+    /// abilities" removes it; an earlier one doesn't). Each creature that has
+    /// it and whose event matches triggers it: the creature is its source,
+    /// its controller the ability's ("your upkeep": the creature's
+    /// controller's), in the battlefield's order (their order on the stack is
+    /// the controller's choice, 603.3b).
+    fn fire_granted_to_creatures(&mut self, g: Observer, slot: u8, ev: &Event, ctx: EvCtx) {
+        let ts = self.objs[g.r.idx.i()].timestamp;
+        let creatures: Vec<CardIdx> = self
+            .battlefield
+            .iter()
+            .copied()
+            .filter(|&c| self.is_creature(c) && self.loss_ts(c).is_none_or(|l| l < ts))
+            .collect();
+        for c in creatures {
+            let o = &self.objs[c.i()];
+            let r = ObjRef { idx: c, inc: o.inc };
+            let controller = o.controller;
+            let obs = Observer { r, def: g.def, controller, spell: false, gy: false };
+            let t = &self.db.def(g.def).triggers[slot as usize];
+            let dests = self.pred_dests(&t.pred, ev, obs);
+            if dests == 0 {
+                continue;
+            }
+            let f = Fire {
+                t: PendingTrigger { controller, source: r, source_def: g.def, slot, ev: ctx },
+                key: (r, slot),
+                batch: has_batch(&t.pred),
+                check_done: false,
+                once: false,
+                times: None,
+            };
+            self.fire_or_hold(f, dests);
+        }
     }
 
     /// Trigger `f`, or hold it until the replacement choice it depends on

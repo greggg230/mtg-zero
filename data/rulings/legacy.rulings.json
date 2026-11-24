@@ -852,5 +852,139 @@
     "text": "Yavimaya, Cradle of Growth isn't a Forest while it's not on the battlefield."
    }
   ]
+ },
+ {
+  "name": "The Tabernacle at Pendrell Vale",
+  "oracle_id": "69b409b3-fa16-4c79-8b46-215a7036ed46",
+  "rulings": []
+ },
+ {
+  "name": "Pithing Needle",
+  "oracle_id": "a188fe7e-68de-4c7c-806c-bfe8fc7b44bf",
+  "rulings": [
+   {
+    "date": "2005-06-01",
+    "source": "wotc",
+    "text": "If you name a card that has both a mana ability and another activated ability, the mana ability can be activated but the other ability can't be activated."
+   },
+   {
+    "date": "2005-06-01",
+    "source": "wotc",
+    "text": "Pithing Needle affects cards regardless of what zone they're in. This includes cards in hand, cards in the graveyard, and exiled cards. For example, a player can't cycle Eternal Dragon or return an Eternal Dragon from their graveyard to hand if Pithing Needle naming Eternal Dragon is on the battlefield."
+   },
+   {
+    "date": "2005-06-01",
+    "source": "wotc",
+    "text": "You can name any card, even if that card doesn't normally have an activated ability. You can't name a token unless that token has the same name as a card."
+   },
+   {
+    "date": "2009-10-01",
+    "source": "wotc",
+    "text": "Once Pithing Needle has left the battlefield, activated abilities of sources with the chosen name can be activated again."
+   },
+   {
+    "date": "2012-10-01",
+    "source": "wotc",
+    "text": "Activated abilities include a colon and are written in the form \"[cost]: [effect].\" Triggered abilities and static abilities of the named card work normally."
+   }
+  ]
+ },
+ {
+  "name": "Choke",
+  "oracle_id": "057fa60b-10b0-4612-be0d-157076c82241",
+  "rulings": []
+ },
+ {
+  "name": "Cursed Totem",
+  "oracle_id": "6225a704-430a-4f56-ad87-0e8d87f285f5",
+  "rulings": [
+   {
+    "date": "2016-06-08",
+    "source": "wotc",
+    "text": "Activated abilities contain a colon. They're generally written “[Cost]: [Effect].” Some keywords are activated abilities and will have colons in their reminder text."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Activated abilities of noncreature permanents that would make them become creatures (such as a Vehicle's crew ability) can still be activated. Once they become creatures, any abilities they have cannot be activated."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Cursed Totem doesn't stop players from activating abilities of creature cards that aren't on the battlefield, such as cycling or unearth."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Cursed Totem stops players from activating mana abilities of creatures."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Other abilities of creatures, including static abilities and triggered abilities, are unaffected."
+   }
+  ]
+ },
+ {
+  "name": "Damping Sphere",
+  "oracle_id": "fd50d76c-7654-47b9-a5b6-d075874e4357",
+  "rulings": [
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Damping Sphere’s second ability counts spells that were cast during a turn even if Damping Sphere wasn’t on the battlefield as they were cast. For example, if Damping Sphere itself is the third spell you cast in a turn, the next spell you cast costs {3} more to cast."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "If multiple replacement effects would modify the mana an ability you control produces, choose one to apply. After that, determine if any others are applicable. A replacement effect can’t apply to the same event more than once."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "To determine the total cost of a spell, start with the mana cost or alternative cost (such as a flashback cost) you’re paying, add any cost increases, then apply any cost reductions. The mana value of the spell is determined only by its mana cost, no matter what the total cost to cast the spell was."
+   }
+  ]
+ },
+ {
+  "name": "Torpor Orb",
+  "oracle_id": "97326cad-b13c-4e52-82ce-850a39e5ff08",
+  "rulings": [
+   {
+    "date": "2024-04-12",
+    "source": "wotc",
+    "text": "Abilities that apply \"as [this creature] enters the battlefield,\" including many abilities that ask a creature's controller to choose a color or creature type, are unaffected."
+   },
+   {
+    "date": "2024-04-12",
+    "source": "wotc",
+    "text": "If Torpor Orb and a creature enter the battlefield at the same time, that creature entering the battlefield won't cause triggered abilities to trigger."
+   },
+   {
+    "date": "2024-04-12",
+    "source": "wotc",
+    "text": "Look at the permanent as it exists on the battlefield, taking into account continuous effects, to determine whether any triggered abilities will trigger. For example, if you control March of the Machines, which says, in part, \"Each noncreature artifact is an artifact creature,\" each artifact will be a creature at the time it enters the battlefield and will not cause triggered abilities to trigger."
+   },
+   {
+    "date": "2024-04-12",
+    "source": "wotc",
+    "text": "Replacement effects are unaffected by Torpor Orb's ability. For example, a creature that enters the battlefield with one +1/+1 counter on it will still receive a +1/+1 counter."
+   },
+   {
+    "date": "2024-04-12",
+    "source": "wotc",
+    "text": "The trigger event doesn't have to specify \"creatures\" entering the battlefield. For example, Captain Storm, Cosmium Raider from the Lost Caverns of Ixalan release has an ability that says \"Whenever an artifact enters the battlefield under your control, put a +1/+1 counter on target Pirate you control.\" If an artifact creature enters the battlefield under your control, that ability won't trigger. If a noncreature artifact enters the battlefield under your control, the ability will trigger."
+   },
+   {
+    "date": "2024-04-12",
+    "source": "wotc",
+    "text": "Torpor Orb stops a creature's own enters-the-battlefield triggered abilities as well as other triggered abilities that would trigger when a creature enters the battlefield."
+   },
+   {
+    "date": "2024-04-12",
+    "source": "wotc",
+    "text": "Triggered abilities use the word \"when,\" \"whenever,\" or \"at.\" They're often written as \"[Trigger condition], [effect].\" Some keyword abilities are triggered abilities and will have \"when,\" \"whenever,\" or \"at the beginning of\" in their reminder text."
+   }
+  ]
  }
 ]

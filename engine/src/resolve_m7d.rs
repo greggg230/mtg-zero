@@ -864,7 +864,7 @@ impl Game {
             let mut prods = Vec::new();
             if !sq {
                 let extra = self.tap_bonus(by, ad.cost.tap, bonus, creature_bonus);
-                prods = crate::pay::productions(self, p, &m.prod, Some(by));
+                prods = crate::pay::productions(self, p, &m.prod, Some(by), ad.cost.tap);
                 for v in prods.iter_mut() {
                     for t in 0..6 {
                         // (Saturating: past 255 the game has ended aborted before

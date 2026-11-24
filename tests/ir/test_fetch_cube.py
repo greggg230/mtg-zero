@@ -431,5 +431,6 @@ def test_committed_legacy_pool_matches_meta(fc):
         "Stitcher's Supplier", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor",
         "Dark Depths", "Thespian's Stage", "Blast Zone", "Ghost Quarter", "Maze of Ith", "Bojuka Bog",
         "Life from the Loam", "Exploration", "Carnivorous Cultivator // Enroot", "Yavimaya, Cradle of Growth",
+        "The Tabernacle at Pendrell Vale", "Pithing Needle", "Choke", "Cursed Totem", "Damping Sphere", "Torpor Orb",
     ]
-    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 40
+    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 46

@@ -86,6 +86,11 @@ impl Game {
         if self.seen & crate::game::SEEN_NAMED_TAX != 0 {
             cost.generic = cost.generic.saturating_add(self.named_tax(card, Some(p)));
         }
+        // "Each spell a player casts costs {1} more to cast for each other
+        // spell that player has cast this turn" (Damping Sphere; ENGINE.md
+        // 270.3): the spells `p` cast before this one (it becomes cast at
+        // 601.2i, after its cost is paid).
+        cost.generic = cost.generic.saturating_add(self.other_spells_tax(p));
         // Then reductions (CR 601.2f: increases, then reductions; generic
         // mana only, not below zero).
         for d in &self.def_of(card).discounts {

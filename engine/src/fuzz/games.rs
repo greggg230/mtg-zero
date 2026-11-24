@@ -173,6 +173,13 @@
 //! in three the mirror; constructed play's table; every check of the default mode, and with 200 games or more each of
 //! the four cast or played, a draw dredged and a dredge declined, a second land played in a turn, Enroot cast, the
 //! Cultivator's combat trigger, and a land a Forest by Yavimaya alone (`LANDS_B_SEEN`). Games only (best-of-one).
+//! `FUZZ_POOL=lands_c` (ENGINE.md 270.3): lane C of the Legacy Lands deck (MTGGoldfish 8027955): Pithing Needle,
+//! Cursed Totem, Torpor Orb, Damping Sphere, Choke and The Tabernacle at Pendrell Vale four each (`LANDS_C_DECK`)
+//! with the deck's other cards on this branch (Ancient Tomb, Urza's Saga, Mox Diamond, Karakas, Otawara, Boseiju,
+//! Wasteland, Crop Rotation, Malevolent Rumble, Icetill Explorer, Endurance) and Dryad Arbor, against the Delver 60
+//! in either seat, one game in three the mirror; constructed play's table; every check of the default mode, and with
+//! 200 games or more each of the six must have been cast (the Tabernacle played) and each rule seen at work
+//! (`LANDS_C_KINDS`). Games only (best-of-one).
 //! `FUZZ_POOL=hogaak` (ENGINE.md 220.4): the Legacy Hogaak Tempo deck (MTGGoldfish 8027954,
 //! `data/decks/hogaak_tempo_8027954.json`, `Decklist::legacy_hogaak`). Games: its real 60 against the real Delver,
 //! Doomsday and Sneak and Show 60s in either seat, one game in four the mirror (`seed % 8`), best-of-one, constructed
@@ -628,6 +635,9 @@ pub enum PoolMode {
     /// `FUZZ_POOL=lands_a` (ENGINE.md 270.1): the Legacy Lands deck's lane A
     /// cards four each against the Delver 60 and itself.
     LandsA,
+    /// `FUZZ_POOL=lands_c` (ENGINE.md 270.3): the Legacy Lands deck's lane C
+    /// cards four each against the Delver 60 and itself.
+    LandsC,
     /// `FUZZ_POOL=hogaak` (ENGINE.md 220.4): the Legacy Hogaak Tempo deck's real
     /// 60 against the Delver, Doomsday and Sneak and Show 60s and its mirror;
     /// best-of-three between its 75 and theirs.
@@ -679,6 +689,7 @@ pub fn pool_mode() -> PoolMode {
         Ok("delver_sb") => PoolMode::DelverSb,
         Ok("hogaak_c") => PoolMode::HogaakC,
         Ok("lands_a") => PoolMode::LandsA,
+        Ok("lands_c") => PoolMode::LandsC,
         Ok("hogaak") => PoolMode::Hogaak,
         Ok("lands_b") => PoolMode::LandsB,
         Ok("cross") => PoolMode::Cross,
@@ -687,7 +698,7 @@ pub fn pool_mode() -> PoolMode {
         Ok("meta") => PoolMode::Meta,
         Ok("meta_wheel") => PoolMode::MetaWheel,
         Ok("meta_pair") => PoolMode::MetaPair,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"lands_a\", \"lands_b\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_pair\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"hogaak_a\", \"hogaak_b\", \"hogaak_c\", \"hogaak\", \"lands_a\", \"lands_b\", \"lands_c\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"meta_pair\", \"meta_wheel\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -818,7 +829,7 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show`, `sns`, `hogaak_a`, `hogaak_b`, `hogaak_c`, `hogaak`, `lands_a`, `lands_b`, `names`, `delver_sb`,
+/// `doomsday`, `sneak_show`, `sns`, `hogaak_a`, `hogaak_b`, `hogaak_c`, `hogaak`, `lands_a`, `lands_b`, `lands_c`, `names`, `delver_sb`,
 /// `cross` or `meta`).
 pub fn constructed_mode() -> bool {
     delver_mode()
@@ -831,6 +842,7 @@ pub fn constructed_mode() -> bool {
         || hogaak_b_mode()
         || hogaak_c_mode()
         || lands_a_mode()
+        || lands_c_mode()
         || hogaak_mode()
         || lands_b_mode()
         || names_mode()
@@ -1879,6 +1891,160 @@ fn count_lands_b(g: &Game, s: &mut LandsBSeen) {
             if !s.forests.contains(&(r, turn)) {
                 s.forests.push((r, turn));
                 LANDS_B_SEEN[9].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// `FUZZ_POOL=lands_c` (ENGINE.md 270.3).
+fn lands_c_mode() -> bool {
+    pool_mode() == PoolMode::LandsC
+}
+
+/// The deck of `FUZZ_POOL=lands_c` (ENGINE.md 270.3): lane C's six cards four each, with the Legacy Lands deck's
+/// cards this branch has (MTGGoldfish 8027955: the other lanes' Dark Depths, Thespian's Stage, Exploration, Life from
+/// the Loam, ... out) and Dryad Arbor (a land creature: Cursed Totem, Torpor Orb and the Tabernacle at once).
+const LANDS_C_DECK: &[(u32, &str)] = &[
+    (4, "Pithing Needle"),
+    (4, "Cursed Totem"),
+    (4, "Torpor Orb"),
+    (4, "Damping Sphere"),
+    (4, "Choke"),
+    (4, "The Tabernacle at Pendrell Vale"),
+    (3, "Icetill Explorer"),
+    (2, "Endurance"),
+    (2, "Dryad Arbor"),
+    (4, "Mox Diamond"),
+    (4, "Ancient Tomb"),
+    (4, "Urza's Saga"),
+    (1, "Karakas"),
+    (2, "Otawara, Soaring City"),
+    (2, "Boseiju, Who Endures"),
+    (3, "Wasteland"),
+    (2, "Crop Rotation"),
+    (2, "Malevolent Rumble"),
+    (5, "Forest"),
+];
+
+fn lands_c_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = LANDS_C_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = crate::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    crate::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("LANDS_C_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=lands_c`'s counters (`LANDS_C_KINDS`): the six cards cast (each stack item once; the Tabernacle played
+/// as a land, `Choice::Play`); Pithing Needles with a name chosen (each object once); the Tabernacle's granted
+/// triggers put on the stack; spells cast while a Damping Sphere was on the battlefield by a player who had cast
+/// another this turn (taxed); a land that makes two or more mana (Ancient Tomb) chosen as a mana source while a
+/// Damping Sphere was on the battlefield; creatures that entered while a Torpor Orb was on the battlefield (each object
+/// once); Islands tapped at their controller's upkeep with a Choke on the battlefield (per turn); creatures on the
+/// battlefield beside a Cursed Totem (per object and turn).
+static LANDS_C_SEEN: [AtomicU64; 13] = [const { AtomicU64::new(0) }; 13];
+const LANDS_C_CARDS: [&str; 6] = ["The Tabernacle at Pendrell Vale", "Pithing Needle", "Choke", "Cursed Totem", "Damping Sphere", "Torpor Orb"];
+const LANDS_C_KINDS: [&str; 13] = [
+    "The Tabernacle at Pendrell Vale played",
+    "Pithing Needle cast",
+    "Choke cast",
+    "Cursed Totem cast",
+    "Damping Sphere cast",
+    "Torpor Orb cast",
+    "Pithing Needle names chosen",
+    "Tabernacle triggers",
+    "spells taxed by Damping Sphere",
+    "Ancient Tomb tapped under Damping Sphere",
+    "creatures entering under Torpor Orb",
+    "Islands held by Choke",
+    "creatures under Cursed Totem",
+];
+
+/// One game's `FUZZ_POOL=lands_c` bookkeeping: the stack items counted, the Needles named, the creatures seen
+/// entering under an Orb, the (turn) Choke counts, the (creature, turn) Totem counts.
+#[derive(Default)]
+struct LandsCSeen {
+    items: Vec<u32>,
+    needles: Vec<crate::ids::ObjRef>,
+    entered: Vec<crate::ids::ObjRef>,
+    choke_turns: Vec<u32>,
+    totem: Vec<(crate::ids::ObjRef, u32)>,
+}
+
+fn on_battlefield(g: &Game, name: &str) -> bool {
+    g.battlefield().iter().any(|&c| g.name(c) == name)
+}
+
+/// Before action `a` is applied: the Tabernacle played, Ancient Tomb chosen as a mana source under a Sphere.
+fn count_lands_c_choice(g: &Game, a: u16) {
+    let Some(d) = g.pending_decision() else { return };
+    let Some(o) = d.options.iter().find(|o| o.action == a) else { return };
+    match (d.kind, o.choice) {
+        (DecisionKind::Priority, Choice::Play(c)) if g.name(c) == LANDS_C_CARDS[0] => {
+            LANDS_C_SEEN[0].fetch_add(1, Ordering::Relaxed);
+        }
+        (DecisionKind::PayMana | DecisionKind::ActivateMana, Choice::Card(c) | Choice::Ability(c, _))
+            if g.name(c) == "Ancient Tomb" && on_battlefield(g, "Damping Sphere") =>
+        {
+            LANDS_C_SEEN[9].fetch_add(1, Ordering::Relaxed);
+        }
+        _ => {}
+    }
+}
+
+fn count_lands_c(g: &Game, s: &mut LandsCSeen) {
+    let sphere = on_battlefield(g, "Damping Sphere");
+    for it in g.stack() {
+        if s.items.contains(&it.id) {
+            continue;
+        }
+        s.items.push(it.id);
+        match it.kind {
+            crate::game::StackKind::Spell { card } => {
+                if let Some(k) = LANDS_C_CARDS[1..].iter().position(|&n| n == g.name(card)) {
+                    LANDS_C_SEEN[1 + k].fetch_add(1, Ordering::Relaxed);
+                }
+                if sphere && g.player(it.controller).spells_cast >= 2 {
+                    LANDS_C_SEEN[8].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            crate::game::StackKind::Ability { ability, .. } if g.db().def(ability.def).name == LANDS_C_CARDS[0] => {
+                LANDS_C_SEEN[7].fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+    let turn = g.turn().number;
+    let (orb, totem) = (on_battlefield(g, "Torpor Orb"), on_battlefield(g, "Cursed Totem"));
+    for &c in g.battlefield() {
+        let r = g.obj_ref(c);
+        if g.name(c) == "Pithing Needle" && !s.needles.contains(&r) && g.marks.iter().any(|&(o, m)| o == r && matches!(m, crate::game::Mark::ChosenName(_))) {
+            s.needles.push(r);
+            LANDS_C_SEEN[6].fetch_add(1, Ordering::Relaxed);
+        }
+        if g.is_creature(c) {
+            if orb && !s.entered.contains(&r) && g.obj(c).timestamp > 0 {
+                // (Seen first while an Orb is there: it entered with one there, or the Orb came later. Counted
+                // only when it is newer than the newest Orb.)
+                let newest_orb = g.battlefield().iter().filter(|&&o| g.name(o) == "Torpor Orb").map(|&o| g.obj(o).timestamp).max().unwrap_or(0);
+                if g.obj(c).timestamp >= newest_orb {
+                    LANDS_C_SEEN[10].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            if totem && !s.totem.contains(&(r, turn)) {
+                s.totem.push((r, turn));
+                LANDS_C_SEEN[12].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        if !s.entered.contains(&r) {
+            s.entered.push(r);
+        }
+    }
+    if g.turn().step == crate::game::Step::Upkeep && !s.choke_turns.contains(&turn) && on_battlefield(g, "Choke") {
+        let ap = g.turn().active;
+        if let Some(island) = g.db().subtype_id("Island") {
+            let held = g.permanents_of(ap).filter(|&c| g.obj(c).tapped && g.has_subtype(c, island)).count() as u64;
+            if held > 0 {
+                s.choke_turns.push(turn);
+                LANDS_C_SEEN[11].fetch_add(held, Ordering::Relaxed);
             }
         }
     }
@@ -3639,6 +3805,15 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
             _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
         };
     }
+    if lands_c_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = lands_c_deck();
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
+    }
     if hogaak_c_mode() {
         // Against Delver in either seat; one game in three the mirror.
         let mine = hogaak_c_deck();
@@ -3721,6 +3896,8 @@ pub fn play(seed: u64, checks: bool) -> Played {
     let mut hogaak_c_seen = HogaakCSeen::default();
     // (`FUZZ_POOL=lands_a`'s counts, ENGINE.md 270.1.)
     let mut lands_a_seen = LandsASeen::default();
+    // (`FUZZ_POOL=lands_c`'s counts, ENGINE.md 270.3.)
+    let mut lands_c_seen = LandsCSeen::default();
     // (`FUZZ_POOL=hogaak`'s Stitcher's Supplier triggers counted, ENGINE.md 220.4.)
     let mut hogaak_stitchers: Vec<u32> = Vec::new();
     // (`FUZZ_POOL=lands_b`'s counts, ENGINE.md 270.2.)
@@ -3787,6 +3964,9 @@ pub fn play(seed: u64, checks: bool) -> Played {
         if lands_b_mode() {
             count_lands_b_choice(&g, a);
         }
+        if lands_c_mode() {
+            count_lands_c_choice(&g, a);
+        }
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         count_dropped_loop_records(&g, false);
         g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}
@@ -3851,6 +4031,9 @@ pub fn play(seed: u64, checks: bool) -> Played {
         }
         if lands_b_mode() {
             count_lands_b(&g, &mut lands_b_seen);
+        }
+        if lands_c_mode() {
+            count_lands_c(&g, &mut lands_c_seen);
         }
         if cross_mode() && !g.stack().is_empty() {
             count_cross(&g, &mut stack_seen);
@@ -4527,6 +4710,12 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             LANDS_B_KINDS.iter().zip(&LANDS_B_SEEN).map(|(n, c)| format!("{n} {}", c.load(Ordering::Relaxed))).collect::<Vec<_>>().join(", ")
         );
     }
+    if lands_c_mode() {
+        println!(
+            "FUZZ_POOL=lands_c: {}",
+            LANDS_C_KINDS.iter().zip(&LANDS_C_SEEN).map(|(n, c)| format!("{n} {}", c.load(Ordering::Relaxed))).collect::<Vec<_>>().join(", ")
+        );
+    }
     if hogaak_mode() {
         let l = |x: &AtomicU64| x.load(Ordering::Relaxed);
         println!(
@@ -4675,7 +4864,7 @@ fn games_totals(companions_used: u64) -> Totals {
     ] {
         t.set(k, v);
     }
-    let arrays: [(&str, &[AtomicU64]); 12] = [
+    let arrays: [(&str, &[AtomicU64]); 13] = [
         ("dd_a_cast", &DD_A_CASTS),
         ("doomsday_cast", &DOOMSDAY_CASTS),
         ("doomsday_ability", &DOOMSDAY_ABILITY_COUNTS),
@@ -4685,6 +4874,7 @@ fn games_totals(companions_used: u64) -> Totals {
         ("hogaak_a_seen", &HOGAAK_A_SEEN),
         ("hogaak_b", &HOGAAK_B_COUNTS),
         ("hogaak_c_seen", &HOGAAK_C_SEEN),
+        ("lands_c_seen", &LANDS_C_SEEN),
         ("hogaak_seen", &HOGAAK_SEEN),
         ("lands_a_seen", &LANDS_A_SEEN),
         ("lands_b_seen", &LANDS_B_SEEN),
@@ -4850,6 +5040,10 @@ pub fn check_games(n: u64, t: &Totals) {
     if lands_b_mode() && n >= 200 {
         let seen = totals_vec(t, "lands_b_seen", LANDS_B_SEEN.len());
         assert!(seen.iter().all(|&c| c > 0), "lane B's cards weren't played: {:?}", LANDS_B_KINDS.iter().zip(&seen).collect::<Vec<_>>());
+    }
+    if lands_c_mode() && n >= 200 {
+        let seen = totals_vec(t, "lands_c_seen", LANDS_C_SEEN.len());
+        assert!(seen.iter().all(|&c| c > 0), "lane C's cards weren't played: {:?}", LANDS_C_KINDS.iter().zip(&seen).collect::<Vec<_>>());
     }
     if hogaak_mode() && n >= 200 {
         // (ENGINE.md 220.4: the seven cards; Massacre, a sideboard card, is the matches')
@@ -5960,7 +6154,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / lands_a / lands_b / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / lands_a / lands_b / lands_c / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
