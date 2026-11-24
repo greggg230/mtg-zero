@@ -127,12 +127,20 @@ def test_best_of_three_matches_are_counted_from_their_records_episodes(tmp_path)
                    rolling=True)
     drv.set_trace(True)
     rows, texts = [], []
-    while len(texts) < 4:
-        drv.resume(4 - len(texts), 0)
+    # Matches 0-3 (the campaign below credits those ids). Which of the rolling driver's matches finish first depends
+    # on the games (a change of the constructed table's definitions, ENGINE.md 270.3, finished 0, 2, 3 and 5 first):
+    # more are played until those four are done, and only they are kept.
+    done = lambda: {int(json.loads(t)['gid']) for t in texts}  # noqa: E731
+    for _ in range(50):
+        if {0, 1, 2, 3} <= done():
+            break
+        drv.resume(max(4 - len(texts), 1), 0)
         drive(drv, {'m': Uniform()})
         r, t, _ = drv.take_game_records()
         rows += r
         texts += t
+    texts = [t for t in texts if int(json.loads(t)['gid']) < 4]
+    rows = [r for r in rows if int(r['gid']) < 4]
     recs = [json.loads(t) for t in texts]
     counts = {int(r['gid']): G.single_games('mtg', spec, r) for r in recs}
     assert sorted(counts) == [0, 1, 2, 3] and all(1 <= n <= 2 for n in counts.values())

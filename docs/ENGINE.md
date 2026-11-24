@@ -48094,3 +48094,252 @@ events tagged with their game (sideboarding choices only in games 2-3, without a
 their game, light rows equal to full rows, ingest idempotent (a second ingest, `--redo`, a state with `chained_skipped`),
 an older database's files read as single games, a match whose boundary is falsified fails loudly. The existing gamedb
 tests pass unchanged. Gate: python tier (below).
+
+### 270.3 Lane C: Pithing Needle, Cursed Totem, Torpor Orb, Damping Sphere, Choke, The Tabernacle at Pendrell Vale (branch `lands-c`)
+
+**Why.** Lane C of the Legacy Lands deck (MTGGoldfish archetype "Legacy Lands", paper, deck 8027955, fetched
+2026-11-24: `E:/mtg-zero-scratch/lands/`, its PROVENANCE.md and BRIEF.md): six of its cards outside the cube and legacy
+IR - The Tabernacle at Pendrell Vale and Pithing Needle (main deck), Choke, Cursed Totem, Damping Sphere and Torpor Orb
+(sideboard). Branch `lands-c` from main 6f3a30d8. Lanes A (Dark Depths, Thespian's Stage, Blast Zone, Ghost Quarter,
+Maze of Ith, Bojuka Bog) and B (Life from the Loam, Exploration, Carnivorous Cultivator, Yavimaya) are other branches;
+the integration merges the three. The user's rules: no approximation of any class (docs/shortcuts.md unchanged), no
+encoding gap (none was needed: no layout change, no new float), every ruling tested, the behaviour digests equal. New
+code in `engine/src/lands_c.rs`, `engine/src/lower/lands_c.rs`, `ir/mtgz_ir/cards/parser/legacy_lands_c.py`,
+`ir/mtgz_ir/effects/generic/legacy_lands_c.py`; hooks where each rule acts.
+
+* Pithing Needle {1}, Artifact: "As this artifact enters, choose a card name. / Activated abilities of sources with
+  the chosen name can't be activated unless they're mana abilities."
+* Cursed Totem {2}, Artifact: "Activated abilities of creatures can't be activated."
+* Torpor Orb {2}, Artifact: "Creatures entering don't cause abilities to trigger."
+* Damping Sphere {2}, Artifact: "If a land is tapped for two or more mana, it produces {C} instead of any other type
+  and amount. / Each spell a player casts costs {1} more to cast for each other spell that player has cast this turn."
+* Choke {2}{G}, Enchantment: "Islands don't untap during their controllers' untap steps."
+* The Tabernacle at Pendrell Vale, Legendary Land: "All creatures have "At the beginning of your upkeep, destroy this
+  creature unless you pay {1}.""
+
+#### 270.3.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, sidecar: 36 cards), `ir/mtgz_ir/cards/parser/legacy_lands_c.py`, `effects/generic/legacy_lands_c.py`, hooks in `roto_board.py` (`permanent_phrase`, `_LINE_RECOGNIZERS`) and `cube_enchantments.py` (Choke's opt-in); `data/cards/*`, `card_ir/src/generated.rs` | 270.3.2; no IR defect (docs/ir_defects.md AD) |
+| Identities | `engine/src/az/legacy_cards.txt` | the six appended after Massacre in deck order (Tabernacle, Needle, Choke, Totem, Sphere, Orb); the integration numbers the three lanes' cards; no test names a number |
+| Lowering | `lower/lands_c.rs` (`printing_board_rules`: the printing's `board_rules`; `lower_effect_lands_c`: "destroy this creature unless you pay {n}"), `lower/printing.rs` (the board rules, the granted triggers appended to the definition's triggers), `lower/effect.rs` (the chain), `lower/graveyard_order.rs` (the new op classified) | every field named, the rest denied; Pithing Needle through `sneak_show::printing_sns` (Disruptor Flute's), Cursed Totem through `locks_activated_abilities_of` (Clarion Conqueror's) |
+| Rules | `lands_c.rs` (`LcDef`, `LcDb`, `LC::DestroySource`, `Game::untap_prevented`, `entering_silenced`, `damps`, `damped`, `other_spells_tax`), `db.rs` (`CardDef::lc`, `CardDb::lc`), `flow.rs` (the untap step), `triggers.rs` (`Game::event`: the Orb's silence first; `fire_granted_to_creatures`), `pay.rs` (`productions` with a `{T}` argument, `yield_of`, `mana_amount_max`, the class key), `activate.rs`, `resolve.rs`, `resolve_eoe_b.rs`, `resolve_m7d.rs` (each production's {T}), `cast.rs` (`cost_with`), `cast_mana.rs` (`damping_may_leave` in the 601.2g step's two shortcuts), `program.rs`, `resolve_ext.rs`; `game.rs` (`put_on_bottom_randomly`, 270.3.5) | 270.3.3 |
+| Tests | `engine/tests/cards_lands_c.rs` (43), `tests/ir/test_legacy_lands_c.py` (17), `tests/az.rs` (`lands_c_positions` in both public-state gates), `support.rs` (`SUPPORTED_LEGACY` +6), `tests/ir/test_legacy_creatures.py` and `test_fetch_cube.py` (the pinned pool +6) | 270.3.7 |
+| Fuzz pool | `engine/src/fuzz/games.rs` (`FUZZ_POOL=lands_c`, `LANDS_C_DECK`, 13 counters), `worker/src/fuzz.rs` (the pool list) | 270.3.7 |
+| Rulings | `data/rulings/legacy.rulings.json` (the six cards' 20 rulings: Needle 5, Totem 5, Sphere 3, Orb 7, Choke and the Tabernacle none), `triage.tsv` (19 new texts, all class a; Needle's 044069c9 was Disruptor Flute's), `docs/rulings.md` | every one tested |
+
+#### 270.3.2 The IR
+
+The six Scryfall records (`raw/scryfall_lands_new.json`, the orchestrator's fetch of 2026-11-24) appended to the
+legacy pool in deck order. Three parsed as they were, through earlier grammars: Pithing Needle (`roto_statics`
+`ChooseCardNameAsEnters { nonland: false }`, `ActivationProhibition { except_mana_abilities: true }`: Disruptor
+Flute's pair without its `SpellTax` and its flash), Cursed Totem (`locks_activated_abilities_of: [Creature]`), The
+Tabernacle (the roto pool's `board_rules: [GrantsTriggerToCreatures]` of a `TriggeredAbility { event:
+beginning_of_upkeep, predicate: Controlled(you), effect: DestroySourceUnlessPay("{1}") }`; no `produces`). Three had
+no grammar (coverage gaps, docs/ir_defects.md AD), now `cards/parser/legacy_lands_c.py`:
+
+* **Choke**: Back to Basics' "<permanents> don't untap during their controllers' untap steps" (`DoesntUntap`) with a
+  plural basic land type, "Islands" -> `HasSubtype("Island")` (`basic_land_type_phrase`, tried by `permanent_phrase`
+  only where the permanent grammar refused); Choke opts into the cube enchantment builder by name
+  (`LEGACY_LANDS_C_ENCHANTMENTS`).
+* **Torpor Orb**: "Creatures entering don't cause abilities to trigger." -> `EnteringDoesntCauseTriggers {
+  permanent_filter: IsCreature, label }` (new, `effects/generic/legacy_lands_c.py`).
+* **Damping Sphere**: `MultiManaLandsProduceColorless` and `SpellTaxPerOtherSpellThisTurn { amount: 1 }` (new).
+
+The three line recognizers are the board-line chain's last. `python tools/card_ir.py export`: schema `180659137ece`
+-> **`347802249f32`** (`board_rules` was `Vec<Never>`: no exported printing had one; now a union of five classes;
+`DestroySourceUnlessPay` joins `Effect`); `powerlsv.ir.json` and `eoe.ir.json` are main's but `schema_sha256` (checked
+card by card); `legacy.ir.json` 36 cards. `check` and `roundtrip` (546, 36, 483) pass.
+
+#### 270.3.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Needle: "As this artifact enters, choose a card name" | 201.3, 614.12; ruling 194bf700 | Disruptor Flute's `SnsDef::plain_name`: `NameCard` over `Game::nameable_defs` (every face of every card of the game, or of the table with hidden decks; the table's tokens that share a card's name) and `PASS`; `Mark::ChosenName` (ENGINE.md 123, 127) |
+| "Activated abilities of sources with the chosen name can't be activated unless they're mana abilities" | 602.5, 605.1a, 606.3, 611.3a; rulings 044069c9, 7e0da1dd, 85cc0060, 258063a6 | `SnsDef::named_ban = Some(true)` in `activation_ready`: every zone (channel and cycling from the hand), loyalty abilities, granted abilities by their source; not mana abilities, not special actions, not triggered or static abilities; ends as the Needle leaves |
+| Totem: "Activated abilities of creatures can't be activated" | 602.5, 302.1, 109.2, 702.122a; rulings 7340e3ca, ec03f345, 6e863b0a, f4c6dda8, e974070e | `CardDef::locks_activated = CREATURE` (`activation_locked_by`, Clarion Conqueror's): a permanent that is a creature now (an animated land, a crewed Vehicle, Dryad Arbor), mana abilities included (in payments and floating), on the battlefield only (a creature card's cycling, a Spirit Guide's mana from the hand work); a noncreature Vehicle's crew and an Equipment's equip are not creatures' abilities |
+| Orb: "Creatures entering don't cause abilities to trigger" | 603.2, 603.6a, 603.6b, 614.1c, 614.12; rulings 0e210050, d6538b6e, 0ac2f0bc, d73b5f20, d1f1a438, cf1f1651, b2cc8d3a | `LcDef::entering_silent` (a filter): `Game::event` matches no ability at all for an `Enters` event whose permanent, as it is on the battlefield (continuous effects applied: Phyrexian Metamorph copying Sol Ring is no creature), matches some permanent's filter - its own enters abilities, every other permanent's (Kappa Cannoneer's "another artifact", landfall for Dryad Arbor), an emblem's, a graveyard card's; an entry's events are matched once all of it is on the battlefield (`enters_together`), so an Orb entering with the creature counts; replacement effects and "as this enters" choices happened in the event already |
+| Sphere: "If a land is tapped for two or more mana, it produces {C} instead of any other type and amount" | 106.12, 106.12b, 614.1a, 616.1f, 106.7, 605.1b, 601.2g; ruling 73f3a5a5 | `pay::productions(.., tap)` (`Game::damps`, `Game::damped`): a land's mana ability with {T} in its cost (106.12, "tapped for mana"), a Sphere on the battlefield: every production of two or more mana becomes one {C} (a count - Gaea's Cradle, Tolarian Academy - as it is then; each of a choice - Sunken Ruins'); the rest of the ability unchanged (Ancient Tomb's damage, Mishra's Workshop's restriction); a triggered mana ability's additional mana (Nissa's) is its own production; two Spheres: one {C}; what a land "could produce" too (106.7: Reflecting Pool, Squandered Resources, `could_produce`); the payment's yields and classes, `mana_amount_max` |
+| "Each spell a player casts costs {1} more to cast for each other spell that player has cast this turn" | 601.2f, 601.2i, 202.3, 702.66a; rulings 0e1c9f8a, b6f2bdbe | `Game::other_spells_tax` in `cost_with`: `Player::spells_cast` (the spells that became cast this turn before this one; spells cast before the Sphere was there count) per Sphere, added to the generic part of the mana or alternative cost before reductions; delve pays it; not abilities (channel) |
+| Choke: "Islands don't untap during their controllers' untap steps" | 502.3, 205.3i, 305.7 | `LcDef::no_untap` (a filter) in the untap step (`Game::untap_prevented`): a permanent matching some permanent's filter as it is then (Volcanic Island under Magus of the Moon is a Mountain: it untaps); other untap effects (Nissa's +1) still untap |
+| Tabernacle: 'All creatures have "At the beginning of your upkeep, destroy this creature unless you pay {1}."' | 113.7, 604.1, 613.1f, 613.7, 503.1a, 603.3b, 118.12, 400.7, 305.7, 704.5j | the granted ability is a trigger of the Tabernacle's definition listed in `LcDef::granted_to_creatures`: `Game::event` skips it as the Tabernacle's own and fires it for every creature on the battlefield that has it (`fire_granted_to_creatures`: not one that lost all abilities after the Tabernacle's timestamp), the creature its source, its controller the ability's ("your upkeep": the creature's controller's); the active player orders them; resolving, `Op::OfferPay { You, {1} }` (offered with mana the player can make; asked even if the creature left) then `LC::DestroySource` (the same object only; indestructible and regeneration as any destruction); a Tabernacle that is a Mountain (Magus of the Moon) grants nothing; one each player's: two instances. A granted ability on any other event is refused at the lowering |
+
+#### 270.3.4 Readings taken
+
+* **Torpor Orb and events that come with an entering.** The Orb stops an ability whose trigger event is the
+  permanent entering (CR 603.6a, enters-the-battlefield abilities: the engine's `Enters` events; the same reading as EoE
+  W6's Starfield Vocalist, ENGINE.md 99.16). An ability triggering on another event that a creature's entering is part
+  of still triggers: "whenever you play a land" (City of Traitors with Dryad Arbor played: 305.1, a play), "whenever
+  you create one or more creature tokens" (Staff of the Storyteller: 111.1, a creation). Hushbringer's rulings (the
+  same text with "or dying") draw that line for its other half: "an ability that triggers on an event that causes a
+  creature to die will still trigger ... 'whenever you sacrifice a creature'", and a "from anywhere" trigger may still
+  trigger. No official ruling of Torpor Orb, Hushwing Gryff, Tocatli Honor Guard or Hushbringer names creation or
+  playing; this is the reading, tested (`cr_603_2_torpor_orb_leaves_other_events`).
+* **Orcish Bowmasters' one ability with two trigger events**: under the Orb its "when this creature enters" event is
+  silenced and its "whenever an opponent draws" event is not (the IR's two arms; 220.3.4's reading).
+* **Damping Sphere's "tapped for mana"** is CR 106.12's: a mana ability with {T} in its cost; the amount is that
+  ability's production (Nissa's and Badgermole Cub's "additional" mana is a triggered mana ability's own, 605.1b; it
+  still triggers, 106.12a: the land was tapped for mana and made mana). No other mana replacement effect is in the
+  tables, so 616.1's order choice reduces to "one applies" (two Spheres; ruling 73f3a5a5); the code applies the rule to
+  every production. Mana abilities are activated before the costs are paid (601.2g, 601.2h): a Sphere sacrificed as
+  Tinker's cost damped the mana tapped for it.
+* **Damping Sphere's count** is `Player::spells_cast`: spells that became cast (601.2i) this turn by that player,
+  reset as each turn begins; a spell being cast is not yet one of them (its cost is determined at 601.2f).
+* **The Tabernacle's payment** is asked when the creature left before the ability resolved (CR 118.12: "unless" offers
+  the payment; destroying a gone object does nothing, 400.7): a legal, dominated choice.
+* **Pithing Needle in the hand and graveyard** (ruling 7e0da1dd): `named_ban_hits` reads every zone already (the
+  Flute's ruling 044069c9 is the same text as Needle's).
+
+#### 270.3.5 Fixes and findings outside the six
+
+* **The 601.2g step's shortcuts and a leaving Sphere.** `cast_mana_collapsed` (a plain "{T}: add <fixed mana>"
+  source's tap before or after the rest of the cast is the same) and `prod_settled` (a production the rest of the cast
+  can't change) treat a land's mana as unsettled when a permanent with the damping replacement may leave during the
+  rest of the cast (`damping_may_leave` over `RestReach::leave`: Tinker's sacrifice); otherwise two orders that differ
+  would be collapsed. A table without the replacement (`CardDb::lc`) is untouched.
+* **The constructed table's definitions move.** The legacy IR is sorted by name: Choke, Cursed Totem and Damping
+  Sphere sort before Disruptor Flute, Pithing Needle before Prismari Charm, The Tabernacle and Torpor Orb last, so the
+  legacy definitions after them, the tokens and faces renumber (identities are the registry's, unchanged). As in
+  220.3.5: `tests/misc_suite known_face_key` (its prior is the table's before the later decks: lane C's six join its
+  list) needed its rescanned world seed for 4248 moved again (4 -> 5, the first of 1..400 that reaches the recorded
+  face choice), and `constructed::the_hogaak_75_and_its_provenance` finds the Hogaak seven by position (they are no
+  longer the registry's last lines); `tests/test_single_games.py`'s best-of-three test waits for matches 0-3 (270.3.8).
+* **A random order to the bottom of a library leaked through triggers (fixed).** `Game::put_on_bottom_randomly`
+  shuffled the cards, then moved them one by one in the shuffled order, so the events of the move came in the hidden
+  random order: Endurance putting the Delver player's graveyard on the bottom made Murktide Regent's "whenever an
+  instant or sorcery card leaves your graveyard" triggers wait - and go on the stack - in that order, each with its
+  card as its event object, so the other player's worlds (which deal another random order under the same chance key)
+  showed different stacks at one node. Found by `FUZZ_POOL=lands_c` under the `fuzz` profile (seed 981: "same keys,
+  different rows"; the deck's Endurance against the Delver 60 - no pool of main pits Endurance against Murktide).
+  The cards now move in the order given (the graveyard's, public) and then take the random order: the same library
+  from the same draws as before, so every game of main is unchanged (the cube's digests and, without the six cards,
+  the constructed ones are main's: 270.3.8); with no "leaves your graveyard" trigger nothing else depends on the move
+  order. CR 603.2c, 603.3b: the cards leave at once and the triggers' controller orders them; the engine, putting
+  equal triggers on the stack without a question, now does it in a public order. Test:
+  `endurance_and_murktide_the_triggers_dont_show_the_random_order` (six RNG seeds, one order; it fails without the
+  fix).
+* No other rules bug found.
+
+#### 270.3.6 The encoding
+
+No layout change, no new float, no gap: Pithing Needle's name is `Mark::ChosenName`, layout v7's and v8's chosen-name
+column (ENGINE.md 125, 236; on layout v6 the Needle is refused as the Flute is, `sneak_show::plain_name_needs_v7`);
+the Tabernacle's triggers are `stack` tokens whose definition is the Tabernacle's and whose `SOURCE` reference is the
+creature (v7), the "pay {1}?" a `YesNo` under it; Damping Sphere's tax reads `Player::spells_cast` (the per-player
+`mtch::SPELLS` float, and the v7 tail's count); the static abilities (Choke, Torpor Orb, Cursed Totem, the damping) are
+their sources' text applied to the encoded board. No new `Game` field (lane C's table flags are `CardDb::lc`, the
+printing facts `CardDef::lc`). `tests/az.rs`'s two public-state gates take `lands_c_positions` (Needle's name choice
+and its name, the Sphere, Choke and the Orb on the battlefield with Islands tapped, two Tabernacle triggers on the stack
+and their payments): both pass with no new gap. No encoding_needs file.
+
+#### 270.3.7 Tests, the fuzz pool
+
+* **`engine/tests/cards_lands_c.rs`, 43 tests** (the CR in each name; the six cards' 20 rulings, `// ruling:`):
+  the definitions; Pithing Needle (names offered: a card without activated abilities, a token's name only as a card's,
+  `PASS`; Karakas's bounce stopped, its mana not; channel and cycling in the hand; gone, the abilities back; Urza's
+  Saga's chapters and Thalia's tax unaffected; loyalty abilities); Cursed Totem (Birds of Paradise and Dryad Arbor can't
+  pay; Karakas and equip unaffected; cycling and a Spirit Guide from the hand; a Vehicle crews, then can't; an animated
+  land's mana; Thalia and Guide of Souls); Torpor Orb (Archon of Cruelty's own and Guide of Souls' triggers; Kappa
+  Cannoneer with an artifact creature and a noncreature artifact, landfall with Dryad Arbor; Metamorph copying Sol Ring
+  or a creature; Walking Ballista's counters and Anointed Peacekeeper's name; the Orb and Archon entering by one Show
+  and Tell; City of Traitors and Staff of the Storyteller's token trigger still; Stitcher's Supplier's dies trigger);
+  Damping Sphere (Ancient Tomb's {C} and damage; payments; Sunken Ruins, Gaea's Cradle at one, two and three creatures,
+  Mishra's Workshop's restriction; two Spheres, Nissa's extra; the tax over three spells and the other player's first;
+  Force of Will's alternative cost; delve paying it; channel untaxed; Tinker sacrificing the Sphere); Choke (every
+  Island, both players', basic and Volcanic; Magus of the Moon; gone; Nissa's untap); the Tabernacle (each creature at
+  its controller's upkeep, one paid one not; no mana; Birds and Dryad Arbor paying for themselves; Karakas bouncing the
+  source in response; under Magus of the Moon, with Torpor Orb; The Wondrous Wasp's ability loss before and after; two
+  Tabernacles); the deck's lines (Choke and the Tabernacle against Delver's Islands, Bowmasters under the Orb, Needle
+  on Wasteland, Totem with Urza's Saga and its Construct taxed). `docs/interactions.md` has the matrix.
+  `tools/untested_cards.py`: 582 supported (36 legacy), none named by no card test.
+* **`tests/ir/test_legacy_lands_c.py`, 17 tests**: the six printings; the plural land types and their
+  non-forms; the board lines and their non-forms; the chain. `test_legacy_creatures.py` and `test_fetch_cube.py` pin
+  the legacy pool's list (+6).
+* **`support.rs`** `SUPPORTED_LEGACY` +6; **`tests/az.rs`** `lands_c_positions`; **`misc_suite`** 270.3.5.
+* **`FUZZ_POOL=lands_c`** (`engine/src/fuzz/games.rs`, `LANDS_C_DECK`): the six cards four each, Icetill Explorer 3,
+  Endurance 2, Dryad Arbor 2, Mox Diamond 4, Ancient Tomb 4, Urza's Saga 4, Karakas, Otawara 2, Boseiju 2, Wasteland
+  3, Crop Rotation 2, Malevolent Rumble 2, Forest 5 (checked by `az::constructed::check`), against the Delver 60 in
+  either seat, one game in three the mirror (`seed % 3`); constructed play's table; every check of the default mode.
+  Counted (`LANDS_C_KINDS`): the six cast (the Tabernacle played), Needles with a name chosen (Urza's Saga's chapter
+  III finds them too), the Tabernacle's triggers on the stack, spells cast under a Sphere by a player who cast another
+  this turn, Ancient Tomb chosen as a mana source under a Sphere, creatures entering under an Orb, Islands held tapped
+  by Choke at their controller's upkeep, creatures beside a Cursed Totem. With 200 games or more each must be
+  non-zero. The worker's pool list (`worker/src/fuzz.rs`) has `lands_c` (games only).
+
+#### 270.3.8 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/lands-c`, every heavy command through `tools/slotd.sh` (a training
+run live on the desktop), cargo `-j 8`, the fuzz at most four shards at once.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`, on the
+  final code): **3,018 passed, 0 failed, 45 ignored** (`cards_suite` 1,577 with `cards_lands_c` 43, `az` 58 (both
+  public-state gates with `lands_c_positions`, no new gap), `misc_suite` 233, `rules_suite` 510, `rulings_suite` 397,
+  `fuzz` 23, `support` 9, `hidden` 28, `limits` 13). The first full run (before the 270.3.5 fixes and the last tests)
+  failed two `misc_suite` tests, both the table's move (270.3.5), since fixed.
+* **The cube's behaviour digests equal** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no
+  `DIGEST_WRITE`): full **5a09242cf4f2cbab** (every one of the 2,500 games equal to `tests/data/digests.txt`),
+  `DIGEST_ENCODING=0` **be0626d4b97cebae**, `DIGEST_ENCODING=v5` **cbae655806dcad36** (the full digest is layout v7's
+  row; no separate v7/v8 digest is printed). The same before and after the 270.3.5 fix.
+* **`digest_formats`**: EoE **d754f4eef3c8adae** and driver **cab97c01912f7e3f** equal; the constructed table's move
+  with the six cards (270.3.5): constructed **23cd7a6f84512058** (570 of 570 lines), metagame **7a7472a8b808e726** (288 of
+  288), pair **7c63308c07dbc61c** (70 of 70); `dealt_decks` dealt **7550cf5acbba9d58** (79 of 80). **Without the six
+  cards in the table** (`data/cards/legacy.ir.json` and `legacy_cards.txt` without them, a local check, reverted; all
+  of this branch's code kept, the 270.3.5 fix included) **every one is main's**: constructed 68e6d9334d2fdfdf,
+  metagame e2884dfcccf49ebe, pair 60e0d7de900cef7e, dealt cc0d138ac5c80402 (the tests pass against the recorded files).
+  Not re-recorded: the integration records them once, with all three lanes' cards.
+* **`FUZZ_POOL=lands_c FUZZ_GAMES=5000`** (`tools/fuzz_shards.py`, four shards, on the final code): **no failure**;
+  5,000 games (wins 2,431 / 2,376, 193 drawn at the turn cap, none aborted), 29.1 turns and 257.0 decisions a game,
+  2,346,275 options completed, 64,506 information-set walks (186,938 states compared); the Tabernacle played 7,688
+  times, Pithing Needle cast 2,773, Choke 1,345, Cursed Totem 2,813, Damping Sphere 2,933, Torpor Orb 2,800; Needles
+  named 8,303; the Tabernacle's triggers 15,243; spells taxed by a Sphere 345; Ancient Tomb tapped under a Sphere
+  11,655; creatures entering under an Orb 5,514; Islands held by Choke 2,144; creatures beside a Cursed Totem 27,261;
+  the binary's 20 other tests passed in the pool's settings. Every check of the default mode: invariants, clones,
+  `determinize` for both viewers (view, known cards, clouds, the information-set walk), every option completed in the
+  game and in the sampled worlds, the rows finite, the rules checks (ENGINE.md 150).
+* **The `fuzz` profile** (debug assertions), 1,000 games (four shards): found seed 981 (270.3.5's leak, fixed); after
+  the fix **no failure** (wins 485 / 480, 35 drawn). **`FUZZ_CHANCE=10`**, 600 games: no failure (15,650 chance walks,
+  6,279 replays whose outcome the force changed). **`FUZZ_BELIEF=2`**, 600 games: no failure (7,895 weighted worlds).
+* `python tools/card_ir.py check` and `roundtrip`: pass. `python -m pytest tests/ir -q`: **2,747 passed**.
+* `bash tools/build_py.sh`, `python -m pytest -q tests --ignore=tests/ir`: 876 passed, 25 skipped, 2 failed:
+  `test_mac_remote.py::test_the_macs_selfplay_settings` (Git Bash rewrote the machine's `MTGZ_MAC_HOME` into a Windows
+  path; passes with `MSYS_NO_PATHCONV=1`: the environment, not the branch) and
+  `test_single_games.py::test_best_of_three_matches_are_counted_from_their_records_episodes` (the table's move,
+  270.3.5: the rolling driver's first four finished matches were 0, 2, 3 and 5, and the test needs 0-3; it passes
+  without the six cards; now it plays on until matches 0-3 are done and keeps those, the same first round as before:
+  rerun, the file's 7 passed).
+* `python tools/rulings_doc.py --check`: current (1,710 rulings, 1,338 distinct, 1,333 class a, every one tested).
+  `python tools/untested_cards.py`: 582 supported (36 legacy), 0 named by no card test.
+* No docs/shortcuts.md entry, no approximation; no layout or encoding change; no zero-core change.
+
+#### 270.3.9 Limits and merge points
+
+* **Other lanes' interactions** are the integration's (the brief's list): Thespian's Stage copying Dark Depths under
+  Pithing Needle naming either (the Stage's copy ability is an activated ability of a source with that name; once
+  a copy of Dark Depths the Stage is named "Dark Depths"), Yavimaya with Choke (every land a Forest, none an Island
+  unless it is one), Torpor Orb and Carnivorous Cultivator entering prepared (prepare is no triggered ability, CR 722),
+  the Tabernacle taxing Marit Lage (a token creature: it triggers) and Cultivator, Damping Sphere against Ancient
+  Tomb and Otawara's channel (tested here: {C}, untaxed), Cursed Totem and the prepared Cultivator's Enroot copy, Crop
+  Rotation into the Tabernacle, Karakas and Marit Lage.
+* **Subsystems built generally** (brief rule 10): "<permanents> don't untap during their controllers' untap steps" and
+  "<permanents> entering don't cause abilities to trigger" take any lowered filter; "all creatures have
+  '<triggered ability>'" any step's beginning (another event is refused); the damping replacement applies to every
+  production of a land's {T} mana ability; the per-other-spell tax is a printing fact any card may have. A chosen name
+  is Disruptor Flute's machinery, unchanged.
+* **Merge points**: `legacy_cards.txt` (the six after Massacre; lane order A, B, C at integration), the legacy pool
+  (`ir/data/legacy_delver.*`) and the export (each lane exported its own: re-export once; this lane's schema
+  347802249f32), the parser (`roto_board.py`'s `permanent_phrase` and `_LINE_RECOGNIZERS` end, `cube_enchantments.py`'s
+  opt-in), `lower/effect.rs` (one more `lower_effect_*` in the chain), `lower/mod.rs`, `lower/printing.rs` (the board
+  rules before `trig_mask`, `lc` in the definition), `lower/graveyard_order.rs` (`Ext::LandsC`, the count 200), `db.rs`
+  (`CardDef::lc`, `CardDb::lc`), `program.rs` (`Ext::LandsC`), `resolve_ext.rs`, `lib.rs`, `flow.rs` (the untap step),
+  `triggers.rs` (the top of `Game::event`, the observer loop, `fire_granted_to_creatures`), `pay.rs` (`productions`'
+  new `tap` argument at every caller: `activate.rs`, `resolve.rs`, `resolve_eoe_b.rs`, `resolve_m7d.rs`; `yield_of`,
+  `yield_with`, `mana_amount_max`, the class key), `cast.rs` (`cost_with`), `cast_mana.rs` (`damping_may_leave`), `game.rs` (`put_on_bottom_randomly`),
+  `fuzz/games.rs` (`PoolMode::LandsC`, the deck, counters, report, checks), `worker/src/fuzz.rs`, `tests/az.rs`
+  (`lands_c_positions`), `tests/support.rs`, `tests/cards_suite.rs`, `tests/known_face_key.rs` (the prior's list and the
+  world seed: rescan after the merge), `tests/constructed.rs`, `tests/test_single_games.py`, `tests/ir/test_legacy_creatures.py`,
+  `test_fetch_cube.py`, `data/rulings/*`, `docs/rulings.md` (regenerate), `docs/ir_defects.md` (section AD),
+  `docs/interactions.md`.
+* **Digests**: the constructed table's (constructed, metagame, pair, dealt) move with the six cards and are not
+  re-recorded here (the integration records them once with all three lanes' cards); without the six every one is
+  main's (270.3.8).
