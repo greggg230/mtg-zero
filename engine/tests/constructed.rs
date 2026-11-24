@@ -211,9 +211,12 @@ fn the_hogaak_75_and_its_provenance() {
     assert_eq!(in_main, ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor"]);
     let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
     assert_eq!(side_only, ["Consign to Memory", "Massacre"]);
-    // The seven new cards are the registry's last lines, in the deck's order (identities 569-575).
+    // The seven new cards are the registry's lines after Rough // Tumble, in the deck's order (identities 569-575;
+    // later decks' cards follow them, ENGINE.md 270).
+    let k = reg.iter().position(|&n| n == "Hogaak, Arisen Necropolis").unwrap();
+    assert_eq!(reg[k - 1], "Rough // Tumble");
     assert_eq!(
-        reg[reg.len() - 7..],
+        reg[k..k + 7],
         ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor", "Massacre"]
     );
 }

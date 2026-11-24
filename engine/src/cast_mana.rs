@@ -541,6 +541,10 @@ impl Game {
     /// permanents, what lands could produce (Reflecting Pool), a condition, another sacrificed land's (exhaustive: a new
     /// production says).
     fn prod_settled(&self, p: PlayerId, prod: &ManaProd, src: CardIdx, reach: &crate::cost_order::RestReach) -> bool {
+        // (A land's production under a damping replacement that may leave: ENGINE.md 270.3.)
+        if self.damping_may_leave(src, reach) {
+            return false;
+        }
         match prod {
             ManaProd::One(_)
             | ManaProd::Fixed(_)
@@ -914,7 +918,14 @@ impl Game {
         }
         let pos = self.item_index(id).expect("the spell being cast");
         let reach = ctx.reach.get_or_insert_with(|| self.cast_rest_reach(p, spell, &self.stack[pos]));
-        !reach.unsettled && !reach.chars && !reach.leave.contains(&c)
+        !reach.unsettled && !reach.chars && !reach.leave.contains(&c) && !self.damping_may_leave(c, reach)
+    }
+
+    /// Is `c` a land whose mana a damping replacement ("if a land is tapped for two or more mana, it produces {C}
+    /// instead", ENGINE.md 270.3) may stop changing during the rest of the cast: a permanent with it may leave
+    /// (`reach.leave`)? Then tapping it before or after that differs.
+    fn damping_may_leave(&self, c: CardIdx, reach: &crate::cost_order::RestReach) -> bool {
+        self.db.lc.damp_lands && self.is_type(c, crate::db::types::LAND) && reach.leave.iter().any(|&x| self.abilities(x).lc.damp_lands)
     }
 
     /// The collapse's checks 2-4 that do not depend on the permanent (`cast_mana_collapsed`).

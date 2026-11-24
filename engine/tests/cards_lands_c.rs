@@ -413,7 +413,7 @@ fn cr_606_3_pithing_needle_stops_loyalty_abilities() {
 fn cr_602_5_cursed_totem_stops_creatures_mana_abilities() {
     // ruling: f4c6dda8
     // ruling: 7340e3ca
-    let mut g = scen()
+    let g = scen()
         .battlefield(0, &["Birds of Paradise", "Dryad Arbor", TOTEM])
         .hand(0, &["Lightning Bolt", "Ponder"])
         .at(Step::Main1, 0)
@@ -449,7 +449,7 @@ fn cr_602_5_cursed_totem_stops_creatures_mana_abilities() {
 #[test]
 fn cr_302_1_cursed_totem_leaves_creature_cards_in_other_zones() {
     // ruling: 6e863b0a
-    let mut g = scen()
+    let g = scen()
         .battlefield(0, &[TOTEM])
         .hand(0, &["Street Wraith", "Simian Spirit Guide", "Lightning Bolt"])
         .at(Step::Main1, 0)
@@ -1148,4 +1148,178 @@ fn cr_704_5j_the_tabernacle_two_grants_trigger_twice() {
     let mut g = scen().battlefield(0, &[TAB, "Thalia, Guardian of Thraben"]).battlefield(1, &[TAB]).at(Step::Main1, 1).start();
     to_upkeep(&mut g, 0);
     assert_eq!(tab_triggers(&g).len(), 2, "{}", log(&g));
+}
+
+// ---- the deck's lines ----------------------------------------------------------------
+
+/// Choke and the Tabernacle against Delver: P1's Volcanic Islands, tapped at
+/// the end of its turn, stay tapped through its untap step (CR 502.3); at its
+/// upkeep its two creatures trigger and P1 has no mana to pay: both are
+/// destroyed.
+#[test]
+fn choke_and_the_tabernacle_lock_delvers_islands() {
+    let mut g = scen()
+        .battlefield(0, &[TAB, CHOKE, "Forest"])
+        .battlefield(1, &["Volcanic Island", "Volcanic Island", "Dragon's Rage Channeler", "Murktide Regent"])
+        .at(Step::Main1, 0)
+        .start();
+    for c in g.lands_of(1).collect::<Vec<_>>() {
+        g.set_tapped(c, true);
+    }
+    to_upkeep(&mut g, 1);
+    assert_eq!(tab_triggers(&g).len(), 2, "{}", log(&g));
+    assert!(g.lands_of(1).all(|c| g.obj(c).tapped), "Choke: {}", log(&g));
+    resolve_with(&mut g, &|g| {
+        if g.kind() == Some(DecisionKind::YesNo) {
+            assert!(!g.has_option(Choice::Yes), "no mana: {}", opts(g));
+            Some(Choice::Pass)
+        } else {
+            None
+        }
+    });
+    assert!(!on_bf(&g, 1, "Dragon's Rage Channeler") && !on_bf(&g, 1, "Murktide Regent"), "{}", log(&g));
+}
+
+/// Damping Sphere against Delver: delve pays the increase too (CR 702.66a:
+/// "for each generic mana in this spell's total cost", the increase
+/// included, 601.2f): Murktide Regent as the second spell of the turn costs
+/// {6}{U}{U}, paid by six graveyard cards and two Islands; with five cards
+/// it can't be cast.
+#[test]
+fn cr_702_66a_damping_sphere_delve_pays_the_increase() {
+    for (cards, castable) in [(6usize, true), (5, false)] {
+        let mut g = scen()
+            .battlefield(0, &["Island", "Island"])
+            .battlefield(1, &[SPHERE])
+            .graveyard(0, &vec!["Island"; cards])
+            .hand(0, &["Mishra's Bauble", "Murktide Regent"])
+            .at(Step::Main1, 0)
+            .start();
+        cast_and_resolve(&mut g, 0, "Mishra's Bauble");
+        let m = hand(&g, 0, "Murktide Regent");
+        assert_eq!(g.has_option(Choice::Cast(m)), castable, "{cards} cards: {}", opts(&g));
+        if castable {
+            cast_and_resolve(&mut g, 0, "Murktide Regent");
+            assert!(on_bf(&g, 0, "Murktide Regent"), "{}", log(&g));
+            assert_eq!(g.player(0).graveyard.len(), 0, "all six delved: {}", log(&g));
+        }
+    }
+}
+
+/// Damping Sphere taxes spells only (CR 601.2f): Otawara's channel, an
+/// activated ability, costs {3}{U} after a spell this turn.
+#[test]
+fn cr_602_2b_damping_sphere_doesnt_tax_an_activated_ability() {
+    let mut g = scen()
+        .battlefield(0, &[SPHERE, "Island", "Island", "Island", "Island", "Island"])
+        .battlefield(1, &["Guide of Souls"])
+        .hand(0, &["Ponder", "Otawara, Soaring City"])
+        .at(Step::Main1, 0)
+        .start();
+    cast_and_resolve(&mut g, 0, "Ponder");
+    assert_eq!(g.lands_of(0).filter(|&c| !g.obj(c).tapped).count(), 4);
+    let o = hand(&g, 0, "Otawara, Soaring City");
+    let ch = abilities_offered(&g, o);
+    assert_eq!(ch.len(), 1, "channel with four lands: {}", opts(&g));
+    let th = bf(&g, 1, "Guide of Souls");
+    let t = g.tgt(th);
+    g.choose(Choice::Ability(o, ch[0]));
+    until_priority(&mut g, &|g| g.has_option(t).then_some(t));
+    resolve(&mut g);
+    assert_eq!(g.find_card(1, "Guide of Souls", Zone::Hand).is_some(), true, "{}", log(&g));
+}
+
+/// Torpor Orb against Orcish Bowmasters: its "when this creature enters"
+/// half doesn't trigger, its "whenever an opponent draws a card except the
+/// first one they draw in each of their draw steps" half does (one ability,
+/// two trigger events; only the entering is stopped).
+#[test]
+fn cr_603_6a_torpor_orb_and_orcish_bowmasters() {
+    let mut g = scen()
+        .battlefield(0, &[ORB, "Island"])
+        .hand(0, &["Brainstorm"])
+        .battlefield(1, &["Swamp", "Swamp"])
+        .hand(1, &["Orcish Bowmasters"])
+        .at(Step::Main1, 0)
+        .start();
+    let life = g.player(0).life;
+    g.pass_until(|g| g.pending_decision().is_some_and(|d| d.player == 1));
+    cast(&mut g, 1, "Orcish Bowmasters");
+    resolve(&mut g);
+    assert!(on_bf(&g, 1, "Orcish Bowmasters"));
+    assert_eq!(g.player(0).life, life, "no enters ping: {}", log(&g));
+    assert!(!g.battlefield().iter().any(|&c| g.name(c) == "Orc Army"), "no amass: {}", log(&g));
+    g.pass_until(|g| g.pending_decision().is_some_and(|d| d.player == 0 && d.kind == DecisionKind::Priority));
+    let p0 = Choice::Target(engine::Target::Player(0));
+    cast(&mut g, 0, "Brainstorm");
+    resolve_with(&mut g, &|g| g.has_option(p0).then_some(p0));
+    assert!(g.player(0).life < life, "the draws trigger it: {}", log(&g));
+}
+
+/// Pithing Needle naming Wasteland: the opponent's Wasteland can't destroy
+/// the Tabernacle (CR 602.5).
+#[test]
+fn pithing_needle_naming_wasteland_protects_the_tabernacle() {
+    let mut g = scen()
+        .battlefield(0, &[TAB, "Forest"])
+        .hand(0, &[NEEDLE])
+        .battlefield(1, &["Wasteland"])
+        .at(Step::Main1, 0)
+        .start();
+    let w = bf(&g, 1, "Wasteland");
+    needle_naming(&mut g, 0, Some("Wasteland"));
+    to_main(&mut g, 1);
+    assert!(abilities_offered(&g, w).is_empty(), "{}", opts(&g));
+    assert!(can_float(&g, w), "Wasteland's mana ability still works");
+}
+
+/// Cursed Totem doesn't stop Urza's Saga (a land, not a creature: CR 602.5);
+/// its Construct token is a creature without activated abilities, and the
+/// Tabernacle makes it pay at its controller's upkeep (CR 111.1: a token is a
+/// permanent like any other).
+#[test]
+fn cursed_totem_leaves_urzas_saga_and_the_tabernacle_taxes_its_construct() {
+    let mut g = scen()
+        .battlefield(0, &[TOTEM, TAB, "Island", "Island", "Island", "Urza's Saga"])
+        .at(Step::Main1, 0)
+        .start();
+    resolve(&mut g);
+    to_main(&mut g, 0);
+    resolve(&mut g);
+    let s = bf(&g, 0, "Urza's Saga");
+    let ab: Vec<AbilitySlot> = abilities_offered(&g, s);
+    assert_eq!(ab.len(), 1, "the Construct ability: {}", opts(&g));
+    g.choose(Choice::Ability(s, ab[0]));
+    until_priority(&mut g, &|_| None);
+    resolve(&mut g);
+    let construct = g.battlefield().iter().copied().find(|&c| g.name(c) == "Construct").expect("a Construct");
+    assert!(g.is_creature(construct));
+    to_upkeep(&mut g, 0);
+    assert_eq!(tab_triggers(&g), vec!["Construct"], "{}", log(&g));
+}
+
+/// Mana abilities are activated before a spell's costs are paid (CR 601.2g,
+/// 601.2h): Tinker sacrificing the Damping Sphere as its additional cost
+/// can't let Ancient Tomb make {C}{C} for it - the Tomb was tapped while the
+/// Sphere was there. Ancient Tomb and one Island ({C}{U}) don't cast Tinker
+/// ({2}{U}); with two Islands they do.
+#[test]
+fn cr_601_2g_damping_sphere_sacrificed_for_tinker_still_damped_its_mana() {
+    for (islands, castable) in [(1usize, false), (2, true)] {
+        let mut g = scen()
+            .battlefield(0, &[SPHERE, "Ancient Tomb"])
+            .battlefield(0, &vec!["Island"; islands])
+            .hand(0, &["Tinker"])
+            .library(0, &["Sol Ring"])
+            .at(Step::Main1, 0)
+            .start();
+        let t = hand(&g, 0, "Tinker");
+        assert_eq!(g.has_option(Choice::Cast(t)), castable, "{islands} Island(s): {}", opts(&g));
+        if castable {
+            let sp = bf(&g, 0, SPHERE);
+            cast_with(&mut g, 0, "Tinker", &|g| g.has_option(Choice::Card(sp)).then_some(Choice::Card(sp)));
+            assert!(!on_bf(&g, 0, SPHERE), "{}", log(&g));
+            resolve(&mut g);
+        }
+    }
 }
