@@ -48190,6 +48190,35 @@ for Wasteland / Unholy Heat; Doomsday: Murktide and Flusterstorm in for Edge of 
 
 **260.6 Gate.** Python only (tier `python`).
 
+## 270. Legacy Lands: the deck's cards (lanes `lands-a`, `lands-b`, `lands-c`; integrated on `lands`, 2026-11-24)
+
+**Why.** The user asked on 2026-11-24 for MTGGoldfish's Legacy Lands list in mtg-zero, so the deck can be played -
+best-of-one and best-of-three with its sideboard - beside the Delver, Doomsday, Sneak and Show and Hogaak 75s. **The
+deck and its provenance**: the archetype page <https://www.mtggoldfish.com/archetype/legacy-lands#paper>, whose export
+field (`deck_input[deck]`) is the archetype's representative paper list, deck 8027955
+(<https://www.mtggoldfish.com/deck/8027955>): "Lands" by juubs, North American Eternal Weekend - Legacy Championship,
+2026-10-31, 6th place (12-3), deck source melee.gg; read with plain curl on 2026-11-24; **61 main** (as listed: legal,
+CR 100.2a's minimum is 60; not "fixed") and 15 sideboard, pinned verbatim as `data/decks/lands_8027955.txt` (270.4).
+**The sixteen cards** new to the legacy table (every other card of the 76 was supported: the cube's Otawara, Karakas,
+Wasteland, Crop Rotation, Ancient Tomb, Mox Diamond, Urza's Saga, Boseiju, Endurance, Force of Vigor, ...; the legacy
+table's Disruptor Flute): fourteen outside every table, and Thespian's Stage and Blast Zone, which only EoE's table had,
+ported by three lanes from main 6f3a30d8 in parallel:
+
+| Lane | Branch | Cards | Section |
+|---|---|---|---|
+| A | `lands-a` | Dark Depths (and the Marit Lage token), Thespian's Stage, Blast Zone, Ghost Quarter, Maze of Ith, Bojuka Bog | 270.1 |
+| B | `lands-b` | Life from the Loam (dredge), Exploration, Carnivorous Cultivator // Enroot, Yavimaya, Cradle of Growth | 270.2 |
+| C | `lands-c` | Pithing Needle, Cursed Totem, Torpor Orb, Damping Sphere, Choke, The Tabernacle at Pendrell Vale | 270.3 |
+
+then merged on `lands` with the Endurance leak fix (`fix/endurance-infoset`, 271) (270.4: the identities, the deck,
+`FUZZ_POOL=lands`, the encoding decision, the cross-lane tests, the digests). **The rules** (the user's, for every lane
+and the integration): no approximation of any class - every reachable state faithful to the Comprehensive Rules and
+the Oracle text, no new docs/shortcuts.md entry, a choice the action layout's slots can't hold decomposed rather than
+cut; no encoding gap - every public state the cards create reaches the network's input exactly (the public-state gate of
+`tests/az.rs`) on layouts v7 and v8, a point that can't be encoded without a gap written up for the user rather than
+decided (lane B's: the draws left of a draw instruction, decided by the user, 270.4.3); every official ruling of the
+cards tested (`// ruling:`); the behaviour digests equal unless the change is the user's (270.4.5).
+
 ### 270.1 Lane A: Dark Depths (and Marit Lage), Thespian's Stage, Blast Zone, Ghost Quarter, Maze of Ith, Bojuka Bog (branch `lands-a`, 2026-11-24)
 
 **Why.** MTGGoldfish's Legacy Lands (paper, the archetype's representative list, deck 8027955: "Lands" by juubs,
@@ -48840,6 +48869,226 @@ run live on the desktop), cargo `-j 8`, the fuzz at most four shards at once.
 * **Digests**: the constructed table's (constructed, metagame, pair, dealt) move with the six cards and are not
   re-recorded here (the integration records them once with all three lanes' cards); without the six every one is
   main's (270.3.8).
+
+### 270.4 The lanes merged; the identities, the encoding decision, the deck, `FUZZ_POOL=lands`, the digests (branch `lands`)
+
+Branch `lands` from main 06d04fd0 (6f3a30d8, the lanes' branch point, and ENGINE.md 260: Python only). The lanes
+merged in their order, each its own merge commit: A (`lands-a` d7bfa109: d709ce43), B (`lands-b` 80937ccf: e8187195),
+C (`lands-c` 807503c0: 7cd4a742); then the Endurance leak fix (`fix/endurance-infoset` e497a3cf, ENGINE.md 271:
+3531b4e0). No docs/shortcuts.md entry, no zero-core change, no layout change (two spare context floats, 270.4.3).
+
+#### 270.4.1 The conflicts and how each was resolved
+
+Every conflict was additive but one (the IR's `board_rules`, below); interleaved functions were rebuilt whole from each
+lane's text (never spliced), the scripts in the integration's scratch directory.
+
+| File | Resolution |
+|---|---|
+| `ir/data/legacy_delver.json` (+ `.sheet.json`, `.meta.json`) | built by script: main's 30 records (each lane's first 30 equal them) then A's six, B's four, C's six, 46 cards; the sidecar's counts 46, its `fetched_at` the lanes' fetch of 2026-11-24 |
+| `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | never merged by hand: `python tools/card_ir.py export` from the merged inputs at each merge (270.4.2) |
+| `CardPrinting.board_rules` (lowering) | **the one real overlap**: lane A's `StateTrigger` (Dark Depths) and lane C's five static rules (Choke, Torpor Orb, Damping Sphere, the Tabernacle) became one IR category (`DoesntUntapOr...OrStateTrigger`); `lower/lands_a.rs::lower_board_rules` takes the state triggers and `lower/lands_c.rs::printing_board_rules` the static rules, each `match` exhaustive (the other lane's variants named and left to the other function; lane C's "not a permanent" refusal counts its own rules only) |
+| `data/rulings/legacy.rulings.json`, `triage.tsv` | the union in lane order (by script for the JSON: no lane changed another card's entry); `docs/rulings.md` regenerated |
+| `engine/src/fuzz/games.rs` | `PoolMode::{LandsA, LandsB, LandsC}` (and 271's `Endurance`); each lane's deck, counters, report and end-of-run checks whole beside the others; the pool lists, the unknown-pool panic, the games-only message name all; the totals array 14 |
+| `engine/tests/az.rs` | `lands_a_positions`, `lands_b_positions`, `lands_c_positions` each its lane's text; lane B's in the lists after `hogaak_positions` (its place), A's and C's last (their places), then 270.4.3's `lands_int_positions` |
+| `engine/tests/constructed.rs` | the table's layout with all three: Marit Lage the legacy cards' token; Enroot, Rough, Tumble the legacy faces; the Stage's made definitions; the Mountain's definitions and Yavimaya's five basic-type ability definitions; the Hogaak registry lines found by position (C's form) |
+| `engine/tests/known_face_key.rs` | the prior leaves out all sixteen (lane B's four too); 4248's world seed rescanned on the merged table: still 5, the first of 1..400 (85 of the 400 reach the recorded face choice; the recorded `s` too, now); 466's recorded seed still reaches its own |
+| `tests/test_single_games.py` | B and C fixed the same test two ways: C's bounded wait for matches 0-3 kept |
+| `engine/src/game.rs` `put_on_bottom_randomly` | ENGINE.md 271's version (the places the moved cards hold permuted, a hard assert, the given order to `forget_order`) over lane C's 336aaa8b; lane C's test stays |
+| `support.rs`, `cards_suite.rs`, `lower/mod.rs`, `lib.rs`, `db.rs`, `lower/effect.rs`, `worker/src/fuzz.rs`, the pinned IR pool lists, `docs/ir_defects.md` (AB, AC, AD), `docs/interactions.md`, this file | the union (`SUPPORTED_LEGACY` sorted, 46) |
+
+Files git merged without a conflict where two lanes touched the same code, read: `flow.rs` (A's cleanup-step look, B's
+`Task::Dredge`, C's untap step), `triggers.rs` (C's Orb silence at the top of `Game::event`; A's state triggers are
+never events), `game.rs` (B's draw machinery), `layers.rs`, `pay.rs` (C's `tap` argument: no new caller in A or B),
+`lower/printing.rs`. The workspace builds without an error or a warning (one array length fixed at the B merge).
+
+#### 270.4.2 The IR, the identities
+
+* **The export** (from the merged parser over the 46-card legacy pool): schema
+  **`1dbd9190a1f930a5978d1eb6892740ee2241ba2a1ecbdf7efdfb1e3b76bd2177`** (main `180659137ece...`; A's `dc0b5a2a451d`, B's
+  `37d99217c47e`, C's `347802249f32`): exactly the union of the lanes' classes. `powerlsv.ir.json` (sha256
+  `7af9e8dc5db2db86`) and `eoe.ir.json` (`1e90dc5ed49a6bc4`) are main's card by card but the schema hash; `legacy.ir.json`
+  (46 cards, `235e161a4239b0bb`): each card's IR equal to its lane's export, main's 30 main's. `powerlsv.schema.json`
+  `30a884be07c1d623`, `generated.rs` `c5291daea70c9965`. `check`: identical; `roundtrip`: cube 546, legacy 46, eoe 483
+  cards ok.
+* **Identities** (`engine/src/az/legacy_cards.txt`, after Massacre = 575), the sixteen in the deck's order (main then
+  sideboard, each at its first appearance): Exploration **576**, Ghost Quarter **577**, The Tabernacle at Pendrell Vale
+  **578**, Pithing Needle **579**, Maze of Ith **580**, Life from the Loam **581**, Bojuka Bog **582**, Dark Depths
+  **583**, Carnivorous Cultivator // Enroot **584**, Yavimaya, Cradle of Growth **585**, Thespian's Stage **586**, Blast
+  Zone **587**, Choke **588**, Cursed Totem **589**, Damping Sphere **590**, Torpor Orb **591**. Marit Lage's token key
+  is `az/tokens.txt`'s last line (lane A). No test names a number (`the_lands_75_and_its_provenance` checks the
+  registry's last sixteen lines against the deck's order by name).
+
+#### 270.4.3 The encoding decision: the draw instruction in progress (context floats 251-252)
+
+Lane B's open point (270.2.5; `encoding_needs_b.md`): the draws of a draw instruction still to come after a pending
+dredge question (`Task::DrawRest.n`) and whether the draw step's beginning event follows them (`DrawRest.step`) are
+public and were in no input - nor under a miracle question, the same fact since ENGINE.md 29. **The user's decision
+(2026-11-24): option 1, the spare context floats.**
+
+* `ctx::DRAWS_LEFT` = 251: the topmost `Task::DrawRest`'s draws left / 4, squashed (0 without one);
+  `ctx::DRAW_STEP_FOLLOWS` = 252: 1 when its `step` is set (`Game::draw_instruction_rest`). Written in
+  `encode_context` before the decider-only part: both viewers, every layout's context block (v7's head, v8 = v7's head
+  plus its tail; v6's block too - its only reachable source is a miracle card, none in the EoE table). `Game::view_of`
+  shows the pair (the gate's view). `ctx::END` 251 -> 253 (`CONTEXT` 256): no width change, no layout version.
+* **The gate**: two perturbations ("a draw instruction in progress has one more draw left", "... is or isn't the draw
+  step's (its beginning event follows)", `Game.agenda`, rare, partners from their own streams:
+  `OWN_STREAM_PERTURBATIONS`) on positions with a pending dredge or miracle question: lane B's dredge positions and
+  `tests/az.rs::lands_int_positions` (Brainstorm's first draw a Metamorphosis Fanatic, the miracle question with two
+  draws left; with a Loam in the graveyard the dredge question first; the draw step's miracle question - nothing left
+  there: the step's event came first, so no `DrawRest`). Each applied 9 times, encoded for both viewers. Test:
+  `cards_lands_int::the_draw_instruction_in_progress_reaches_both_players_inputs` (two left and none-with-the-step's-
+  event, P0 and P1, v7 and v8).
+* **What it changes**: no recorded digest (270.4.5) - the cube's 2,500 games never reach a miracle question with a draw
+  left (Metamorphosis Fanatic is the table's only miracle card), and the constructed games none. **No stew or meta3 deck
+  reaches it**: the Delver, Doomsday, Sneak and Show and Hogaak Tempo 75s hold no miracle or dredge card (the IR scanned:
+  the only two in the cube and legacy tables are Metamorphosis Fanatic and Life from the Loam), so an existing network
+  reads 0 in both floats in every position its runs play; the Lands deck's games set them (the Loam's dredge
+  questions). Not a gap left: a 616.1 order question (`Task::DrawOrder`) or a forced dredge question carries its own
+  `step` and has no `DrawRest` under it (a one-card instruction); whether the draw step's event follows it is the
+  turn-based draw itself (an empty stack in the draw step: a resolving spell's draw has it on the stack), which the input
+  shows.
+
+#### 270.4.4 The deck, `FUZZ_POOL=lands`, the cross-lane tests
+
+* **The files**: `data/decks/lands_8027955.txt`, the scratch pin byte for byte (the export field, a `sideboard` line
+  before the 15), and `.json` in the Hogaak file's format: "Lands", archetype "Legacy Lands", juubs, North American
+  Eternal Weekend - Legacy Championship, 2026-10-31, "6th place, 12-3", paper, deck source melee.gg, the deck,
+  archetype-page and download URLs, how it was fetched; `export_names` Carnivorous Cultivator -> "Carnivorous Cultivator
+  // Enroot". **61 main** (as listed; CR 100.2a's minimum is 60) and 15 sideboard.
+* **Registered**: `az::constructed::{LEGACY_LANDS, LEGACY_LANDS_EXPORT}`, `Decklist::legacy_lands()`,
+  `mtgz.az.decklists.LEGACY_LANDS` (every spec helper's best-of-one takes it by name; no preset plays it). Tests:
+  `constructed.rs::the_lands_75_and_its_provenance` (the export equals the JSON; 61 + 15; every card supported; CR
+  100.2a / 100.4a over both - Disruptor Flute's two and one, two more make five, refused; the legacy cards in the
+  registry's order: main Disruptor Flute and twelve of the sixteen, sideboard-only Choke, Cursed Totem, Damping Sphere,
+  Torpor Orb; the registry's last sixteen lines in the deck's order; best-of-three refuses the 61) and
+  `the_lands_75_plays_best_of_one_and_best_of_three` (best-of-one of the 61 against the Delver, Doomsday, Sneak and Show
+  and Hogaak 60s and itself, both seats; best-of-three with its real sideboard - the main less one Forest - against
+  each 75); `tests/test_delver.py::test_the_lands_deck_and_its_loader`.
+* **Open, the user's call: best-of-three with the 61.** A constructed best-of-three's decks are exactly 60 (the user's
+  format restriction of 2026-11-11, ENGINE.md 120: the registered main and every deck after sideboarding), so the
+  registered 61 is refused in best-of-three (the engine and `decklists.pair_spec(..., fmt='bo3')` say so). Options: keep
+  the restriction and pin a 60-card best-of-three main for the deck (which card goes is a deck decision), or allow a
+  registered main of at least 60 in best-of-three (CR 100.2a; the sideboarding's 60 then a choice of 60 of 76, the
+  dealt decks and the deck prior read "exactly 60" too: a format change). Nothing here decides it: the deck files keep
+  the 61, best-of-one plays it, and only the fuzz's matches (below) and the best-of-three test take one Forest out.
+* **`FUZZ_POOL=lands`** (`engine/src/fuzz/games.rs`): games - the real 61 against the real Delver, Doomsday, Sneak and
+  Show and Hogaak 60s in either seat, one game in five the mirror (`seed % 10`), best-of-one, every check of the default
+  mode; the three lanes' counters run in its games, and with 200 games or more every lane A and lane B counter and lane
+  C's main-deck ones (the Tabernacle played and its triggers, Pithing Needle cast and named) must be non-zero. Matches -
+  the Lands 76 against each real 75 in either seat and its mirror twice (`LANDS_PAIRS`, `seed % 10`; one match in four
+  12-turn games), the main less one Forest (`LANDS_BO3_OUT`, the 60-card restriction above), the real 15 with Endurance,
+  then post-sideboard matches of its mirror; every check of `FUZZ_POOL=delver`'s matches; with 500 matches or more each of
+  Choke, Cursed Totem, Damping Sphere, Torpor Orb and Endurance must have been cast (`LANDS_SB_SEEN`).
+  `FUZZ_HIDDEN_DECKS=1` refused (Sneak and Show's Show and Tell, 129.3). The release worker knows `lands` (games and
+  matches, `FUZZ_DECK_TILT` allowed) beside the lanes' games-only pools and 271's `endurance`. `FUZZ_POOL=cross` is
+  unchanged (its 15 pairs; `REAL_75_NAMES` has the Lands 75 fifth, its report names it).
+* **The cross-lane tests** (`engine/tests/cards_lands_int.rs`, 18, `cards_suite`; the CR in each name): Pithing Needle
+  naming Dark Depths - Dark Depths' {3} can't be activated (602.5, not a mana ability 605.1a), a Thespian's Stage (named
+  Thespian's Stage) still copies it, the copy, named Dark Depths, activates neither the {3} nor the Stage ability it keeps
+  (707.9b), but its state trigger triggers (603.8: a triggered ability) and Marit Lage is created (044069c9); Pithing
+  Needle naming Thespian's Stage - a Stage's copy ability stopped, its mana ability not, and a Stage that is a Ghost
+  Quarter keeps and activates the Stage ability (201.2: the name it has now); Torpor Orb - Dark Depths' state trigger
+  isn't an entering's (603.8 vs 603.6a: Marit Lage created; Guide of Souls' trigger on it stopped, triggered without the
+  Orb), and the Cultivator entering prepared isn't a trigger (723.3a: prepared, its Enroot copy in exile and castable);
+  Cursed Totem - casting the Enroot copy is casting a spell, not an activated ability (723.3c, 602.5): cast, resolved;
+  the opponent's Tabernacle - Marit Lage (a token creature) and the Cultivator each trigger at their controller's upkeep,
+  unpaid the Cultivator is destroyed (its copy ceases to exist) and Marit Lage, indestructible, isn't (702.12b); Choke and
+  Yavimaya - every land a Forest, none an Island that wasn't: only the Island stays tapped (502.3, 305.7); Dark Depths
+  under Yavimaya - a Forest that taps for {G}, its state trigger kept; a Stage copy of the opponent's Yavimaya grants
+  Forest after Ghost Quarter destroys the original (707.2, 613.1d); Life from the Loam returning Dark Depths, Wasteland
+  and Bojuka Bog, Dark Depths replayed with ten ice counters (400.7, 614.1c), the Loam dredging the next draw; Bojuka Bog
+  exiling a Loam: no dredge question (406.2, 702.52a); Damping Sphere - a Yavimaya Forest's {G} is one mana (undamped:
+  Ancient Tomb casts Exploration without damage), Ancient Tomb's {C}{C} damped (a {2} spell not castable from it), and
+  Otawara's channel untaxed after a spell, paid by Forests (106.12b, 601.2f, 602.2b); Crop Rotation into Dark Depths
+  (ten ice counters: it enters) and the Tabernacle (the opponent's creature taxed), neither a land play (614.1c,
+  305.4); Karakas bouncing a Stage-made Marit Lage (111.7, 704.5d; the Stage in the graveyard as Thespian's Stage);
+  Ghost Quarter destroying a Stage copy of Bojuka Bog, its controller searching (701.23); Maze of Ith on an attacking
+  Marit Lage (615.1a, 506.4); and the encoding test of 270.4.3. docs/interactions.md has the matrix.
+
+#### 270.4.5 Digests
+
+The cube's digests **EQUAL** to main's with the floats on (`--test digest`): full **5a09242cf4f2cbab** (every one of the
+2,500 games equal to `tests/data/digests.txt`), `DIGEST_ENCODING=0` **be0626d4b97cebae**, `v5` **cbae655806dcad36**, `v7`
+**12c92841a2d4f628**; EoE **d754f4eef3c8adae** and the driver **cab97c01912f7e3f** equal; with `DIGEST_ENCODING=0`
+every format passes against main's files (no constructed game changes). The constructed family moves - constructed
+play's table holds the sixteen cards (and the Stage's made definitions, Yavimaya's five basic-type ability definitions;
+the deal cache keys definition ids, the table's prior its whole support: 220.1.8) - and is **re-recorded with
+`DIGEST_WRITE=1`** (4c44f3b3):
+
+| digest | main | `lands` | lines |
+|---|---|---|---|
+| constructed (`digests_constructed.txt`) | 68e6d9334d2fdfdf | **33fd025bacb21413** | 570 of 570 |
+| metagame (`digests_metagame.txt`) | e2884dfcccf49ebe | **f1ca224f901d809d** | 288 of 288 |
+| pair (`digests_pair.txt`) | 60e0d7de900cef7e | **9611d13bb054de40** | 70 of 70 |
+| dealt (`dealt_decks.rs`, `digests_dealt.txt`) | cc0d138ac5c80402 | **4c28ec816ed1245f** | 79 of 80 |
+| dealt per seat (`dealt_per_seat.rs`, `digests_dealt_per_seat.txt`) | e2a91849b5b9f372 | **9973e2e667f5ce41** | 60 of 60 |
+
+**The proof** (once, on the merged code 50eb105d with 271's fix in): a scratch detached worktree (never committed, its
+own target dir) with the sixteen filtered out of `CardDb::constructed` and the floats 251-252 zeroed gives
+constructed **68e6d9334d2fdfdf**, metagame **e2884dfcccf49ebe**, pair **60e0d7de900cef7e**, dealt **cc0d138ac5c80402**,
+dealt per seat **e2a91849b5b9f372** - main's recorded files exactly, every digest test passing against them - and the
+cube's, EoE's and the driver's unchanged. So no rule, payment, encoding, fuzz or fix change of the three lanes, 271 and
+the merge alters a game of those specs: the digests move only because the table holds sixteen more cards (the floats
+are 0 in all those games: no miracle or dredge card in the decks they play, 270.4.3).
+
+#### 270.4.6 Checks
+
+On the merged code (the commits after it change docs and recorded digests only), the desktop, every heavy command through
+`tools/slotd.sh` (the stew live), cargo `-j 8`, the fuzz at most four shards at once at idle priority.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`, on
+  50eb105d): **3,128 passed, 0 failed, 45 ignored** - `cards_suite` 1,685 (`cards_lands_int` 18 and the lanes' 39, 49,
+  43), `misc_suite` 235 (`constructed` with the Lands 75's two), `rules_suite` 510, `rulings_suite` 397, `az` 58, `hidden`
+  28, `fuzz` 23, `limits` 13, `support` 9 (the legacy list of 46).
+* **The public-state gate** (`--test az`): 562 positions, 285 fields (143 public, 13 hidden, 129 derived), 283
+  perturbations: **269 encoded, 2 deliberate limits, 0 known gaps, 0 gaps for the next layout**; 120 hidden-decklist
+  perturbations reach only their owner; the pairwise pass 160,081 states, 0 panicked. No encoding gap.
+* **Digests**: 270.4.5.
+* **`fuzz_shards.py`'s silent scrub, fixed** (the orchestrator's finding): the tool removed every `FUZZ_*` and `DIGEST_*`
+  variable of the caller's environment from the shards, so a sharded run "with" `FUZZ_BELIEF=2` or `FUZZ_CHANCE=10` ran
+  without them (lane B's sharded belief run showed 0 weighted worlds; lanes A's and C's figures may have hit it too:
+  they are rerun below). Now a caller's `FUZZ_*` variable is refused (exit 2, naming it), `--belief T` / `--chance N` put
+  the setting into every games and matches shard and the merged checks (echoed in the first line and each shard's log),
+  and a run fails unless the merged totals show it at work (`belief_worlds`, `chance_walks` > 0); `--idle` runs the
+  shards at idle priority (Windows). Tests in `tests/test_fuzz_shards.py` (both).
+* **`FUZZ_POOL=lands`, 5,000 games, 500 matches and 500 post-sideboard matches** (8 shards a loop, 4 at once, idle):
+  **PASSED**, no failure; games wins 2,265 / 2,334, 401 drawn, none aborted, 35.1 turns and 392.5 decisions a game,
+  4,164,138 options completed, 98,570 information-set walks (401,405 states compared). Seen in the games: ice counters
+  removed 24,632, **Marit Lage created 1,601**, Stage copies 10,356 (of Dark Depths 722), Blast Zone destructions 1,416,
+  Ghost Quarter destructions 2,507, Maze of Ith activations 960, Bojuka Bog triggers 2,821; Life from the Loam cast
+  4,401, **draws dredged 5,206**, declined 4,686, Exploration cast 3,715, second lands of a turn 8,621, Carnivorous
+  Cultivator cast 2,621, Enroot cast 1,699, its combat trigger 3,210, Yavimaya played 7,491; the Tabernacle played 2,271
+  and its triggers 10,639, Pithing Needle cast 865 and named 2,897. The sideboard in the matches: Choke 13, Cursed Totem
+  24, Damping Sphere 38, Torpor Orb 226, **Endurance 20** cast (the post-sideboard matches: 21, 20, 51, 338, 38). The fuzz
+  binary's 20 other tests passed.
+* **The `fuzz` profile** (debug assertions), `FUZZ_POOL=lands` 1,000 games, 50 matches + 50 post-sideboard: PASSED.
+  **`--chance 10`**, 600 games, 30 + 30 matches (the `fuzz` profile): PASSED, **23,384 chance walks**. **`--belief 2`**,
+  600 games, 30 + 30 matches (the `fuzz` profile): PASSED, **112,376 weighted worlds**.
+* **Each lane's pool on the merged code** (release 1,000 games; the `fuzz` profile `--chance 10` 600 and `--belief 2`
+  600, the counters checked non-zero): all **PASSED** - `lands_a` 1,000, `--chance 10` 600 (**28,299 chance walks**), `--belief 2` 600 (**136,117 weighted
+  worlds**); `lands_b` 1,000, 600 (27,685), 600 (129,110); `lands_c` 1,000, 600 (15,085), 600 (74,811). (The lanes'
+  own sharded belief and chance figures predate the fix: lane B's showed 0 weighted worlds; these are the ones that count.)
+* **IR**: `python tools/card_ir.py check` identical, `roundtrip` ok (270.4.2). `python tools/rulings_doc.py --check`:
+  current - 1,752 rulings (1,368 distinct), 1,379 class a, every one tested, 0 untested. `python tools/untested_cards.py`:
+  592 supported (46 legacy), **0** named by no card test. `python tools/privacy_check.py`: 0 findings.
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 3,313 passed, 3 skipped and 1 failed up to
+  `tests/test_mac_remote.py::test_the_macs_selfplay_settings` (Git Bash rewrote the Mac's home path into a Windows one,
+  as 270.3.8 found: the environment), then from that file on with `MSYS_NO_PATHCONV=1`: **354 passed, 22 skipped** (that
+  test included) - `tests/ir` among the first part; the Lands loader test and `test_fuzz_shards.py`'s two new tests
+  pass.
+* **The gates**: pending (the next commit records them).
+
+#### 270.4.7 Findings, limits and follow-ups
+
+* **Open for the user**: best-of-three with the deck's 61 (270.4.4) - no run preset or live spec plays the Lands deck
+  (`legacy-meta3`, the stew's decks, `FUZZ_POOL=meta`, the yardsticks' cells stay as they were): adding it to a run's
+  metagame is the user's call, after that decision.
+* The Endurance x Murktide Regent leak the lanes found is ENGINE.md 271's (merged here); `FUZZ_POOL=lands` plays the real
+  sideboard's Endurance against the Delver 75's Murktide Regent in its matches with no failure.
+* The lanes' own limits and merge points (270.1.8, 270.2.8, 270.3.9) are closed here but the best-of-three point; no
+  rules gap was found between the lanes.
+* Scratch left outside the repository: the proof worktree (`E:/mtg-zero-scratch/lands/int_proof`, detached, its own
+  target dir; never committed) and the integration's scripts and logs beside it.
 
 ## 271. A random order onto the bottom of a library no longer shows in the order of the triggers the move sets off: Endurance and Murktide Regent (branch `fix/endurance-infoset`, 2026-11-24)
 
