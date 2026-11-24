@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1690 | 1319 |
-| class a | 1313 | 1040 |
+| fetched | 1707 | 1335 |
+| class a | 1330 | 1056 |
 | class b | 195 | 147 |
 | class c | 182 | 132 |
-| a, tested (passing) | 1313 | 1040 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 949 | 781 |
-| a, tested only by an earlier test (Oracle or rules) | 364 | 259 |
+| a, tested (passing) | 1330 | 1056 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 950 | 781 |
+| a, tested only by an earlier test (Oracle or rules) | 380 | 275 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 184/184, stack 140/140, triggers 140/140, zones 132/132, other 110/110, copies 102/102, dfc 67/67, replacement 63/63, combat 53/53, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 187/187, stack 142/142, triggers 142/142, zones 132/132, other 111/111, copies 106/106, dfc 67/67, replacement 63/63, combat 56/56, protection 27/27, facedown 13/13, walkers 9/9, removal 1/1 (tested/all).
 
 ## Per card
 
@@ -2978,7 +2978,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0e713983` | a | mana | a permanent with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
+| `0e713983` | a | mana | a permanent with X in its mana cost treats X as 0 | `cards_lands_a::cr_202_3_blast_zone_at_zero_destroys_tokens_and_x_permanents`; `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
 
 ### Alpha Deathclaw
 
@@ -3698,6 +3698,48 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `2c34d4ba` | a | other | changed into another basic land type it is still a green Dryad creature (CR 305.7) | `cards_hogaak_c::cr_305_7_dryad_arbor_under_magus_of_the_moon` |
 | `c0965c9d` | a | zones | flash would lift only the timing of a land play: never on another player's turn, never without a land play left (CR 305.2b, 305.3); no card of the tables gives a land flash | `cards_hogaak_c::cr_305_3_dryad_arbor_only_on_its_owners_turn_with_a_land_play_left` |
 
-## Cards without rulings (181)
+### Dark Depths (legacy, constructed play: ENGINE.md 54)
 
-Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54), Meltdown (legacy, constructed play: ENGINE.md 54), Price of Progress (legacy, constructed play: ENGINE.md 54), Massacre (legacy, constructed play: ENGINE.md 54), Stitcher's Supplier (legacy, constructed play: ENGINE.md 54), Dark Matter Manipulator (legacy, constructed play: ENGINE.md 54), Moonshadow (legacy, constructed play: ENGINE.md 54)
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `f01a8c16` | a | mana | Dark Depths has no mana ability (its "{3}: remove an ice counter" is no mana ability, CR 605.1a) | `cards_lands_a::cr_205_4_dark_depths_is_a_legendary_snow_land_without_a_mana_ability` |
+| `79635c14` | a | triggers | Dark Depths gone before its trigger resolves: nothing is sacrificed, no Marit Lage (CR 701.21a, 608.2b) | `cards_lands_a::cr_701_21a_dark_depths_gone_before_its_trigger_resolves_makes_no_marit_lage`; `cards_lands_a::cr_704_5j_keeping_the_real_dark_depths_leaves_the_copy_s_trigger_with_nothing` |
+| `faf3075b` | a | triggers | a state trigger doesn't trigger again while on the stack; countered with the condition still true, it triggers again at once (CR 603.8) | `cards_lands_a::cr_603_8_the_state_trigger_does_not_trigger_again_while_on_the_stack`; `cards_lands_a::cr_603_8_a_countered_state_trigger_triggers_again` |
+
+### Thespian's Stage (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `6445c953` | a | copies | Thespian's Stage copies copiable values only: no counters or other effects; an animated land is copied unanimated (CR 707.2) | `cards_lands_a::cr_707_2_the_stage_copies_the_printed_land_not_its_effects_or_counters` |
+| `56b267d6` | a | copies | Thespian's Stage becoming a copy doesn't enter: no enters abilities, no "as enters" or "enters with" (Dark Depths' counters) (CR 707.5, 614.12) | `cards_lands_a::cr_707_9b_thespians_stage_copying_dark_depths_makes_marit_lage`; `cards_lands_a::cr_603_6a_the_stage_copying_bojuka_bog_has_no_enters_trigger` |
+| `7bf3dd51` | a | copies | the Stage's copy effect has no duration and loses the Stage's first ability; another copy effect overwrites it (CR 707.9b, 613.2a, 613.7) | `cards_lands_a::cr_707_9b_the_copy_keeps_the_stage_ability_stays_tapped_and_is_overwritten` |
+| `d4cd124c` | a | copies | the Stage doesn't untap as it becomes a copy (CR 707.2: status isn't copied) | `cards_lands_a::cr_707_9b_the_copy_keeps_the_stage_ability_stays_tapped_and_is_overwritten` |
+
+### Blast Zone (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `3f985fb3` | a | mana | {X}{X} in an activation cost: twice X is paid (CR 107.3, 601.2f via 602.2b) | `cards_lands_a::cr_107_3_blast_zone_enters_with_a_charge_counter_and_x_x_pays_twice_x` |
+| `fc7d2534` | a | other | a token's mana value is 0 unless it copies something or was given a mana cost (CR 111.3, 202.3) | `cards_lands_a::cr_202_3_blast_zone_at_zero_destroys_tokens_and_x_permanents` |
+| `0e713983` | a | mana | a permanent with X in its mana cost treats X as 0 | `cards_lands_a::cr_202_3_blast_zone_at_zero_destroys_tokens_and_x_permanents`; `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
+
+### Ghost Quarter (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `3aa7df53` | a | stack | Ghost Quarter targeting itself: sacrificed as a cost, its ability doesn't resolve, no search (CR 602.2b, 608.2b) | `cards_lands_a::cr_608_2b_ghost_quarter_targeting_itself_does_nothing` |
+| `962d2c28` | a | stack | Ghost Quarter's target illegal on resolution: nothing happens, no search (CR 608.2b) | `cards_lands_a::cr_608_2b_ghost_quarter_s_target_gone_no_search` |
+| `a7f48de4` | a | removal | the land's controller may search even if it wasn't destroyed (indestructible, regenerated) | `cards_lands_a::cr_702_12b_ghost_quarter_s_search_even_if_the_land_survives` |
+
+### Maze of Ith (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `7d47c20c` | a | combat | Maze of Ith may target an untapped attacking creature: its combat damage is still prevented (CR 615.1a) | `cards_lands_a::cr_115_1_maze_of_ith_targets_an_untapped_attacker` |
+| `a5613231` | a | mana | Maze of Ith has no mana ability | `cards_lands_a::cr_615_1a_maze_of_ith_prevents_an_unblocked_attacker_s_damage` |
+| `ba3777e8` | a | combat | a Mazed creature stays attacking until the combat phase ends; only its combat damage is prevented (CR 506.4) | `cards_lands_a::cr_506_4_a_mazed_creature_stays_in_combat_and_neither_deals_nor_takes_damage` |
+| `8abfa1d8` | a | combat | Maze of Ith activated in the combat damage step or the end of combat step untaps the creature; damage dealt already stands (CR 615.1, 510.2) | `cards_lands_a::cr_615_1_maze_of_ith_after_combat_damage_untaps_and_changes_nothing_dealt` |
+
+## Cards without rulings (182)
+
+Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54), Meltdown (legacy, constructed play: ENGINE.md 54), Price of Progress (legacy, constructed play: ENGINE.md 54), Massacre (legacy, constructed play: ENGINE.md 54), Stitcher's Supplier (legacy, constructed play: ENGINE.md 54), Dark Matter Manipulator (legacy, constructed play: ENGINE.md 54), Moonshadow (legacy, constructed play: ENGINE.md 54), Bojuka Bog (legacy, constructed play: ENGINE.md 54)

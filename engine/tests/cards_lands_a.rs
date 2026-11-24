@@ -209,9 +209,9 @@ fn remove_ice(g: &mut Game, depths: CardIdx, n: usize) {
 
 /// The card: a legendary snow land with no mana ability (the ruling), its
 /// "{3}" ability not a mana ability (CR 605.1a), and its state trigger.
-/// ruling: f01a8c16
 #[test]
 fn cr_205_4_dark_depths_is_a_legendary_snow_land_without_a_mana_ability() {
+    // ruling: f01a8c16
     let d = db().def(db().id(DEPTHS).unwrap());
     assert!(d.is(types::LAND) && d.types == types::LAND);
     assert_eq!(d.supertypes, engine::db::supertypes::LEGENDARY | engine::db::supertypes::SNOW);
@@ -265,9 +265,9 @@ fn cr_603_8_no_ice_counters_sacrifices_dark_depths_and_creates_marit_lage() {
 /// it doesn't trigger again while its ability is on the stack, though the
 /// condition still holds and priority passes back and forth (Dark Depths'
 /// ability activated again, removing nothing).
-/// ruling: faf3075b
 #[test]
 fn cr_603_8_the_state_trigger_does_not_trigger_again_while_on_the_stack() {
+    // ruling: faf3075b
     let mut g = bare().battlefield(0, &[DEPTHS, "Island", "Island", "Island", "Island", "Island", "Island"]).counters(0, DEPTHS, ice(), 1).at(Step::Main1, 0).start();
     let c = bf(&g, 0, DEPTHS);
     remove_ice(&mut g, c, 1);
@@ -285,9 +285,9 @@ fn cr_603_8_the_state_trigger_does_not_trigger_again_while_on_the_stack() {
 /// Countered (Consign to Memory: "counter target triggered ability"), the
 /// state trigger has left the stack; Dark Depths is still there with no
 /// ice counters, so it triggers again at once (CR 603.8, the ruling).
-/// ruling: faf3075b
 #[test]
 fn cr_603_8_a_countered_state_trigger_triggers_again() {
+    // ruling: faf3075b
     let mut g = bare()
         .battlefield(0, &[DEPTHS, "Island", "Island", "Island"])
         .counters(0, DEPTHS, ice(), 1)
@@ -316,9 +316,9 @@ fn cr_603_8_a_countered_state_trigger_triggers_again() {
 
 /// Dark Depths destroyed in response (Ghost Quarter): its trigger resolves
 /// but can't sacrifice it, so no Marit Lage (CR 701.21a; "if you do").
-/// ruling: 79635c14
 #[test]
 fn cr_701_21a_dark_depths_gone_before_its_trigger_resolves_makes_no_marit_lage() {
+    // ruling: 79635c14
     let mut g = bare()
         .battlefield(0, &[DEPTHS, "Island", "Island", "Island"])
         .counters(0, DEPTHS, ice(), 1)
@@ -491,9 +491,9 @@ fn pay_not(g: &Game, not: CardIdx) -> Option<Choice> {
 /// its state trigger triggers (603.8); P0 keeps the copy by the legend rule
 /// (704.5j: both are "Dark Depths"), the trigger sacrifices it and creates
 /// Marit Lage.
-/// ruling: 56b267d6
 #[test]
 fn cr_707_9b_thespians_stage_copying_dark_depths_makes_marit_lage() {
+    // ruling: 56b267d6
     let mut g = bare().battlefield(0, &[STAGE, DEPTHS, "Island", "Island"]).counters(0, DEPTHS, ice(), 10).at(Step::Main1, 0).start();
     let (s, d) = (bf(&g, 0, STAGE), bf(&g, 0, DEPTHS));
     let k = stage_slot(&g, s);
@@ -516,9 +516,9 @@ fn cr_707_9b_thespians_stage_copying_dark_depths_makes_marit_lage() {
 /// copy goes to the graveyard and its trigger, already triggered, can't
 /// sacrifice it: no Marit Lage (CR 603.8 then 704.5j; the Dark Depths
 /// ruling).
-/// ruling: 79635c14
 #[test]
 fn cr_704_5j_keeping_the_real_dark_depths_leaves_the_copy_s_trigger_with_nothing() {
+    // ruling: 79635c14
     let mut g = bare().battlefield(0, &[STAGE, DEPTHS, "Island", "Island"]).counters(0, DEPTHS, ice(), 10).at(Step::Main1, 0).start();
     let (s, d) = (bf(&g, 0, STAGE), bf(&g, 0, DEPTHS));
     let k = stage_slot(&g, s);
@@ -551,10 +551,10 @@ fn cr_707_2_copying_the_opponent_s_dark_depths() {
 /// copy ability (CR 707.9b, the ruling); it stays tapped (the ruling); the
 /// copy effect has no duration and another one overwrites it (613.7): a
 /// Forest the next turn, with the Stage's ability again.
-/// ruling: 7bf3dd51
-/// ruling: d4cd124c
 #[test]
 fn cr_707_9b_the_copy_keeps_the_stage_ability_stays_tapped_and_is_overwritten() {
+    // ruling: 7bf3dd51
+    // ruling: d4cd124c
     let mut g = bare().battlefield(0, &[STAGE, "Island", "Island", "Island", "Island"]).battlefield(1, &[GQ, "Forest"]).at(Step::Main1, 0).start();
     let s = bf(&g, 0, STAGE);
     let t = bf(&g, 1, GQ);
@@ -593,9 +593,9 @@ fn pass_until_main1(g: &mut Game, p: PlayerId) {
 /// aren't copied. Celestial Colonnade animated (a 4/4 creature until end of
 /// turn) is copied as the land; Blast Zone with charge counters is copied
 /// without them.
-/// ruling: 6445c953
 #[test]
 fn cr_707_2_the_stage_copies_the_printed_land_not_its_effects_or_counters() {
+    // ruling: 6445c953
     let mut g = bare()
         .battlefield(0, &[STAGE, STAGE, "Island", "Island", "Island", "Island"])
         .battlefield(1, &["Celestial Colonnade", BLAST, "Island", "Island", "Island", "Plains", "Plains"])
@@ -627,9 +627,9 @@ fn cr_707_2_the_stage_copies_the_printed_land_not_its_effects_or_counters() {
 /// No enters abilities of the copied land (the ruling): copying Bojuka Bog
 /// exiles no graveyard; it isn't tapped by "enters tapped" either (it
 /// stays as it was).
-/// ruling: 56b267d6
 #[test]
 fn cr_603_6a_the_stage_copying_bojuka_bog_has_no_enters_trigger() {
+    // ruling: 56b267d6
     let mut g = bare().battlefield(0, &[STAGE, "Island", "Island"]).battlefield(1, &[BOG]).graveyard(1, &["Lightning Bolt"]).at(Step::Main1, 0).start();
     let s = bf(&g, 0, STAGE);
     let t = bf(&g, 1, BOG);
@@ -701,9 +701,9 @@ fn blast_slot(g: &Game, c: CardIdx, k: usize) -> u8 {
 /// Played, Blast Zone enters with a charge counter (CR 122.6, 614.1c);
 /// "{X}{X}, {T}" pays twice X (CR 107.3; the ruling): X = 2 taps four Islands
 /// and puts two more.
-/// ruling: 3f985fb3
 #[test]
 fn cr_107_3_blast_zone_enters_with_a_charge_counter_and_x_x_pays_twice_x() {
+    // ruling: 3f985fb3
     let mut g = bare().hand(0, &[BLAST]).battlefield(0, &["Island", "Island", "Island", "Island", "Island"]).at(Step::Main1, 0).start();
     let c = g.card(0, BLAST, Zone::Hand);
     act_with(&mut g, Choice::Play(c), |_| None);
@@ -750,10 +750,10 @@ fn cr_608_2h_blast_zone_destroys_each_nonland_permanent_of_its_counters() {
 /// Army), a permanent with {X} in its mana cost (X is 0 there: Walking
 /// Ballista, the ruling), Mox Diamond; Marit Lage is indestructible and
 /// stays (CR 702.12b).
-/// ruling: fc7d2534
-/// ruling: 0e713983
 #[test]
 fn cr_202_3_blast_zone_at_zero_destroys_tokens_and_x_permanents() {
+    // ruling: fc7d2534
+    // ruling: 0e713983
     let mut g = bare()
         .battlefield(0, &[STAGE, BLAST, "Island", "Island", "Island", "Island", "Island", DEPTHS])
         .counters(0, BLAST, charge(), 4)
@@ -839,9 +839,9 @@ fn cr_701_23_ghost_quarter_s_search_may_be_declined() {
 /// Ghost Quarter may target itself (CR 602.2b: targets are chosen before the
 /// costs are paid); sacrificed as the cost, its target is gone and the
 /// ability doesn't resolve: no search (608.2b; the ruling).
-/// ruling: 3aa7df53
 #[test]
 fn cr_608_2b_ghost_quarter_targeting_itself_does_nothing() {
+    // ruling: 3aa7df53
     let mut g = bare().battlefield(0, &[GQ]).library(0, &["Island", "Island"]).at(Step::Main1, 0).start();
     let gq = bf(&g, 0, GQ);
     let k = nonmana_slot(&g, gq, 0);
@@ -855,9 +855,9 @@ fn cr_608_2b_ghost_quarter_targeting_itself_does_nothing() {
 /// The target illegal on resolution (sacrificed to Crop Rotation in
 /// response): the ability doesn't resolve, no search (CR 608.2b; the
 /// ruling).
-/// ruling: 962d2c28
 #[test]
 fn cr_608_2b_ghost_quarter_s_target_gone_no_search() {
+    // ruling: 962d2c28
     let mut g = bare()
         .battlefield(0, &[GQ])
         .battlefield(1, &["Forest", "Volcanic Island"])
@@ -900,9 +900,9 @@ fn db_indestructible_land() -> &'static CardDb {
 
 /// The land's controller searches even if it wasn't destroyed
 /// (indestructible: CR 702.12b; the ruling).
-/// ruling: a7f48de4
 #[test]
 fn cr_702_12b_ghost_quarter_s_search_even_if_the_land_survives() {
+    // ruling: a7f48de4
     let mut g = Scenario::new(db_indestructible_land())
         .spec(|s| s.auto_single = false)
         .battlefield(0, &[GQ])
@@ -968,9 +968,9 @@ fn priority_in(g: &mut Game, p: PlayerId, step: Step) {
 /// attacking creature. Prevent all combat damage that would be dealt to and
 /// dealt by that creature this turn" (CR 615.1a): the Mazed attacker,
 /// unblocked, deals no damage; untapped.
-/// ruling: a5613231
 #[test]
 fn cr_615_1a_maze_of_ith_prevents_an_unblocked_attacker_s_damage() {
+    // ruling: a5613231
     let mut g = bare().battlefield(0, &["Orcish Bowmasters"]).battlefield(1, &[MAZE]).at(Step::Main1, 0).start();
     let m = bf(&g, 1, MAZE);
     assert!(g.def_of(m).activated.iter().all(|a| a.mana().is_none()), "no mana ability");
@@ -995,9 +995,9 @@ fn cr_615_1a_maze_of_ith_prevents_an_unblocked_attacker_s_damage() {
 /// Blocked, its damage to the blocker and the blocker's to it are both
 /// prevented (CR 615.1a): both live. It is still an attacking creature, and
 /// still blocked (the ruling: not removed from combat, CR 506.4).
-/// ruling: ba3777e8
 #[test]
 fn cr_506_4_a_mazed_creature_stays_in_combat_and_neither_deals_nor_takes_damage() {
+    // ruling: ba3777e8
     let mut g = bare().battlefield(0, &["Orcish Bowmasters"]).battlefield(1, &[MAZE, "Llanowar Elves"]).at(Step::Main1, 0).start();
     let a = bf(&g, 0, "Orcish Bowmasters");
     let e = bf(&g, 1, "Llanowar Elves");
@@ -1046,9 +1046,9 @@ fn cr_615_12_questing_beast_s_damage_is_not_prevented_by_maze_of_ith() {
 /// Maze of Ith targets an untapped attacking creature (vigilance: an
 /// animated Celestial Colonnade); its combat damage is still prevented (the
 /// ruling). Only attacking creatures are targets.
-/// ruling: 7d47c20c
 #[test]
 fn cr_115_1_maze_of_ith_targets_an_untapped_attacker() {
+    // ruling: 7d47c20c
     let mut g = bare()
         .battlefield(0, &["Celestial Colonnade", "Island", "Island", "Island", "Plains", "Plains", "Orcish Bowmasters"])
         .battlefield(1, &[MAZE])
@@ -1085,9 +1085,9 @@ fn cr_115_1_maze_of_ith_targets_an_untapped_attacker() {
 /// own attacking creature after it dealt its damage: it untaps it and the
 /// damage dealt stands (CR 615.1: prevention acts on damage still to come;
 /// the ruling).
-/// ruling: 8abfa1d8
 #[test]
 fn cr_615_1_maze_of_ith_after_combat_damage_untaps_and_changes_nothing_dealt() {
+    // ruling: 8abfa1d8
     for step in [Step::CombatDamage, Step::EndCombat] {
         let mut g = bare().battlefield(0, &["Orcish Bowmasters", MAZE]).at(Step::Main1, 0).start();
         let a = bf(&g, 0, "Orcish Bowmasters");
@@ -1229,4 +1229,30 @@ fn the_stage_as_dark_depths_reaches_both_players_inputs() {
         let copies = tokens(b, engine::az::tail_encode::seg::EFFECTS).into_iter().filter(|t| t[engine::az::tail_encode::ef::COPY] == 1.0).count();
         assert_eq!(copies, 1, "the copy effect");
     }
+}
+
+/// The cleanup step (CR 514.3a, 603.8): Dark Depths with no ice counters
+/// that lost its abilities until end of turn gets its state trigger back
+/// as the effect ends (514.2); the trigger triggers then, so the players
+/// get priority in the cleanup step, it resolves, and another cleanup step
+/// follows.
+#[test]
+fn cr_514_3a_a_state_trigger_regained_in_the_cleanup_step() {
+    let mut g = bare().battlefield(0, &[DEPTHS, "Island", "Island", "Island"]).counters(0, DEPTHS, ice(), 1).at(Step::Main2, 0).start();
+    let d = bf(&g, 0, DEPTHS);
+    // The last ice counter's removal on the stack; then Dark Depths loses its
+    // abilities until end of turn (an effect set by hand: no card of the
+    // tables does it to a land), and the removal resolves.
+    let k = nonmana_slot(&g, d, 0);
+    act_with(&mut g, ability(d, k), |g| pay_with_names(g, &["Island"]));
+    g.add_effect_until_eot(d, engine::db::Mod::LoseAllAbilities, 1);
+    resolve_top(&mut g);
+    assert_eq!(g.counters_on(d, ice()), 0);
+    g.drive_until(at_priority);
+    assert!(g.stack().is_empty(), "no ability: no trigger\n{}", log(&g));
+    pass_until(&mut g, |g| !g.stack().is_empty() || g.turn().active != 0);
+    assert_eq!(g.turn().step, Step::Cleanup, "{}", log(&g));
+    assert_eq!(stack_names(&g), [format!("ability of {DEPTHS}")]);
+    resolve(&mut g);
+    assert_eq!(lages(&g, 0).len(), 1, "{}", log(&g));
 }

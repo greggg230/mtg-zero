@@ -1173,6 +1173,15 @@ impl Game {
         &mut self.effects
     }
 
+    /// A continuous effect `m` on permanent `c` until end of turn, controlled by `controller`, as a resolving
+    /// ability adds one (`Game::add_effect`; ENGINE.md 270.1's cleanup-step test); the pending decision asked again.
+    #[doc(hidden)]
+    pub fn add_effect_until_eot(&mut self, c: CardIdx, m: crate::db::Mod, controller: PlayerId) {
+        let r = self.obj_ref(c);
+        self.add_effect(crate::layers::Affected::Obj(r), m, crate::layers::Until::EndOfTurn, controller);
+        self.refresh_pending();
+    }
+
     /// The cards exiled face down, in the order they were exiled (`Game::face_down`; ENGINE.md
     /// 142.3's test: the order the encoding must not show).
     #[doc(hidden)]
