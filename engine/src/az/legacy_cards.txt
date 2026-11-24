@@ -28,18 +28,18 @@ Dark Matter Manipulator
 Moonshadow
 Dryad Arbor
 Massacre
-Dark Depths
-Thespian's Stage
-Blast Zone
-Ghost Quarter
-Maze of Ith
-Bojuka Bog
-Life from the Loam
 Exploration
-Carnivorous Cultivator // Enroot
-Yavimaya, Cradle of Growth
+Ghost Quarter
 The Tabernacle at Pendrell Vale
 Pithing Needle
+Maze of Ith
+Life from the Loam
+Bojuka Bog
+Dark Depths
+Carnivorous Cultivator // Enroot
+Yavimaya, Cradle of Growth
+Thespian's Stage
+Blast Zone
 Choke
 Cursed Totem
 Damping Sphere

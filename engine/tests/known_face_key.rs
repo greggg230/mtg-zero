@@ -62,8 +62,8 @@ fn fuzz_seeds_466_and_4248_a_known_cards_face_choice_keeps_the_worlds_apart() {
         // IR, so the Flutes these games show have another id than when the cases were recorded, and the worlds of a
         // recorded `s` may be other decks. Seed 466's recorded `s` still reaches its face choice; 4248's world seed
         // is rescanned: 4, the first of 1..400 whose two worlds keep one node along the recorded path and name two
-        // known cards at its end - about one seed in four does; rescanned with every Legacy Lands card in the table,
-        // ENGINE.md 270.4: @SEED@, the first of 1..400 now.)
+        // known cards at its end - about one seed in four does; rescanned with all sixteen Legacy Lands cards in the
+        // table, ENGINE.md 270.4: still 5, the first of 1..400 (85 of the 400 reach it).)
         let s: u64 = if seed == 4248 { 5 } else { case["s"].as_str().unwrap().parse().unwrap() };
         let gspec = GameSpec { hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };
         let seat = |deck: Vec<u16>| Seat { deck, sideboard: Vec::new(), first_picks: Vec::new(), elsewhere: Vec::new() };
