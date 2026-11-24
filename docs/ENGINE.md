@@ -47897,3 +47897,120 @@ section's 7 among them), the run-loop smoke 16 games, 0 unfinished; the skip: 1 
 
 **Measured.** Nothing on a live run yet: a run counts from its next start on a commit with this pin (a re-pin), and
 the farm's board shows the counts once such a run's pool acks.
+
+## 257. The stew distils and judges its stews only when wanted: `recipe.distill_every`, `tools/stew.py distil` (branch `feat/stew-distil-on-demand`, 2026-11-23)
+
+**Why** (the user, 2026-11-23, on the first stew's generation 0: 6.7 h of training, 4.9 h of distillation, 6.4 h of
+judging): "distil when we NEED the stew networks to be updated". The flow of a stew is one-directional, so nothing a
+specialist does waits for a stew net:
+
+* a specialist's turn continues its own run from its own newest checkpoint (`turn`: `--iters` = its version g's
+  iteration + `turn_iters`; its version g + 1 = that checkpoint, parent `<spec>@g`);
+* the main stew seeds a specialist once, when it is created (`_new_specialist`: `seeds.<pairing>` or the main stew),
+  and a deck stew is a copy of the main stew once, when its deck joins (`_new_deck_stew`);
+* the stall rule (251) compares a specialist with its own earlier version (`judge.window_base`: its trained versions).
+
+Distillation only reads the specialists (teachers = their version g + 1, rows = their turn's shards) and the stews'
+own earlier versions (warm start, the retention teacher). So a generation may go without it and the specialists
+improve exactly as before; only the stews, and the numbers measured with them (arms A and M: the distillation gap,
+main - deck, the candidates' field rate under the stews), are older.
+
+**The setting.** `recipe.distill_every` (default 1: the five phases every generation, state, sources, jobs and
+reports as before, key for key):
+
+* N > 1: at the end of generation g's `train` the stews are distilled and judged (`distil_decks`, `judge_deck_gap`,
+  `distil_main`, `judge`) once N turns have been trained since the newest main stew (g + 1 - its version >= N). The
+  count starts at the newest main stew, whatever made it: a new stew with N = 3 distils in generations 2, 5, 8 (main
+  v3, v6, v9); a stew switched to N = 3 with main v2 next distils in generation 4 (v5); a distillation asked for
+  restarts it.
+* 0 or `"never"`: never by itself, only when asked for.
+
+**A generation without distillation** is `train` -> `judge_specialists` -> the next generation's `train`.
+`judge_specialists` (a sixth phase name, `config.SKIP_PHASE`; `hold_after` and `step` take it) is the judging that
+needs no stew net:
+
+* the stall tests of 251, exactly as `judge_deck_gap` plays them (same jobs `W.<a>-<b>.<k>`, same extension, same
+  decision, `stall_parts` and `stall_log`): the rule keeps its own cadence - a specialist is tested after every turn
+  it trains (from its `window`-th: with the default window 2 its first test is in generation 1, `judge_deck_gap@1` or
+  `judge_specialists@1`), stalls and sits out whether or not the stews are distilled;
+* `recipe.judge.between` (default `[]`) adds `"gen"` (each specialist's version g + 1 against g, the `G` jobs) and
+  `"matchup"` (arm B: the matchup table and the candidates' field rate under the specialists);
+* the generation's report (training, the stall table, what was judged, the stews block below). With no stall rule and
+  nothing in `between` the phase plays nothing and only writes the report.
+
+**Numbering.** Generation numbers stay the trained turns: a specialist has every version 0, 1, 2, ... A stew net has
+a version g + 1 only when generation g distilled (`nets/main/gen_003.pt` is made by generation 2, as before); the
+numbers between do not exist. `State.base(name, g)` is "the stew of generation g": the newest version at or before g.
+Every reader of a stew version, and what it does across a gap:
+
+| reader | reads | across a gap |
+|---|---|---|
+| `sources.deck_sources` (student init) | deck stew v g | `base`: its newest version; the version's `parents` names it |
+| `sources.main_sources` (student init, the retention teacher) | main v g | `base`: the newest main |
+| `sources.main_sources` (the cells' teachers) | deck stews v g + 1 | made by the same generation's `distil_decks`: always there |
+| `sources.*` (specialist teachers), `snapshot` | specialists v g, v g + 1 | every generation has them: the newest version and the newest `distill_iters` iterations of generation g's turn, as in any generation |
+| `snapshot`, a specialist that sat out | the snapshot of its last turn (`rows.<r>`) | its last turn's generation may have none: the rows are taken from its run then (recorded `turn_of`); an older turn's snapshot is not used in its place |
+| `judge` arms A and M | deck stews / main v g + 1 | only planned in a generation that distils |
+| `judge` gen over gen (G), arm B, the stall tests (W) | specialists only | unchanged (G stays one turn: v g + 1 against v g) |
+| `_new_deck_stew` (add-deck) | main v g | a copy of the newest main, numbered as it (`deck:<X>` v k, parent `main@k`) |
+| `_new_specialist` (add-deck) | main v g (its seed) | the newest main; the specialist's first version is still v g |
+| `write_report`, `status` | versions g, g + 1; the latest | a stew's absent version is simply not listed; the new block says so |
+
+There is no other reader: nothing outside `mtgz/stew` and `tools/stew.py` reads a stew's state on main (no dashboard
+or publisher yet).
+
+**On demand.** `python tools/stew.py distil DIR` writes `DIR/DISTIL` (`--cancel` removes it); the recipe is not
+touched. A run of the stew - live or the next one started - takes it at a seam and moves it to `DISTIL.old`:
+
+* at the end of a `train` phase: that generation distils, whatever `distill_every` says (a request written while a
+  turn is being trained waits for the generation's turns to finish, as STOP and PAUSE wait for a safe point);
+* at a generation's start, when no turn of it has begun and the generation before did not distil (a stopped stew
+  standing at `train@g`, or a run coming out of `judge_specialists@(g-1)`): the stew goes back to
+  `distil_decks@(g-1)` and runs that generation's four stew phases before generation g's turns - no turn is trained
+  first, the stall tests already played are reused (same job hashes) and logged once. A deck pending for generation g
+  joins after it, on the main stew just made.
+
+It is honoured once (the request's time is recorded in state.json `distil_log`; a file left by a kill between the
+state's save and the file's move is recognized and moved away). With `distill_every` 1 a request changes nothing.
+
+**What shows it.** `status` and `plan`: a `distillation:` line (the next one: "after generation 8's turns (main v9;
+every 3 turns, newest main v6)", "ASKED FOR ...", "only when asked for ...", "under way: ...") and, when versions are
+missing or the setting is not 1, `stew versions: main v0 v3 v6 (2 turn(s) behind the specialists' v8); the deck stews
+the same` (a deck stew with other versions on its own line); `plan` at `train` also says which phase follows these
+turns and why. The report of every generation has a `stews` block (`reports/gen_NNN.json`; "The stews" in the .md):
+whether this generation distilled and why, every stew's versions, the next distillation. state.json `distil_log`
+keeps each seam's decision (`round`, `due`, `why`, the request taken, `rewound`). A stew that distils every
+generation and always has gets none of this in its state or reports.
+
+**Unchanged at 1** (the default): the phase order, state.json's keys, the sources files, the judge jobs and their
+hashes, the reports. Three things differ in words only: `status` and `plan` print the `distillation:` line, and
+`plan` for `judge_deck_gap` now counts the stall tests' jobs it had left out.
+
+**Switching a live stew** (not done here; the first stew is switched only when the owner and its session agree): the
+recipe is read when `run` starts, and the old code refuses the unknown key, so the key goes into stew.json at the
+re-pin onto a commit with this section - stop the stew at any safe point (PAUSE), re-pin, add
+`"distill_every": N` (and `judge.between` if wanted) to `recipe`, remove PAUSE, run. Whatever phase it stands in is
+finished as before; the first decision is the next end of `train`. Do not go back to an older commit while the stew
+stands in `judge_specialists`. On the first stew's generation-0 timings (6.7 h training, 4.9 h distillation, 6.4 h
+judging = 18.0 h; its recipe has no stall rule) a generation without distillation is the 6.7 h of training: 11.3 h
+saved each time, e.g. N = 3 -> 31.4 h per three generations instead of 54.0 h (10.5 h a generation, 1.7 times the
+turns per day). `between: ["gen"]` gives back about a fifth of the judging (600 of generation 0's 3,000 matches); a
+stall rule its tests (200 to 600 matches a specialist that trained).
+
+**Left for the owner.** (1) The distillation of a generation after a gap uses the newest `distill_iters` iterations
+of the newest turn only, as every generation does; the turns between contribute through the teacher, not their rows.
+More rows per distillation is `distill_iters` (the runs keep `keep_data` iterations). (2) The open stew branches
+(`feat/stew-deck-arms`, `feat/stew-judge-farm`) plan judge jobs too: at their merge, arm A / M jobs must stay inside
+the generations that distil and anything they add to `judge_deck_gap` that needs no stew belongs in
+`judge_specialists` as well.
+
+**Tests** (`tests/test_stew_distil.py`, on test_stew.py's fakes; 13): the default over two generations leaves no
+trace (and takes a request without changing the cycle); the config's values and refusals; N = 3 over six generations
+(the phase sequence, versions 0 / 3 / 6, warm starts, teachers, rows, parents, the retention teacher, judge jobs only
+where the stews are, reports, `distil_log`, `status`, `plan`); `between`; `never` + a request written during a turn,
+honoured once, the stale file, `--cancel`; a request at a generation's start (the generation before distilled, no turn
+trained again, stall tests not replayed, one log entry); the stall rule's first test at window 2 in
+`judge_specialists@1`; a stalled specialist across a gap (sits out, its rows from its run, then the snapshot reused);
+add-deck with the newest main stew three generations old, and with a request at the same start; a hold after
+`judge_specialists`; `judge_specialists` interrupted mid-extension and resumed; PAUSE and a crash around a
+distillation asked for, a request then STOP inside a turn. tests/test_stew.py is unchanged and passes.

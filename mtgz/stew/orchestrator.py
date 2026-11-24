@@ -21,6 +21,16 @@ to STOP.old (as tools/supervise.py does). `recipe.hold_after` tags pause the ste
 GPU phase of a `run` the stew pauses the `yield_runs` at their iteration boundary (tools/pause_run.py --wait) and
 their farm runs, and gives them back - only those it paused - when it stops, pauses, holds or fails. It refuses to
 start while a supervisor is live that is neither a yield run's nor a specialist's.
+
+**Distillation only when wanted** (docs/ENGINE.md 257). `recipe.distill_every` N (1: the five phases above, every
+generation): at the end of generation g's `train` the stews are distilled and judged (phases 2-5) once N turns have
+been trained since the newest main stew, or when asked for - `tools/stew.py distil DIR` writes DIR/DISTIL, taken at
+that seam (0 / "never": only then). Any other generation goes `train` -> `judge_specialists` (the judging that needs
+no stew net: the stall tests, plus `recipe.judge.between`) -> the next generation's `train`: the specialists get
+their version g + 1, the stews none of that number, and whatever needs a stew "of generation g" (a distillation's
+warm start and retention teacher, an added deck's stew and specialists' seed) takes the newest at or before g
+(`State.base`). A request that finds the stew standing at a generation's start with the generation before not
+distilled takes it there: that generation's phases 2-5 run before the next turn.
 """
 import json
 import os
@@ -270,9 +280,11 @@ class Stew:
         os.replace(tmp, dst)
 
     def _new_deck_stew(self, x, gen):
-        """Deck stew x's version `gen` = a copy of the main stew's version `gen`."""
+        """Deck stew x's first version = a copy of the main stew's version `gen` - of its newest version at or before
+        `gen`, and numbered as that one, when generations went without distillation (docs/ENGINE.md 257)."""
         st = self.st
         name = C.deck_net(x)
+        gen = st.base('main', gen)['gen']
         if st.version(name, gen) is not None:
             return
         src = st.ckpt('main', gen)
@@ -305,7 +317,7 @@ class Stew:
         sn = C.spec_name(a, b)
         if st.version(sn, gen) is not None:
             return
-        seed = self.cfg['seeds'].get(C.pair_key(a, b)) or st.ckpt('main', gen)
+        seed = self.cfg['seeds'].get(C.pair_key(a, b)) or st.base_ckpt('main', gen)   # (the newest main stew)
         run = self.p('runs', C.spec_dir(a, b))
         ck0 = os.path.join(run, 'models', 'iter_0000.pt')
         if not os.path.exists(ck0):
@@ -436,18 +448,34 @@ class Stew:
         st = self.st
         tag = st.tag()
         st.log(tag, start, result)
-        i = C.PHASES.index(st.d['phase'])
-        if i + 1 < len(C.PHASES):
-            st.d['phase'] = C.PHASES[i + 1]
-        else:
+        ph, taken, skip = st.d['phase'], None, None
+        if ph == 'train':
+            # (the seam: is this generation's distillation wanted? docs/ENGINE.md 257)
+            due, why, taken = self.distil_due(st.d['round'])
+            st.d['phase'] = C.PHASES[1] if due else C.SKIP_PHASE
+            if taken is not None or self.cfg['recipe']['distill_every'] != 1:
+                e = {'round': st.d['round'], 'due': due, 'why': why, 'time': now()}
+                if taken is not None:
+                    e['request'] = taken
+                st.d.setdefault('distil_log', []).append(e)
+            if not due:
+                skip = why
+        elif ph in (C.SKIP_PHASE, C.PHASES[-1]):
             st.d['phase'] = C.PHASES[0]
             st.d['round'] += 1
+        else:
+            st.d['phase'] = C.PHASES[C.PHASES.index(ph) + 1]
         held = tag in self.cfg['recipe']['hold_after'] and not any(h.get('tag') == tag for h in st.d.get('holds', []))
         if held:
             st.d['held'] = {'tag': tag, 'time': now()}
             st.d.setdefault('holds', []).append({'tag': tag, 'time': now()})
             jsave(self.p('PAUSE'), {'time': time.time(), 'by': 'tools/stew.py hold_after', 'tag': tag})
         st.save()
+        if taken is not None:
+            self._request_taken()
+            self.say(f"{tag}: the distillation asked for ({taken.get('by', 'DISTIL')}) is this generation's")
+        if skip is not None:
+            self.say(f'{tag}: no distillation this generation ({skip}); next: {self.next_distil()}')
         if held:
             self.say(f'HOLD after {tag} (recipe.hold_after): the stew paused itself - read reports/, then remove '
                      f'{self.p("PAUSE")} and run again')
@@ -456,8 +484,143 @@ class Stew:
     def do_phase(self):
         g, ph = self.st.d['round'], self.st.d['phase']
         if ph == 'train':
-            self.apply_pending(g)
+            if self.rewind_for_request(g):
+                g, ph = self.st.d['round'], self.st.d['phase']
+            else:
+                self.apply_pending(g)
         return getattr(self, 'phase_' + ph)(g)
+
+    # ---------------------------------------------------------------- when the stews are distilled (docs/ENGINE.md 257)
+    def distil_request(self, peek=False):
+        """The request waiting in DIR/DISTIL (`tools/stew.py distil`), or None. A file whose request the state has
+        taken already (a kill between the state's save and the file's move) is moved away (not when `peek`)."""
+        p = self.p('DISTIL')
+        if not os.path.exists(p):
+            return None
+        req = jload(p)
+        if not isinstance(req, dict) or 'time' not in req:     # (a file written by hand)
+            req = {'time': round(os.path.getmtime(p), 3), 'by': 'a DISTIL file'}
+        if any((e.get('request') or {}).get('time') == req['time'] for e in self.st.d.get('distil_log', [])):
+            if not peek:
+                self._request_taken()
+            return None
+        return req
+
+    def _request_taken(self):
+        if os.path.exists(self.p('DISTIL')):
+            os.replace(self.p('DISTIL'), self.p('DISTIL.old'))
+
+    def request_distil(self, cancel=False, by='tools/stew.py distil'):
+        """`tools/stew.py distil DIR`: ask for the stews to be distilled and judged at the next seam (`--cancel`: take
+        the request back) -> when it is honoured (text). The recipe stays as it is; a live run reads the file itself."""
+        if cancel:
+            had = os.path.exists(self.p('DISTIL'))
+            if had:
+                os.remove(self.p('DISTIL'))
+            self.say('distil: the request is cancelled' if had else 'distil: no request to cancel')
+            return self.next_distil()
+        jsave(self.p('DISTIL'), {'time': round(time.time(), 3), 'by': by})
+        when = self.next_distil()
+        self.say(f'distil: requested ({self.p("DISTIL")}); {when}')
+        return when
+
+    def distil_due(self, g, peek=False):
+        """Is generation g distilled and judged once its turns are done -> (due, why, the request it takes or None).
+        recipe.distill_every 1: always; N: once N turns have been trained since the newest main stew (version g + 1
+        would be the next); 0: never by itself. A request (DIR/DISTIL) makes it due whatever the setting."""
+        n = self.cfg['recipe']['distill_every']
+        req = self.distil_request(peek)
+        if n == 1:
+            return True, 'every generation', req
+        if req is not None:
+            return True, f"asked for ({req.get('by', 'DISTIL')})", req
+        m = self.st.latest('main')['gen']
+        k = g + 1 - m
+        if n == 0:
+            return False, f'recipe.distill_every 0: only when asked for; {k} turn(s) since main v{m}', None
+        if k >= n:
+            return True, f'{k} turns since main v{m} (recipe.distill_every {n})', None
+        return False, f'{k} of {n} turns since main v{m} (recipe.distill_every {n})', None
+
+    def can_rewind(self, g):
+        """The stew stands at generation g's start (no turn of it begun) and generation g - 1 was not distilled, with
+        every specialist of the field in both generations: a request can still distil generation g - 1."""
+        st = self.st
+        if st.d['phase'] != 'train' or g < 1 or st.version('main', g) is not None or st.d.get('turn'):
+            return False
+        return all(st.version(sn, g + 1) is None and st.version(sn, g) is not None and st.version(sn, g - 1) is not None
+                   for _, _, sn in self._pairs_named())
+
+    def rewind_for_request(self, g):
+        """A request found at generation g's start, generation g - 1 not distilled: back to distil_decks@(g - 1) (the
+        specialists' newest versions are that generation's; its turns are not trained again) -> True when it did."""
+        if not self.can_rewind(g):
+            return False
+        req = self.distil_request()
+        if req is None:
+            return False
+        st = self.st
+        st.d['round'], st.d['phase'] = g - 1, C.PHASES[1]
+        st.d.setdefault('distil_log', []).append({'round': g - 1, 'due': True, 'time': now(), 'request': req,
+                                                  'why': f"asked for ({req.get('by', 'DISTIL')}) at generation {g}'s "
+                                                         f"start", 'rewound': True})
+        st.save()
+        self._request_taken()
+        self.say(f"distil: asked for ({req.get('by', 'DISTIL')}) - generation {g - 1} is distilled and judged now, "
+                 f"before generation {g}'s turns (next phase {st.tag()})")
+        return True
+
+    def next_distil(self):
+        """When the stews are next distilled, in words (status, plan, the report)."""
+        st = self.st
+        n = self.cfg['recipe']['distill_every']
+        g, ph = st.d['round'], st.d['phase']
+        m = st.latest('main')['gen']
+        how = {1: 'every generation', 0: 'only when asked for (tools/stew.py distil DIR)'}.get(n, f'every {n} turns')
+        if ph not in ('train', C.SKIP_PHASE):
+            return f'under way: generation {g} ({ph}; main v{g + 1}); then {how}'
+        req = self.distil_request(peek=True)
+        r = g if ph == 'train' else g + 1          # (the generation whose end of `train` is the next seam)
+        if req is not None:
+            if self.can_rewind(g):
+                return (f"ASKED FOR ({req.get('by', 'DISTIL')}): generation {g - 1} is distilled when the stew runs "
+                        f"next, before generation {g}'s turns (main v{g}); then {how}")
+            if ph == C.SKIP_PHASE:                 # (the stew then stands at generation g + 1's start: `can_rewind`)
+                return (f"ASKED FOR ({req.get('by', 'DISTIL')}): generation {g} is distilled right after this phase "
+                        f"(main v{g + 1}); then {how}")
+            return (f"ASKED FOR ({req.get('by', 'DISTIL')}): after generation {r}'s turns (main v{r + 1}); "
+                    f"then {how}")
+        if n == 1:
+            return f"every generation (after generation {r}'s turns: main v{r + 1})"
+        if n == 0:
+            return f'{how}; newest main v{m}'
+        due = max(r, m + n - 1)
+        return f"after generation {due}'s turns (main v{due + 1}; {how}, newest main v{m})"
+
+    def stew_versions(self):
+        """{stew net: its versions' generations}: the main stew's and every deck stew's."""
+        return {k: [v['gen'] for v in n['versions']] for k, n in self.st.d['nets'].items() if not k.startswith('spec:')}
+
+    def distil_summary(self, g):
+        """The report's `stews` block of generation g, or None for a stew that distils every generation and always has
+        (the reports of before, key for key)."""
+        st = self.st
+        log = st.d.get('distil_log') or []
+        if self.cfg['recipe']['distill_every'] == 1 and not log:
+            return None
+        e = next((x for x in reversed(log) if x['round'] == g), None)
+        done = st.version('main', g + 1) is not None
+        return {'distill_every': self.cfg['recipe']['distill_every'],
+                'this_generation': ('distilled' if done else 'being distilled' if e and e['due'] else 'not distilled')
+                + (f": {e['why']}" if e else ''),
+                'versions': self.stew_versions(), 'next': self.next_distil()}
+
+    def last_turn(self, sn, g):
+        """The newest generation before g in which specialist `sn` trained a turn, or None."""
+        joined = self.st.net(sn).get('joined', 0)
+        gens = [v['gen'] - 1 for v in self.st.net(sn)['versions']
+                if joined < v['gen'] <= g and not v.get('skipped')]
+        return max(gens) if gens else None
 
     # ---------------------------------------------------------------- 1. train
     # ---------------------------------------------------------------- the stall rule (docs/ENGINE.md 251)
@@ -680,12 +843,29 @@ class Stew:
         for a, b, sn in self.specialists(g):
             k = C.pair_key(a, b)
             if k not in rec and st.version(sn, g + 1).get('skipped'):
+                last = self.last_turn(sn, g)
                 for r in range(g - 1, -1, -1):
                     old = (st.d['rows'].get(str(r)) or {}).get(k)
                     if old and all(os.path.isdir(st.abs(d)) for d in old['dirs']):
-                        rec[k] = dict(old, reused_from=r)
-                        st.save()
                         break
+                else:
+                    r = None
+                if r is not None and (last is None or r >= last):
+                    rec[k] = dict(old, reused_from=r)
+                    st.save()
+                elif last is not None:
+                    # (its last turn's generation went without distillation, docs/ENGINE.md 257: no snapshot of that
+                    # turn's rows yet - taken from its run now, as that generation's distillation would have)
+                    run = st.abs(st.net(sn)['run'])
+                    its = S.pick_iters(run, st.version(sn, last)['iter'], st.version(sn, last + 1)['iter'],
+                                       self.cfg['recipe']['distill_iters'])
+                    if not its:
+                        raise Refused(f"{sn}: sat out generation {g}, and its run holds no complete data iteration of "
+                                      f"its last turn (generation {last}) to distil from")
+                    rr = S.copy_iters(run, its, self.p('rows', f'gen_{g + 1:03d}', C.spec_dir(a, b)), mode='link')
+                    rr['dirs'] = [st.rel(d) for d in rr['dirs']]
+                    rec[k] = dict(rr, turn_of=last)
+                    st.save()
                 else:
                     raise Refused(f"{sn}: sat out generation {g} and no earlier turn's rows are left to distil from")
             if k not in rec or not all(os.path.isdir(st.abs(d)) for d in rec[k]['dirs']):
@@ -749,7 +929,8 @@ class Stew:
         if empty:
             raise Refused(f'{name}: sources with 0 rows {empty} (a source must select rows)')
         st.add_version(name, {'gen': g + 1, 'path': st.rel(out), 'sha256': sha256(out), 'time': now(),
-                              'parents': [f'{name}@{g}'], 'sources': st.rel(sp), 'sources_sha256': ssha,
+                              'parents': [f"{name}@{st.base(name, g)['gen']}"], 'sources': st.rel(sp),
+                              'sources_sha256': ssha,
                               'teachers': sorted({s['teacher'].replace('\\', '/') for s in doc['sources']}),
                               'distill': info, 'note': note})
         st.save()
@@ -764,9 +945,14 @@ class Stew:
     def phase_judge(self, g):
         return self.judge_phase('judge', g)
 
+    def phase_judge_specialists(self, g):
+        """A generation without distillation (docs/ENGINE.md 257): the stall tests, and recipe.judge.between's
+        specialist-only comparisons; the generation's report."""
+        return self.judge_phase(C.SKIP_PHASE, g)
+
     def judge_phase(self, phase, g):
         jcfg = self.cfg['recipe']['judge']
-        stall = self.cfg['recipe'].get('stall') if phase == 'judge_deck_gap' else None
+        stall = self.cfg['recipe'].get('stall') if phase in ('judge_deck_gap', C.SKIP_PHASE) else None
         parts = self.st.d.setdefault('stall_parts', {}).setdefault(str(g), {}) if stall is not None else None
         while True:
             out = self._judge_once(phase, g, jcfg, stall, parts)
@@ -815,7 +1001,10 @@ class Stew:
             n = st.net(sn)
             was = (n.get('stall') or {}).get('stalled')
             n['stall'] = d
-            n.setdefault('stall_log', []).append(d)
+            log = n.setdefault('stall_log', [])
+            same = lambda x: {k: v for k, v in x.items() if k != 'time'}     # noqa: E731
+            if not (log and same(log[-1]) == same(d)):
+                log.append(d)
             if d['stalled'] != bool(was):
                 self.say(f"{sn}: the stall rule says {'STALLED' if d['stalled'] else 'improving'} ({d['versions']}: "
                          f"{d['elo']:+.1f} +- {d['elo_se']:.1f} Elo, z {d['z']:+.2f}, {d['matches']} matches)"
@@ -844,6 +1033,9 @@ class Stew:
         jobs = J.plan_jobs(phase, self.st, g, jcfg, self.pair_spec_json, self.judge_play(),
                            records=self.p('judge', 'records') if jcfg['records'] else None, stall=stall, parts=parts)
         if not jobs:
+            if phase == C.SKIP_PHASE:
+                self.write_report(g)
+                return {'jobs': 0, 'note': 'no distillation this generation; nothing to judge without the stews'}
             if phase == 'judge' and not jcfg['main_arms']:
                 self.write_report(g)
                 return {'jobs': 0, 'note': 'judge.main_arms off'}
@@ -1000,7 +1192,8 @@ class Stew:
             while True:
                 if only is not None and self.st.d['phase'] != only:
                     raise Refused(f"step {only}: the stew's next phase is {self.st.tag()} (phases go in order: "
-                                  f"{', '.join(C.PHASES)})")
+                                  f"{', '.join(C.PHASES)}; a generation without distillation: train, "
+                                  f"{C.SKIP_PHASE})")
                 if self.stop_requested():
                     how = 'paused' if os.path.exists(self.p('PAUSE')) else 'stopped'
                     break
@@ -1056,6 +1249,9 @@ class Stew:
             for nt in n.get('notes') or []:
                 rep['notes'].append(f'{k}: {nt}')
         rep['notes'] = sorted(set(rep['notes']))
+        sw = self.distil_summary(g)
+        if sw is not None:
+            rep['stews'] = sw
         jsave(self.p('reports', f'gen_{g:03d}.json'), rep)
         text_save(self.p('reports', f'gen_{g:03d}.md'), J.report_md(rep))
         return rep
@@ -1074,6 +1270,7 @@ class Stew:
                                         for d in st.decks()))
         for p in st.d['pending']:
             L.append(f"  pending: add-deck {p['name']} (joins at the next generation)")
+        L += ['  ' + x for x in self.distil_lines()]
         for k, n in st.d['nets'].items():
             v = st.latest(k)
             line = f"  {k}: v{v['gen']} {v['path']}"
@@ -1102,6 +1299,23 @@ class Stew:
             L.append(f"  last report: {self.p('reports', reps[-1])}")
         return '\n'.join(L)
 
+    def distil_lines(self):
+        """Which generations have stew versions and when the next distillation is (status and plan)."""
+        sv = self.stew_versions()
+        spec_gen = max((self.st.latest(sn)['gen'] for _, _, sn in self._pairs_named()), default=0)
+        L = [f'distillation: {self.next_distil()}']
+        mg = sv.get('main') or []
+        if mg != list(range(len(mg))) or mg[-1] < spec_gen - 1 or self.cfg['recipe']['distill_every'] != 1:
+            fmt = lambda gs: ' '.join(f'v{x}' for x in gs)           # noqa: E731
+            behind = spec_gen - mg[-1]
+            L.append(f"stew versions: main {fmt(mg)}" + (f' ({behind} turn(s) behind the specialists\' v{spec_gen})'
+                                                         if behind > 0 else ''))
+            other = {k: gs for k, gs in sv.items() if k != 'main' and gs != mg}
+            L += [f'stew versions: {k} {fmt(gs)}' for k, gs in other.items()]
+            if len(other) < len(sv) - 1:
+                L[-1 - len(other)] += '; the deck stews the same' if not other else '; the other deck stews the same'
+        return L
+
     def plan(self):
         """What the next phase does, with the exact commands (nothing is run or written)."""
         st = self.st
@@ -1109,6 +1323,14 @@ class Stew:
         L = [f'next: {st.tag()}' + (' (then HOLD: recipe.hold_after)' if st.tag() in self.cfg['recipe']['hold_after']
                                     else '')]
         L += [f'requires: {r}' for r in self.cfg.get('requires') or []]
+        L += self.distil_lines()
+        if ph == 'train' and self.can_rewind(g) and self.distil_request(peek=True) is not None:
+            L.append(f'first (the distillation asked for): distil_decks@{g - 1}, judge_deck_gap@{g - 1}, '
+                     f'distil_main@{g - 1}, judge@{g - 1} - then this phase')
+        elif ph == 'train':
+            due, why, _ = self.distil_due(g, peek=True)
+            L.append(f"after these turns: {C.PHASES[1] if due else C.SKIP_PHASE}@{g} "
+                     f"({'the stews are distilled and judged' if due else 'no distillation'}: {why})")
         if self.cfg['yield_runs']:
             L.append('yield first: ' + '; '.join(
                 f"python tools/pause_run.py {y['run']} --wait + farm runs {y['farm_runs']} -> paused"
@@ -1116,7 +1338,7 @@ class Stew:
         if ph == 'train':
             if st.d['pending']:
                 L.append(f"add-decks joining now: {[p['name'] for p in st.d['pending']]} (their deck stews = copies of "
-                         f"main v{g}; new specialists forked from it)")
+                         f"main v{st.base('main', g)['gen']}; new specialists forked from it)")
             for a, b in C.pairings(st.decks(), st.candidates()):
                 sn = C.spec_name(a, b)
                 v = st.version(sn, g)
@@ -1156,7 +1378,9 @@ class Stew:
         else:
             jcfg = self.cfg['recipe']['judge']
             try:
-                jobs = J.plan_jobs(ph, st, g, jcfg, self.pair_spec_json, {'seat': '(the specialists\' evaluation seat)'})
+                jobs = J.plan_jobs(ph, st, g, jcfg, self.pair_spec_json, {'seat': '(the specialists\' evaluation seat)'},
+                                   stall=self.cfg['recipe'].get('stall') if ph in ('judge_deck_gap', C.SKIP_PHASE)
+                                   else None, parts=(st.d.get('stall_parts') or {}).get(str(g)))
             except KeyError as e:
                 L.append(f'  (jobs after the earlier phases: {e})')
                 jobs = []

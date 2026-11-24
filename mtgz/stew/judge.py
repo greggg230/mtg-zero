@@ -154,11 +154,12 @@ def window_base(st, sn, g, window):
 
 
 def plan_jobs(phase, st, g, jcfg, spec_fn, play, records=None, stall=None, parts=None):
-    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arms B and A, and the stall tests; 'judge': arm M)
-    of round `g`. `records`: the directory of the jobs' game records (`recipe.judge.records`; None: none kept).
+    """The judge jobs of `phase` ('judge_deck_gap': gen over gen, arms B and A, and the stall tests; 'judge': arm M;
+    'judge_specialists', a generation without distillation, docs/ENGINE.md 257: the stall tests, and of
+    `jcfg['between']` 'gen' = gen over gen, 'matchup' = arm B - nothing that needs a stew net) of round `g`. `records`: the directory of the jobs' game records (`recipe.judge.records`; None: none kept).
     `stall`: recipe.stall (None: no stall test); `parts`: {specialist: parts of its stall test} (default 1 each)."""
     jobs = _plan_jobs(phase, st, g, jcfg, spec_fn, play)
-    if phase == 'judge_deck_gap' and stall is not None:
+    if phase in ('judge_deck_gap', C.SKIP_PHASE) and stall is not None:
         al = {d['name']: d['alias'] for d in st.decks()}
         for a, b in C.pairings(st.decks(), st.candidates()):
             sn = C.spec_name(a, b)
@@ -181,13 +182,15 @@ def _plan_jobs(phase, st, g, jcfg, spec_fn, play):
     for a, b in pairs:
         sn = C.spec_name(a, b)
         new = st.ckpt(sn, g + 1)
-        if phase == 'judge_deck_gap':
+        between = (jcfg.get('between') or []) if phase == C.SKIP_PHASE else []
+        if phase == 'judge_deck_gap' or between:
             old = st.version(sn, g)
             sat_out = bool((st.version(sn, g + 1) or {}).get('skipped'))     # (the same net as v{g}: nothing to compare)
-            if jcfg['gen_over_gen'] and old is not None and not sat_out:
+            want_gen = jcfg['gen_over_gen'] if phase == 'judge_deck_gap' else 'gen' in between
+            if want_gen and old is not None and not sat_out:
                 out.append(gen_job(new, st.abs(old['path']), a, b, al, jcfg, spec_fn, play,
                                    f'{sn} v{g + 1} vs v{g}', nets=(f'{sn} v{g + 1}', f'{sn} v{g}')))
-            if a != b:
+            if a != b and (phase == 'judge_deck_gap' or 'matchup' in between):
                 out += pair_b_jobs(new, a, b, al, jcfg, spec_fn, play, f'{sn} v{g + 1}')
         for x, y in ([(a, b), (b, a)] if a != b else [(a, a)]):
             if phase == 'judge_deck_gap':
@@ -472,6 +475,12 @@ def report_md(rep):
     g = rep['round']
     L = [f"# Stew {rep['name']}: generation {g} (versions {g} -> {g + 1})", '',
          f"Written {rep['written']}; phase {rep['phase']}" + (' (held here)' if rep.get('held') else '') + '.', '']
+    sw = rep.get('stews')
+    if sw:
+        L += ['## The stews (docs/ENGINE.md 257)', '', f"This generation: {sw['this_generation']}.", '',
+              f"Next distillation: {sw['next']}.", '', '| stew | versions |', '|---|---|']
+        L += [f"| {_c(k)} | {' '.join('v%d' % x for x in gs)} |" for k, gs in sw['versions'].items()]
+        L.append('')
     tr = rep.get('training') or {}
     if tr:
         L += ['## Training', '', '| specialist | iterations | matches | games / match | rows | rows / match | hours |',

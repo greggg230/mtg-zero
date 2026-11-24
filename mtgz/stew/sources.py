@@ -1,6 +1,7 @@
 """The stew's distillation sources files (docs/ENGINE.md 239.1 is the contract, 239.2 how the stew fills it).
 
-* **A deck stew X** (round g): warm start = its version g; one source per specialist whose pairing holds X - teacher
+* **A deck stew X** (round g): warm start = its version g (its newest version at or before g when the generations
+  before went without distillation, `State.base`: docs/ENGINE.md 257; the main stew's too); one source per specialist whose pairing holds X - teacher
   = that specialist's version g + 1 (its checkpoint after the round's turn), data = the turn's newest shards
   (`snapshot`), select {"actor": X} (the rows where X's pilot acts), weight = the opponent deck's field share (the
   mirror's: X's own).
@@ -47,7 +48,7 @@ def deck_sources(st, cfg, g, snaps, x):
                     'weight': round(sh[opp], 6)})
     if not out:
         raise RuntimeError(f'deck stew {x}: no specialist of round {g} plays it (candidates {st.candidates()})')
-    return sources_doc(st.ckpt(C.deck_net(x), g), out, cfg['recipe']['distill'])
+    return sources_doc(st.base_ckpt(C.deck_net(x), g), out, cfg['recipe']['distill'])
 
 
 def archive_decks(archive_cfg):
@@ -119,11 +120,11 @@ def main_sources(st, cfg, g, snaps, archive_dir, archive_cfg):
         s['weight'] = round((1.0 - r) * w / cov, 6)
         out.append(s)
     if sel is not None and r > 0:
-        out.append({'name': 'retention', 'teacher': st.ckpt('main', g),
+        out.append({'name': 'retention', 'teacher': st.base_ckpt('main', g),
                     'data': [os.path.join(archive_dir, 'data').replace('\\', '/')],
                     'config': os.path.join(archive_dir, 'config.json').replace('\\', '/'), 'select': sel,
                     'weight': round(r, 6)})
-    return sources_doc(st.ckpt('main', g), out, cfg['recipe']['distill']), note
+    return sources_doc(st.base_ckpt('main', g), out, cfg['recipe']['distill']), note
 
 
 # ------------------------------------------------------------------ the shards a round distils from

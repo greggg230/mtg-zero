@@ -1,7 +1,7 @@
 """state.json (docs/ENGINE.md 239.2): the stew's lineage and phase machine, written atomically.
 
     {"v": 1, "name", "created", "updated",
-     "round": g, "phase": "train" | "distil_decks" | "judge_deck_gap" | "distil_main" | "judge",
+     "round": g, "phase": "train" | "distil_decks" | "judge_deck_gap" | "distil_main" | "judge" | "judge_specialists",
      "field": {"decks": [{"name", "share", "alias"}], "candidates": [...]},     # the live field (add-deck moves it)
      "nets": {"main": {"versions": [V, ...]}, "deck:<X>": {...},
               "spec:<A>|<B>": {"run", "farm_run", "joined", "versions": [...]}},
@@ -10,13 +10,16 @@
      "yield": {"runs": {"<run>": "paused by the stew" | "was paused"}, "farm": {"<farm run>": "<its state before>"}},
      "farm_to_pause": ["<farm run>", ...],                                     # specialists' farm runs still active
      "held": {"tag", "time"} | null,
-     "history": [{"tag", "start", "end", "result"}]}
+     "distil_log": [{"round", "due", "why", "time", "request"?, "rewound"?}],   # 257: only when a generation's
+     "history": [{"tag", "start", "end", "result"}]}                            #   distillation was skipped or asked for
 
 A version V of a net: {"gen": k, "path", "sha256", "time", ...} - the main stew's and deck stews' with "parents"
 (warm start), "sources" (the sources file), "sources_sha256", "teachers"; a specialist's with "iter" (its run's
 checkpoint). Generation g of the loop (round g: phases tagged '<phase>@g') reads version g of every net and writes
 version g + 1; version 0 is the start (the source run's checkpoint, its copies, the seeds). Paths inside the stew
-directory are kept relative to it.
+directory are kept relative to it. A generation without distillation (recipe.distill_every, docs/ENGINE.md 257) writes
+the specialists' version g + 1 only: the main stew and the deck stews have no version of that number, and whatever
+needs "the stew of generation g" takes the newest one at or before g (`State.base`).
 """
 import hashlib
 import json
@@ -134,6 +137,17 @@ class State:
     def latest(self, name):
         vs = self.d['nets'].get(name, {}).get('versions', [])
         return max(vs, key=lambda v: v['gen']) if vs else None
+
+    def base(self, name, gen):
+        """Net `name`'s newest version at or before `gen` (dict; a stew net has no version for a generation whose
+        distillation was skipped: docs/ENGINE.md 257) - version `gen` itself when it exists. KeyError when none."""
+        vs = [v for v in self.d['nets'].get(name, {}).get('versions', []) if v['gen'] <= gen]
+        if not vs:
+            raise KeyError(f'{name}: no version at or before {gen}')
+        return max(vs, key=lambda v: v['gen'])
+
+    def base_ckpt(self, name, gen):
+        return self.abs(self.base(name, gen)['path'])
 
     def add_version(self, name, v):
         n = self.d['nets'].setdefault(name, {'versions': []})

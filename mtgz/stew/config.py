@@ -12,7 +12,7 @@ unordered pairing with at least one candidate, mirrors included), the shares, th
                 "spec_extra": {...}, "deck_spec_extra": {"<deck>": {...}},   # self-play spec keys (dealt decks...)
                 "distill": {...}, "distill_cli": ["--device", "cuda"], "distill_iters": 6,
                 "retention_share": "field", "judge": {...}, "hold_after": ["judge_deck_gap@0"], "env": {...},
-                "archive": "copy"},
+                "archive": "copy", "distill_every": 1},   # 1: every generation; N: every N-th; 0 / "never": on demand
      "code": {"worktree": null, "sha": null, "python": null, "farm": {...}, "farm_gates": true},
      "yield_runs": [{"run": "<run dir>", "farm_runs": ["<farm run>", ...]}],
      "beside_runs": ["<run dir>", ...],                  # live runs it may run beside, never touched (a CPU stew)
@@ -26,6 +26,11 @@ import json
 import re
 
 PHASES = ('train', 'distil_decks', 'judge_deck_gap', 'distil_main', 'judge')
+# A generation without distillation (recipe.distill_every, docs/ENGINE.md 257) is 'train' then SKIP_PHASE: the judging
+# that needs no stew net (the stall tests; recipe.judge.between adds more), then the next generation's 'train'.
+SKIP_PHASE = 'judge_specialists'
+ALL_PHASES = PHASES + (SKIP_PHASE,)
+BETWEEN = ('gen', 'matchup')           # recipe.judge.between: gen over gen (G), the matchup table (arm B)
 SLUG_RE = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
 ALIAS_RE = re.compile(r'^[a-z0-9]{1,16}$')
 # what the stew sets in every specialist's settings itself (recipe.settings may not)
@@ -39,7 +44,7 @@ DEFAULT_DISTILL = {'steps': 20000, 'batch': 512, 'lr': 5e-4, 'lr_min': 1e-5, 'wa
                    'ram_budget_gb': 20, 'seed': 1}
 DEFAULT_JUDGE = {'backend': 'local', 'matches': 400, 'gen_matches': 400, 'sims': 64, 'device': 'cuda', 'threads': 16,
                  'groups': 1, 'procs': 1, 'seed': 0, 'chance_k': 2, 'precision': None, 'gen_over_gen': True,
-                 'main_arms': True, 'est_s_per_match': 3.5, 'records': False}
+                 'main_arms': True, 'est_s_per_match': 3.5, 'records': False, 'between': []}
 # The stall rule (docs/ENGINE.md 251): after a specialist's turn the judge plays its new version against its version of
 # `window` turns before (paired, `matches` matches; extended by `matches` at a time up to `max_matches` while the gain is
 # positive but not significant); no gain significant at one-sided z >= `z` = the algorithm's recommendation STALLED, and a
@@ -50,7 +55,7 @@ JUDGE_BACKENDS = ('local',)            # ('farm': campaigns later - one backend 
 DEFAULT_RECIPE = {'game': 'mtg', 'turn_iters': 32, 'format': 'bo3', 'game_episodes': True, 'start_game': 1, 'settings': {},
                   'pair_settings': {}, 'spec_extra': {}, 'deck_spec_extra': {}, 'farm': True, 'distill': DEFAULT_DISTILL, 'distill_cli': ['--device', 'cuda'],
                   'distill_iters': 6, 'retention_share': 'field', 'judge': DEFAULT_JUDGE, 'hold_after': [], 'env': {},
-                  'archive': 'copy', 'stall': DEFAULT_STALL}
+                  'archive': 'copy', 'stall': DEFAULT_STALL, 'distill_every': 1}
 DEFAULT_CODE = {'worktree': None, 'sha': None, 'python': None, 'farm': None, 'farm_gates': True}
 FARM_KEYS = ('pool_build', 'pool_runtime', 'pool_worker', 'pool_alternates', 'pool_variants', 'pool_min_agent')
 
@@ -158,8 +163,8 @@ def tag(phase, rnd):
 
 def parse_tag(t):
     p, sep, r = str(t).partition('@')
-    if not sep or p not in PHASES or not r.isdigit():
-        raise ConfigError(f'hold point {t!r}: "<phase>@<generation>", phase one of {PHASES}')
+    if not sep or p not in ALL_PHASES or not r.isdigit():
+        raise ConfigError(f'hold point {t!r}: "<phase>@<generation>", phase one of {ALL_PHASES}')
     return p, int(r)
 
 
@@ -248,6 +253,14 @@ def normalize(cfg, check_lists=True):
     if not isinstance(r['distill_iters'], int) or r['distill_iters'] < 1:
         raise ConfigError(f"recipe.distill_iters {r['distill_iters']!r}: a positive integer (the newest data iterations "
                           f"of a specialist's turn its deck stews distil from)")
+    de = r['distill_every']
+    if de in ('never', None):
+        de = 0
+    if isinstance(de, bool) or not isinstance(de, int) or de < 0:
+        raise ConfigError(f"recipe.distill_every {r['distill_every']!r}: 1 (the stews are distilled and judged every "
+                          f"generation), N > 1 (once N turns have been trained since the newest main stew), 0 or "
+                          f"\"never\" (only on demand: tools/stew.py distil)")
+    r['distill_every'] = de
     for k in ('settings',):
         if not isinstance(r[k], dict):
             raise ConfigError(f'recipe.{k}: a JSON object of run settings')
@@ -289,6 +302,10 @@ def normalize(cfg, check_lists=True):
     if not isinstance(j['records'], bool):
         raise ConfigError(f"recipe.judge.records {j['records']!r}: true (every judged match's game record is kept: "
                           f"judge/records/, docs/ENGINE.md 250) or false")
+    bt = j['between']
+    if not isinstance(bt, list) or [x for x in bt if x not in BETWEEN] or len(set(bt)) != len(bt):
+        raise ConfigError(f"recipe.judge.between {bt!r}: a list of {BETWEEN} (what a generation without distillation "
+                          f"judges beside the stall tests: the specialists gen over gen, the matchup table's arm B)")
     s = r['stall']
     if s is not None:
         bad = sorted(set(s) - set(DEFAULT_STALL))

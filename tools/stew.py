@@ -7,6 +7,11 @@ distilled upward from them, judged every generation (mtgz.stew).
   python tools/stew.py status  DIR                # generation, phase, nets, specialists' runs, yield, last report
   python tools/stew.py run     DIR                # the loop: train -> distil_decks -> judge_deck_gap -> distil_main ->
                                                   #   judge -> the next generation; stops at DIR/STOP or DIR/PAUSE
+                                                  #   (recipe.distill_every N: the stews only every N turns, the
+                                                  #   generations between train -> judge_specialists: ENGINE.md 257)
+  python tools/stew.py distil  DIR [--cancel]     # ask for the stews to be distilled and judged at the next seam
+                                                  #   (DIR/DISTIL: a live run takes it when the turns under way are
+                                                  #   done, a stopped one when it runs next), whatever distill_every
   python tools/stew.py step    DIR PHASE          # one phase by hand (it must be the next one)
   python tools/stew.py add-deck DIR NAME [--candidate] [--share S] [--alias A]   # joins at the next generation
   python tools/stew.py stop    DIR [--pause]      # write DIR/STOP (or PAUSE): the loop stops at its next safe point
@@ -37,7 +42,8 @@ def same_checkout(cfg):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('cmd', choices=['init', 'plan', 'status', 'run', 'step', 'add-deck', 'stop', 'specialist'])
+    ap.add_argument('cmd', choices=['init', 'plan', 'status', 'run', 'step', 'add-deck', 'stop', 'specialist',
+                                    'distil'])
     ap.add_argument('dir', help="the stew's directory")
     ap.add_argument('arg', nargs='?', help="step: the phase; add-deck: the deck (a data/decks/ name); specialist: "
                                            "its pairing 'A|B'")
@@ -46,6 +52,7 @@ def main(argv=None):
     ap.add_argument('--share', type=float, default=None, help='add-deck: its field share (default: the mean)')
     ap.add_argument('--alias', default=None, help="add-deck: its short name in farm runs' names")
     ap.add_argument('--pause', action='store_true', help='stop: write PAUSE instead of STOP')
+    ap.add_argument('--cancel', action='store_true', help='distil: take the request back')
     ap.add_argument('--any-checkout', action='store_true', help="run from a checkout other than code.worktree")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument('--train', dest='mode', action='store_const', const='on', help='specialist: train every round')
@@ -78,8 +85,8 @@ def main(argv=None):
             print(f'stew run: {s.run()}')
             print(s.status())
         elif a.cmd == 'step':
-            if a.arg not in C.PHASES:
-                ap.error(f'step: a phase ({", ".join(C.PHASES)})')
+            if a.arg not in C.ALL_PHASES:
+                ap.error(f'step: a phase ({", ".join(C.ALL_PHASES)})')
             print(f'stew step {a.arg}: {s.run(only=a.arg)}')
         elif a.cmd == 'add-deck':
             if not a.arg:
@@ -89,6 +96,8 @@ def main(argv=None):
             if not a.arg or not a.mode:
                 ap.error("specialist: the pairing 'A|B' and one of --train / --stall / --auto")
             s.set_train_mode(a.arg, a.mode)
+        elif a.cmd == 'distil':
+            print(f'distil: {s.request_distil(cancel=a.cancel)}')
         elif a.cmd == 'stop':
             from mtgz.stew.state import jsave
             import time
