@@ -3377,6 +3377,20 @@ impl Game {
         self.agenda.push(crate::flow::Task::MiracleReveal { p, card });
     }
 
+    /// The draw instruction in progress under a pending question (a miracle
+    /// question, CR 702.94a, or a dredge question, 702.52a: `queue_miracle`,
+    /// `queue_dredge`): the draws of it still to come and whether the draw
+    /// step's beginning event follows them - the topmost `Task::DrawRest`'s
+    /// `n` and `step`; None when the agenda holds none. Public (both players
+    /// saw the instruction and every draw so far): the context block's
+    /// `ctx::DRAWS_LEFT` and `ctx::DRAW_STEP_FOLLOWS` (ENGINE.md 270.4).
+    pub fn draw_instruction_rest(&self) -> Option<(u32, bool)> {
+        self.agenda.iter().rev().find_map(|t| match *t {
+            crate::flow::Task::DrawRest { n, step, .. } => Some((n, step)),
+            _ => None,
+        })
+    }
+
     /// The rest of a draw instruction a miracle question interrupted
     /// (`queue_miracle`), in the instruction's event group (CR 603.2c).
     pub(crate) fn draw_rest(&mut self, p: PlayerId, n: u32, ev: u32, step: bool) {

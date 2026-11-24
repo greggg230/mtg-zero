@@ -1738,6 +1738,92 @@ fn lands_c_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+
+/// The Legacy Lands integration's positions (ENGINE.md 270.4): miracle and dredge questions with the draw
+/// instruction in progress under them (`Task::DrawRest`: the context's floats 251-252) - Brainstorm cast in its
+/// caster's upkeep, its first draw a Metamorphosis Fanatic (a miracle question, two draws left); Brainstorm with a
+/// Life from the Loam in the graveyard (a dredge question, two draws left, then, declined, the miracle question with
+/// the same two left); the draw step's draw of a Fanatic (nothing left: the step's beginning event came first).
+fn lands_int_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    const LOAM: &str = "Life from the Loam";
+    const FANATIC: &str = "Metamorphosis Fanatic";
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [(LOAM, 4), (FANATIC, 4), ("Brainstorm", 4), ("Forest", 24), ("Island", 24)] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 2704).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let lib = [FANATIC, "Island", "Forest", "Island", "Forest", "Island", "Forest", "Island"];
+    let mut out = Vec::new();
+    // Brainstorm in its caster's upkeep (no card drawn this turn yet), with and without a Loam in the graveyard.
+    for gy in [&[][..], &[LOAM][..]] {
+        let mut g = Scenario::new(db)
+            .spec(|s| s.auto_single = false)
+            .library(0, &lib)
+            .library(1, &lib)
+            .graveyard(0, gy)
+            .battlefield(0, &["Island", "Island"])
+            .battlefield(1, &["Island", "Forest"])
+            .hand(0, &["Brainstorm"])
+            .at(Step::Upkeep, 0)
+            .start();
+        let bs = g.card(0, "Brainstorm", Zone::Hand);
+        g.choose(Choice::Cast(bs));
+        let mut seen = 0;
+        for _ in 0..60 {
+            let Some(d) = g.pending_decision() else { break };
+            match d.kind {
+                DecisionKind::ChooseHandCard => break,
+                // The first draw's dredge question (declined: the draw is the Fanatic), then the miracle question,
+                // two draws left under each; the later draws' dredge questions declined.
+                DecisionKind::ChooseGraveyardCard | DecisionKind::YesNo if g.draw_instruction_rest().is_some() => {
+                    if g.draw_instruction_rest() == Some((2, false)) {
+                        out.push(("lands_int", wrap(&g)));
+                        seen += 1;
+                    }
+                    g.choose(Choice::Pass);
+                }
+                DecisionKind::Priority => {
+                    g.pass();
+                }
+                _ => {
+                    let c = d.options[0].choice;
+                    g.choose(c);
+                }
+            }
+        }
+        assert_eq!(seen, 1 + gy.len(), "the questions under Brainstorm's draws");
+    }
+    // The draw step's draw of a Fanatic: a miracle question with nothing of the instruction left.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &lib)
+        .library(1, &lib)
+        .battlefield(0, &["Island"])
+        .battlefield(1, &["Island"])
+        .at(Step::Upkeep, 0)
+        .start();
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::YesNo) {
+            break;
+        }
+        g.pass();
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::YesNo), "the draw step's miracle question");
+    // (The step's beginning event came first: nothing of the instruction is left, `Task::DrawRest` none; the
+    // draw step's dredge question, `Task::DrawRest` 0 with the event after it, is a `lands_b_positions` one.)
+    assert_eq!(g.draw_instruction_rest(), None);
+    out.push(("lands_int", wrap(&g)));
+    out
+}
+
 /// The 601.2g step's positions (ENGINE.md 231): Hogaak castable only through a Chromatic Star activated while it is
 /// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
 /// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
@@ -1909,6 +1995,7 @@ fn public_state_reaches_the_encoding() {
     // (ENGINE.md 270.1: last, so the other positions keep their places and streams.)
     pos.extend(lands_a_positions());
     pos.extend(lands_c_positions());
+    pos.extend(lands_int_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -2172,6 +2259,7 @@ fn public_states_encode_apart() {
     // (ENGINE.md 270.1: last, so the other positions keep their places and streams.)
     pos.extend(lands_a_positions());
     pos.extend(lands_c_positions());
+    pos.extend(lands_int_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
@@ -3299,7 +3387,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
     // prediction at tilt 1, from a stream of its own)
     let (mut trng, mut tilted) = (Rng::new(106), 0);
-    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()).chain(lands_a_positions()).chain(lands_b_positions()).chain(lands_c_positions()) {
+    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()).chain(lands_a_positions()).chain(lands_b_positions()).chain(lands_c_positions()).chain(lands_int_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };

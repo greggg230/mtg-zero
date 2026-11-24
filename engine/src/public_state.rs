@@ -2350,9 +2350,63 @@ pub fn perturbations() -> Vec<Perturbation> {
             task_picked(&mut a.g.agenda[i]).push(c);
             Some(format!("agenda task {i}, around task {}, picks {}", ts[h].0, a.g.name(c)))
         }),
+        // The draw instruction in progress under a pending dredge or miracle question (CR 702.52a,
+        // 702.94a, 121.6b; ENGINE.md 270.4: the context's `DRAWS_LEFT` and `DRAW_STEP_FOLLOWS`): one more
+        // draw of it still to come, and the draw step's beginning event following it or not.
+        p!(rare "a draw instruction in progress has one more draw left", "Game.agenda", |a, _r| {
+            let (p, below) = draw_question(&a.g)?;
+            match below {
+                Some(i) => {
+                    let crate::flow::Task::DrawRest { n, .. } = &mut a.g.agenda[i] else { unreachable!() };
+                    *n += 1;
+                    Some(format!("P{p}'s draw instruction: {n} draws left"))
+                }
+                None => {
+                    let at = a.g.agenda.len() - 1;
+                    let ev = a.g.ev_seq;
+                    a.g.agenda.insert(at, crate::flow::Task::DrawRest { p, n: 1, ev, step: false });
+                    Some(format!("P{p}'s draw instruction: 1 draw left"))
+                }
+            }
+        }),
+        p!(rare "a draw instruction in progress is or isn't the draw step's (its beginning event follows)", "Game.agenda", |a, _r| {
+            let (p, below) = draw_question(&a.g)?;
+            match below {
+                Some(i) => {
+                    let crate::flow::Task::DrawRest { n, step, .. } = &mut a.g.agenda[i] else { unreachable!() };
+                    *step = !*step;
+                    let (n, step) = (*n, *step);
+                    if n == 0 && !step {
+                        // (Nothing left of the instruction: no `Task::DrawRest`, as `queue_miracle` and
+                        // `queue_dredge` leave it.)
+                        a.g.agenda.remove(i);
+                    }
+                    Some(format!("P{p}'s draw instruction: the draw step's event follows {step}"))
+                }
+                None => {
+                    let at = a.g.agenda.len() - 1;
+                    let ev = a.g.ev_seq;
+                    a.g.agenda.insert(at, crate::flow::Task::DrawRest { p, n: 0, ev, step: true });
+                    Some(format!("P{p}'s draw instruction: the draw step's event follows"))
+                }
+            }
+        }),
     ];
     v.extend(v8_perturbations());
     v
+}
+
+/// A pending dredge or miracle question (`Task::Dredge`, `Task::MiracleReveal`, the agenda's top) and the
+/// `Task::DrawRest` of its draw instruction right under it, if any (ENGINE.md 270.4).
+fn draw_question(g: &Game) -> Option<(PlayerId, Option<usize>)> {
+    g.pending.as_ref()?;
+    let k = g.agenda.len().checked_sub(1)?;
+    let p = match g.agenda[k] {
+        crate::flow::Task::Dredge { p, .. } | crate::flow::Task::MiracleReveal { p, .. } => p,
+        _ => return None,
+    };
+    let below = k.checked_sub(1).filter(|&i| matches!(g.agenda[i], crate::flow::Task::DrawRest { .. }));
+    Some((p, below))
 }
 
 /// The agenda's tasks that can hold picks in progress (`tail_encode::agenda_picks`), innermost
@@ -3433,7 +3487,12 @@ pub fn v8_perturbation_names() -> Vec<&'static str> {
 /// Perturbations added after the pairwise pass's partner draws were fixed (ENGINE.md 270.1): each draws its
 /// partner from a stream of its own, and no other perturbation draws one of them, so every other pair is the
 /// one it was before they joined (`tests/az.rs::public_states_encode_apart`, as layout v8's do).
-pub const OWN_STREAM_PERTURBATIONS: [&str; 1] = ["combat damage to and by a creature is prevented this turn"];
+pub const OWN_STREAM_PERTURBATIONS: [&str; 3] = [
+    "combat damage to and by a creature is prevented this turn",
+    // (ENGINE.md 270.4: the draw instruction in progress, the context's floats 251-252.)
+    "a draw instruction in progress has one more draw left",
+    "a draw instruction in progress is or isn't the draw step's (its beginning event follows)",
+];
 
 /// (`v8_fixed`'s doc above.)
 pub fn v8_fixed() -> Vec<&'static str> {

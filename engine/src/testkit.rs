@@ -545,6 +545,12 @@ impl Game {
                 }
             }
         }
+        // The draw instruction in progress under a dredge or miracle question (ENGINE.md 270.4): its draws
+        // left and whether the draw step's beginning event follows them.
+        v.push(u64::MAX - 150);
+        if let Some((left, step)) = self.draw_instruction_rest() {
+            v.extend([left as u64, step as u64]);
+        }
         // The picks in progress (ENGINE.md 125, 142.10): every holding task's, innermost first -
         // each object by its public place and its picker, a search's definitions to its searcher.
         let picks = crate::az::tail_encode::agenda_picks(self, 0);

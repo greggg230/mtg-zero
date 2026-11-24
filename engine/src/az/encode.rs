@@ -1549,12 +1549,23 @@ pub mod ctx {
     pub const DIGIT: usize = PAGE + 2;
     /// The digits chosen so far, as a number, / 32 (squashed).
     pub const PREFIX: usize = DIGIT + 1;
-    pub const END: usize = PREFIX + 1;
+    /// The draw instruction in progress (ENGINE.md 270.4, the user's decision of 2026-11-24: v5's spare
+    /// context floats 251-252, both viewers, layouts v7 and v8): the draws of it still to come after the
+    /// pending question (a dredge question, CR 702.52a, or a miracle question, 702.94a: the topmost
+    /// `Task::DrawRest`'s `n`) / 4, squashed; 0 when no `Task::DrawRest` is on the agenda. Public: both
+    /// players saw the instruction and every draw so far.
+    pub const DRAWS_LEFT: usize = PREFIX + 1;
+    /// 1 when the draw step's beginning event follows those draws (the topmost `Task::DrawRest`'s `step`:
+    /// the instruction is the draw step's turn-based draw, CR 504.1).
+    pub const DRAW_STEP_FOLLOWS: usize = DRAWS_LEFT + 1;
+    pub const END: usize = DRAW_STEP_FOLLOWS + 1;
 }
 const _: () = assert!(ctx::END <= CONTEXT);
 // The faithfulness audit's assignment (5.1, 5.2, 5.8) of v5's spare context
 // floats 246-255.
 const _: () = assert!(ctx::PAGED == 246 && ctx::PAGE == 247 && ctx::FRAME == 248 && ctx::DIGIT == 249 && ctx::PREFIX == 250);
+// The draw instruction in progress (ENGINE.md 270.4): spare floats 251-252.
+const _: () = assert!(ctx::DRAWS_LEFT == 251 && ctx::DRAW_STEP_FOLLOWS == 252);
 
 impl Game {
     /// The seat the encoding for `viewer` is framed in (ENGINE.md 100.5, CR
@@ -3011,6 +3022,11 @@ impl Game {
         x[ctx::DECIDER_IS_VIEWER] = mine as u8 as f32;
         x[ctx::PENDING] = 1.0;
         x[ctx::FRAME] = (me != knower) as u8 as f32;
+        // The draw instruction in progress under the pending question (public: ENGINE.md 270.4).
+        if let Some((left, step)) = self.draw_instruction_rest() {
+            x[ctx::DRAWS_LEFT] = squash(left as f32 / 4.0);
+            x[ctx::DRAW_STEP_FOLLOWS] = step as u8 as f32;
+        }
         if mine && d.player == me {
             x[ctx::OPTIONS] = d.options.len() as f32 / 32.0;
             match d.stage {
