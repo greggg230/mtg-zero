@@ -307,6 +307,10 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 /// land card, put it onto the battlefield tapped, then
                 /// shuffle."
                 SearchBasic { optional: bool },
+                /// "Its controller may search their library for <a card>,
+                /// put it onto the battlefield [tapped], then shuffle"
+                /// (Ghost Quarter: a basic land card, untapped).
+                MaySearch { filter: Filter, tapped: bool },
                 /// "Each player other than its controller creates a token
                 /// that's a copy of it" (as it last existed, CR 608.2h).
                 OthersCopy,
@@ -327,6 +331,10 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     super::effect_ext::named_token(l, token_name).map(|t| Rider::ControllerTokens(t, n))
                 }
                 Some(cats::RemovalRider::OtherPlayersCreateTokenCopy(nodes::OtherPlayersCreateTokenCopy {})) => Some(Rider::OthersCopy),
+                Some(cats::RemovalRider::ControllerMaySearchOntoBattlefield(nodes::ControllerMaySearchOntoBattlefield {
+                    card_filter,
+                    tapped,
+                })) => super::filter::lower_card_filter(l, card_filter).map(|filter| Rider::MaySearch { filter, tapped: *tapped }),
             };
             // "It can't be regenerated" (CR 701.19c): around the
             // destruction (EoE W3, ENGINE.md 99.13).
@@ -407,6 +415,17 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     let exc = crate::copies::Except::default();
                     b.op(Op::Ext(crate::program::Ext::CreateTokenCopy { of, who: Who::NotLkiController, n: Amount::Fixed(1), exc }));
                     b.op(Op::Ext(crate::program::Ext::TokensCreated));
+                }
+                Some(Rider::MaySearch { filter, tapped }) => {
+                    // The search happens whether or not the land was
+                    // destroyed (indestructible, regenerated: Ghost
+                    // Quarter's ruling); declined, nothing is searched and
+                    // the library isn't shuffled.
+                    let who = Who::LkiController;
+                    let may = b.op(Op::May { who, skip: 0 });
+                    let dest = SearchDest::Battlefield { tapped };
+                    b.op(Op::Search { who, filter, dest, reveal: false, may_fail: true });
+                    b.patch(may);
                 }
                 Some(Rider::SearchBasic { optional }) => {
                     let who = Who::LkiController;
@@ -998,6 +1017,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::sneak_show::lower_effect_sns(l, b, other)
                 && !super::delver_sb::lower_effect_delver_sb(l, b, other)
                 && !super::hogaak_c::lower_effect_hogaak_c(l, b, other)
+                && !super::lands_a::lower_effect_lands_a(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

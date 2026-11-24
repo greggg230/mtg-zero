@@ -384,7 +384,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_discard_alternative_cost", grants_discard_alternative_cost);
         l.deny("CardPrinting.tapped_for_mana_triggers", tapped_for_mana_triggers);
         l.deny("CardPrinting.extra_mana_when_you_tap_nonland_for_mana", extra_mana_when_you_tap_nonland_for_mana);
-        l.deny("CardPrinting.board_rules", board_rules);
         l.deny("CardPrinting.escape_exile_card_types", escape_exile_card_types);
         l.deny("CardPrinting.conspiracy_rules", conspiracy_rules);
         l.deny("CardPrinting.replacement_statics", replacement_statics);
@@ -1235,6 +1234,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             triggers.push(td);
         }
     }
+    // State-triggered abilities (CR 603.8; Dark Depths, ENGINE.md 270.1).
+    triggers.extend(super::lands_a::lower_board_rules(l, board_rules));
     l.watches_exile = false;
     // Cascade: the keyword and its "when you cast this spell" trigger.
     let cascade_trigger = triggers.iter().any(|t| {

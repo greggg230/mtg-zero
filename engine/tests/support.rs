@@ -1019,12 +1019,15 @@ fn eoe_support_report() {
 /// The legacy cards of constructed play (`data/cards/legacy.ir.json`: the
 /// Delver mirror's two, ENGINE.md 54; the Legacy Doomsday deck's ten, 124;
 /// the Legacy Sneak and Show deck's six, 123; the Delver 75's five sideboard
-/// cards, 122; the Legacy Hogaak Tempo deck's, 220), sorted. Every one is supported (`CardDb::constructed` fails
+/// cards, 122; the Legacy Hogaak Tempo deck's, 220; the Legacy Lands deck's, 270), sorted. Every one is supported (`CardDb::constructed` fails
 /// loudly otherwise); changing the list is deliberate.
 const SUPPORTED_LEGACY: &[&str] = &[
+    "Blast Zone",
+    "Bojuka Bog",
     "Brotherhood's End",
     "Cavern of Souls",
     "Consign to Memory",
+    "Dark Depths",
     "Dark Matter Manipulator",
     "Disruptor Flute",
     "Doomsday",
@@ -1032,11 +1035,13 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Edge of Autumn",
     "Flow State",
     "Flusterstorm",
+    "Ghost Quarter",
     "Hogaak, Arisen Necropolis",
     "Hydroblast",
     "Leyline of the Void",
     "Magus of the Moon",
     "Massacre",
+    "Maze of Ith",
     "Meltdown",
     "Misdirection",
     "Mistrise Village",
@@ -1052,6 +1057,7 @@ const SUPPORTED_LEGACY: &[&str] = &[
     "Show and Tell",
     "Stitcher's Supplier",
     "Street Wraith",
+    "Thespian's Stage",
 ];
 
 /// The support report over the legacy cards alone (their own table): every

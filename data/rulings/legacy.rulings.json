@@ -583,5 +583,125 @@
     "text": "If a Dryad Arbor gains flash, or you have the ability to play Dryad Arbor as though it had flash (due to Teferi, Mage of Zhalfir or Scout's Warning, for example), you can ignore the normal timing rules for when during your turn you can play a land, but not any other restrictions. You can't play Dryad Arbor during another player's turn, and you can't play Dryad Arbor if you don't have any land plays remaining."
    }
   ]
+ },
+ {
+  "name": "Dark Depths",
+  "oracle_id": "c9b82110-7dfd-4617-9399-9510be449043",
+  "rulings": [
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Dark Depths doesn't have a mana ability. It doesn't tap for colorless mana."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "If Dark Depths leaves the battlefield before its triggered ability resolves, you won't be able to sacrifice it, so you won't create Marit Lage."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "The last ability of Dark Depths is a state trigger. It won't trigger again while the ability is on the stack, but if the ability is countered and Dark Depths is still on the battlefield with no ice counters on it, it will trigger again immediately."
+   }
+  ]
+ },
+ {
+  "name": "Thespian's Stage",
+  "oracle_id": "b01e698b-608a-4fc7-8073-b01d044743ec",
+  "rulings": [
+   {
+    "date": "2018-12-07",
+    "source": "wotc",
+    "text": "A land's copiable values are those printed on it, as modified by other copy effects. Counters and other effects aren't copied. Notably, if you copy a land that is also a creature because of a temporary effect (such as Celestial Colonnade), Thespian's Stage will become just the \"unanimated\" land."
+   },
+   {
+    "date": "2018-12-07",
+    "source": "wotc",
+    "text": "No enters-the-battlefield abilities of the land Thespian's Stage is copying will trigger. Thespian's Stage was already on the battlefield. Similarly, no \"as this land enters the battlefield\" or \"this land enters the battlefield with\" effects, such as that of Dark Depths, will apply."
+   },
+   {
+    "date": "2018-12-07",
+    "source": "wotc",
+    "text": "The copy effect created by the last activated ability doesn't have a duration. It will last until Thespian's Stage leaves the battlefield or another copy effect overwrites it. The permanent will no longer have the first ability of Thespian's Stage."
+   },
+   {
+    "date": "2018-12-07",
+    "source": "wotc",
+    "text": "Thespian's Stage doesn't become untapped when it becomes a copy, even if the target land is untapped."
+   }
+  ]
+ },
+ {
+  "name": "Blast Zone",
+  "oracle_id": "393a254f-be31-431a-9341-a51286f8cbce",
+  "rulings": [
+   {
+    "date": "2025-07-25",
+    "source": "wotc",
+    "text": "An activation cost of {X}{X} means that you pay twice X. If you want X to be 3, you pay {6} to activate Blast Zone’s ability."
+   },
+   {
+    "date": "2025-07-25",
+    "source": "wotc",
+    "text": "Every token has mana value 0 unless it is copying something or was created with a specific mana cost."
+   },
+   {
+    "date": "2025-07-25",
+    "source": "wotc",
+    "text": "If a permanent has {X} in its mana cost, X is 0 for the purpose of determining its mana value."
+   }
+  ]
+ },
+ {
+  "name": "Ghost Quarter",
+  "oracle_id": "2ec4288e-34c6-4831-a2c0-ba1ca1d9d1dc",
+  "rulings": [
+   {
+    "date": "2006-05-01",
+    "source": "wotc",
+    "text": "If you target Ghost Quarter with its own ability, the ability won't resolve because its target is no longer on the battlefield. You won't get to search for a land card."
+   },
+   {
+    "date": "2011-09-22",
+    "source": "wotc",
+    "text": "If the targeted land is an illegal target by the time Ghost Quarter's ability resolves, it won't resolve and none of its effects will happen. The land's controller won't get to search for a basic land card."
+   },
+   {
+    "date": "2013-07-01",
+    "source": "wotc",
+    "text": "The target land's controller gets to search for a basic land card even if that land wasn't destroyed by Ghost Quarter's ability. This may happen because the land has indestructible or because it was regenerated."
+   }
+  ]
+ },
+ {
+  "name": "Maze of Ith",
+  "oracle_id": "38a12bd7-4394-44a8-91a0-6a4ff7fa4f71",
+  "rulings": [
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Maze of Ith can target an untapped attacking creature. It will still prevent the combat damage it would deal and be dealt."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Maze of Ith doesn't have a mana ability. It doesn't tap for colorless mana."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "The creature isn't removed from combat; it just has its damage prevented. It's still an attacking creature until the combat phase is complete."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "You can activate Maze of Ith's ability targeting an attacking creature you control during the combat damage step or the end of combat step, even though it will already have dealt combat damage. This will untap the creature. The damage it dealt will be unaffected."
+   }
+  ]
+ },
+ {
+  "name": "Bojuka Bog",
+  "oracle_id": "04b7362d-0490-4cb0-b5d7-2a7732f659ce",
+  "rulings": []
  }
 ]

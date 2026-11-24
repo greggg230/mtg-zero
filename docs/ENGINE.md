@@ -48189,3 +48189,201 @@ the weaker deck. The Doomsday and Sneak specialists' tables board 3-4 cards per 
 for Wasteland / Unholy Heat; Doomsday: Murktide and Flusterstorm in for Edge of Autumn and Lion's Eye Diamond).
 
 **260.6 Gate.** Python only (tier `python`).
+
+### 270.1 Lane A: Dark Depths (and Marit Lage), Thespian's Stage, Blast Zone, Ghost Quarter, Maze of Ith, Bojuka Bog (branch `lands-a`, 2026-11-24)
+
+**Why.** MTGGoldfish's Legacy Lands (paper, the archetype's representative list, deck 8027955: "Lands" by juubs,
+North American Eternal Weekend - Legacy Championship, 2026-10-31, 6th place, 12-3, deck source melee.gg; fetched
+2026-11-24, `E:/mtg-zero-scratch/lands/`, its PROVENANCE.md; 61 main, legal, and 15 sideboard) has fourteen cards outside
+the cube and legacy IR and two (Thespian's Stage, Blast Zone) that only the EoE table had. Three lanes port them from
+main 6f3a30d8 (A: this section; B: Life from the Loam, Exploration, Carnivorous Cultivator // Enroot, Yavimaya, Cradle
+of Growth, 270.2; C: Pithing Needle, Cursed Totem, Torpor Orb, Damping Sphere, Choke, The Tabernacle at Pendrell Vale,
+270.3), then the integration merges them (270.4). The user's rules: no approximation of any class (docs/shortcuts.md
+unchanged), every public state the cards create in the network's input exactly on layouts v7 and v8 (no gap, no guard,
+no spare float, no layout change), every ruling tested, the behaviour digests equal. New code in `engine/src/lands_a.rs`
+and `engine/src/lower/lands_a.rs`, additive hooks elsewhere.
+
+Dark Depths, Legendary Snow Land: "Dark Depths enters with ten ice counters on it. / {3}: Remove an ice counter from Dark
+Depths. / When Dark Depths has no ice counters on it, sacrifice it. If you do, create Marit Lage, a legendary 20/20 black
+Avatar creature token with flying and indestructible." Thespian's Stage: "{T}: Add {C}. / {2}, {T}: This land becomes a
+copy of target land, except it has this ability." Blast Zone: "This land enters with a charge counter on it. / {T}: Add
+{C}. / {X}{X}, {T}: Put X charge counters on this land. / {3}, {T}, Sacrifice this land: Destroy each nonland permanent
+with mana value equal to the number of charge counters on this land." Ghost Quarter: "{T}: Add {C}. / {T}, Sacrifice this
+land: Destroy target land. Its controller may search their library for a basic land card, put it onto the battlefield,
+then shuffle." Maze of Ith: "{T}: Untap target attacking creature. Prevent all combat damage that would be dealt to and
+dealt by that creature this turn." Bojuka Bog: "This land enters tapped. / When this land enters, exile target player's
+graveyard. / {T}: Add {B}."
+
+#### 270.1.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, sidecar: 36 cards), `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | the six Scryfall records appended to the legacy pool; no parser change (270.1.2) |
+| Identities | `engine/src/az/legacy_cards.txt`, `az/tokens.txt` | the six appended after Massacre in lane order (the final numbers are the integration's; no test names one); Marit Lage's token key appended |
+| Lowering | `lower/lands_a.rs`, `lower/printing.rs` (`board_rules`), `lower/effect.rs` (Ghost Quarter's rider), `lower/mod.rs` | the state trigger, Bojuka Bog's and Maze of Ith's effects, "its controller may search" |
+| Rules | `lands_a.rs` (`check_state_triggers`, `state_triggers_due`), `sba.rs`, `flow.rs` (the cleanup step's look), `db.rs` (`EventKind::State`, `CardDb::state_triggers`, `Mod::PreventCombatDamage`'s meaning), `layers.rs` (`Flags::prevent_combat_damage_to`), `game.rs` (`deal_damage`), `resolve_ext.rs` (`SacrificeSourceThen`), `program.rs` | 270.1.3 |
+| Encoding | `public_state.rs` (the Maze perturbation, `V7_FIXED`, `OWN_STREAM_PERTURBATIONS`), `az/encode.rs` (`name_face` of a kept definition), `eoe_w6.rs` (`CardDb::kept_original`) | 270.1.5 |
+| Tests | `engine/tests/cards_lands_a.rs` (42), `tests/az.rs` (`lands_a_positions`, the pairwise pass's own stream), `tests/support.rs`, `tests/constructed.rs`, `tests/known_face_key.rs`, `tests/ir/test_legacy_lands_a.py` (7), `test_legacy_creatures.py`, `test_fetch_cube.py` | 270.1.6 |
+| Fuzz | `engine/src/fuzz/games.rs`: `FUZZ_POOL=lands_a` (`LANDS_A_DECK`, `LANDS_A_SEEN`) | 270.1.6 |
+| Rulings | `data/rulings/legacy.rulings.json` (the six cards' 17, fetched 2026-11-24; no other card's refetched), `triage.tsv` (16 new texts; Blast Zone's 0e713983 was the cube's), `docs/rulings.md` regenerated | every ruling tested |
+| Docs | this section, docs/ir_defects.md section AB | |
+
+#### 270.1.2 The IR
+
+All six parse through the existing grammar (EoE's lands, the roto pool's recognizers): Dark Depths' last line is a
+`board_rules` `StateTrigger` (`HasNoCountersOfKind(ice)`, its ability `SacrificeSourceThen(CreateToken(Marit Lage))`),
+Ghost Quarter's rider `ControllerMaySearchOntoBattlefield` (a basic land card, untapped), Maze of Ith's
+`PreventCombatDamageToAndByTarget(untap)`, Bojuka Bog's `ExileTargetPlayersGraveyard`; Thespian's Stage's and Blast
+Zone's legacy records give the EoE printings byte for byte. `python tools/card_ir.py export`: schema
+**`dc0b5a2a451d...`** (was `180659137ece...`; six new classes), `powerlsv.ir.json` and `eoe.ir.json` byte for byte but
+`schema_sha256`, `legacy.ir.json` 36 cards (the 30 others' IR unchanged); `check` identical, `roundtrip` ok (cube 546,
+legacy 36, eoe 483). No IR defect (docs/ir_defects.md section AB; entries 460-479 unused).
+
+#### 270.1.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| "Dark Depths enters with ten ice counters on it" | 614.1c, 122.6 | the existing `enters_with_named_counters` (an "ice" named counter); a permanent that becomes a copy of it doesn't enter and gets none (707.5; the Stage's ruling) |
+| "{3}: Remove an ice counter from Dark Depths" | 602, 122.8 | `RemoveCountersFromSource` (220.3's): no mana ability (605.1a; the ruling), any time its controller could cast an instant, removing one if it has one |
+| "When Dark Depths has no ice counters on it, sacrifice it. If you do, create Marit Lage ..." | 603.8, 113.6, 701.21a | a state-triggered ability: `TriggerDef { event: EventKind::State, pred: TrigPred::Source(Filter::NoCounters(ice)) }` (never emitted as an event). `Game::check_state_triggers` (`lands_a.rs`) runs at every `sba_check` (117.5: before triggered abilities are put on the stack, so also before the legend rule's choice) and the cleanup step's look (514.3a, `state_triggers_due`): each permanent's state trigger whose condition holds and that has no instance waiting or on the stack from the same object with the same text triggers for its controller. An instance that leaves the stack by any means (resolved, countered by Consign to Memory) is gone from both, so it triggers again while the condition holds (603.8; the ruling). Not of a permanent that lost its abilities (613.1f) or is a nonbasic Mountain under Magus of the Moon (305.7); off the battlefield it has no state trigger. Its effect: `SacrificeSourceThen` - the source if it is still that permanent and its controller is the ability's controller (701.21a: fixed for every card, 270.1.4) - then the token |
+| Marit Lage | 111.4, 704.5j, 704.5d | a legendary 20/20 black (its colour indicator, 204.1) Avatar creature token with flying and indestructible, mana value 0; two under one player: the legend rule; returned to a hand (Karakas) it ceases to exist |
+| Thespian's Stage in constructed play | 707.2, 707.9b, 613.2a | EoE W6's `BecomeCopyKeeping` (ENGINE.md 99.16) in constructed play's table: `add_kept_ability_defs` makes, for each definition, one with its abilities and the Stage's (each with its original's identity); tested in Legacy on Dark Depths (no ice counters: its state trigger; the legend rule with a real Dark Depths, either kept), Urza's Saga (no lore counter until its controller's precombat main phase, 714.3b; not sacrificed with none, 714.4), Karakas (legendary: the legend rule), Bojuka Bog (no enters trigger), Blast Zone (no charge counter), an animated Celestial Colonnade (the land), itself (no change), a basic Forest (Basic too) |
+| Blast Zone | 107.3, 608.2h, 202.3 | EoE W2's (ENGINE.md 99.12): {X}{X} paid twice X; the destruction reads its last known charge counters; tokens and X permanents at mana value 0; lands (a Dryad Arbor) never; indestructible Marit Lage stays |
+| Ghost Quarter's rider | 701.23, 608.2b | `RemoveTargetPermanents`' new `Rider::MaySearch { filter, tapped }`: the land's controller (last known, `Op::Remember`) may search for a basic land card, onto the battlefield untapped, then shuffle - declined, nothing is searched or shuffled; after the destruction whether it happened or not (indestructible: the ruling); an illegal target (sacrificed to Crop Rotation in response, or Ghost Quarter itself, sacrificed as the cost: targets come first, 602.2b) - nothing |
+| Maze of Ith | 615.1a, 506.4, 510.1, 615.12 | `Op::Untap` then `Ext::Apply` of `Mod::PreventCombatDamage` on the target until end of turn. The Mod now means "combat damage that would be dealt to it and dealt by it is prevented" (`Flags::prevent_combat_damage` and `_to`; `deal_damage` prevents the "to" half during combat damage unless the source's controller's creatures' combat damage can't be prevented, Questing Beast's); Darkness's group effect on every creature (EoE lane D) prevents exactly what it did, combat damage being dealt by creatures only (510.1). The creature stays attacking and blockable (506.4; the ruling); an untapped (vigilance) attacker is a target (the ruling); after the damage step it untaps and changes nothing dealt (the ruling) |
+| Bojuka Bog | 614.1c, 603.6a, 406.2 | enters tapped; its trigger targets any player (its controller too) and exiles that graveyard (`Ext::ExileGraveyard { who: TargetPlayer }`) |
+
+#### 270.1.4 Readings taken, and fixes outside the cards
+
+* **When the state trigger is checked.** CR 603.8 makes it trigger "whenever" the condition holds; the engine looks at
+  every point triggered abilities could be put on the stack (and the cleanup step's look). Exact for every reachable
+  state: a condition of the tables only becomes true by a resolution, a copy effect beginning, a Magus leaving (an
+  ability regained) or a control change, and none can become true then false again before the next look (nothing puts
+  ice counters on a permanent); a state trigger that triggered mid-resolution and one found at the next look go on the
+  stack at the same point.
+* **"The ability" of 603.8** is the object's state trigger with the same text: a Thespian's Stage that is a copy of
+  Dark Depths has Dark Depths' (its made definition's) - the same ability; a new object (a zone change, 400.7) a new one.
+* **"Sacrifice it" by the trigger's controller only** (701.21a): `SacrificeSourceThen` sacrificed its source whoever
+  controlled it; now only if the ability's controller controls it (a fix for every card; the cube's and EoE's digests
+  are unchanged, 270.1.7). With Dark Depths taken by the other player first, its new controller's own trigger follows
+  (tested).
+* **`Mod::PreventCombatDamage`'s meaning** (above): to and by. No new Mod (the effects token's one-hot of 21 is full:
+  a 22nd would be a layout change), and none needed.
+
+#### 270.1.5 The encoding
+
+No layout change, no spare float, no guard. Ice and charge counters are the `counters` segment's named counters (their
+stable name ids, exact counts); Marit Lage's identity is its token registry line; a Stage that is a copy is its copy
+effect's token (the copied definition's identity) and the kept ability (`perm::KEPT_ABILITY`, `g6::KEPT_FROM`, 100.5.1);
+the state trigger on the stack is a stack item like any triggered ability; Maze of Ith's effect is an `effects` token on
+the creature (the prevention float, the object named, its duration and controller). `name_face` of a made definition
+names its original's face (a Stage copying a land back face). The public-state gate: `lands_a_positions` (constructed
+play: Bojuka Bog's target, the Stage copying Dark Depths and its trigger, Marit Lage, Ghost Quarter's search, Maze of
+Ith on an attacker; added last, so every other position keeps its place and stream) in the single pass, the pairwise
+pass and the hidden-information check; a perturbation "combat damage to and by a creature is prevented this turn"
+(layout v6 lacks it: in `V7_FIXED`; no EoE card makes it), whose partners come from a stream of its own
+(`OWN_STREAM_PERTURBATIONS`, as layout v8's): every other pair is main's. **539 positions, 281 perturbations, 267
+encoded, 2 deliberate limits, 0 known gaps, 0 gaps for the next layout.** (Drawing its partner from the old stream
+moved the pairs and showed three collisions of main's own: v6 "a hand card is promised to a delve" alone and "a creature
+became saddled this turn" beside "the owner learns the top card of their library", and v8 "a control effect ends at the
+end of the turn" on Karakas in a best-of-three position - left to the encoding's owner, 270.1.8.)
+
+#### 270.1.6 Tests, the fuzz pool
+
+* **`engine/tests/cards_lands_a.rs`, 39 tests** (in `cards_suite`; every ruling of the six, `// ruling:`; the CR in each
+  name): Dark Depths (the card: legendary snow, no mana ability; ten ice counters as it enters; the last counter, its
+  trigger, Marit Lage's characteristics; one instance while on the stack though priority passes; countered by Consign
+  to Memory, triggered again at once; destroyed in response - no Marit Lage; off the battlefield nothing; a Mountain
+  under Magus of the Moon, then the Magus bolted - it triggers; control taken with the trigger on the stack - the old
+  controller can't sacrifice it, the new one's trigger follows; two Marit Lages and the legend rule; Karakas bouncing
+  Marit Lage; the cleanup step's look, its abilities regained as an "until end of turn" loss ends); Thespian's Stage
+  (copying Dark Depths and keeping the copy - Marit Lage -, keeping the real one - nothing -, the opponent's Dark Depths,
+  the kept ability, staying tapped and a later copy overwriting it, an animated Celestial Colonnade and a Blast Zone with
+  counters, Bojuka Bog, itself, Urza's Saga, Karakas); Blast Zone ({X}{X}, its counters as it last existed, a copy with
+  no counter destroying a token, Walking Ballista and Mox Diamond but not Marit Lage or a land); Ghost Quarter (the
+  search, declined, itself as the target, a target sacrificed in response, an indestructible land - a test card);
+  Maze of Ith (unblocked, blocked - both live, still attacking -, Questing Beast's unpreventable damage either way, an
+  untapped vigilant attacker and no non-attacking target, after the damage step); Bojuka Bog (either player's
+  graveyard, empty graveyards); the encoding (ice counters and Marit Lage, Maze of Ith's effect, the Stage as Dark
+  Depths, for both players, layouts v7 and v8).
+* **`tests/az.rs`**: `lands_a_positions` in the single pass, the pairwise pass and the hidden-information check;
+  `OWN_STREAM_PERTURBATIONS` (270.1.5). **`tests/support.rs`**: the legacy registry's 36. **`tests/constructed.rs`**: the
+  table's layout (the legacy cards' token, the made definitions after the face-down one, each with its original's
+  identity); the Hogaak registry lines 23-29. **`tests/known_face_key.rs`**: the lane's cards out of the table's prior
+  as the cases were recorded, seed 4248's world seed rescanned 4 -> 5 (three of the six sort before Disruptor Flute,
+  whose definition id the deal cache keys, 220.4). **`tests/ir/test_legacy_lands_a.py`** (7), the pinned pool lists.
+  `tools/untested_cards.py`: 582 supported (36 legacy), **0** named by no card test. `docs/rulings.md`: 1,707 rulings
+  (1,335 distinct), 1,330 class a, every one tested.
+* **`FUZZ_POOL=lands_a`** (`engine/src/fuzz/games.rs`): the deck's 61 with the other lanes' 16 cards out (`LANDS_A_DECK`:
+  lane A's six four each, Forest 4, Otawara, Karakas, Wasteland 2, Ancient Tomb, Urza's Saga 4, Boseiju 4, Crop
+  Rotation 4, Mox Diamond 4, Malevolent Rumble 4, Expedition Map 3, Icetill Explorer, Skateboard, Disruptor Flute 2),
+  against the Delver 60 in either seat, one game in three the mirror; games only. With 200 games or more each of
+  `LANDS_A_SEEN` must be non-zero: ice counters removed, Marit Lage created, Stage copies and Stage copies of Dark
+  Depths, Blast Zone's and Ghost Quarter's destructions, Maze of Ith activations, Bojuka Bog triggers.
+
+#### 270.1.7 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/lands-a`, heavy commands through `tools/slotd.sh` (a training run
+live on the desktop).
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`):
+  **3,014 passed, 0 failed, 45 ignored**. `cards_lands_a` 39, `az` 58 (the gate with the lane's positions), `support` (the legacy list of 36).
+* **Behaviour digests (the cube's) EQUAL**: full **5a09242cf4f2cbab** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **be0626d4b97cebae**, `DIGEST_ENCODING=v5` **cbae655806dcad36**.
+* **`digest_formats`**: EoE **d754f4eef3c8adae** and driver **cab97c01912f7e3f** equal; with `DIGEST_ENCODING=0` every
+  format equal to its recorded file (constructed **e56598e6aed6091f**, metagame **9ed3e90772c76c19**, pair
+  **56c30df7822e9153**, EoE **562186ffd18631ea**): no game of constructed play changes. With the encodings, constructed
+  68e6d9334d2fdfdf -> **1f417c836b902491**, metagame e2884dfcccf49ebe -> **5a7309e21ee46229** and pair
+  60e0d7de900cef7e -> **eb118a5060c35579** (every line), **not re-recorded**: the cause is constructed play's table holding
+  the six cards, not this branch's code - a scratch build of this branch with the six filtered out of
+  `CardDb::constructed` (`E:/mtg-zero-scratch/lands/a_filt`) gives the recorded files exactly (all five tests pass), as
+  220.1.8 found for Hogaak (the hidden decks' deal keys definition ids; the table's prior its whole support). The
+  integration adds all three lanes' cards: its decision.
+* **The public-state gate** (`--test az`): 539 positions, 281 perturbations, 267 encoded, 2 deliberate limits, 0 known
+  gaps, 0 next-layout gaps (270.1.5).
+* **`FUZZ_POOL=lands_a`, 5,000 games** (`tools/fuzz_shards.py`, 8 shards, 4 at once): **no failure**; wins 1,978 / 2,001,
+  1,021 drawn, none aborted, 42.1 turns and 485.6 decisions a game, 4,929,173 options completed; ice counters removed
+  35,824, Marit Lage created 2,334, Stage copies 18,229 (of Dark Depths 1,368), Blast Zone destructions 6,259, Ghost
+  Quarter destructions 10,903, Maze of Ith activations 24,670, Bojuka Bog triggers 12,268; the fuzz binary's 20 other
+  tests passed.
+* **Under the `fuzz` profile** (debug assertions), 1,000 games (4 shards): no failure (391 / 437, 172 drawn; 1,526,520 options completed). **`FUZZ_CHANCE=10`**, 600 games:
+  no failure (28,882 chance walks, 303,707 steps at one node, 14,519 replays whose outcome the force changed; the rules checks of 1,840,094 states). **`FUZZ_BELIEF=2`**, 600 games: no failure (14,328 weighted worlds; Marit Lage 288 times, a Stage copy of Dark Depths 169).
+* **IR**: `python tools/card_ir.py check` identical, `roundtrip` ok; `python -m pytest tests/ir -q`: **2,736 passed**.
+  `bash tools/build_py.sh`, `python -m pytest -q tests` (`tests/ir` included): **3,613 passed, 25 skipped** (the Mac-only `test_mac_remote.py::test_the_macs_selfplay_settings` deselected, ENGINE.md 170.6). `python tools/rulings_doc.py`: current. `python tools/untested_cards.py`: 582 supported (36 legacy), 0 named
+  by no card test.
+* No docs/shortcuts.md entry; layouts v7 and v8 unchanged (no spare float used); no zero-core change.
+
+#### 270.1.8 Limits, open items and the integration's merge points
+
+* **Found, outside the lane (not changed): Endurance with Murktide Regent fails the information-set walk.** The lane's
+  first pool held the Lands sideboard's two Endurance; game 231 of `FUZZ_POOL=lands_a` with them (`E:/mtg-zero-scratch/
+  lands/a_tools/endurance_murktide_seed231.log`): Endurance's enters trigger put the Delver player's graveyard on the
+  bottom of their library in a random order, each instant or sorcery card leaving triggered Murktide Regent, and in two
+  worlds of that player the triggers' event objects - library cards in hidden places - sit in other orders on the stack:
+  "same keys, different rows" (head float 43,542, in the stack slots' layout v7 block: the event object's reference,
+  `stack::EV`). A hidden-information leak of a stack item's event reference to a card in a hidden zone, reachable in
+  the real Lands 75 against Delver; the pool plays without Endurance (two more Expedition Maps and a Forest in). For the
+  integration's `FUZZ_POOL=lands` (the real 75): the fuzz steward's queue.
+* **Constructed play's table holds six more cards and the Stage's made definitions** (one per definition, ~0.7k):
+  the constructed, metagame and pair digests' encodings change (270.1.7), not re-recorded - the integration's decision;
+  `tests/known_face_key.rs` and `tests/constructed.rs` updated as 270.1.6 says (all lanes again at the integration).
+* **The other lanes' cards** aren't on this branch: `FUZZ_POOL=lands_a` plays supported stand-ins. The cross-lane lines
+  of the brief (the Stage copying Dark Depths under Pithing Needle naming either; Yavimaya with Dark Depths or the Stage;
+  Life from the Loam returning Dark Depths, Wasteland, Bojuka Bog; The Tabernacle at Pendrell Vale and Marit Lage;
+  Karakas bouncing Marit Lage - tested here; Crop Rotation into Dark Depths - a land search like any) are the
+  integration's. Notes for them: Pithing Needle's "activated abilities of sources with the chosen name" must reach the
+  Stage's kept ability on a copy (a copy named Dark Depths has Dark Depths' name) and Dark Depths' "{3}" (not its state
+  trigger, a triggered ability); Torpor Orb doesn't stop Dark Depths' state trigger (not an "enters" trigger); a land
+  that becomes a Forest by Yavimaya keeps its abilities (no 305.7 on its own), so Dark Depths' state trigger stays.
+* **Merge points**: `legacy_cards.txt` (lane order A, B, C: Dark Depths, Thespian's Stage, Blast Zone, Ghost Quarter,
+  Maze of Ith, Bojuka Bog first), `az/tokens.txt` (Marit Lage's key), the legacy pool's data (`legacy_delver.json` +
+  sheet + sidecar: the union), the export (re-export once: schema, the three IR files, `generated.rs`),
+  `tests/ir/test_legacy_creatures.py` / `test_fetch_cube.py` (the pinned list), `lower/effect.rs` (one rider, one
+  dispatch line), `lower/printing.rs` (`board_rules`), `lower/mod.rs`, `lib.rs`, `db.rs` (`EventKind::State`,
+  `CardDb::state_triggers`, `Mod::PreventCombatDamage`'s doc), `layers.rs` (`Flags::prevent_combat_damage_to`),
+  `game.rs` (`deal_damage`), `sba.rs`, `flow.rs`, `resolve_ext.rs`, `program.rs`, `eoe_w6.rs` (`kept_original`),
+  `az/encode.rs` (`name_face`),
+  `public_state.rs` (a perturbation, `V7_FIXED`, `OWN_STREAM_PERTURBATIONS`), `testkit.rs` (`add_effect_until_eot`),
+  `fuzz/games.rs` (the pool beside `hogaak_c`), `tests/az.rs` (`lands_a_positions`, the own stream),
+  `tests/support.rs`, `tests/cards_suite.rs`, `tests/constructed.rs`, `tests/known_face_key.rs`, `data/rulings/*`,
+  `docs/rulings.md` (regenerate), `docs/ir_defects.md`.

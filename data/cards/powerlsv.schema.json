@@ -301,6 +301,7 @@
    "ExileTargetCreatureUntilSourceLeaves",
    "ExileTargetCreatureWithPowerOrToughnessAtMost",
    "ExileTargetGraveyardCardWithPlayPermission",
+   "ExileTargetPlayersGraveyard",
    "ExileTargetPlayersLibraryThenShuffleHandIn",
    "ExileTargetReturnAtNextEndStep",
    "ExileTargetUntilSourceLeaves",
@@ -427,6 +428,7 @@
    "PoisonCountersEqualToDamage",
    "PossibilityTechnicianETBEffect",
    "PreventAllCombatDamageThisTurn",
+   "PreventCombatDamageToAndByTarget",
    "PumpAllCreaturesUEOT",
    "PumpCreaturesOpponentsControlUntilEOT",
    "PumpCreaturesYouControlUntilEOT",
@@ -528,6 +530,7 @@
    "SacrificeSelfUnlessEscaped",
    "SacrificeSelfUnlessTapPermanent",
    "SacrificeSelfUnlessVoidActive",
+   "SacrificeSourceThen",
    "SawAttacksOptionalSacDrawEffect",
    "ScheduleDelayedEffect",
    "ScheduleSelfSacAtNextEndStep",
@@ -668,6 +671,9 @@
   "HandCardFilter": [
    "HandCardFilter"
   ],
+  "HasNoCountersOfKind": [
+   "HasNoCountersOfKind"
+  ],
   "Keyword": [
    "Keyword"
   ],
@@ -744,6 +750,7 @@
   "RemovalRider": [
    "ControllerCreatesTokens",
    "ControllerGainsLifeEqualToPower",
+   "ControllerMaySearchOntoBattlefield",
    "ControllerSearchesForBasicLand",
    "IfYouControlledItDraw",
    "OtherPlayersCreateTokenCopy"
@@ -774,6 +781,9 @@
    "SpellsCastThisTurn",
    "VoidActive",
    "YouControlAtLeast"
+  ],
+  "StateTrigger": [
+   "StateTrigger"
   ],
   "StaticAbility": [
    "StaticAbility"
@@ -5867,7 +5877,10 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "StateTrigger"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -6797,6 +6810,39 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.targeted_removal",
    "qualname": "ControllerGainsLifeEqualToPower"
+  },
+  "ControllerMaySearchOntoBattlefield": {
+   "category": "RemovalRider",
+   "fields": [
+    {
+     "annotation": "CardFilter",
+     "default": {
+      "$t": "CardFilter"
+     },
+     "name": "card_filter",
+     "required": false,
+     "type": {
+      "categories": [
+       "CardFilter"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "tapped",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "ControllerMaySearchOntoBattlefield"
   },
   "ControllerSearchesForBasicLand": {
    "category": "RemovalRider",
@@ -10928,6 +10974,13 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "ExileTargetGraveyardCardWithPlayPermission"
   },
+  "ExileTargetPlayersGraveyard": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "ExileTargetPlayersGraveyard"
+  },
   "ExileTargetPlayersLibraryThenShuffleHandIn": {
    "category": "Effect",
    "fields": [],
@@ -12284,6 +12337,23 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.value_predicates",
    "qualname": "HasManaValueAtMostColorsSpent"
+  },
+  "HasNoCountersOfKind": {
+   "category": "HasNoCountersOfKind",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "kind",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_mana",
+   "qualname": "HasNoCountersOfKind"
   },
   "HasPowerAtLeast": {
    "category": "ObjectPredicate",
@@ -15142,6 +15212,40 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.stack_control",
    "qualname": "PreventAllCombatDamageThisTurn"
+  },
+  "PreventCombatDamageToAndByTarget": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untap",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_damage",
+   "qualname": "PreventCombatDamageToAndByTarget"
   },
   "PumpAllCreaturesUEOT": {
    "category": "Effect",
@@ -19459,6 +19563,30 @@
    "module": "mtg_bot.effects.combinators",
    "qualname": "SacrificeSelfUnlessVoidActive"
   },
+  "SacrificeSourceThen": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "'Effect | None'",
+     "default": null,
+     "name": "then_effect",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_mana",
+   "qualname": "SacrificeSourceThen"
+  },
   "SawAttacksOptionalSacDrawEffect": {
    "category": "Effect",
    "fields": [],
@@ -20443,6 +20571,38 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "StateCondition"
+  },
+  "StateTrigger": {
+   "category": "StateTrigger",
+   "fields": [
+    {
+     "annotation": "object",
+     "name": "condition",
+     "required": true,
+     "type": {
+      "categories": [
+       "HasNoCountersOfKind"
+      ],
+      "t": "ref"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "object",
+     "name": "ability",
+     "required": true,
+     "type": {
+      "categories": [
+       "TriggeredAbility"
+      ],
+      "t": "ref"
+     },
+     "type_source": "observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.roto_board_statics",
+   "qualname": "StateTrigger"
   },
   "StaticAbility": {
    "category": "StaticAbility",

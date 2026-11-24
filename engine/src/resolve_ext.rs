@@ -1297,7 +1297,10 @@ impl Game {
                 }
                 Flow::Next
             }
-            Ext::SacrificeSourceThen { skip } => match self.objs_on(f, &On::Source).first() {
+            // (Only a permanent its controller controls can be sacrificed,
+            // CR 701.21a: Dark Depths taken by the other player before its
+            // trigger resolves isn't; ENGINE.md 270.1.)
+            Ext::SacrificeSourceThen { skip } => match self.objs_on(f, &On::Source).first().filter(|&&c| self.objs[c.i()].controller == f.controller) {
                 Some(&c) => {
                     self.sacrifice(c);
                     Flow::Next

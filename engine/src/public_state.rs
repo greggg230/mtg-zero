@@ -2279,6 +2279,10 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.add_effect(Affected::Group(f), Mod::CantBlock, Until::EndOfTurn, p);
             Some(format!("P{p}'s creatures"))
         }),
+        p!("combat damage to and by a creature is prevented this turn", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            effect(&mut a.g, c, Mod::PreventCombatDamage)
+        }),
         p!("combat damage is prevented this turn (a rules effect)", "Game.effects", |a, r| {
             let p = player(r);
             a.g.add_effect(Affected::Group(crate::db::Filter::Type(types::CREATURE)), Mod::PreventCombatDamage, Until::EndOfTurn, p);
@@ -2503,7 +2507,7 @@ pub const V6_FIXED: [&str; 26] = [
 /// target; and (ENGINE.md 125.7) the two limits by design until v7 - a card
 /// exiled face down and who knows it (`face_down`, face-down permanents too),
 /// the identities the viewer revealed in earlier games (`my_revealed`).
-pub const V7_FIXED: [&str; 41] = [
+pub const V7_FIXED: [&str; 42] = [
     "mana in a pool is restricted to creature spells of a chosen type",
     "a permanent entered with a big kicker count and X",
     "Containment Priest's replacement waits for a copy choice",
@@ -2548,6 +2552,8 @@ pub const V7_FIXED: [&str; 41] = [
     // ENGINE.md 142.12: the finds the other player tells apart (`found`).
     "the top library card is its owner's search's find",
     "a search's find is no longer told apart",
+    // ENGINE.md 270.1: Maze of Ith's prevention on an object (layout v7's effects tokens; no EoE card makes it).
+    "combat damage to and by a creature is prevented this turn",
 ];
 
 /// One perturbation per `Mark` variant (ENGINE.md 125, the gate's G1): the
@@ -2664,7 +2670,8 @@ pub const MOD_PERTURBATIONS: [(&str, &str); 21] = [
     ("ExileIfLeaves", "exiled if it would leave"),
     ("ControlFrom", "a player gained control of a permanent until end of turn"),
     // (Darkness's "prevent all combat damage that would be dealt this turn": a group's rules
-    // effect, the only kind the lowering makes, lower/effect_eoe_d.rs.)
+    // effect, lower/effect_eoe_d.rs; Maze of Ith's on one creature is the perturbation "combat
+    // damage to and by a creature is prevented this turn", ENGINE.md 270.1.)
     ("PreventCombatDamage", "combat damage is prevented this turn (a rules effect)"),
     ("MustAttackPlayer", "a creature attacks the other player this combat if able"),
 ];
@@ -3422,6 +3429,11 @@ fn v8_perturbations() -> Vec<Perturbation> {
 pub fn v8_perturbation_names() -> Vec<&'static str> {
     v8_perturbations().iter().map(|p| p.name).collect()
 }
+
+/// Perturbations added after the pairwise pass's partner draws were fixed (ENGINE.md 270.1): each draws its
+/// partner from a stream of its own, and no other perturbation draws one of them, so every other pair is the
+/// one it was before they joined (`tests/az.rs::public_states_encode_apart`, as layout v8's do).
+pub const OWN_STREAM_PERTURBATIONS: [&str; 1] = ["combat damage to and by a creature is prevented this turn"];
 
 /// (`v8_fixed`'s doc above.)
 pub fn v8_fixed() -> Vec<&'static str> {

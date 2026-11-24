@@ -416,7 +416,8 @@ def test_committed_legacy_pool_matches_meta(fc):
     # 124.1-124.3), then its Legacy Sneak and Show deck's six (ENGINE.md 123),
     # then the Delver 75's five sideboard cards (ENGINE.md 122), then the
     # Legacy Hogaak Tempo deck's seven by lane (ENGINE.md 220.1-220.3):
-    # lane A's one, lane B's two, lane C's four.
+    # lane A's one, lane B's two, lane C's four; then the Legacy Lands deck's
+    # lane A six (ENGINE.md 270.1).
     assert [c["name"] for c in cards] == names == [
         "Murktide Regent", "Prismari Charm",
         "Doomsday", "Pact of Negation", "Personal Tutor", "Flow State",
@@ -428,5 +429,6 @@ def test_committed_legacy_pool_matches_meta(fc):
         "Hogaak, Arisen Necropolis",
         "Mockingbird", "Massacre",
         "Stitcher's Supplier", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor",
+        "Dark Depths", "Thespian's Stage", "Blast Zone", "Ghost Quarter", "Maze of Ith", "Bojuka Bog",
     ]
-    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 30
+    assert not custom and meta["includes_basic_lands"] == [] and meta["pool_card_count"] == 36

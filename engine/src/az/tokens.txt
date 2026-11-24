@@ -52,3 +52,4 @@ Human Knight 2/2 R c Human Knight trample haste
 Boo 1/1 R c Hamster trample haste
 The monarch rules
  -/- C 
+Marit Lage 20/20 B c Avatar flying indestructible

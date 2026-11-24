@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). Updated 2026-11-11 (branch `doomsday-a`, ENGINE.md 124.1, Legacy Doomsday lane A): entry 200 (Pact of Negation's colour indicator, section T), fixed in mtg-bot `feature/doomsday-a-ir`. Updated 2026-11-12 (branch `fix/eoe-station`, ENGINE.md 146, the Fable review's lane E): entries 340 (station striations, fixed in mtg-bot `feature/eoe-station-ir` 68b62ed3, local) and 341 (Warping Wail's {C}, read from the printed cost by the lowering), section X. Updated 2026-11-21 (branch `hogaak-c`, ENGINE.md 220.3, Legacy Hogaak Tempo lane C): entry 440 (a land creature's land type, Dryad Arbor), fixed at the parser, section AA. The IR was exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). Updated 2026-11-11 (branch `doomsday-a`, ENGINE.md 124.1, Legacy Doomsday lane A): entry 200 (Pact of Negation's colour indicator, section T), fixed in mtg-bot `feature/doomsday-a-ir`. Updated 2026-11-12 (branch `fix/eoe-station`, ENGINE.md 146, the Fable review's lane E): entries 340 (station striations, fixed in mtg-bot `feature/eoe-station-ir` 68b62ed3, local) and 341 (Warping Wail's {C}, read from the printed cost by the lowering), section X. Updated 2026-11-21 (branch `hogaak-c`, ENGINE.md 220.3, Legacy Hogaak Tempo lane C): entry 440 (a land creature's land type, Dryad Arbor), fixed at the parser, section AA. Updated 2026-11-24 (branch `lands-a`, ENGINE.md 270.1, Legacy Lands lane A): no defect, section AB. The IR was exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`); since ENGINE.md 170 the same code is in this repo
 (`ir/mtgz_ir/cards/ir.py`, `ir/mtgz_ir/cards/parser/`, `ir/mtgz_ir/effects/`; `tools/card_ir.py export`),
@@ -1391,6 +1391,35 @@ creature, counter and trigger grammars sit in the creature builder's chain befor
 free-cast condition in `spell_builder`). Lane C's Dryad Arbor rulings added a second `triage.tsv` row for 0dfaac8c, a
 ruling text Pact of Negation's row already had (one row per distinct text; `tools/rulings_doc.py` let the later win):
 folded into the one row, both cards named.
+
+### AB. The Legacy Lands deck, lane A (ENGINE.md 270.1)
+
+No defect (entries 460-479 are this lane's; none used). The six Scryfall records (Dark Depths, Thespian's Stage, Blast
+Zone, Ghost Quarter, Maze of Ith, Bojuka Bog) appended to the legacy pool parse with the existing grammar, no parser
+change. Checked against the Oracle text and not defects:
+
+* Dark Depths: `supertypes: [Legendary, Snow]`, no `produces` and `mana_only_from_produces` (no mana ability, the
+  ruling); `enters_with_named_counters: [[ice, 10]]`; "{3}: Remove an ice counter from Dark Depths" ->
+  `RemoveCountersFromSource(kind: ice, amount: 1)` with a mana-only cost; the last line is a `board_rules`
+  `StateTrigger` (CR 603.8: the condition `HasNoCountersOfKind(ice)` - "it" is the source -, its ability's effect
+  `SacrificeSourceThen(then_effect: CreateToken(Marit Lage))`, no event or predicate: a state trigger has none). The
+  token printing: legendary (`supertypes: [Legendary, Token]`, the IR's token marker as on every token), Creature -
+  Avatar, 20/20, `color_indicator: [B]`, flying and indestructible.
+* Thespian's Stage and Blast Zone: their records give the legacy pool exactly the IR `eoe.ir.json` has (byte for byte:
+  the same parser over the same Oracle text), read by EoE W6's `BecomesCopyOfTargetLand` (its target, a land,
+  re-derived as entry 11 says) and W2's Blast Zone lowering.
+* Ghost Quarter: `produces: [C]` beside its explicit "{T}: Add {C}" (a summary, ENGINE.md 18); the destruction is
+  `RemoveTargetPermanents(action: destroy, target_filter: IsLand)` with the rider `ControllerMaySearchOntoBattlefield
+  (card_filter: RotoCardFilter(any_types: [Land], supertype: Basic), tapped: false)` - the land's controller, "may",
+  untapped (Path to Exile's `ControllerSearchesForBasicLand` puts the land tapped; the two riders are two surfaces).
+* Maze of Ith: `PreventCombatDamageToAndByTarget(targets: [IsCreature & IsAttacking], untap: true)`, no mana ability.
+* Bojuka Bog: `enters_tapped`, `produces: [B]`, an `enters` trigger (`IsSelf`) with `ExileTargetPlayersGraveyard`
+  (its target, a player, implied by the class: any player).
+
+Export: schema `dc0b5a2a451d...` (six new classes: `StateTrigger`, `HasNoCountersOfKind`, `SacrificeSourceThen`,
+`ExileTargetPlayersGraveyard`, `PreventCombatDamageToAndByTarget`, `ControllerMaySearchOntoBattlefield`);
+`powerlsv.ir.json` and `eoe.ir.json` byte for byte but `schema_sha256`; `legacy.ir.json` 36 cards, the 30 others
+unchanged.
 
 ## Suspected defects (representational)
 

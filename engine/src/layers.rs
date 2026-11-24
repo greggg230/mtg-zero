@@ -72,8 +72,12 @@ pub struct Flags {
     pub exile_if_dies: bool,
     /// "If it would leave the battlefield, exile it instead."
     pub exile_if_leaves: bool,
-    /// Combat damage it would deal is prevented (EoE lane D).
+    /// Combat damage it would deal is prevented (EoE lane D;
+    /// `Mod::PreventCombatDamage`).
     pub prevent_combat_damage: bool,
+    /// Combat damage that would be dealt to it is prevented (the same
+    /// `Mod`: Maze of Ith's, ENGINE.md 270.1).
+    pub prevent_combat_damage_to: bool,
     /// It can attack as though it didn't have defender (CR 702.3b).
     pub attack_despite_defender: bool,
 }
@@ -544,7 +548,10 @@ impl Game {
                 Mod::MustAttack | Mod::Goad | Mod::MustAttackPlayer => f.must_attack = true,
                 Mod::ExileIfDies => f.exile_if_dies = true,
                 Mod::ExileIfLeaves => f.exile_if_leaves = true,
-                Mod::PreventCombatDamage => f.prevent_combat_damage = true,
+                Mod::PreventCombatDamage => {
+                    f.prevent_combat_damage = true;
+                    f.prevent_combat_damage_to = true;
+                }
                 Mod::AttackDespiteDefender => f.attack_despite_defender = true,
                 _ => {}
             }

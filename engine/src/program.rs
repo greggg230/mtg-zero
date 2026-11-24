@@ -538,8 +538,9 @@ pub enum Ext {
     /// Put each legal target of requirement `tgt` into its owner's library
     /// beneath the top X cards.
     PutInLibraryAtX { tgt: u8 },
-    /// Sacrifice the source if it is still the same permanent, else
-    /// continue at `skip` ("you may sacrifice it. If you do").
+    /// Sacrifice the source if it is still the same permanent and the
+    /// ability's controller controls it (CR 701.21a), else continue at
+    /// `skip` ("[you may] sacrifice it. If you do").
     SacrificeSourceThen { skip: u16 },
     /// "You may mill that many cards. If you do, you may put a creature
     /// card from among them into your hand" (the event's amount). Choice:
