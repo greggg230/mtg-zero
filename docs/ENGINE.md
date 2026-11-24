@@ -48344,7 +48344,7 @@ script outside the repo.
   rows, 150 batches; gate 3: 6 games, 2,598 rows - main's counts). The three runs before it with every step on the
   desktop (default, `--pytest-shards 2`, `--throttle on`) passed every step but
   `tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`, which timed out each time under the gate's own parallel
-  load (no game finished in the worker's 180 s phase; the known load flake of 155, 193 and later sections): alone it
+  load (no game finished in the worker's 180 s phase; the known load flake: 155, 216, 220): alone it
   passes on this tree in 113 s (main's checkout: 131 s), and the python tier below passed it. (One of those runs also
   saw farm compat's gate 3 exit at once with no output; re-run by hand on the same worker: identical, 6 games, 2,598
   rows.) With `--offload mac` the pure-CPU steps ran on the Mac, every step passed.
