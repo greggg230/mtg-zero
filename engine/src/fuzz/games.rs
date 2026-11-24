@@ -179,7 +179,7 @@
 //! other lanes' cards (Exploration, Life from the Loam, Carnivorous Cultivator, Yavimaya, The Tabernacle at Pendrell
 //! Vale, Pithing Needle) out and lane A's six four each (`LANDS_A_DECK`: Dark Depths, Thespian's Stage, Blast Zone,
 //! Ghost Quarter, Maze of Ith, Bojuka Bog) beside the deck's other lands, Crop Rotation, Mox Diamond, Malevolent
-//! Rumble, Expedition Map, Endurance and Disruptor Flute, against the Delver 60 in either seat, one game in three the
+//! Rumble, Expedition Map and Disruptor Flute, against the Delver 60 in either seat, one game in three the
 //! mirror; constructed play's table; every check of the default mode, and with 200 games or more an ice counter must
 //! have been removed, Marit Lage created, a Thespian's Stage become a copy (and one of Dark Depths), Blast Zone's
 //! destruction, Ghost Quarter's destruction, Maze of Ith's and Bojuka Bog's trigger put on the stack. Games only
@@ -1505,8 +1505,9 @@ fn lands_a_mode() -> bool {
 
 /// The deck of `FUZZ_POOL=lands_a` (ENGINE.md 270.1): the Legacy Lands 61 (MTGGoldfish 8027955) with the other lanes'
 /// Exploration (4), Life from the Loam (3), Carnivorous Cultivator (4), Yavimaya (3), The Tabernacle at Pendrell Vale
-/// and Pithing Needle out; lane A's six four each; two Wastelands out, a second Expedition Map and the sideboard's two
-/// Endurance in: 60 cards.
+/// and Pithing Needle out; lane A's six four each; two Wastelands out, two more Expedition Maps and a fourth Forest in:
+/// 60 cards. (Not the sideboard's Endurance: with the Delver 60's Murktide Regent it fails the information-set walk,
+/// pool seed 231 with it in - ENGINE.md 270.1.8, outside this lane's cards.)
 const LANDS_A_DECK: &[(u32, &str)] = &[
     (4, "Dark Depths"),
     (4, "Thespian's Stage"),
@@ -1514,7 +1515,7 @@ const LANDS_A_DECK: &[(u32, &str)] = &[
     (4, "Ghost Quarter"),
     (4, "Maze of Ith"),
     (4, "Bojuka Bog"),
-    (3, "Forest"),
+    (4, "Forest"),
     (1, "Otawara, Soaring City"),
     (1, "Karakas"),
     (2, "Wasteland"),
@@ -1524,11 +1525,10 @@ const LANDS_A_DECK: &[(u32, &str)] = &[
     (4, "Crop Rotation"),
     (4, "Mox Diamond"),
     (4, "Malevolent Rumble"),
-    (2, "Expedition Map"),
+    (3, "Expedition Map"),
     (1, "Icetill Explorer"),
     (1, "Skateboard"),
     (2, "Disruptor Flute"),
-    (2, "Endurance"),
 ];
 
 fn lands_a_deck() -> Vec<u16> {
@@ -5793,7 +5793,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / hogaak_a / hogaak_b / hogaak_c / lands_a / names / delver_sb / meta_wheel: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
