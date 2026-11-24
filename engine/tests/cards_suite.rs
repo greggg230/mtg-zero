@@ -80,6 +80,8 @@ mod cards_hogaak_c;
 mod cards_lands_a;
 #[path = "cards_lands_c.rs"]
 mod cards_lands_c;
+#[path = "cards_lands_int.rs"]
+mod cards_lands_int;
 #[path = "cards_legacy.rs"]
 mod cards_legacy;
 #[path = "cards_m4b1.rs"]
