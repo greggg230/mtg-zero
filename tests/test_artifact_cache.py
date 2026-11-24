@@ -181,14 +181,17 @@ def test_a_lease_is_exclusive_and_a_dead_holders_is_taken_over(pool):
 
 def hand_over(ttl):
     """A short-lived process takes slot 1's lease and hands it to a holder, as `acquire` does, then exits (a Git Bash
-    command's forked shell, an agent's tool call) -> its pid."""
-    code = ('import sys; sys.path.insert(0, sys.argv[1]); import warm_pool as W; '
-            'assert W.try_lease(1, "gate", "abc"); W.spawn_holder(W.lease_path(1), float(sys.argv[2]))')
+    command's forked shell, an agent's tool call) -> its pid: the interpreter's own (`os.getpid()` there), which is not
+    `Popen.pid` when `sys.executable` is a venv's python.exe on Windows (a launcher that runs the interpreter as its
+    child)."""
+    code = ('import os, sys; sys.path.insert(0, sys.argv[1]); import warm_pool as W; '
+            'assert W.try_lease(1, "gate", "abc"); W.spawn_holder(W.lease_path(1), float(sys.argv[2])); '
+            'print(os.getpid())')
     p = subprocess.Popen([sys.executable, '-c', code, os.path.join(ROOT, 'tools'), str(ttl)],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    _, err = p.communicate(timeout=60)
+    out, err = p.communicate(timeout=60)
     assert p.returncode == 0, err
-    return p.pid
+    return int(out.strip().splitlines()[-1])
 
 
 def gone_within(pid, seconds):
