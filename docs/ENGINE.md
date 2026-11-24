@@ -49076,7 +49076,22 @@ On the merged code (the commits after it change docs and recorded digests only),
   as 270.3.8 found: the environment), then from that file on with `MSYS_NO_PATHCONV=1`: **354 passed, 22 skipped** (that
   test included) - `tests/ir` among the first part; the Lands loader test and `test_fuzz_shards.py`'s two new tests
   pass.
-* **The gates**: pending (the next commit records them).
+* **The gates** on 643ebac1 (this section's first commit; the code of 1e6009a5 and the re-recorded digests of 4c44f3b3),
+  in this worktree, `--offload local --throttle on` (every heavy step holding a `tools/slotd.sh` slot, the whole gate on
+  twelve logical cores at low priority beside the live stew): `python tools/gate.py suite --fuzz-pools
+  default,default+hidden,delver_dealt,lands,cross --fuzz-shards 4` - **GATE PASSED suite 643ebac17c8b in 605s**
+  (privacy; the full engine suite 3,123 passed over 24 binaries; the sharded 2,000-game fuzz of the default pool and
+  100 matches, the default pool with hidden decklists, `delver_dealt`, `lands` and `cross` each with 100 matches + 100
+  post-sideboard; the checkout unchanged; `gates/643ebac17c8b-suite.json`); then `python tools/gate.py engine
+  --tested-sha 643ebac17c8b --expect-digest 5a09242cf4f2cbab --expect-digest0 be0626d4b97cebae` - **GATE PASSED WITH
+  SKIPS engine 643ebac17c8b in 1338s** (skipped: nine live-run-hazard tests of the desktop's pytest, fenced by the live
+  stew): privacy (0 findings); the build and the release worker; the digests full 5a09242cf4f2cbab and encoding-free
+  be0626d4b97cebae (= expected); the formats constructed 33fd025bacb21413, EoE d754f4eef3c8adae, driver
+  cab97c01912f7e3f, metagame f1ca224f901d809d, pair 9611d13bb054de40 and dealt 4c28ec816ed1245f (each = the checkout's
+  recorded file); `az` 58, `limits` 13, `hidden` 28 passed; pytest 1,606 + 612 + 651 + 800 passed; the desktop smoke
+  config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,542 rows, 150 batches; gate 3:
+  6 games, 2,634 rows, 6 decks compared); the suite evidence of 643ebac17c8b; the Mac's recheck not needed; the
+  checkout unchanged (`gates/643ebac17c8b-engine.json`). The next commit adds this paragraph only (docs).
 
 #### 270.4.7 Findings, limits and follow-ups
 
