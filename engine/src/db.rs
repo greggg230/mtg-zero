@@ -240,17 +240,14 @@ pub enum Mod {
     /// end of turn (CR 613.1b); as the effect ends, control returns
     /// (`Game::end_turn_effects`; EoE lane D). No characteristic changes.
     ControlFrom(u8),
-    /// Combat damage it would deal is prevented (CR 615.1a; "prevent all
-    /// combat damage that would be dealt this turn" on every creature, a
-    /// rules effect; EoE lane D).
-    PreventCombatDamage,
     /// Combat damage that would be dealt to it and dealt by it is prevented
-    /// (CR 615.1a; Maze of Ith's "prevent all combat damage that would be
-    /// dealt to and dealt by that creature this turn": one object's
-    /// effect, ENGINE.md 270.1). Only on an object (`Affected::Obj`),
-    /// `PreventCombatDamage` only on a group (`Game::add_effect` asserts
-    /// both): the encoding tells them apart by what is affected.
-    PreventCombatDamageToAndBy,
+    /// (CR 615.1a): Maze of Ith's "prevent all combat damage that would be
+    /// dealt to and dealt by that creature this turn" on one object
+    /// (ENGINE.md 270.1), and "prevent all combat damage that would be
+    /// dealt this turn" on every creature, a rules effect (EoE lane D: all
+    /// combat damage is dealt by creatures, CR 510.1, so on every creature
+    /// "to and by" prevents what "by" alone does).
+    PreventCombatDamage,
     /// "It attacks that player this combat if able" (the effect
     /// controller's opponent, 2 players: never one of their planeswalkers;
     /// Ursine Monstrosity).

@@ -1143,3 +1143,90 @@ fn cr_603_3d_bojuka_bog_with_empty_graveyards() {
     assert_eq!(stack_names(&g), [format!("ability of {BOG}")], "{}", log(&g));
     resolve(&mut g);
 }
+
+// ---- the encoding ------------------------------------------------------------
+
+/// Both viewers' rows, layouts v7 and v8.
+fn rows(g: &Game) -> Vec<engine::az::tail_encode::Row> {
+    use engine::az::tail_encode::Row;
+    vec![Row::of(g, 0), Row::of(g, 1), Row::of_v8(g, 0), Row::of_v8(g, 1)]
+}
+
+/// The tokens of segment `seg` in a row.
+fn tokens(r: &engine::az::tail_encode::Row, seg: u16) -> Vec<&[f32]> {
+    r.tail.iter().filter(|t| t.0 == seg).map(|t| &t.2[engine::az::encode::CODE..]).collect()
+}
+
+fn digits_of(s: &[f32]) -> u64 {
+    s.iter().enumerate().map(|(b, &x)| ((x == 1.0) as u64) << b).sum()
+}
+
+/// Dark Depths' ice counters reach both players' inputs exactly (the
+/// `counters` segment, ENGINE.md 142.7: a named counter's stable name id and
+/// its number's 64 digits), in layouts v7 and v8; Marit Lage has an
+/// identity (the token registry's line).
+#[test]
+fn ice_counters_and_marit_lage_reach_both_players_inputs() {
+    use engine::az::tail_encode::{ct, name_id, seg};
+    let g = bare().battlefield(0, &[DEPTHS]).counters(0, DEPTHS, ice(), 7).at(Step::Main1, 0).start();
+    for r in rows(&g) {
+        let found: Vec<u64> = tokens(&r, seg::COUNTERS)
+            .into_iter()
+            .filter(|s| s[ct::KIND + 4] == 1.0 && digits_of(&s[ct::NAME..ct::NAME + 32]) == name_id("counter:ice") as u64)
+            .map(|s| digits_of(&s[ct::COUNT_BITS..ct::COUNT_BITS + 64]))
+            .collect();
+        assert_eq!(found, [7]);
+    }
+    let ids = engine::az::identity::identities(db());
+    let lage = db().token_by_name(LAGE).expect("Marit Lage's definition");
+    assert_ne!(ids[lage as usize], engine::az::identity::UNKNOWN, "Marit Lage is registered (az/tokens.txt)");
+    // Every token, face and made definition of constructed play's table has an identity.
+    for i in 0..db().len() {
+        assert_ne!(ids[i], engine::az::identity::UNKNOWN, "definition {i} ({})", db().def(i as u16).name);
+    }
+}
+
+/// Maze of Ith's prevention (`Mod::PreventCombatDamage` on that creature: to
+/// and by it, ENGINE.md 270.1) reaches both inputs as an `effects` token on
+/// that object (its `Mod` float, the object named).
+#[test]
+fn maze_of_ith_s_prevention_reaches_both_players_inputs() {
+    use engine::az::tail_encode::{ef, seg};
+    let mut g = bare().battlefield(0, &["Orcish Bowmasters"]).battlefield(1, &[MAZE]).at(Step::Main1, 0).start();
+    let a = bf(&g, 0, "Orcish Bowmasters");
+    let m = bf(&g, 1, MAZE);
+    let before = rows(&g);
+    attack(&mut g, &[a]);
+    priority_in(&mut g, 1, Step::DeclareAttackers);
+    maze(&mut g, m, a);
+    for r in rows(&g) {
+        let fx = tokens(&r, seg::EFFECTS);
+        let prevention: Vec<&&[f32]> = fx.iter().filter(|s| s[ef::MOD + 19] == 1.0).collect();
+        assert_eq!(prevention.len(), 1);
+        assert_eq!(prevention[0][ef::GROUP], 0.0, "an object's");
+        assert!(prevention[0][ef::OBJ..ef::OBJ + engine::az::tail_encode::rf::W].iter().any(|&x| x != 0.0), "the creature named");
+    }
+    for r in before {
+        assert!(tokens(&r, seg::EFFECTS).is_empty());
+    }
+}
+
+/// Thespian's Stage as a copy of Dark Depths: its copy effect and its kept
+/// ability (CR 707.9b; EoE W6's `perm::KEPT_ABILITY`, `g6::KEPT_FROM`) and
+/// its state trigger on the stack reach both inputs: the rows differ from
+/// the Stage's own.
+#[test]
+fn the_stage_as_dark_depths_reaches_both_players_inputs() {
+    let mut g = bare().battlefield(0, &[STAGE, "Island", "Island"]).battlefield(1, &[DEPTHS]).counters(1, DEPTHS, ice(), 10).at(Step::Main1, 0).start();
+    let s = bf(&g, 0, STAGE);
+    let before = rows(&g);
+    let d = bf(&g, 1, DEPTHS);
+    stage_copy(&mut g, s, d);
+    assert_eq!(stack_names(&g), [format!("ability of {DEPTHS}")]);
+    let after = rows(&g);
+    for (a, b) in before.iter().zip(&after) {
+        assert!(a.head != b.head || a.tail != b.tail);
+        let copies = tokens(b, engine::az::tail_encode::seg::EFFECTS).into_iter().filter(|t| t[engine::az::tail_encode::ef::COPY] == 1.0).count();
+        assert_eq!(copies, 1, "the copy effect");
+    }
+}

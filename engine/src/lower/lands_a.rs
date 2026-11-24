@@ -90,7 +90,7 @@ pub(crate) fn lower_effect_lands_a(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             if *untap {
                 b.op(Op::Untap { tgt: t });
             }
-            b.op(Op::Ext(Ext::Apply { on: On::Target(t), mods: vec![Mod::PreventCombatDamageToAndBy], until: Until::EndOfTurn }));
+            b.op(Op::Ext(Ext::Apply { on: On::Target(t), mods: vec![Mod::PreventCombatDamage], until: Until::EndOfTurn }));
         }
         _ => return false,
     }

@@ -132,6 +132,14 @@ fn creates_tokens_late(op: &crate::program::Op) -> bool {
 }
 
 impl crate::db::CardDb {
+    /// The definition `d` was made from by "becomes a copy of ..., except it has this ability"
+    /// (`add_kept_ability_defs`), if it is such a definition (ENGINE.md 270.1: in constructed play's
+    /// table every definition has one, a face's too).
+    pub fn kept_original(&self, d: crate::ids::DefId) -> Option<crate::ids::DefId> {
+        self.def(d).w6.kept_from?;
+        self.w6.kept.iter().find(|x| x.1 == d).map(|x| x.0 .0)
+    }
+
     /// The definition "a copy of `t`, except it has this ability" gives
     /// (`add_kept_ability_defs`; `key`: the ability's definition and index).
     pub(crate) fn w6_kept_def(&self, t: crate::ids::DefId, key: (crate::ids::DefId, u8)) -> crate::ids::DefId {

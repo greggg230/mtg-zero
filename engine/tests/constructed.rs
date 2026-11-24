@@ -211,9 +211,10 @@ fn the_hogaak_75_and_its_provenance() {
     assert_eq!(in_main, ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor"]);
     let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
     assert_eq!(side_only, ["Consign to Memory", "Massacre"]);
-    // The seven new cards are the registry's last lines, in the deck's order (identities 569-575).
+    // The seven new cards are the registry's lines 23-29, in the deck's order (identities 569-575; the Legacy Lands
+    // deck's follow, ENGINE.md 270).
     assert_eq!(
-        reg[reg.len() - 7..],
+        reg[23..30],
         ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor", "Massacre"]
     );
 }
@@ -352,19 +353,25 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     }
     assert!(cube.unsupported().is_empty() && con.unsupported().is_empty());
     // Every cube card at the same id, with the same definition; its tokens
-    // and faces k ids later (after the k legacy cards), the same too; the
-    // face-down characteristics (the cube table's last definition) after the
-    // legacy cards' faces.
+    // k ids later (after the k legacy cards), then the legacy cards' tokens
+    // (Marit Lage, Dark Depths', ENGINE.md 270.1: t of them), then the cube's
+    // faces k + t ids later, the same too; the face-down characteristics (the
+    // cube table's last definition) after the legacy cards' faces.
     let k = legacy.len() as u16;
     assert_eq!(k as usize, engine::db::load_legacy_document().cards.len());
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
     assert_eq!(cube.face_down_def() as usize, cube.len() - 1);
-    // The legacy cards make no token; their faces are Rough // Tumble's two
-    // halves (a split card, ENGINE.md 122), each with its card's identity,
-    // after the cube's tokens and faces.
+    let first_face = |db: &CardDb| (db.num_cards()..db.face_down_def() as usize).find(|&i| db.is_face(i as u16)).unwrap() as u16;
+    let (cube_ff, con_ff) = (first_face(cube), first_face(con));
+    let cube_tokens = cube_ff - cube.num_cards() as u16;
+    let t = con_ff - con.num_cards() as u16 - cube_tokens;
+    let legacy_tokens: Vec<&str> = (con.num_cards() as u16 + cube_tokens..con_ff).map(|i| con.def(i).name.as_str()).collect();
+    assert_eq!(legacy_tokens, ["Marit Lage"], "the legacy cards' tokens");
+    // The legacy cards' faces are Rough // Tumble's two halves (a split card,
+    // ENGINE.md 122), each with its card's identity, after the cube's faces.
     let rt = con.id("Rough // Tumble").unwrap();
     let ik_all = identity::identities(con);
-    let faces: Vec<usize> = (cube.len() - 1 + k as usize..con.face_down_def() as usize).collect();
+    let faces: Vec<usize> = (cube.len() - 1 + (k + t) as usize..con.face_down_def() as usize).collect();
     let names: Vec<&str> = faces.iter().map(|&i| con.def(i as u16).name.as_str()).collect();
     assert_eq!(names, ["Rough", "Tumble"]);
     for &i in &faces {
@@ -372,19 +379,44 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
         assert_eq!(ik_all[i], ik_all[rt as usize], "a face has its card's identity");
     }
     assert_eq!(con.def(rt).halves, Some((faces[0] as u16, faces[1] as u16)));
-    // Then, at the end, the abilities of a nonbasic land that is a Mountain
-    // (Magus of the Moon's, CR 305.7: EoE W2's `moon_base` and one variant per
+    // Then Thespian's Stage's "becomes a copy of target land, except it has
+    // this ability" (CR 707.9b; EoE W6's `add_kept_ability_defs`, ENGINE.md
+    // 270.1): one definition a definition of the table that lacks the ability
+    // (the Stage's own has it), each with its original's identity; then, at
+    // the end, the abilities of a nonbasic land that is a Mountain (Magus of
+    // the Moon's, CR 305.7: EoE W2's `moon_base` and one variant per
     // definition with latent abilities, ENGINE.md 99.12, 123).
+    let fd = con.face_down_def() as usize;
+    let kept: Vec<usize> = (fd + 1..con.len()).take_while(|&i| con.kept_original(i as u16).is_some()).collect();
+    let stage = con.id("Thespian's Stage").unwrap();
+    assert_eq!(kept.len(), fd, "every definition up to the face-down one but the Stage's own: {}", kept.len());
+    for &i in &kept {
+        let o = con.kept_original(i as u16).unwrap();
+        assert!(o != stage && (o as usize) <= fd);
+        assert_eq!(con.def(i as u16).name, con.def(o).name);
+        assert_eq!(ik_all[i], ik_all[o as usize], "{}: its original's identity", con.def(o).name);
+    }
     let latent = (0..con.len()).filter(|&i| con.def(i as u16).latent > 0 && !con.def(i as u16).name.is_empty()).count();
-    assert_eq!(con.len(), cube.len() + k as usize + faces.len() + 1 + latent, "the legacy faces; the Mountain's definitions");
+    assert_eq!(con.len(), fd + 1 + kept.len() + 1 + latent, "the legacy faces; the made definitions; the Mountain's definitions");
     // (the Mountain's definitions: no name, a registered key, as in the EoE table)
-    for i in con.face_down_def() as usize + 1..con.len() {
+    for i in fd + 1 + kept.len()..con.len() {
         assert!(con.def(i as u16).name.is_empty() && ik_all[i] != identity::UNKNOWN, "definition {i}");
     }
     let (fd_cube, fd_con) = (cube.face_down_def(), con.face_down_def());
-    let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else if id == fd_con { fd_cube } else { id - k };
+    let cube_nc = cube.num_cards() as u16;
+    let to_cube = |id: u16| {
+        if id < cube_nc {
+            id
+        } else if id == fd_con {
+            fd_cube
+        } else if id < con_ff {
+            id - k
+        } else {
+            id - k - t
+        }
+    };
     for i in 0..cube.len() as u16 {
-        let j = if i < cube.num_cards() as u16 { i } else if i == fd_cube { fd_con } else { i + k };
+        let j = if i < cube_nc { i } else if i == fd_cube { fd_con } else if i < cube_ff { i + k } else { i + k + t };
         let a = cube.def(i);
         let mut b = con.def(j).clone();
         b.back = b.back.map(to_cube);

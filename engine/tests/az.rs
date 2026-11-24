@@ -1421,6 +1421,106 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The gate's positions of the Legacy Lands cards of lane A (ENGINE.md 270.1; constructed play's
+/// table): Dark Depths with ice counters, its state trigger on the stack and Marit Lage; Thespian's
+/// Stage as a copy of Dark Depths; Blast Zone's charge counters; Maze of Ith's prevention on an
+/// attacker beside Marit Lage; Ghost Quarter's search; Bojuka Bog's target. Added where `hogaak_positions` are.
+fn lands_a_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [("Dark Depths", 4), ("Thespian's Stage", 4), ("Blast Zone", 4), ("Ghost Quarter", 4), ("Maze of Ith", 4), ("Bojuka Bog", 4), ("Orcish Bowmasters", 4), ("Island", 16), ("Swamp", 16)] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 270).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let ice = engine::db::Counter::Named(db.subtype_id("counter:ice").unwrap());
+    let charge = engine::db::Counter::Named(db.subtype_id("counter:charge").unwrap());
+    let at_priority = |g: &engine::Game| g.kind() == Some(DecisionKind::Priority);
+    // Run decisions with `f` (None: the first option) until `stop`.
+    fn run(g: &mut engine::Game, stop: &dyn Fn(&engine::Game) -> bool, f: &dyn Fn(&engine::Game) -> Option<Choice>) {
+        for _ in 0..400 {
+            if stop(g) {
+                return;
+            }
+            let d = g.pending_decision().expect("a decision");
+            let c = f(g).unwrap_or(d.options[0].choice);
+            g.choose(c);
+        }
+        panic!("lands_a_positions: no progress\n{}", g.log_lines().join("\n"));
+    }
+    let mut out = Vec::new();
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 8])
+        .library(1, &["Swamp", "Island", "Swamp", "Island"])
+        .battlefield(0, &["Thespian's Stage", "Blast Zone", "Ghost Quarter", "Island", "Island", "Island", "Island", "Orcish Bowmasters"])
+        .counters(0, "Blast Zone", charge, 2)
+        .battlefield(1, &["Dark Depths", "Maze of Ith", "Swamp", "Swamp", "Swamp"])
+        .counters(1, "Dark Depths", ice, 1)
+        .hand(0, &["Bojuka Bog"])
+        .graveyard(1, &["Island", "Orcish Bowmasters"])
+        .at(Step::Main1, 0)
+        .start();
+    out.push(("lands_a", wrap(&g)));
+    // Bojuka Bog played: its trigger's target.
+    let bog = g.card(0, "Bojuka Bog", Zone::Hand);
+    g.choose(Choice::Play(bog));
+    run(&mut g, &|g| g.kind() != Some(DecisionKind::Priority) || !g.stack().is_empty(), &|_| None);
+    out.push(("lands_a", wrap(&g)));
+    run(&mut g, &|g| at_priority(g) && g.stack().is_empty(), &|g| if at_priority(g) { Some(Choice::Pass) } else { None });
+    out.push(("lands_a", wrap(&g)));
+    // The Stage becomes a copy of P1's Dark Depths: its state trigger on the stack.
+    let stage = g.card(0, "Thespian's Stage", Zone::Battlefield);
+    let depths = g.card(1, "Dark Depths", Zone::Battlefield);
+    let k = g.def_of(stage).activated.iter().position(|a| a.mana().is_none()).unwrap() as u8;
+    g.choose(Choice::Ability(stage, engine::db::AbilitySlot::Activated(k)));
+    let t = g.tgt(depths);
+    // (Paid by the Islands: Ghost Quarter stays untapped.)
+    let island = |g: &engine::Game| {
+        g.pending_decision()?.options.iter().map(|o| o.choice).find(|c| matches!(c, Choice::Card(x) | Choice::Ability(x, _) if g.name(*x) == "Island"))
+    };
+    run(&mut g, &at_priority, &|g| if g.has_option(t) { Some(t) } else { island(g) });
+    out.push(("lands_a", wrap(&g)));
+    run(&mut g, &|g| at_priority(g) && g.stack().len() == 1 && g.pending_decision().unwrap().player == 0, &|g| if at_priority(g) { Some(Choice::Pass) } else { None });
+    out.push(("lands_a", wrap(&g)));
+    run(&mut g, &|g| at_priority(g) && g.stack().is_empty(), &|g| if at_priority(g) { Some(Choice::Pass) } else { None });
+    out.push(("lands_a", wrap(&g)));
+    // Ghost Quarter on P1's Swamp: P1's search.
+    let gq = g.card(0, "Ghost Quarter", Zone::Battlefield);
+    let swamp = g.card(1, "Swamp", Zone::Battlefield);
+    let k = g.def_of(gq).activated.iter().position(|a| a.mana().is_none()).unwrap() as u8;
+    g.choose(Choice::Ability(gq, engine::db::AbilitySlot::Activated(k)));
+    let t = g.tgt(swamp);
+    run(&mut g, &at_priority, &|g| if g.has_option(t) { Some(t) } else { None });
+    run(&mut g, &|g| !at_priority(g), &|_| Some(Choice::Pass));
+    out.push(("lands_a", wrap(&g)));
+    run(&mut g, &|g| at_priority(g) && g.stack().is_empty(), &|g| if at_priority(g) { Some(Choice::Pass) } else { g.has_option(Choice::Yes).then_some(Choice::Yes) });
+    out.push(("lands_a", wrap(&g)));
+    // Combat: Orcish Bowmasters attacks (Marit Lage, made this turn, can't); P1's Maze of Ith.
+    run(&mut g, &|g| g.kind() == Some(DecisionKind::DeclareAttackers), &|_| Some(Choice::Pass));
+    let lage = g.permanents_of(0).find(|&c| g.name(c) == "Orcish Bowmasters");
+    if let Some(l) = lage {
+        g.choose(Choice::Card(l));
+        run(&mut g, &|g| g.kind() != Some(DecisionKind::AttackTarget), &|_| None);
+        g.choose(Choice::Pass);
+        run(&mut g, &|g| at_priority(g) && g.pending_decision().unwrap().player == 1, &|_| Some(Choice::Pass));
+        let maze = g.card(1, "Maze of Ith", Zone::Battlefield);
+        g.choose(Choice::Ability(maze, engine::db::AbilitySlot::Activated(0)));
+        let t = g.tgt(l);
+        run(&mut g, &at_priority, &|g| if g.has_option(t) { Some(t) } else { None });
+        run(&mut g, &|g| at_priority(g) && g.stack().is_empty(), &|g| if at_priority(g) { Some(Choice::Pass) } else { None });
+        out.push(("lands_a", wrap(&g)));
+    }
+    assert!(out.len() >= 9, "lane A's positions: {}\n{}", out.len(), g.log_lines().join("\n"));
+    out
+}
+
 /// The 601.2g step's positions (ENGINE.md 231): Hogaak castable only through a Chromatic Star activated while it is
 /// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
 /// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
@@ -1588,6 +1688,8 @@ fn public_state_reaches_the_encoding() {
     pos.extend(cast_mana_positions());
     pos.extend(eoe_exile_positions());
     pos.extend(v8_positions());
+    // (ENGINE.md 270.1: last, so the other positions keep their places and streams.)
+    pos.extend(lands_a_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1847,6 +1949,8 @@ fn public_states_encode_apart() {
     pos.extend(cast_mana_positions());
     pos.extend(eoe_exile_positions());
     pos.extend(v8_positions());
+    // (ENGINE.md 270.1: last, so the other positions keep their places and streams.)
+    pos.extend(lands_a_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
@@ -1856,7 +1960,11 @@ fn public_states_encode_apart() {
     // (Layout v8's perturbations, ENGINE.md 236, draw their partners from a stream of their own, among every
     // combinable one; the others draw from the others as before, so their pairs are main's.)
     let v8p = engine::public_state::v8_perturbation_names();
-    let combinable_old: Vec<usize> = combinable.iter().copied().filter(|&k| !v8p.contains(&ps[k].name)).collect();
+    // (ENGINE.md 270.1: the perturbations added since draw their partners from a stream of their own, among every
+    // combinable one, and are no one else's partner: every other pair is as before.)
+    let own = engine::public_state::OWN_STREAM_PERTURBATIONS;
+    let combinable_old: Vec<usize> = combinable.iter().copied().filter(|&k| !v8p.contains(&ps[k].name) && !own.contains(&ps[k].name)).collect();
+    let combinable_v8: Vec<usize> = combinable.iter().copied().filter(|&k| !own.contains(&ps[k].name)).collect();
     // ENGINE.md 151.4: CR 508.8's record (`Turn::had_attackers`, game float `g5::COMBAT_GOES_ON`)
     // is compared with every state: the states it reaches, on layout v7 and on v6 (never vacuous).
     let goes_on = ps.iter().position(|p| p.name == "the declare blockers step follows an attacker that left combat").expect("151.4's perturbation");
@@ -1875,6 +1983,7 @@ fn public_states_encode_apart() {
         let stream = seed ^ (pi as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
         let mut partner_rng = Rng::new(stream ^ 0x5bd1_e995);
         let mut partner8_rng = Rng::new(stream ^ 0x0232_0232);
+        let mut partner_own_rng = Rng::new(stream ^ 0x0270_0270);
         // the states: (perturbations, description, views, v7 row hashes, v6 hashes)
         struct St {
             atoms: Vec<usize>,
@@ -1912,8 +2021,10 @@ fn public_states_encode_apart() {
             if !combinable.contains(&k) {
                 continue;
             }
-            let j = if v8p.contains(&ps[k].name) {
-                combinable[partner8_rng.below(combinable.len() as u32) as usize]
+            let j = if own.contains(&ps[k].name) {
+                combinable[partner_own_rng.below(combinable.len() as u32) as usize]
+            } else if v8p.contains(&ps[k].name) {
+                combinable_v8[partner8_rng.below(combinable_v8.len() as u32) as usize]
             } else {
                 combinable_old[partner_rng.below(combinable_old.len() as u32) as usize]
             };
@@ -2967,7 +3078,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
     // prediction at tilt 1, from a stream of its own)
     let (mut trng, mut tilted) = (Rng::new(106), 0);
-    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()) {
+    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()).chain(hogaak_positions()).chain(lands_a_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };

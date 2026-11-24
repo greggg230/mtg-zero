@@ -1298,6 +1298,11 @@ fn pool_kind(only: crate::db::Spend) -> usize {
 /// that is none of these is a loud failure), so distinct names encode apart: a card's identity and the
 /// face kind name one face (CR 201.2, 709.4, 712, 715, 722).
 pub fn name_face(db: &CardDb, d: DefId) -> (DefId, u8) {
+    // (A definition "becomes a copy of ..., except it has this ability" made of a face names that
+    // face: Thespian's Stage's in constructed play's table, ENGINE.md 270.1.)
+    if let Some(o) = db.kept_original(d) {
+        return name_face(db, o);
+    }
     let def = db.def(d);
     let Some(c) = def.front else { return (d, 0) };
     let card = db.def(c);

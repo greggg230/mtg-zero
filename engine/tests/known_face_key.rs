@@ -62,12 +62,14 @@ fn fuzz_seeds_466_and_4248_a_known_cards_face_choice_keeps_the_worlds_apart() {
         // IR, so the Flutes these games show have another id than when the cases were recorded, and the worlds of a
         // recorded `s` may be other decks. Seed 466's recorded `s` still reaches its face choice; 4248's world seed
         // is rescanned: 4, the first of 1..400 whose two worlds keep one node along the recorded path and name two
-        // known cards at its end - about one seed in four does.)
-        let s: u64 = if seed == 4248 { 4 } else { case["s"].as_str().unwrap().parse().unwrap() };
+        // known cards at its end - about one seed in four does; 5 since the Legacy Lands cards of lane A, three of
+        // them sorting before Disruptor Flute too, ENGINE.md 270.1.)
+        let s: u64 = if seed == 4248 { 5 } else { case["s"].as_str().unwrap().parse().unwrap() };
         let gspec = GameSpec { hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };
         let seat = |deck: Vec<u16>| Seat { deck, sideboard: Vec::new(), first_picks: Vec::new(), elsewhere: Vec::new() };
         // (The table's prior as the cases were recorded, before the Delver 75's five sideboard cards joined the
-        // constructed table, ENGINE.md 122, and the Legacy Hogaak Tempo deck's seven, 220: its draws depend on its
+        // constructed table, ENGINE.md 122, the Legacy Hogaak Tempo deck's seven, 220, and the Legacy Lands
+        // deck's, 270: its draws depend on its
         // whole support, and the worlds must be the recorded ones; ENGINE.md 129.1.)
         let later: Vec<u16> = [
             "Consign to Memory",
@@ -82,6 +84,12 @@ fn fuzz_seeds_466_and_4248_a_known_cards_face_choice_keeps_the_worlds_apart() {
             "Moonshadow",
             "Dryad Arbor",
             "Massacre",
+            "Dark Depths",
+            "Thespian's Stage",
+            "Blast Zone",
+            "Ghost Quarter",
+            "Maze of Ith",
+            "Bojuka Bog",
         ]
         .map(id)
         .to_vec();
