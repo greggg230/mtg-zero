@@ -1392,6 +1392,33 @@ free-cast condition in `spell_builder`). Lane C's Dryad Arbor rulings added a se
 ruling text Pact of Negation's row already had (one row per distinct text; `tools/rulings_doc.py` let the later win):
 folded into the one row, both cards named.
 
+### AC. Legacy Lands, lane B: Life from the Loam, Exploration, Carnivorous Cultivator // Enroot, Yavimaya, Cradle of Growth (ENGINE.md 270.2)
+
+No defect (entries 480-499 are this lane's; none used). The four Scryfall records (MTGGoldfish 8027955,
+`E:/mtg-zero-scratch/lands/raw/scryfall_lands_new.json`) parsed with the parser as it was, each line claimed by an
+existing recognizer; checked against the Oracle text and not defects:
+
+* **Life from the Loam**: `ReturnFromGraveyard { land, min_n: 0, max_n: 3, destination: hand, target_kind:
+  graveyard_land }` ("up to three target land cards from your graveyard"); "Dredge 3" (its reminder text stripped) is
+  the roto pool's `zone_abilities: [Dredge { n: 3 }]` (`cards/parser/roto_zones.py`, CR 702.52). The class joins the
+  legacy pool's schema: `CardPrinting.zone_abilities` is now the category `Dredge | GraveyardExileInstead`
+  (Leyline of the Void's), schema `180659137ece` -> `37d99217c47e`; every other printing's IR is byte for byte the
+  same (`powerlsv.ir.json`, `eoe.ir.json` but the schema hash).
+* **Exploration**: `grants_additional_land_per_turn: 1` (the printing keywords' parameterized "<N> additional
+  land(s)", `cube_enchantments._any_number_of_lands`' first branch; Fastbond's sentinel is the other).
+* **Carnivorous Cultivator // Enroot**: the preparation layout (`layout: prepare`) as Emeritus of Abundance's: the
+  creature's characteristics (`{1}{G}`, Elf Warlock 2/3, deathtouch, `enters_prepared`), the combat-damage trigger
+  `ReturnTargetCardFromYourGraveyardToHand { card_filter: Land }` (`deals_combat_damage`, `IsSelf(source) &
+  Subject(target, IsPlayer)`), and `prepare_spell` Enroot (`{G}` Sorcery, `SearchLibrary { Land, destination:
+  graveyard }`; "then shuffle" is the search's own, CR 701.23).
+* **Yavimaya, Cradle of Growth**: `grants_basic_land_type_to_all_lands: "Forest"` ("Each land is a Forest in addition
+  to its other land types"), legendary, no `produces` and `mana_only_from_produces`: its "{T}: Add {G}" is not
+  printed - it is the Forest type's intrinsic ability, Yavimaya being a land (CR 305.6), given by the engine with the
+  type (`CardDb::basic_abilities`). Reading the Scryfall `produced_mana: [G]` as a printed ability would be wrong:
+  under Magus of the Moon Yavimaya is no Forest (ENGINE.md 270.2).
+
+`tests/ir/test_legacy_lands_b.py` pins the four printings.
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."

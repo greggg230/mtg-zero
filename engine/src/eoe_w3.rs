@@ -150,6 +150,10 @@ pub(crate) const SEEN_W3_HOST: u8 = 1;
 pub(crate) const SEEN_W3_GRANT_ACT: u8 = 2;
 /// `W3State::seen`: a card gives other permanents a subtype.
 pub(crate) const SEEN_W3_SUBTYPE: u8 = 4;
+/// `W3State::seen`: the subtype a card gives is a basic land type, which brings
+/// a land its intrinsic mana ability (CR 305.6; Yavimaya, Cradle of Growth,
+/// ENGINE.md 270.2): the grant changes abilities too.
+pub(crate) const SEEN_W3_BASIC_TYPE: u8 = 8;
 
 /// The `SEEN_W3_*` bits of a definition (`W3Def::seen`, set as it is
 /// lowered).

@@ -42,23 +42,26 @@ pub(crate) fn lower_zone_abilities(l: &mut Lowerer, zone_abilities: &[cats::Dred
 /// <basic land type> in addition to its other land types" (Yavimaya, Cradle
 /// of Growth; CR 305.7's last sentence, 613.1d): a static ability of a
 /// permanent giving every land on the battlefield, whoever controls it, the
-/// type (the land cards elsewhere are not: Yavimaya's ruling 6d9a0b55-style
+/// type (the land cards elsewhere are not: Yavimaya's ruling 6466518a,
 /// "Land cards not on the battlefield aren't Forests"), and with it the
 /// type's intrinsic mana ability (305.6: `CardDb::basic_abilities`,
 /// `Game::granted_activated`). Applied by `Game::granted_subtype_ts` (EoE
 /// W3's "artifacts you control are Foods"), which leaves it out while its
 /// source is a nonbasic land that is a Mountain (CR 305.7, 613.8a: it
 /// depends on the "nonbasic lands are Mountains" effect, which removes it).
-pub(crate) fn lower_land_type_grant(l: &mut Lowerer, def: &mut crate::db::CardDef, grant: &Option<String>) {
-    let Some(t) = grant.as_deref() else { return };
+/// True when it gives one (`eoe_w3::SEEN_W3_BASIC_TYPE`: the type brings an
+/// ability).
+pub(crate) fn lower_land_type_grant(l: &mut Lowerer, def: &mut crate::db::CardDef, grant: &Option<String>) -> bool {
+    let Some(t) = grant.as_deref() else { return false };
     if !matches!(t, "Plains" | "Island" | "Swamp" | "Mountain" | "Forest") {
         l.unsupported(format!("CardPrinting.grants_basic_land_type_to_all_lands({t}: not a basic land type)"));
-        return;
+        return false;
     }
     if !def.is(types::PERMANENT) {
         l.unsupported("CardPrinting.grants_basic_land_type_to_all_lands(not a permanent)");
-        return;
+        return false;
     }
-    let Some(sub) = l.given_subtype("CardPrinting.grants_basic_land_type_to_all_lands", t) else { return };
+    let Some(sub) = l.given_subtype("CardPrinting.grants_basic_land_type_to_all_lands", t) else { return false };
     def.w3.grants_subtype.push((Filter::Type(types::LAND), sub));
+    true
 }

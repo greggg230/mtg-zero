@@ -817,7 +817,7 @@ a5afe2a8	c	NR	casting the exiled alternate-spell copy isnt an alt cost itself, s
 f028f400	a	copies	losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy
 b775049c	a	copies	losing creature status or copying something else doesnt undo being prepared; the copy stays castable
 c6772882	c	NR	an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared [part 3, was a/replacement: no cube effect makes a creature unprepared (only casting the prepared spell, tested)]
-8c23b69e	c	NR	choosing a card name may select this kind of alternate spell's name [part 3, was a/dfc: the cube's naming cards look at cards outside the stack, where a prepare spell's name never matches; naming it is naming a card that isn't there]
+8c23b69e	a	dfc	choosing a card name may select a prepare spell's name: Disruptor Flute (constructed play's table) names Enroot, taxing the prepare copy (CR 201.3, 723; ENGINE.md 270.2) [was c NR in part 3: the cube's naming cards named only cards outside the stack]
 341b5cd9	a	other	only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner
 81739185	a	dfc	a card with this kind of alternate spell can only be cast with its base characteristics, unless it's prepared
 94077065	a	copies	copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception
@@ -1318,3 +1318,17 @@ c5c89b6e	a	other	Dryad Arbor changed into another basic land type (a Mountain un
 9da0e7ba	a	other	Forest is a land type and Dryad a creature type (CR 205.3i, 205.3m): fetchable as a Forest
 2c34d4ba	a	other	changed into another basic land type it is still a green Dryad creature (CR 305.7)
 c0965c9d	a	zones	flash would lift only the timing of a land play: never on another player's turn, never without a land play left (CR 305.2b, 305.3); no card of the tables gives a land flash
+d3cba85a	a	replacement	dredge replaces any draw, not only the draw step's (CR 702.52a)
+cb6b05ff	a	replacement	a card put into a hand without the word draw is no draw: no dredge (CR 121.1)
+43bacf7c	a	replacement	draws one at a time: each may be dredged, by a card an earlier dredge milled too (CR 121.2, 121.6b)
+ea37d02f	a	replacement	dredging is done at once: no action between the choice, the mill and the return (CR 702.52a)
+41dfb0fe	a	replacement	one draw is replaced by one dredge ability at most (CR 614.5)
+ebef1beb	a	replacement	no dredge with fewer than N cards in the library (CR 702.52b)
+08f2525f	a	zones	additional land plays are cumulative, Explorations' with each other's and Fastbond's (CR 305.2)
+689c6d88	a	copies	a permanent already prepared isn't prepared again: no second copy (CR 723.3a)
+2d0caf19	a	dfc	a preparation card is a creature card in every zone, its own mana value and colour (CR 723.2)
+3e90518e	a	copies	the prepare copy ignores the creature's copy exceptions (CR 723.3c)
+eeba768b	a	dfc	a preparation card is cast only with its base characteristics (CR 723.3)
+6466518a	a	other	land cards not on the battlefield aren't Forests by Yavimaya (CR 305.7, 611.3)
+5bfb8e33	a	other	each land on the battlefield is a Forest with {T}: Add {G}, nothing else changes (CR 305.6, 305.7)
+7bbd22d4	a	other	Yavimaya isn't a Forest off the battlefield (CR 305.7)

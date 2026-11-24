@@ -54,7 +54,7 @@ impl Game {
         if left > 0 || step {
             self.agenda.push(Task::DrawRest { p, n: left, ev: self.ev_seq, step });
         }
-        self.agenda.push(Task::Dredge { p, ev: self.ev_seq, step: false, inst: false });
+        self.agenda.push(Task::Dredge { p, ev: self.ev_seq, step: false, forced: false });
     }
 
     /// `Task::Dredge`: `p` chooses whether a dredge ability of a card in
@@ -63,26 +63,27 @@ impl Game {
     /// choose; one draw is replaced by one dredge ability at most, the
     /// card's ruling). `ChooseGraveyardCard`: `LIBRARY` + the card's slot in
     /// the graveyard list = that card's dredge; `PASS` = not to dredge (the
-    /// draw goes on: its other replacements, then the draw; `inst`: the
-    /// instruction's replacements, then its draws, each asked again).
-    pub(crate) fn dredge_choice(&mut self, p: PlayerId, ev: u32, step: bool, inst: bool) {
+    /// draw goes on: its other replacements, then the draw). `forced`: the
+    /// drawer chose to apply dredge first among the replacements of a
+    /// one-card instruction (`Task::DrawOrder`'s `NUMBER` 7): which card's,
+    /// no `PASS` (applying it is dredging); then, `step`, the draw step's
+    /// beginning event.
+    pub(crate) fn dredge_choice(&mut self, p: PlayerId, ev: u32, step: bool, forced: bool) {
         match self.answer.take() {
             Some(Choice::Card(c)) => {
                 let saved = self.ev_seq;
                 self.ev_seq = ev;
                 self.dredge(p, c);
-                if inst && step {
+                if forced && step {
                     self.event(crate::triggers::Event::player(crate::db::EventKind::BeginningOfDrawStep, p));
                 }
                 self.ev_seq = saved;
             }
             Some(Choice::Pass) => {
+                debug_assert!(!forced);
                 let saved = self.ev_seq;
                 self.ev_seq = ev;
-                if inst {
-                    let cut = self.draw_instruction_replaced(p, 1, step);
-                    self.draw_cut(p, cut, step);
-                } else if let Some(card) = self.draw(p) {
+                if let Some(card) = self.draw(p) {
                     // (The miracle question, before the instruction's draws
                     // left: the `Task::DrawRest` under this task.)
                     self.queue_miracle(p, card, 0, false);
@@ -94,8 +95,10 @@ impl Game {
                 let cards = self.dredgers(p);
                 assert!(!cards.is_empty() && !self.draw_disallowed(p), "a dredge question with no dredge ability that applies");
                 let mut opts: Vec<Opt> = cards.into_iter().map(|c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }).collect();
-                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                self.ask(Task::Dredge { p, ev, step, inst }, p, DecisionKind::ChooseGraveyardCard, opts);
+                if !forced {
+                    opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                }
+                self.ask(Task::Dredge { p, ev, step, forced }, p, DecisionKind::ChooseGraveyardCard, opts);
             }
         }
     }

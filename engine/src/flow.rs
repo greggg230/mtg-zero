@@ -51,13 +51,11 @@ pub(crate) enum Task {
     DrawOrder { p: PlayerId, plus: u32, ev: u32, step: bool },
     /// CR 702.52a, 616.1: may `p` replace their next draw with a dredge
     /// ability of a card in their graveyard (`Game::dredge_choice`), in event
-    /// group `ev`. `inst`: the draw is a one-card instruction another
-    /// replacement could still modify as a whole ("draw that many plus d",
-    /// Quantum Riddler): declining applies the instruction's replacements,
-    /// then its draws one at a time (each asked again), and `step` is the
-    /// draw step's (its beginning event after it). Otherwise the draws left
-    /// and the step's event are a `Task::DrawRest` under it.
-    Dredge { p: PlayerId, ev: u32, step: bool, inst: bool },
+    /// group `ev`; the draws left and the draw step's event are a
+    /// `Task::DrawRest` under it. `forced`: `p` chose to apply dredge first
+    /// among a one-card instruction's replacements (`Task::DrawOrder`): which
+    /// card's, then (`step`) the draw step's beginning event.
+    Dredge { p: PlayerId, ev: u32, step: bool, forced: bool },
     /// CR 613.7m: the active player orders the timestamps of the objects
     /// given ones simultaneously since `first` (`Game::order_timestamps`).
     OrderTimestamps { first: u32, settled: bool, picked: Vec<CardIdx> },
@@ -504,7 +502,7 @@ impl Game {
             Task::MiracleReveal { p, card } => self.miracle_reveal(p, card),
             Task::DrawRest { p, n, ev, step } => self.draw_rest(p, n, ev, step),
             Task::DrawOrder { p, plus, ev, step } => self.draw_order(p, plus, ev, step),
-            Task::Dredge { p, ev, step, inst } => self.dredge_choice(p, ev, step, inst),
+            Task::Dredge { p, ev, step, forced } => self.dredge_choice(p, ev, step, forced),
             Task::OrderTimestamps { first, settled, picked } => self.order_timestamps(first, settled, picked),
             Task::PutTriggers { page } => self.put_triggers(page),
             Task::PriorityAsk { page } => self.priority_ask(page),

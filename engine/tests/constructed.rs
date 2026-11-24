@@ -211,9 +211,11 @@ fn the_hogaak_75_and_its_provenance() {
     assert_eq!(in_main, ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor"]);
     let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
     assert_eq!(side_only, ["Consign to Memory", "Massacre"]);
-    // The seven new cards are the registry's last lines, in the deck's order (identities 569-575).
+    // The seven new cards are seven consecutive lines of the registry, in the deck's order (identities 569-575;
+    // the Legacy Lands cards follow them, ENGINE.md 270).
+    let first = reg.iter().position(|&n| n == "Hogaak, Arisen Necropolis").unwrap();
     assert_eq!(
-        reg[reg.len() - 7..],
+        reg[first..first + 7],
         ["Hogaak, Arisen Necropolis", "Stitcher's Supplier", "Mockingbird", "Dark Matter Manipulator", "Moonshadow", "Dryad Arbor", "Massacre"]
     );
 }
@@ -359,24 +361,30 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     assert_eq!(k as usize, engine::db::load_legacy_document().cards.len());
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
     assert_eq!(cube.face_down_def() as usize, cube.len() - 1);
-    // The legacy cards make no token; their faces are Rough // Tumble's two
+    // The legacy cards make no token; their faces are Carnivorous Cultivator's
+    // prepare spell Enroot (CR 723, ENGINE.md 270.2) and Rough // Tumble's two
     // halves (a split card, ENGINE.md 122), each with its card's identity,
     // after the cube's tokens and faces.
     let rt = con.id("Rough // Tumble").unwrap();
+    let cc = con.id("Carnivorous Cultivator // Enroot").unwrap();
     let ik_all = identity::identities(con);
     let faces: Vec<usize> = (cube.len() - 1 + k as usize..con.face_down_def() as usize).collect();
     let names: Vec<&str> = faces.iter().map(|&i| con.def(i as u16).name.as_str()).collect();
-    assert_eq!(names, ["Rough", "Tumble"]);
-    for &i in &faces {
-        assert!(con.is_face(i as u16) && !con.def(i as u16).token && con.def(i as u16).front == Some(rt));
-        assert_eq!(ik_all[i], ik_all[rt as usize], "a face has its card's identity");
+    assert_eq!(names, ["Enroot", "Rough", "Tumble"]);
+    for (j, &i) in faces.iter().enumerate() {
+        let card = if j == 0 { cc } else { rt };
+        assert!(con.is_face(i as u16) && !con.def(i as u16).token && con.def(i as u16).front == Some(card));
+        assert_eq!(ik_all[i], ik_all[card as usize], "a face has its card's identity");
     }
-    assert_eq!(con.def(rt).halves, Some((faces[0] as u16, faces[1] as u16)));
+    assert_eq!(con.def(cc).prepare, Some(faces[0] as u16));
+    assert_eq!(con.def(rt).halves, Some((faces[1] as u16, faces[2] as u16)));
     // Then, at the end, the abilities of a nonbasic land that is a Mountain
     // (Magus of the Moon's, CR 305.7: EoE W2's `moon_base` and one variant per
     // definition with latent abilities, ENGINE.md 99.12, 123).
     let latent = (0..con.len()).filter(|&i| con.def(i as u16).latent > 0 && !con.def(i as u16).name.is_empty()).count();
-    assert_eq!(con.len(), cube.len() + k as usize + faces.len() + 1 + latent, "the legacy faces; the Mountain's definitions");
+    // (And the five basic land types' intrinsic mana abilities, which Yavimaya, Cradle of Growth's Forest grant
+    // brings: `CardDb::basic_abilities`, CR 305.6, ENGINE.md 270.2; the cube's table has none.)
+    assert_eq!(con.len(), cube.len() + k as usize + faces.len() + 1 + latent + 5, "the legacy faces; the Mountain's definitions; the basic land types' abilities");
     // (the Mountain's definitions: no name, a registered key, as in the EoE table)
     for i in con.face_down_def() as usize + 1..con.len() {
         assert!(con.def(i as u16).name.is_empty() && ik_all[i] != identity::UNKNOWN, "definition {i}");

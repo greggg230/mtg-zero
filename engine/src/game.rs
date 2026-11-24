@@ -3252,39 +3252,25 @@ impl Game {
     /// question (`step`: the draw step's, whose beginning event follows the
     /// draws).
     pub(crate) fn draw_instruction(&mut self, p: PlayerId, n: u32, step: bool) -> Drew {
-        // A one-card instruction Quantum Riddler's "draw that many plus d"
-        // would modify as a whole, and a dredge ability that would replace
-        // the draw: the drawer chooses which applies first (CR 616.1, 121.2a,
-        // 702.52a). Asked as "dredge now, or not": declining lets the
-        // instruction's replacements apply, then each of its draws is asked
-        // again (`Task::Dredge` with `inst`; ENGINE.md 270.2).
-        if n == 1 && self.seen & SEEN_DRAW_REPL != 0 && self.draw_plus(p) > 0 && self.dredge_due(p) {
-            self.agenda.push(crate::flow::Task::Dredge { p, ev: self.ev_seq, step, inst: true });
-            return Drew::Asked;
-        }
-        self.draw_instruction_replaced(p, n, step)
-    }
-
-    /// [`draw_instruction`](Self::draw_instruction) once a dredge ability
-    /// was declined for its one card as a whole (`Task::Dredge`'s `inst`):
-    /// the instruction's replacements, then its draws one at a time.
-    pub(crate) fn draw_instruction_replaced(&mut self, p: PlayerId, n: u32, step: bool) -> Drew {
         let mut n = n;
-        // One card, which an opponent's Hullbreacher would replace too, and
-        // Quantum Riddler's "draw that many plus one": both replace the same
-        // draw, and the drawer chooses the order (CR 616.1;
-        // `Task::DrawOrder`). (To more than one card Quantum Riddler applies
-        // first, to the instruction, its ruling: then Hullbreacher to each
-        // draw.)
-        if n == 1 && self.seen & SEEN_DRAW_REPL != 0 && self.opp_draw_token(p).is_some() {
+        // One card, which an opponent's Hullbreacher or the drawer's dredge
+        // ability would replace too, and Quantum Riddler's "draw that many
+        // plus one": they replace the same draw, and the drawer chooses the
+        // order (CR 616.1; `Task::DrawOrder`). (To more than one card Quantum
+        // Riddler applies first, to the instruction, its ruling: then
+        // Hullbreacher and dredge to each draw.)
+        if n == 1 && self.seen & SEEN_DRAW_REPL != 0 {
+            let token = self.opp_draw_token(p).is_some();
             let plus = self.draw_plus(p);
-            if plus > 0 {
+            if plus > 0 && (token || self.dredge_due(p)) {
                 self.agenda.push(crate::flow::Task::DrawOrder { p, plus, ev: self.ev_seq, step });
                 return Drew::Asked;
             }
-            // (A dredge ability of the drawer's may replace it first: the
-            // drawer's order, CR 616.1.)
-            return self.draw_seq(p, 1, step);
+            if token {
+                // (A dredge ability of the drawer's may replace it first: the
+                // drawer's order, CR 616.1.)
+                return self.draw_seq(p, 1, step);
+            }
         }
         if n > 0 && self.seen & SEEN_DRAW_REPL != 0 {
             let plus = self.draw_plus(p);
@@ -3307,14 +3293,20 @@ impl Game {
             .sum()
     }
 
-    /// CR 616.1: `p` orders an opponent's "create a token instead" and
-    /// their own "draw that many plus `plus` instead" on one draw: `NUMBER`
+    /// CR 616.1: `p` orders an opponent's "create a token instead", their
+    /// own dredge ability (CR 702.52a: `NUMBER` 7 = dredge first, then which
+    /// card, `Task::Dredge` with `forced`; ENGINE.md 270.2) and their own
+    /// "draw that many plus `plus` instead" on one draw: `NUMBER`
     /// 5 = the token first (no draw is left to add to: one token), 6 = the
     /// added draws first (each draw then replaced). Then as the draw
     /// instruction would go on (`ev`, `step`: `draw_rest`'s).
     pub(crate) fn draw_order(&mut self, p: PlayerId, plus: u32, ev: u32, step: bool) {
         match self.answer.take() {
             Some(Choice::Number(k)) => {
+                if k == 7 {
+                    self.agenda.push(crate::flow::Task::Dredge { p, ev, step, forced: true });
+                    return;
+                }
                 let saved = self.ev_seq;
                 self.ev_seq = ev;
                 let cut = if k == 5 {
@@ -3331,9 +3323,14 @@ impl Game {
             }
             Some(other) => unreachable!("draw order answer {other:?}"),
             None => {
-                let opts = [5u8, 6]
+                // (The token first only when an opponent's would apply; dredge
+                // first only with a dredge ability that would.)
+                let token = self.opp_draw_token(p).is_some();
+                let dredge = self.dredge_due(p);
+                let opts = [(5u8, token), (6, true), (7, dredge)]
                     .iter()
-                    .map(|&k| crate::decision::Opt { action: crate::decision::act::NUMBER + k as u16, choice: Choice::Number(k) })
+                    .filter(|x| x.1)
+                    .map(|&(k, _)| crate::decision::Opt { action: crate::decision::act::NUMBER + k as u16, choice: Choice::Number(k) })
                     .collect();
                 self.ask(crate::flow::Task::DrawOrder { p, plus, ev, step }, p, crate::decision::DecisionKind::ChooseReplacement, opts);
             }

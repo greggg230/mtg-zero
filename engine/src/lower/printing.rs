@@ -2090,9 +2090,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
     // "Each land is a Forest in addition to its other land types" (Yavimaya; ENGINE.md 270.2).
-    super::lands_b::lower_land_type_grant(l, &mut def, grants_basic_land_type_to_all_lands);
+    let basic_grant = super::lands_b::lower_land_type_grant(l, &mut def, grants_basic_land_type_to_all_lands);
     super::eoe_w6::printing_w6_grants(&mut def, *grants_blue_mana_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);
+    if basic_grant {
+        def.w3.seen |= crate::eoe_w3::SEEN_W3_BASIC_TYPE;
+    }
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     crate::eoe_w6::finish_def(&mut def);
     // "Mana of the chosen color": a colour chosen as it enters (or, for a
