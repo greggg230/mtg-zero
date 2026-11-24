@@ -141,13 +141,13 @@ def DIGEST(d, games=(2000, 500)):
 
 
 D_FORMATS = {'constructed': '63f58560ad7b3df0', 'eoe': 'b36df9098a38d794', 'driver': '837d42c28214befe',
-             'metagame': '0123456789abcdef', 'pair': 'fedcba9876543210'}
+             'metagame': '0123456789abcdef', 'pair': 'fedcba9876543210', 'pair_around': 'abcdef0123456789'}
 
 
-def FORMATS(digests=None, passed=5):
-    """digest_formats' output as the five tests print it (ENGINE.md 148.1, 176, 223), in the order they finished."""
+def FORMATS(digests=None, passed=6):
+    """digest_formats' output as the six tests print it (ENGINE.md 148.1, 176, 223, 261), in the order they finished."""
     d = dict(D_FORMATS, **(digests or {}))
-    return ('running 5 tests\n'
+    return ('running 6 tests\n'
             'driver (8 threads, 2 groups of 8 games): 20000 batches, 90491 rows, 1251 samples (the first at batch 7532), '
             '5 results (the first at batch 12020); sims 85674, leaves 90491, cache hits 51316, view rows 10061, belief '
             'rows 2159, busy 4.1 s (47.9 us a simulation)\n'
@@ -159,6 +159,8 @@ def FORMATS(digests=None, passed=5):
             'test metagame_digests ... ok\n'
             f'pair: 70 best-of-three matches in 6.0 s; combined digest {d["pair"]}\n'
             'test pair_digests ... ok\n'
+            f'pair_around: 40 best-of-three matches in 3.0 s; combined digest {d["pair_around"]}\n'
+            'test pair_around_digests ... ok\n'
             f'eoe: 160 games in 38.4 s; combined digest {d["eoe"]}\n'
             'test eoe_digests ... ok\n\n'
             f'test result: ok. {passed} passed; 0 failed; 0 ignored; 0 measured; {30 - passed} filtered out; '
@@ -803,24 +805,25 @@ def test_a_failed_retry_fails_the_step(core_step):
 
 
 def test_the_digest_formats_checker():
-    """digest_formats (ENGINE.md 148.1, 157, 176, 223): exactly one line each of constructed, eoe, driver, metagame and
-    pair, no re-record, the binary's one "test result: ok. 5 passed" line + exit 0 - the five digests named in the reason
-    and the report."""
+    """digest_formats (ENGINE.md 148.1, 157, 176, 223, 261): exactly one line each of constructed, eoe, driver, metagame,
+    pair and pair_around, no re-record, the binary's one "test result: ok. 6 passed" line + exit 0 - the six digests
+    named in the reason and the report."""
     check = G.check_digest_formats
     ok, why, extra = check(FORMATS(), 0)
     assert ok and extra['formats'] == D_FORMATS and all(f'{n} {d}' in why for n, d in D_FORMATS.items())
     out = FORMATS()
     assert not check(out.replace('eoe: 160', 'eoe (encodings off): 160'), 0)[0]          # a line missing
     ok, why, _ = check(out + f'constructed: x; combined digest {D_FORMATS["constructed"]}\n', 0)
-    assert not ok and '6 "<name>' in why                                                  # a line twice
-    ok, why, _ = check(out.replace('test result: ok. 5 passed', 'wrote E:/x/engine/tests/data/digests_eoe.txt\n'
-                                   'test result: ok. 5 passed'), 0)
+    assert not ok and '7 "<name>' in why                                                  # a line twice
+    ok, why, _ = check(out.replace('test result: ok. 6 passed', 'wrote E:/x/engine/tests/data/digests_eoe.txt\n'
+                                   'test result: ok. 6 passed'), 0)
     assert not ok and 'RE-RECORDED' in why                                                # DIGEST_WRITE
-    ok, why, _ = check(FORMATS(passed=4), 0)
-    assert not ok and '4 passed, not the 5' in why
-    assert not check(out.replace('test result: ok. 5 passed; 0 failed', 'test result: FAILED. 4 passed; 1 failed'), 101)[0]
+    ok, why, _ = check(FORMATS(passed=5), 0)
+    assert not ok and '5 passed, not the 6' in why
+    assert not check(out.replace('test result: ok. 6 passed; 0 failed', 'test result: FAILED. 5 passed; 1 failed'), 101)[0]
     assert not check(out.replace('metagame: 225', 'metagame (encodings off): 225'), 0)[0]   # the metagame line missing
     assert not check(out.replace('pair: 70', 'pair (encodings off): 70'), 0)[0]             # the pair line missing
+    assert not check(out.replace('pair_around: 40', 'pair_around (encodings off): 40'), 0)[0]  # the pair_around line
     assert not check(out, 1)[0]
     assert 'did it compile' in check('error[E0425]: cannot find value\n', 101)[1]
 

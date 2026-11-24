@@ -174,7 +174,10 @@ impl Eq for Share {}
 /// 60s from the same restricted prior, untilted. A self-play setting: the evaluation spec drops it (`eval_json`).
 /// Without the key every spec is what it was. `"per_seat": true` (ENGINE.md 168.1; default false): each seat is
 /// dealt independently with probability p (`matches::dealt_seats`), so a match has none, one or two dealt seats; with
-/// two, nobody decides at a sideboarding and seat 1's deals come from a stream of their own.
+/// two, nobody decides at a sideboarding and seat 1's deals come from a stream of their own. `"around": "table"`
+/// (ENGINE.md 261; default `"main"`, the deal above): each deal's swaps are counted from the 60 the dealt seat's choice
+/// table picks for the deal's context (the next game, whether it sideboards first, its game wins less the other's,
+/// whether the other seat is dealt) instead of the main - the main for a seat without a table; any other value refused.
 ///
 /// Sideboarding by a choice table (ENGINE.md 168.3): `"sideboard_table": {"version": name, "list": [[name, copies],
 /// ...], "choices": [[game, first, lead, opp_dealt, [copies per list entry]], ...]}` (a constructed best-of-three
@@ -334,19 +337,42 @@ pub struct DealtDecks {
     /// Each seat dealt independently with probability `p` (ENGINE.md 168.1); false: one dealt seat with probability
     /// `p`, each seat 1/2 (ENGINE.md 154).
     pub per_seat: bool,
+    /// What a dealt 60 is dealt around (ENGINE.md 261, `"around"`; default `Main`: ENGINE.md 154's deal, unchanged).
+    pub around: DealtAround,
+}
+
+/// The base a dealt 60's swaps are counted from (ENGINE.md 261, the spec's `dealt_decks.around`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DealtAround {
+    /// `"main"` (the default): the registered main (ENGINE.md 154, 168.1).
+    #[default]
+    Main,
+    /// `"table"`: the 60 the seat's choice table picks for the deal's context (the next game, whether the dealt seat
+    /// sideboards first, its game wins less the other's, whether the other seat is dealt - `table_action`'s context,
+    /// ENGINE.md 168.3, 240); the main for a seat without a table.
+    Table,
 }
 
 impl DealtDecks {
     /// `{"p": p, "swaps": [lo, hi]}`: p in (0, 1], 0 <= lo <= hi <= 15 (a constructed sideboard's most; the spec
-    /// checks each seat's own sideboard), no other key.
+    /// checks each seat's own sideboard), optional `"per_seat"` (a boolean) and `"around"` (`"main"` or `"table"`), no
+    /// other key.
     fn parse(x: &Value) -> Result<DealtDecks, String> {
         let o = x.as_object().ok_or("mtg spec: dealt_decks must be {\"p\": share, \"swaps\": [lo, hi]} (ENGINE.md 154)")?;
-        if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "p" | "swaps" | "per_seat")) {
-            return Err(format!("mtg spec: unknown dealt_decks key {k:?} (p, swaps, per_seat)"));
+        if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "p" | "swaps" | "per_seat" | "around")) {
+            return Err(format!("mtg spec: unknown dealt_decks key {k:?} (p, swaps, per_seat, around)"));
         }
         let per_seat = match o.get("per_seat") {
             None => false,
             Some(v) => v.as_bool().ok_or("mtg spec: dealt_decks.per_seat must be a boolean (ENGINE.md 168.1)")?,
+        };
+        let around = match o.get("around") {
+            None => DealtAround::Main,
+            Some(v) => match v.as_str() {
+                Some("main") => DealtAround::Main,
+                Some("table") => DealtAround::Table,
+                _ => return Err(format!("mtg spec: dealt_decks.around {v}: \"main\" (the registered main) or \"table\" (the seat's choice table's 60 for the context; ENGINE.md 261)")),
+            },
         };
         let p = o
             .get("p")
@@ -364,7 +390,7 @@ impl DealtDecks {
             (Some(lo), Some(hi)) if lo <= hi => (lo as u8, hi as u8),
             _ => return Err(format!("mtg spec: dealt_decks.swaps {} must be [lo, hi] with 0 <= lo <= hi <= {most} (a sideboard's most)", Value::Array(a.clone()))),
         };
-        Ok(DealtDecks { p: Share(p), swaps: (lo, hi), per_seat })
+        Ok(DealtDecks { p: Share(p), swaps: (lo, hi), per_seat, around })
     }
 }
 
@@ -1207,11 +1233,11 @@ impl MtgAz {
                     let ds = matches::dealt_seats(seed, dd.p.0);
                     for d in 0..2u8 {
                         if ds[d as usize] {
-                            az.set_dealt(d, dd.swaps, &seats[d as usize], seed);
+                            az.set_dealt(d, dd.swaps, &seats[d as usize], seed, dd.around);
                         }
                     }
                 } else if let Some(d) = matches::dealt_seat(seed, dd.p.0) {
-                    az.set_dealt(d, dd.swaps, &seats[d as usize], seed);
+                    az.set_dealt(d, dd.swaps, &seats[d as usize], seed, dd.around);
                 }
             }
             // (ENGINE.md 168.3: the seats that sideboard by the choice table - its list is their 75; ENGINE.md 240: or each

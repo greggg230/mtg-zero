@@ -211,7 +211,14 @@ impl Bo3Log {
         let mut spec_json = if bo1 {
             json!({"kind": "bo1-spec", "lists": lists, "mains": mains, "max_turns": spec.max_turns})
         } else {
-            let dealt = spec.dealt_decks.map(|d| json!({"p": d.p.0, "swaps": [d.swaps.0, d.swaps.1], "per_seat": d.per_seat}));
+            let dealt = spec.dealt_decks.map(|d| {
+                let mut v = json!({"p": d.p.0, "swaps": [d.swaps.0, d.swaps.1], "per_seat": d.per_seat});
+                // (ENGINE.md 261: only when not the default, so every other spec line is what it was)
+                if d.around == super::DealtAround::Table {
+                    v["around"] = json!("table");
+                }
+                v
+            });
             json!({
                 "kind": "bo3-spec", "lists": lists, "mains": mains, "dealt_decks": dealt,
                 "table": spec.sideboard_table.as_ref().map(|t| t.version.clone()), "start_game": spec.start_game,

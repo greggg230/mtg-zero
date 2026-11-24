@@ -16,6 +16,8 @@ mod build;
 mod constructed;
 #[path = "constructed_bo3.rs"]
 mod constructed_bo3;
+#[path = "dealt_around.rs"]
+mod dealt_around;
 #[path = "dealt_integrated.rs"]
 mod dealt_integrated;
 #[path = "dealt_per_seat.rs"]

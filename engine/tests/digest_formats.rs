@@ -559,6 +559,33 @@ fn pair_digests() {
     finish("pair", "digests_pair.txt", "70 best-of-three matches", &lines, t);
 }
 
+/// The pair digest's specs dealing around each seat's choice table (ENGINE.md 261, `dealt_decks.around` "table"): the
+/// preset's pairing with a table per deck (20 matches), the Delver mirror (10) and the fixed two-75 spec with its seat
+/// tables (10). A spec of its own: `pair_digests`' specs (around the main) are unchanged.
+#[test]
+#[ignore]
+fn pair_around_digests() {
+    let t = std::time::Instant::now();
+    let around_v = |mut v: serde_json::Value| {
+        v["dealt_decks"]["around"] = serde_json::json!("table");
+        v
+    };
+    let around = |v: serde_json::Value| MtgSpec::parse(&around_v(v).to_string()).unwrap();
+    let dd = around(pair_value(&[0, 1], Some(0.0)));
+    assert!(dd.dealt_decks.is_some_and(|d| d.per_seat && d.around == engine::az::DealtAround::Table), "the preset's shape, around the tables");
+    let mirror = around(pair_value(&[0], None));
+    let fixed = MtgSpec::parse(&engine::az::metagame::Metagame::pair_json(&around_v(pair_value(&[0, 1], Some(0.5))).to_string(), [1, 0]).unwrap()).unwrap();
+    assert!(fixed.seat_tables.iter().all(|t| t.is_some()), "the fixed spec's seat tables");
+    let cell = |s: &MtgSpec, seed: u64| s.pairing(seed).map_or("f".to_string(), |p| format!("{}{}", p.decks[0], p.decks[1]));
+    let mut lines = Vec::new();
+    for (tag, s, n, base) in [("ap", &dd, 20u64, 6500u64), ("am", &mirror, 10, 6600), ("af", &fixed, 10, 6700)] {
+        for seed in 0..n {
+            lines.push(format!("{tag} {seed} {} {:016x}", cell(s, base + seed), play::<MtgAz>(s, base + seed, None)));
+        }
+    }
+    finish("pair_around", "digests_pair_around.txt", "40 best-of-three matches", &lines, t);
+}
+
 #[test]
 #[ignore]
 fn eoe_digests() {

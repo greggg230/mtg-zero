@@ -353,14 +353,23 @@ _META3_LAUNCH = dict(aux_belief_w=0.25, aux_deck_w=0.5, belief_mix=0.25, blocks=
                      train_prefetch=2, train_static=1, train_tf32=1, value_q=0.6, value_q_warmup=0, window_cache=1,
                      window_sparse=1, shard_writer_thread=1, shard_writer_queue_mb=2048, game_records=1)
 PAIR_DEALT = {'p': 0.85, 'swaps': [0, 15], 'per_seat': True}
+# (docs/ENGINE.md 261: the dealt 60s around each seat's choice table instead of its main - `pair_varied_specs(...,
+# around='table')`, or `dealt_decks` with 'around'; no preset uses it by default)
+DEALT_AROUND = ('main', 'table')
 PAIR_GAMES = 1018
 
 
-def pair_varied_specs(a, b, forced_find_p=0.0, dealt_decks=PAIR_DEALT, max_turns=60):
+def pair_varied_specs(a, b, forced_find_p=0.0, dealt_decks=PAIR_DEALT, max_turns=60, around=None):
     """(the self-play spec, the evaluation spec) of the stew specialist of decks `a`, `b` (names of data/decks/; a == b:
     the mirror) - docs/ENGINE.md 240: decklists.pairing_spec in best-of-three (game 1 played, one episode per game) with
     each seat dealt from its own 75 (`dealt_decks`), and the forced find (Doomsday for Thassa's Oracle at
-    `forced_find_p`; None: none) when a deck's 75 holds both (the engine refuses it where it could never apply)."""
+    `forced_find_p`; None: none) when a deck's 75 holds both (the engine refuses it where it could never apply).
+    `around` (docs/ENGINE.md 261): None keeps `dealt_decks` as given; 'main' or 'table' sets its `around` (each dealt 60
+    around the seat's main, or its choice table's 60 for the context)."""
+    if around is not None:
+        if around not in DEALT_AROUND or not dealt_decks:
+            raise ValueError(f'around {around!r}: one of {DEALT_AROUND}, with dealt decks (docs/ENGINE.md 261)')
+        dealt_decks = dict(dealt_decks, around=around)
     spec = decklists.pairing_spec(a, b, fmt='bo3', max_turns=max_turns, game_episodes=True, start_game=1,
                                   dealt_decks=dealt_decks)
     ff = forced_find_p is not None and any(
@@ -370,10 +379,10 @@ def pair_varied_specs(a, b, forced_find_p=0.0, dealt_decks=PAIR_DEALT, max_turns
     return sp, eval_spec(sp)
 
 
-def pair_varied_settings(a, b, forced_find_p=0.0, smoke=False):
+def pair_varied_settings(a, b, forced_find_p=0.0, smoke=False, dealt_decks=PAIR_DEALT, around=None):
     """The settings of the stew specialist of decks `a`, `b` (docs/ENGINE.md 240): `legacy-pair-bo3-varied`'s (or its
-    CPU smoke's) with the pairing's specs."""
-    sp, ev = pair_varied_specs(a, b, forced_find_p)
+    CPU smoke's) with the pairing's specs (`dealt_decks`, `around`: `pair_varied_specs`'s)."""
+    sp, ev = pair_varied_specs(a, b, forced_find_p, dealt_decks=dealt_decks, around=around)
     return dict(PRESETS['legacy-pair-bo3-varied-smoke' if smoke else 'legacy-pair-bo3-varied'], spec=sp, eval_spec=ev)
 
 

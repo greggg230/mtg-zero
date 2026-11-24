@@ -841,6 +841,32 @@ fn dealt_main(sp: &crate::az::MtgSpec, p: usize, seed: u64) -> (Vec<u16>, (usize
     (main, (dd.swaps.0 as usize, dd.swaps.1 as usize))
 }
 
+/// The base dealt seat `q`'s 60 for game `game` (2 or 3) of match `g` was dealt around (ENGINE.md 261): with
+/// `"around": "table"` and a table of the seat, its choice for the deal's context - `first` (the seat sideboarded first
+/// before that game: that game's chooser, CR 103.1), `lead` (its game wins less the other's before that game), the other
+/// seat dealt -, else its registered main (ENGINE.md 154). Card ids, sorted. Computed here from the match's course,
+/// not by the engine's `dealt_base`.
+fn dealt_base_vs(sp: &crate::az::MtgSpec, g: &crate::az::MtgAz, q: usize, seed: u64, game: u8, first: bool, lead: i8) -> Vec<u16> {
+    let (main, _) = dealt_main(sp, q, seed);
+    let around = sp.dealt_decks.expect("a dealt spec").around == crate::az::DealtAround::Table;
+    match (around, &g.m.table[q]) {
+        (true, Some(t)) => g.m.pools[q].deck(t.choice(game, first, lead, g.m.is_dealt(1 - q as u8))),
+        _ => main,
+    }
+}
+
+/// The lead of seat `q` before game `game` of match `g` (its game wins less the other's then): the results of the games
+/// before it (a draw is no win).
+fn lead_before(g: &crate::az::MtgAz, q: usize, game: u8) -> i8 {
+    let mut w = [0i8; 2];
+    for i in 0..(game as usize - 1) {
+        if let r @ (1 | 2) = g.m.results[i] {
+            w[(r - 1) as usize] += 1;
+        }
+    }
+    w[q] - w[1 - q]
+}
+
 /// `FUZZ_POOL=dd_a` (ENGINE.md 124.1).
 fn dd_a_mode() -> bool {
     pool_mode() == PoolMode::DdA
@@ -1063,13 +1089,18 @@ pub fn pair_mode() -> bool {
 
 /// `FUZZ_POOL=meta_pair`'s per-deck settings of match `seed` merged into `v` (a best-of-three metagame spec value): each
 /// seat dealt from its own 75, a choice table per deck in two matches of three (random legal 60s of the deck's own 75:
-/// `fuzz_table`), the forced find (module docs).
+/// `fuzz_table`), the forced find (module docs); in half the matches (`(seed / 9) % 2 == 1`: every combination of the
+/// range and the tables) the dealt 60s around each seat's table (ENGINE.md 261, `"around": "table"`; around the main
+/// without a table).
 fn pair_settings(seed: u64, v: &mut serde_json::Value) {
     v["dealt_decks"] = match seed % 3 {
         0 => serde_json::json!({"p": 0.85, "swaps": [0, 15], "per_seat": true}),
         1 => serde_json::json!({"p": 1.0, "swaps": [0, 15], "per_seat": true}),
         _ => serde_json::json!({"p": 0.5, "swaps": [2, 6], "per_seat": true}),
     };
+    if (seed / 9) % 2 == 1 {
+        v["dealt_decks"]["around"] = serde_json::json!("table");
+    }
     let p = [1.0, 0.5, 0.25][((seed / 3) % 3) as usize];
     v["forced_find"] = serde_json::json!({"spell": "Doomsday", "card": "Thassa's Oracle", "p": p});
     if seed % 3 != 2 {
@@ -5287,6 +5318,8 @@ pub fn check_matches(n: u64, t: &Totals) {
     if pair_mode() && n >= 100 {
         // (ENGINE.md 240: the forced find beside the dealt decks in best-of-three)
         assert!(g("ff_res") > 0 && g("ff_forced") > 0, "FUZZ_POOL=meta_pair: no Doomsday resolution forced in {n} matches ({} resolutions)", g("ff_res"));
+        // (ENGINE.md 261: dealt 60s around a seat's table, half the matches deal so)
+        assert!(g("dealt_around_table") > 0, "FUZZ_POOL=meta_pair: no dealt 60 around a choice table in {n} matches");
     }
     assert!(g("pk_new_games") > 0 && g("pk_new_game_keys") > 0, "the private-key check reached no game a world started (ENGINE.md 141)");
     assert!(g("sb") > 0 && g("changed") > 0 && g("three") > 0, "no sideboarding, changed deck or match of three");
@@ -5611,13 +5644,21 @@ fn check_constructed_world(g: &crate::az::MtgAz, d: &crate::az::MtgAz, viewer: u
     // between games its dealt next one) within the spec's swap range, from its dealt prior
     assert_eq!((d.m.dealt, d.m.dealt_both), (g.m.dealt, g.m.dealt_both), "{}: a world changed the dealt seats", what());
     if g.m.is_dealt(o) {
-        if let Some((main, (lo, hi))) = DEALT_SPEC.with(|s| s.borrow().as_ref().map(|sp| dealt_main(sp, ou, seed))) {
+        if let Some(sp) = DEALT_SPEC.with(|s| s.borrow().clone()) {
+            let (_, (lo, hi)) = dealt_main(&sp, ou, seed);
+            // (ENGINE.md 261: counted from the base of the deal - the main, or the seat's table's 60 for its context)
             if g.deck_hidden(o) {
-                assert!((lo..=hi).contains(&swaps_vs(&main, &deck)), "{}: a dealt 60 of {} swaps", what(), swaps_vs(&main, &deck));
+                let game = g.m.game_no;
+                // (the game's chooser sideboarded first before it: in progress the game's own, between games the last's)
+                let chooser = if g.sideboarding().is_some() || g.match_over() { g.m.choosers[game as usize - 1] } else { g.g.turn().chooser };
+                let base = dealt_base_vs(&sp, g, ou, seed, game, chooser == o, lead_before(g, ou, game));
+                assert!((lo..=hi).contains(&swaps_vs(&base, &deck)), "{}: a dealt 60 of {} swaps from its base", what(), swaps_vs(&base, &deck));
             }
             if let Some(x) = d.sideboarding().and_then(|sb| sb.done[ou].as_ref()) {
                 let nd = pool.deck(x);
-                assert!((lo..=hi).contains(&swaps_vs(&main, &nd)), "{}: a dealt next 60 of {} swaps", what(), swaps_vs(&main, &nd));
+                let first = g.sideboarding().expect("between games").order[0] == o;
+                let base = dealt_base_vs(&sp, g, ou, seed, g.m.game_no + 1, first, lead_before(g, ou, g.m.game_no + 1));
+                assert!((lo..=hi).contains(&swaps_vs(&base, &nd)), "{}: a dealt next 60 of {} swaps from its base", what(), swaps_vs(&base, &nd));
             }
         }
     }
@@ -5813,6 +5854,8 @@ static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_RES: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_FORCED: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_FORCED_LATER: AtomicU64 = AtomicU64::new(0);
+/// Dealt 60s checked around a seat's choice table (ENGINE.md 261, `FUZZ_POOL=meta_pair`'s `"around": "table"` matches).
+static PAIR_AROUND_TABLE: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAMES: AtomicU64 = AtomicU64::new(0);
 static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
 /// Of `PK_HAND_LOOKS`, the looks in a step that ended the game and began the next (both seats dealt, ENGINE.md 168.1,
@@ -6314,12 +6357,18 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                 if let Some(t) = table_target[q as usize].take() {
                     assert_eq!(&g.m.decks[q as usize][..], &t[..], "match {seed} game {game_no}: P{q} followed the table to another 60");
                 }
-                // a dealt 60 (ENGINE.md 154): its swaps against the registered main within the spec's range
+                // a dealt 60 (ENGINE.md 154): its swaps against the registered main within the spec's range - ENGINE.md
+                // 261: around the seat's table, against its table's 60 for the deal's context
                 if g.m.is_dealt(q) {
-                    let (main, (lo, hi)) = dealt_main(sp, q as usize, seed);
-                    let n = swaps_vs(&main, &deck);
-                    assert!((lo..=hi).contains(&n), "match {seed} game {game_no}: P{q}'s dealt 60 of {n} swaps (range {lo}..={hi})");
+                    let (_, (lo, hi)) = dealt_main(sp, q as usize, seed);
+                    let lead = g.m.wins[q as usize] as i8 - g.m.wins[1 - q as usize] as i8;
+                    let base = dealt_base_vs(sp, &g, q as usize, seed, game_no, g.g.turn().chooser == q, lead);
+                    let n = swaps_vs(&base, &deck);
+                    assert!((lo..=hi).contains(&n), "match {seed} game {game_no}: P{q}'s dealt 60 of {n} swaps from its base (range {lo}..={hi})");
                     dealt_decks += 1;
+                    if sp.dealt_decks.is_some_and(|d| d.around == crate::az::DealtAround::Table) && g.m.table[q as usize].is_some() {
+                        PAIR_AROUND_TABLE.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
                 changed_decks += (g.m.decks[q as usize] != decks[q as usize]) as u32;
             }
@@ -6438,6 +6487,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             PAIR_FF_FORCED.load(Ordering::Relaxed),
             PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)
         );
+        println!("FUZZ_POOL=meta_pair (ENGINE.md 261): {} dealt 60s checked around their seat's choice table", PAIR_AROUND_TABLE.load(Ordering::Relaxed));
     }
     println!(
         "{n} matches: {games_played} games ({three} matches of three, {draws} drawn games, {aborted} aborted matches), mean decisions {:.1}, \
@@ -6500,6 +6550,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         ("ff_res", PAIR_FF_RES.load(Ordering::Relaxed)),
         ("ff_forced", PAIR_FF_FORCED.load(Ordering::Relaxed)),
         ("ff_forced_later", PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)),
+        ("dealt_around_table", PAIR_AROUND_TABLE.load(Ordering::Relaxed)),
         ("sb", sb),
         ("changed", changed),
         ("three", three),

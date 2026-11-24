@@ -105,6 +105,8 @@ def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=T
         spec['dealt_decks'] = {'p': dealt_decks['p'], 'swaps': list(dealt_decks['swaps'])}
         if dealt_decks.get('per_seat'):
             spec['dealt_decks']['per_seat'] = True     # (each seat dealt on its own, ENGINE.md 168.1)
+        if 'around' in dealt_decks:
+            spec['dealt_decks']['around'] = dealt_decks['around']   # ("main" or "table", ENGINE.md 261)
     spec['decks'] = {'p0': main, 'p1': main, 'p0_sideboard': side, 'p1_sideboard': side}
     return json.dumps(spec, separators=(',', ':'))
 
@@ -165,10 +167,13 @@ def _format_keys(fmt, max_turns, mulligans, game_episodes, start_game):
 
 
 def _dealt(dealt_decks):
-    """The spec's `"dealt_decks"` of {'p', 'swaps', 'per_seat'?} (docs/ENGINE.md 154, 168.1)."""
+    """The spec's `"dealt_decks"` of {'p', 'swaps', 'per_seat'?, 'around'?} (docs/ENGINE.md 154, 168.1; 'around':
+    "main" - the default, the key left out when not given - or "table", docs/ENGINE.md 261)."""
     out = {'p': dealt_decks['p'], 'swaps': list(dealt_decks['swaps'])}
     if dealt_decks.get('per_seat'):
         out['per_seat'] = True
+    if 'around' in dealt_decks:
+        out['around'] = dealt_decks['around']
     return out
 
 
