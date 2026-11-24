@@ -1421,6 +1421,102 @@ fn hogaak_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The Legacy Lands lane C positions (ENGINE.md 270.3): Pithing Needle's name choice and the name chosen, Damping
+/// Sphere on the battlefield with Choke and Torpor Orb and Islands kept tapped, and The Tabernacle's triggers on the
+/// stack (each creature its source) with their "pay {1}?" questions and payments.
+fn lands_c_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let db = CardDb::constructed();
+    let mut deck: Vec<&str> = Vec::new();
+    for (n, k) in [
+        ("Pithing Needle", 4),
+        ("Damping Sphere", 4),
+        ("Torpor Orb", 4),
+        ("Choke", 4),
+        ("The Tabernacle at Pendrell Vale", 1),
+        ("Ancient Tomb", 4),
+        ("Ponder", 4),
+        ("Thalia, Guardian of Thraben", 4),
+        ("Island", 16),
+        ("Forest", 15),
+    ] {
+        deck.extend(std::iter::repeat_n(n, k));
+    }
+    let sp = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": deck, "p1": deck}}).to_string()).unwrap();
+    let wrap = |g: &engine::Game| {
+        let mut a = MtgAz::new_game(&sp, 2, 270).unwrap();
+        a.g = g.clone();
+        a
+    };
+    let log = |g: &engine::Game| g.log_lines().join("\n");
+    let mut out = Vec::new();
+    // Pithing Needle: its name choice, then the name chosen; Damping Sphere, Choke, Torpor Orb on the battlefield.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 8])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Island", "Island", "Ancient Tomb", "Damping Sphere", "Choke", "Torpor Orb"])
+        .battlefield(1, &["Island", "Island", "Thalia, Guardian of Thraben"])
+        .hand(0, &["Pithing Needle", "Ponder"])
+        .at(Step::Main1, 0)
+        .start();
+    let tapped = g.card(1, "Island", Zone::Battlefield);
+    g.set_tapped(tapped, true);
+    g.refresh_decision();
+    out.push(("lands_c", wrap(&g)));
+    let needle = g.card(0, "Pithing Needle", Zone::Hand);
+    g.choose(Choice::Cast(needle));
+    for _ in 0..200 {
+        let Some(d) = g.pending_decision() else { break };
+        if d.kind == DecisionKind::Priority && g.stack().is_empty() {
+            break;
+        }
+        if d.kind == DecisionKind::NameCard {
+            out.push(("lands_c", wrap(&g)));
+            g.choose(Choice::Def(db.expect_id("Thalia, Guardian of Thraben").unwrap()));
+            continue;
+        }
+        let c = if d.kind == DecisionKind::Priority { Choice::Pass } else { d.options[0].choice };
+        g.choose(c);
+    }
+    assert!(g.find_card(0, "Pithing Needle", Zone::Battlefield).is_some(), "{}", log(&g));
+    out.push(("lands_c", wrap(&g)));
+    // The Tabernacle: two creatures' triggers at P1's upkeep, then the payment questions.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 8])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["The Tabernacle at Pendrell Vale", "Damping Sphere"])
+        .battlefield(1, &["Thalia, Guardian of Thraben", "Guide of Souls", "Forest", "Ancient Tomb"])
+        .at(Step::Main1, 0)
+        .start();
+    for _ in 0..400 {
+        let Some(d) = g.pending_decision() else { break };
+        if g.turn().active == 1 && !g.stack().is_empty() && d.kind == DecisionKind::Priority {
+            break;
+        }
+        let c = if d.options.iter().any(|o| o.choice == Choice::Pass) { Choice::Pass } else { d.options[0].choice };
+        g.choose(c);
+    }
+    assert_eq!(g.stack().len(), 2, "{}", log(&g));
+    for _ in 0..200 {
+        let Some(d) = g.pending_decision() else { break };
+        if g.stack().is_empty() {
+            break;
+        }
+        out.push(("lands_c", wrap(&g)));
+        let c = match d.kind {
+            DecisionKind::YesNo if d.options.iter().any(|o| o.choice == Choice::Yes) => Choice::Yes,
+            _ if d.options.iter().any(|o| o.choice == Choice::Pass) => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert!(out.len() >= 6, "lands_c: {} positions", out.len());
+    out
+}
+
 /// The 601.2g step's positions (ENGINE.md 231): Hogaak castable only through a Chromatic Star activated while it is
 /// cast (its {1} paid by the Swamp), and a Lotus Petal beside it: the step's decision (`CastMana`), the Star's payment
 /// and colour with the spell's total cost locked (`Game::cast_lock`), the step asked again, delve, convoke.
@@ -1588,6 +1684,7 @@ fn public_state_reaches_the_encoding() {
     pos.extend(cast_mana_positions());
     pos.extend(eoe_exile_positions());
     pos.extend(v8_positions());
+    pos.extend(lands_c_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1847,6 +1944,7 @@ fn public_states_encode_apart() {
     pos.extend(cast_mana_positions());
     pos.extend(eoe_exile_positions());
     pos.extend(v8_positions());
+    pos.extend(lands_c_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
