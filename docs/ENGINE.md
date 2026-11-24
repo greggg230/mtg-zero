@@ -49270,6 +49270,20 @@ On the merged code (the commits after it change docs and recorded digests only),
 * Scratch left outside the repository: the proof worktree (`E:/mtg-zero-scratch/lands/int_proof`, detached, its own
   target dir; never committed) and the integration's scripts and logs beside it.
 
+#### 270.4.8 main 52e05153 merged in (ENGINE.md 261's dealt decks around the choice table)
+
+main moved by four commits (261: `dealt_decks.around`, a new `pair_around` digest file recorded on main without the
+sixteen cards). One conflict (this file: 261 placed before 270). On the merge f011f2f8: the engine suite green (27
+binaries); `digest` equal (full 5a09242cf4f2cbab); `digest_formats`: driver, pair, metagame, constructed and EoE equal to
+this branch's recorded files; `pair_around` differed on all 40 lines (main ebaa7f7e45dc8e32 recorded without the
+sixteen). Proof as in 270.4: the proof worktree at f011f2f8 with the sixteen filtered out of `CardDb::constructed` and
+the floats zeroed reproduces main's recorded `pair_around` file exactly (and pair 60e0d7de900cef7e, metagame
+e2884dfcccf49ebe, constructed 68e6d9334d2fdfdf, main's values); so `digests_pair_around.txt` is re-recorded
+(`DIGEST_WRITE`, combined ebaa7f7e45dc8e32 -> the table with the sixteen).
+
+**User decision (2026-11-24): best-of-three allows a main of at least 60** (270.4.4's open point): a format change,
+its own branch after this merge.
+
 ## 271. A random order onto the bottom of a library no longer shows in the order of the triggers the move sets off: Endurance and Murktide Regent (branch `fix/endurance-infoset`, 2026-11-24)
 
 **Why.** The Legacy Lands port (270) met the same hidden-information failure three times, each lane with the Lands
