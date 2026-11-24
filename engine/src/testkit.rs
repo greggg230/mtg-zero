@@ -356,6 +356,22 @@ impl Game {
         self.refresh_pending();
     }
 
+    /// Put card `c` into `zone` (its top) by the rules' zone change, as an
+    /// effect would (its leave and enter events): a test's setup; the
+    /// pending decision is asked again (ENGINE.md 270.2).
+    pub fn move_to(&mut self, c: CardIdx, zone: Zone) {
+        self.move_card(c, zone, crate::game::Pos::Top);
+        self.refresh_pending();
+    }
+
+    /// How many activated abilities permanent `c` has now: its own (a
+    /// Mountain's under a Moon effect), then those granted it, the intrinsic
+    /// mana abilities of basic land types an effect gave it included (CR
+    /// 305.6, 613.1f; `Game::granted_activated`).
+    pub fn activated_count(&self, c: CardIdx) -> usize {
+        self.ability_slots_total(c)
+    }
+
     pub fn kind(&self) -> Option<DecisionKind> {
         self.pending.as_ref().map(|d| d.kind)
     }

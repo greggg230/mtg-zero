@@ -336,6 +336,7 @@ impl Named<'_> {
             | Task::PutTriggers { .. }
             | Task::DrawRest { .. }
             | Task::DrawOrder { .. }
+            | Task::Dredge { .. }
             | Task::PriorityAsk { .. }
             | Task::DeclareAttackers { .. }
             | Task::DeclareBlockers { .. }
