@@ -47881,3 +47881,19 @@ tests/test_single_games.py on its toy match (run by this gate's core pytest); it
 test directory, so an `mtg` pool round trip is not repeated here.
 
 **Digests.** None moves (no engine, encoding or search change).
+
+**Gates** (on 7ad5dbe9, this section's commit before this note; warm worktrees, beside a live stew). Two tiers,
+because none covers both halves: `optin-core` for the pin (AGENTS.md's tier for a zero-core change with byte-identical
+defaults - the only one that runs zero-core's own tests at the new pin, the checkpoint byte identity against main and
+farm compat; `--baseline-root` a warm worktree of main 790483c5, its module from the artifact cache), then `python` for
+this repo's Python change (its pytest, the run-loop smoke). **GATE PASSED WITH SKIPS optin-core 7ad5dbe978d1 in 883 s**:
+checkpoint_compat identical across both checkouts (3,554 samples each of visits and cq), digest formats = the recorded
+files (constructed 68e6d9334d2fdfdf, eoe d754f4eef3c8adae, driver cab97c01912f7e3f, metagame e2884dfcccf49ebe, pair
+60e0d7de900cef7e, dealt cc0d138ac5c80402), farm compat identical (gates 2 and 3), az 58 and hidden 28 passed, the three
+other games built against this core, core tests 225 passed, core pytest 921 passed in 6 shards (zero-core's
+tests/test_single_games.py among them); the skips: 17 live-run-hazard tests of the core, fenced beside the live run.
+**GATE PASSED WITH SKIPS python 7ad5dbe978d1 in 200 s**: pytest 821 passed in 4 shards and the desktop part (this
+section's 7 among them), the run-loop smoke 16 games, 0 unfinished; the skip: 1 live-run-hazard test, fenced.
+
+**Measured.** Nothing on a live run yet: a run counts from its next start on a commit with this pin (a re-pin), and
+the farm's board shows the counts once such a run's pool acks.
