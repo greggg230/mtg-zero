@@ -48327,3 +48327,30 @@ independently: 64 of 64 matches; P(both) 0.72 a match) is within [1, 4] swaps of
 deal's context (1: 11, 2: 17, 3: 14, 4: 14), every base differs from the main, and the dealt 60s are 7-13 swaps from
 the main - the deal follows the plan, not the main. Read from the run's game log against the versions' tables by a
 script outside the repo.
+
+### 261.8 Gates (warm pool; docs only after 64bb9abf)
+
+* `python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,meta_pair` on b6e6b064: **GATE PASSED
+  suite b6e6b0645b81 in 726s** - the full engine suite 2,974 passed (24 binaries); the sharded fuzz, 2,000 games each
+  from seed 0: the default pool (100 matches), the default pool with hidden decklists, `delver_dealt` (100 matches, 100
+  post-sideboard), `meta_pair` (100 matches, 100 post-sideboard; the around-table matches among them). (Its first run,
+  on ddfcc33a, failed to build: `dealt_decks.rs`'s `DealtDecks` literal lacked `around` - b6e6b064.) A by-hand `meta_pair`
+  run before it: 90 dealt 60s checked around a table in its 100 whole matches.
+* `python tools/gate.py engine --tested-sha b6e6b0645b81 --expect-digest 5a09242cf4f2cbab --expect-digest0
+  be0626d4b97cebae --offload mac` on 64bb9abf: **GATE PASSED engine 64bb9abfc564 in 343s** - full 5a09242cf4f2cbab and
+  encoding-free be0626d4b97cebae (= main's, 254.8), digest formats constructed 68e6d9334d2fdfdf, eoe d754f4eef3c8adae,
+  driver cab97c01912f7e3f, metagame e2884dfcccf49ebe, pair 60e0d7de900cef7e (each = main's recorded file, unchanged),
+  pair_around abf27a7e8f5bf50e (new), dealt cc0d138ac5c80402 (unchanged); farm compat identical (gate 2: 6 games, 2,468
+  rows, 150 batches; gate 3: 6 games, 2,598 rows - main's counts). The three runs before it with every step on the
+  desktop (default, `--pytest-shards 2`, `--throttle on`) passed every step but
+  `tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`, which timed out each time under the gate's own parallel
+  load (no game finished in the worker's 180 s phase; the known load flake of 155, 193 and later sections): alone it
+  passes on this tree in 113 s (main's checkout: 131 s), and the python tier below passed it. (One of those runs also
+  saw farm compat's gate 3 exit at once with no output; re-run by hand on the same worker: identical, 6 games, 2,598
+  rows.) With `--offload mac` the pure-CPU steps ran on the Mac, every step passed.
+* `python tools/gate.py python` on 64bb9abf: **GATE PASSED python 64bb9abfc564 in 450s** (pytest 922 passed, 4
+  skipped; the run-loop smoke 16 games).
+* Farm compatibility around the tables (`tools/farm_compat.py --preset legacy-pair-bo3-varied --set spec=<the
+  pairing's spec, p 0.85 per seat, swaps [1, 4], around "table", the smoke's v0002 table per deck>` on the gate's
+  release worker): PASSED - gate 2 identical, 6 games, 3,477 rows, 150 batches; gate 3 identical, 6 games, 2,353 rows,
+  6 decks.
