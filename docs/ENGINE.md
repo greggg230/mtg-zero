@@ -48840,3 +48840,125 @@ run live on the desktop), cargo `-j 8`, the fuzz at most four shards at once.
 * **Digests**: the constructed table's (constructed, metagame, pair, dealt) move with the six cards and are not
   re-recorded here (the integration records them once with all three lanes' cards); without the six every one is
   main's (270.3.8).
+
+## 271. A random order onto the bottom of a library no longer shows in the order of the triggers the move sets off: Endurance and Murktide Regent (branch `fix/endurance-infoset`, 2026-11-24)
+
+**Why.** The Legacy Lands port (270) met the same hidden-information failure three times, each lane with the Lands
+sideboard's Endurance in its fuzz deck against the Delver 60: lane A's `FUZZ_POOL=lands_a` seed 231 (`lands-a`
+0aaeb192, viewer P1), lane B's `lands_b` seed 936 under the `fuzz` profile (270.2.7, viewer P0) and lane C's `lands_c`
+seed 981 under the `fuzz` profile (270.3.5). Each was `check_information_set`'s "same keys, different rows": two
+worlds of one player's that the search keeps in one node (equal keys, decider and legal actions) with different
+layout v8 rows, at the stack's head floats (43541 / 43542: stack slot 0's event reference, a digit of its card's last
+known identity). Both cards are on main (Endurance in the cube, Murktide Regent since 54); no main pool pairs them, so
+no main fuzz met it.
+
+**Root cause.** Endurance's enters trigger: "up to one target player puts all the cards from their graveyard on the
+bottom of their library in a random order" (`Ext::GraveyardToBottomRandom` -> `Game::put_on_bottom_randomly`). That
+function shuffled the cards and then **moved them one by one in the random order**, so every per-card effect of the
+move came in that order. The one that shows: each instant or sorcery card leaving the Delver player's graveyard
+triggers Murktide Regent ("whenever an instant or sorcery card leaves your graveyard": one trigger per card, CR 603.2c;
+a `LeavesGraveyard` event looked back on, 603.10a, recorded in `move_card_ctl`). The triggers wait in event order; they
+are interchangeable (`put_triggers`' `same`: the effect ignores the event), so they go on the stack in waiting order
+with no order decision; and each stack item's event reference (`stack::EV`, `tail_encode::ev::OBJ`) is a stale
+reference to the card that left, written with its last known identity (`Cx::ref_def` -> `Game::lki_identity`: public,
+the card was in a graveyard). So the stack's order of identities was the random library order, which nobody may know,
+its owner included (ENGINE.md 10, `forget_order`). Each world of a determinize draws its own random order (the worlds'
+RNGs are reseeded), so the worlds of one information set showed different stacks. **Not only an encoding gap: the real
+game's state, the order of its stack, carried the hidden order** - the same class as 248.4 (a random bottom order seen
+through a find group) and 223 (finds listed in the order of the searches). With a trigger that does read its event
+(not interchangeable) the same order becomes the `OrderTriggers` decision's option order (`Choice::Trigger(k)`, k the
+waiting index): the pre-fix `endurance` pool's first failure (seed 530, below) is that form.
+
+**The fix** (lane C found and fixed the same leak independently: `lands-c` 336aaa8b; this is that fix, ported and
+generalised). `put_on_bottom_randomly` (game.rs) draws the random order exactly as before, then **moves the cards in
+the order given** - a public one wherever the cards are public: Endurance's graveyard list, cascade's exiled cards, a
+revealed pile - and only then gives the cards that reached the library the random order. Every per-card effect of the
+move (the leave event and the triggers it sets off, their waiting and stack order, the last known information recorded
+as each card leaves, `forget_order`'s records) comes in a public order, the same in every world of either player's.
+The library ends exactly as before: a move to the bottom goes under the one before, so the old code left the random
+order reversed, bottom first, on the moved cards' places; the new code writes the same cards on the same places.
+
+Over 336aaa8b: it permutes **the places the moved cards actually hold**, found after the moves, instead of assuming
+they are the library's bottom block (336aaa8b checks that with a `debug_assert` only: in a release build a card a
+replacement sent elsewhere, or one waiting for its replacement choice, would have made it overwrite other library
+cards), with a hard assert that the counts agree; and `forget_order` gets the cards in the given order rather than the
+random one (its records - private entries, clouds, find groups - are multisets or sorted, so nothing read that order,
+but no state keeps the random order now). Not an Endurance special case: every caller takes it (Endurance; cascade's
+misses; the rest of a look on the bottom in a random order - Narset, Parter of Veils, Thundertrap Trainer, the
+reveal-and-choose effects; "the rest of the library in a random order nobody knows").
+
+**Completeness review** (every random order and random pick of the engine: `rng.shuffle`, `rng.below`):
+
+| Path | Per-card effects in a hidden order? | Verdict |
+|---|---|---|
+| `put_on_bottom_randomly` (its eight callers) | were: the random order | fixed here |
+| `shuffle_library`, and every "shuffle X into a library" (Emrakul's trigger, `shuffle_in_instead`, shuffle-graveyard effects) | no: the cards move first in the caller's order (a graveyard's, a hand's object order: the same in every world); the shuffle moves nothing between zones and emits no event | unchanged |
+| random picks (a random discard, a random graveyard card, a coin flip, a die, the starting player) | one card or one value, keyed where it shows | unchanged |
+| a random order onto the top of a library | no such effect in the engine | - |
+| several players at once | `GraveyardToBottomRandom` names one player; a several-player effect would call the function once per player, each in a public order | covered by construction |
+| library-to-library moves (the rest of a look, the rest of a library) | the given order is the library's own (hidden), but such a move emits no per-card event anything triggers on (`LeavesGraveyard` only from a graveyard; `CardsPutIntoLibrary` is a player event) | no leak; the library unchanged |
+
+Compared with 223 and 128: 223 removed a hidden order from the encoding (finds listed by place, not by the order of
+the searches) and 128 keyed a known card where a hidden slot named it. Here the hidden order was in the game state
+itself (the order of events, so of the stack), so the fix is at the source: the events' order is public now, and the
+encoding needed nothing.
+
+**Was lane B right that a fix changes existing games' encodings?** Not this fix. Lane B's candidates (270.2.7: put
+interchangeable triggers on the stack in a canonical order of what their encoding shows, or drop the event object from
+a stack item's encoding when the effect ignores it) would change the encoding wherever interchangeable triggers with
+different events meet, in any game. Fixing the move's order changes only games where a random order onto the bottom
+moves cards whose leaving triggers something: `LeavesGraveyard` events exist only in games holding a card that
+triggers on them (`SEEN_GY_LEAVE`: Murktide Regent), and the only random bottom order from a graveyard is Endurance's.
+No deck of data/decks holds Endurance (Delver, Doomsday, Sneak and Show, Hogaak Tempo), the cube's games hold no
+Murktide Regent, and the other callers move library or exile cards that trigger nothing per card. The library and the
+RNG's draws are the same. **All digests are equal** (below): lane C's view held. The live stew and meta3 decks cannot
+reach the changed behaviour (none plays Endurance); the Lands deck's sideboard will.
+
+**Tests** (engine/tests/cards_legacy.rs, in `cards_suite`; both fail with the fix reverted, checked: the walk's rows
+differ at P0's world pair 0, step 5, with the Regent triggers on the stack; the trigger orders differ across the eight
+RNG seeds):
+* `engine_271_endurances_random_order_does_not_show_in_murktides_triggers`: P0's Endurance resolving against P1's
+  graveyard of five instants and sorceries and a land, P1's Murktide Regent on the battlefield. For each viewer and
+  twelve world pairs (`determinize` with two RNG seeds) the two worlds are driven through the same actions (the
+  target, the move, the five Regent triggers on the stack, their resolutions) and must keep equal keys, decider, legal
+  actions, view and whole layout v8 row at every step; the two worlds' random library orders must differ (else the
+  walk proves nothing); the Regent ends with five counters.
+* `engine_271_endurances_triggers_come_in_the_graveyards_order` (lane C's 336aaa8b test, on this scenario): over eight
+  RNG seeds, the same order of the Regent triggers' cards on the stack.
+
+**`FUZZ_POOL=endurance`** (fuzz/games.rs; worker/src/fuzz.rs's pool lists, games only): `ENDURANCE_DECK`, the Delver
+60 with four Endurance, four Murktide Regents and Tropical Islands, against the Delver 60 in either seat, one game in
+three the mirror (Endurance on its own controller's graveyard under its own Regent too). Counters: Endurance cast, and
+Regent triggers whose card is in a library (only Endurance's move puts one there); with 200 games or more both must be
+non-zero.
+
+**Digests** (not re-recorded): `--test digest` full **5a09242cf4f2cbab**, `DIGEST_ENCODING=0` **be0626d4b97cebae**,
+v5 **cbae655806dcad36**, v7 **12c92841a2d4f628**; `digest_formats` driver **cab97c01912f7e3f**, pair
+**60e0d7de900cef7e**, metagame **e2884dfcccf49ebe**, constructed **68e6d9334d2fdfdf**, EoE **d754f4eef3c8adae**; dealt
+**cc0d138ac5c80402**, dealt per seat **e2a91849b5b9f372**: **all equal** to the recorded files.
+
+**Checks** (desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/lands-fix`, beside the live stew: cargo `-j 8`, fuzz
+4 shards at once at below-normal priority):
+* the full engine suite (`cargo test --release -p engine -p card_ir --no-fail-fast`, incl. `az`): **2,977 passed, 0
+  failed, 45 ignored** (27 binaries);
+* `FUZZ_POOL=endurance`, 2,000 games (`tools/fuzz_shards.py`, 8 shards): **passed** (wins 1,037 / 948, 15 drawn; 32.9
+  turns and 395 decisions a game; Endurance cast 2,030, Regent triggers of a card put into a library 219; 39,624
+  information-set walks, 142,220 states compared), and the fuzz binary's 20 other tests;
+* the same 2,000 on a fuzz binary built with the fix reverted: **failed at seed 530** ("same keys, different rows of
+  P0" at an `OrderTriggers` decision), so the pool catches the leak;
+* `FUZZ_BELIEF=2`, 600 games: **passed** (11,453 weighted worlds; 11,740 walks, 41,813 states compared; Endurance
+  cast 588, Regent triggers of a library card 54);
+* **the lanes' own failing seeds**, each in a scratch worktree of the lane's commit (its own target dir), with the
+  fix reverted and applied: lane A's `FUZZ_POOL=lands_a` seed 231 at 0aaeb192 (the commit whose pool still held
+  Endurance; release) **fails as reported without the fix** (step 6, P1's row, head float 43542, the six Regent
+  triggers' library cards in two orders) **and passes with it**, as does that shard's whole range, seeds 180-239;
+  lane B's `lands_b` seed 936 at 80937ccf with the deck's two Endurance restored (its first pool: 7 Forests, Endurance
+  after Expedition Map) under the `fuzz` profile **fails as reported without the fix** (step 7, P0's row, head float
+  43541) **and passes with it**. Those pools need the lanes' cards, so these are checks, not tests on this branch:
+  the integration's `FUZZ_POOL=lands` (Endurance in the 75) is where they become regression runs.
+* `mtgz_worker` checks (`cargo check -p mtgz_worker`) with `endurance` in its pool lists.
+
+**For the integration.** The lanes dropped Endurance from their pools because of this finding (270.1.8, 270.2.7,
+270.3.5); with this merged, `FUZZ_POOL=lands` can keep the real 75's Endurance. Lane C's 336aaa8b changes the same
+function (the bottom-block form): the merge keeps this section's version, a superset; its test is here as
+`engine_271_endurances_triggers_come_in_the_graveyards_order` (lane C's copy in cards_lands_c.rs can stay).

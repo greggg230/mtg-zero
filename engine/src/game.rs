@@ -3526,25 +3526,37 @@ impl Game {
 
     /// Put cards on the bottom of `p`'s library in a random order. Nobody
     /// knows the order (ENGINE.md 10).
-    pub(crate) fn put_on_bottom_randomly(&mut self, p: PlayerId, mut cards: Vec<CardIdx>) {
+    ///
+    /// The cards move in the order given - a public one where the cards are
+    /// public (a graveyard's, an exile's, a revealed pile's) - and only then
+    /// take the random order (ENGINE.md 271; lane C's 336aaa8b). So everything
+    /// the moves do one card at a time - each card's leave event and the
+    /// triggers it sets off, in their order on the stack (Murktide Regent's
+    /// once per instant or sorcery leaving a graveyard: Endurance), its last
+    /// known information, the order nobody knows recorded by `forget_order` -
+    /// comes in that order, the same in every world of either player's, and
+    /// not in the random one, which the move must keep hidden from everyone.
+    /// The random order is drawn as before and the library ends the same: the
+    /// cards that reached it take, bottom first, the places the moves gave
+    /// them, in the random order's reverse (a move to the bottom goes under
+    /// the one before).
+    pub(crate) fn put_on_bottom_randomly(&mut self, p: PlayerId, cards: Vec<CardIdx>) {
         if cards.is_empty() {
             return;
         }
-        // The cards move in the order given (a public one: the graveyard's), so the events of the move - a card
-        // leaving a graveyard, the triggers it sets off (Murktide Regent's, in their stack order) - come in that
-        // order and not in the hidden random one (ENGINE.md 270.3.5: Endurance's random order leaked to the other
-        // player through the triggers' order). Then the cards that reached the library take the random order: the
-        // same library, from the same draws, as moving them in that order.
-        let given = cards.clone();
-        self.rng.shuffle(&mut cards);
-        for &c in &given {
+        let mut random = cards.clone();
+        self.rng.shuffle(&mut random);
+        for &c in &cards {
             self.move_card(c, Zone::Library, Pos::Bottom);
         }
-        let landed: Vec<CardIdx> = cards.iter().copied().filter(|&c| self.objs[c.i()].zone == Zone::Library).collect();
+        // (A card a replacement sent elsewhere, or whose replacement choice is pending, keeps no place here; the
+        // others' places are wherever the moves put them.)
         let lib = &mut self.players[p as usize].library;
-        debug_assert!(lib[..landed.len()].iter().all(|c| landed.contains(c)), "the moved cards are the library's bottom");
-        for (k, &c) in landed.iter().rev().enumerate() {
-            lib[k] = c;
+        let places: Vec<usize> = (0..lib.len()).filter(|&i| cards.contains(&lib[i])).collect();
+        let landed: Vec<CardIdx> = random.iter().rev().copied().filter(|c| lib.contains(c)).collect();
+        assert_eq!(places.len(), landed.len(), "put_on_bottom_randomly: the cards in P{p}'s library");
+        for (&i, &c) in places.iter().zip(&landed) {
+            lib[i] = c;
         }
         self.forget_order(p, &cards);
     }

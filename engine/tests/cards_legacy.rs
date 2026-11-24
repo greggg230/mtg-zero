@@ -725,3 +725,119 @@ fn a_metamorph_copying_a_regent_enters_without_counters_and_triggers_cr_707_2() 
     assert_eq!(p1p1(&g, pm), 1, "{}", g.log_lines().join("\n"));
     assert_eq!(p1p1(&g, theirs), 3, "their Regent: not their graveyard");
 }
+
+/// ENGINE.md 271: P0's Endurance (cast, on the stack) about to put P1's graveyard - five instants and sorceries and a
+/// land - on the bottom of P1's library in a random order, P1's Murktide Regent on the battlefield.
+fn endurance_vs_regent_271() -> Game {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest"])
+        .hand(0, &["Endurance"])
+        .battlefield(1, &[MURKTIDE])
+        .graveyard(1, &["Brainstorm", "Lightning Bolt", "Force of Will", "Ponder", "Island", "Daze"])
+        .at(Step::Main1, 0)
+        .start();
+    let e = g.card(0, "Endurance", Zone::Hand);
+    g.choose(Choice::Cast(e));
+    pay_with(&mut g, &[], |_| None);
+    assert!(at_priority(&g) && g.stack().len() == 1, "Endurance on the stack: {}", g.log_lines().join("\n"));
+    g
+}
+
+/// ENGINE.md 271 (the regression of the information-set failures `lands_a` seed 231, `lands_b` seed 936, `lands_c`
+/// seed 981): each card leaving P1's graveyard triggers Murktide Regent (CR 603.2c, 603.10a); the six triggers are
+/// interchangeable (their effect ignores the event) and go on the stack in the order their events came, and each
+/// stack item's event reference shows its card's last known identity (public: it was in the graveyard). The events
+/// came in the random order, so the stack's order of identities told the hidden library order. Two worlds of either
+/// player's (equal keys, the random order drawn by each world's own RNG) must stay the same row for that player at
+/// every step: the Endurance trigger's target, the move, the six triggers on the stack and their resolutions.
+#[test]
+fn engine_271_endurances_random_order_does_not_show_in_murktides_triggers() {
+    use engine::az::tail_encode::Row;
+    use engine::rng::Rng;
+    let g0 = endurance_vs_regent_271();
+    let p1 = Choice::Target(Target::Player(1));
+    let bits = |r: &Row| -> (Vec<u32>, Vec<(u16, u32, Vec<u32>)>, Vec<(u32, i64)>) {
+        (r.head.iter().map(|f| f.to_bits()).collect(), r.tail.iter().map(|(a, b, v)| (*a, *b, v.iter().map(|f| f.to_bits()).collect())).collect(), r.ov.clone())
+    };
+    let mut seen_six = 0;
+    for v in 0..2u8 {
+        for s in 0..12u64 {
+            let mut a = g0.clone();
+            a.determinize(v, &mut Rng::new(s));
+            let mut b = g0.clone();
+            b.determinize(v, &mut Rng::new(s ^ 0x5EED));
+            let (mut la, mut lb) = (Vec::new(), Vec::new());
+            let mut libs = None;
+            for step in 0..60 {
+                if a.is_over() || (a.stack().is_empty() && step > 0) {
+                    break;
+                }
+                a.legal_actions(&mut la);
+                b.legal_actions(&mut lb);
+                assert_eq!((a.to_move(), &la), (b.to_move(), &lb), "P{v} world pair {s} step {step}: the same decider and options");
+                assert_eq!(a.view_of(v), b.view_of(v), "P{v} world pair {s} step {step}: the same view");
+                assert!(bits(&Row::of_v8(&a, v)) == bits(&Row::of_v8(&b, v)), "P{v} world pair {s} step {step}: the same row\n{}", a.log_lines().join("\n"));
+                let regent = |g: &Game| g.stack().iter().filter(|x| matches!(x.kind, StackKind::Ability { source, .. } if g.name(source.idx) == MURKTIDE)).count();
+                if regent(&a) == 5 {
+                    seen_six += 1;
+                    libs.get_or_insert((a.player(1).library.clone(), b.player(1).library.clone()));
+                }
+                let d = a.pending_decision().expect("a decision");
+                let want = if d.kind == DecisionKind::Target && a.has_option(p1) {
+                    p1
+                } else if d.kind == DecisionKind::Priority {
+                    Choice::Pass
+                } else {
+                    d.options[0].choice
+                };
+                let act = d.options.iter().find(|o| o.choice == want).expect("the choice offered").action;
+                let (mut ka, mut kb) = (Vec::new(), Vec::new());
+                a.apply(act, &mut ka).unwrap();
+                b.apply(act, &mut kb).unwrap();
+                assert_eq!(ka, kb, "P{v} world pair {s} step {step}: equal keys (nothing revealed)");
+            }
+            assert!(a.player(1).graveyard.is_empty() && a.stack().is_empty(), "{}", a.log_lines().join("\n"));
+            assert_eq!(a.counters_on(a.card(1, MURKTIDE, Zone::Battlefield), Counter::P1P1), 5);
+            let (x, y) = libs.expect("the five Regent triggers on the stack");
+            if s == 0 {
+                assert_ne!(x[..6].iter().map(|&c| a.obj(c).def).collect::<Vec<_>>(), y[..6].iter().map(|&c| b.obj(c).def).collect::<Vec<_>>(), "P{v}: the two worlds' random orders differ (else the walk proves nothing)");
+            }
+        }
+    }
+    assert!(seen_six >= 24);
+}
+
+/// ENGINE.md 271 (lane C's 336aaa8b test): whatever the random draws, Murktide Regent's triggers from Endurance's
+/// move go on the stack in the graveyard's order.
+#[test]
+fn engine_271_endurances_triggers_come_in_the_graveyards_order() {
+    let orders: Vec<Vec<String>> = (0..8u64)
+        .map(|seed| {
+            let mut g = endurance_vs_regent_271();
+            g.reseed_rng(seed);
+            let p1 = Choice::Target(Target::Player(1));
+            for _ in 0..40 {
+                if g.stack().iter().any(|s| matches!(s.kind, StackKind::Ability { source, .. } if g.name(source.idx) == MURKTIDE)) {
+                    break;
+                }
+                if at_priority(&g) {
+                    g.pass();
+                } else {
+                    let c = if g.has_option(p1) { p1 } else { g.pending_decision().unwrap().options[0].choice };
+                    g.choose(c);
+                }
+            }
+            let trig: Vec<String> = g
+                .stack()
+                .iter()
+                .filter_map(|s| match s.kind {
+                    StackKind::Ability { source, .. } if g.name(source.idx) == MURKTIDE => s.ev.obj.map(|r| g.name(r.idx).to_string()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(trig.len(), 5, "{}", g.log_lines().join("\n"));
+            trig
+        })
+        .collect();
+    assert!(orders.iter().all(|o| *o == orders[0]), "{orders:?}");
+}
