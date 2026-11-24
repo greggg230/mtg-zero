@@ -47822,3 +47822,62 @@ power still stops such a machine. No Rust input changes: the engine hash and eve
 
 **Left.** The agent's own on-device autotune trials (zero-farm `policy::tuning_allowed`, PROTOCOL 13) still require an
 idle machine whatever `work_when` says; the same rule there is a zero-farm change and an agent release.
+
+## 256. Single games: what one game id of an `mtg` spec holds, reported exactly to the farm (the package hook `id_games`, `mtgz.az.single_games`; zero-core pin a39a8c1 -> c10104d, docs/az.md 82; zero-farm PROTOCOL 22; branch `feat/single-game-counts`, 2026-11-23)
+
+**Why.** Throughput is reported in single games (the user's rule), and every count a run or the farm keeps is a count
+of game ids: an id of a best-of-one spec is one game, an id of a best-of-three spec a whole match of two or three (one
+or two played with `start_game` 2, section 130). The farm's coordinator stores `results.single_games` when the trainer's
+ack carries them (zero-farm PROTOCOL 22, rev 30); only the trainer side knows how many games an id held. zero-core's
+side is its docs/az.md 82 (`zero.games.single_games`, the pool's / the evaluations' acks, the pool metrics, the own
+machines' report); this section is the pin onto it and this package's half: the hook, and the one ack this repo sends
+itself.
+
+**256.1 The pin.** `third_party/zero-core` a39a8c1 -> c10104d (`feat/single-game-counts`, a fast-forward of zero-core
+main a39a8c1): Python only - no crate, no graph, no setting. Nothing about play, search, training or an encoding
+changes; the new things are keys (a metrics row's `selfplay.single_games`, `eval_yard` / `eval_random`'s
+`single_games`, a pool's `single_games` / `single_uncounted` / `single_machines` and per machine in `by_machine`, the
+`single_games` list in three ack bodies, `single_games` / `uncounted` in `zero.farm_report`'s sources).
+
+**256.2 The hook** (`GamePackage(id_games=...)`, `mtgz.az.single_games`; declared for `mtg`, `mtg_v7` and `mtg_eoe` -
+every game of `mtg`'s rules the engine module registers). zero-core asks it only for a spec that does not chain its
+episodes; the answer is asked of the engine, not read off the spec's text: a game is made from the spec
+(`MtgSpec::parse`: the default format `bo1`, the spellings `"bo1"` / `"bo3"`, every refusal) and its exported state
+names the parsed format (`match.format`, `view.rs`) while `Game.chained` says whether `game_episodes` is on.
+
+| the spec, as the engine reads it | one id is | from |
+|---|---|---|
+| best-of-one (the default; the cube, sealed, EoE, a constructed best-of-one, the yardsticks' bo1) | 1 game | the hook: `match.format == "bo1"` |
+| best-of-three with `game_episodes` (section 121: the Delver, metagame and stew runs) | the episodes its row or record lists: 2 or 3, 1 or 2 with `start_game` 2, an unfinished last game included | zero-core (`chained`): `len(episodes)`; a record's replay refuses a list that is not the match's. The hook is not asked (it would answer None) |
+| best-of-three, one episode the whole match (section 36's limited best-of-three, a constructed one without `game_episodes`) | **not known** | the hook answers None: nothing an id, a row or a record carries says whether the match took two games or three |
+| `team_draft` | **not known** | not declared: an id is a whole draft and its matches |
+
+A count is exact or absent: nothing is estimated and no reader multiplies ids by a ratio. A spec the engine refuses
+raises its refusal (the same game construction zero-core's `chained` does first).
+
+**256.3 The campaign pull's ack** (`mtgz.az.farm_campaign.pull`, section 165 - this repo's own `POST .../ack`): each
+result's credited rows (its file's and its `also` files', by the ids it credited from each) go to zero-core's
+`farm_eval.credited_single_games`, and the ack is `farm_eval.ack_body(cursor, counts)`: `{"cursor", "single_games":
+[[result id, n], ...]}`. A result gets no entry when a credited id is not in its files, a row's record fails its
+digest, or the spec's ids are not known (the table); without any entry the body is the one of before, as it is for a
+coordinator before PROTOCOL rev 30 (which ignores the key). A problem while counting is never the pull's failure. The
+other acks are zero-core's (the farm pool of a run, `farm_h2h`, `eval_pool`) and need only the hook.
+
+**256.4 Not counted, by design.** A best-of-three evaluation on the farm whose rows are not traced (the worker's eval
+row does not carry its match's games; zero-core docs/az.md 82: it needs a row field from the worker, a new worker
+build); best-of-three without `game_episodes`; `team_draft`; a remote host's own self-play (its shard events carry ids
+only); results acked before this change (the coordinator keeps NULL for them; a backfill is its own job).
+
+**Tests.** tests/test_single_games.py (7): the hook is declared for every `mtg` game the engine module registers and
+not for the draft; for `mtg` and `mtg_v7` the engine's best-of-one (default and spelled) is 1, a best-of-three of one
+episode None (limited and constructed), a best-of-three with `game_episodes` its row's episodes and None without them,
+a format the engine refuses raises; `mtg_eoe`'s spec is 1; every preset's self-play and evaluation spec is answered
+as its parsed format says; a campaign pull of traced best-of-one rows acks each complete result's count (a result
+missing an id gets none; a wrong digest or a wrong `games` gives none; a result without `games` leaves the ack of
+before); real Delver best-of-three matches with `game_episodes` - each record's count is the number of games the
+driver's row lists, and a campaign's pull of their self-play records file acks the exact totals, spot check replaying
+them. The farm pool's own round trip on a chained game (ack entries, `single_machines`, `by_machine`) is zero-core's
+tests/test_single_games.py on its toy match (run by this gate's core pytest); its fixture is a toy run of zero-core's
+test directory, so an `mtg` pool round trip is not repeated here.
+
+**Digests.** None moves (no engine, encoding or search change).

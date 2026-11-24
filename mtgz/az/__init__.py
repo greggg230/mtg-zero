@@ -42,7 +42,7 @@ import os
 from zero import local_config
 from zero.package import GamePackage, register
 
-from . import deck_reader, decklists
+from . import deck_reader, decklists, single_games
 from .evaldecks import eval_spec
 from .mac import LocalGpuRemote, RunCommitRemote
 from .publish import DELVER_PUBLISH, META3_PUBLISH
@@ -600,6 +600,9 @@ PACKAGE = register(GamePackage(
     # rows by the acting player's deck and the pairing ({"actor"}, {"pairing"}, {"not_pairing"}), read exactly from
     # each row's bags (mtgz.az.rowselect)
     row_selectors={'mtg': 'mtgz.az.rowselect:row_select', 'mtg_v7': 'mtgz.az.rowselect:row_select'},
+    # the single games of one game id (zero-core docs/az.md 82, docs/ENGINE.md 256): 1 for a best-of-one spec, asked of
+    # the engine; a best-of-three match is counted from its record's episodes (`game_episodes`) or not at all
+    id_games=single_games.ID_GAMES,
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'mtg_v7': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
     env_prefix='MTGZ', presets=PRESETS,

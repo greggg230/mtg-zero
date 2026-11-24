@@ -936,12 +936,14 @@ def pull(cl, d, st, log=log_stderr):
     while True:
         ans = cl.call('GET', f'/v1/admin/run/{st["run"]}/results?after={st.get("cursor", 0)}&limit=500')
         res = ans.get('results') or []
+        counts = {}                                # result id -> its credited ids' single games (ENGINE.md 256)
         for r in res:
             if samples_job(st):
                 if r.get('kind') != 'selfplay':
                     continue
             elif r.get('kind') != 'eval' or r.get('batch') not in (None, st['batch']):
                 continue
+            cred = []
             dup = ids_of(r.get('dup_ids'))
             parts = [(_result_file(cl, d, r['key'], r.get('sha256')), ids_of(r.get('ids')))]
             for x in r.get('also') or []:
@@ -950,6 +952,8 @@ def pull(cl, d, st, log=log_stderr):
             for text, ids in parts:
                 for row in (records_rows(st, text) if samples_job(st) else FE.read_rows(text)):
                     g = int(row['gid'])
+                    if g in ids:
+                        cred.append(row)
                     if g in dup or g in have or g not in ids:
                         continue
                     try:
@@ -961,6 +965,7 @@ def pull(cl, d, st, log=log_stderr):
                     row['by'] = {'machine': r.get('machine_id') or '?', 'lease': r.get('lease_id')}
                     have.add(g)
                     new.append(row)
+            counts[r.get('id')] = _single_games(st, r, cred)
             _append_rows(d, new)
             if new:
                 st.setdefault('first_result', time.time())    # (the queue's wait: the batch put to its first game)
@@ -976,10 +981,23 @@ def pull(cl, d, st, log=log_stderr):
             if samples_job(st):
                 # (the self-play quota: accepted + in flight; the total, PROTOCOL.md 4 - before the ack)
                 cl.call('POST', f'/v1/admin/run/{st["run"]}/accept', body={'gen': 1, 'games': len(have)})
-            cl.call('POST', f'/v1/admin/run/{st["run"]}/ack', body={'cursor': st['cursor']})
+            cl.call('POST', f'/v1/admin/run/{st["run"]}/ack', body=FE.ack_body(st['cursor'], counts))
         if len(res) < 500:
             save_state(d, st)
             return taken
+
+
+def _single_games(st, r, rows):
+    """A result entry's single games for the ack (zero-core docs/az.md 82, docs/ENGINE.md 256; zero-farm PROTOCOL 22):
+    the games of the ids it credited (`rows`: their rows, from its file and its `also` files), exactly - a
+    best-of-one id is one, a best-of-three match with `game_episodes` the episodes its record lists - or None: not
+    counted (an id missing from the files, a record whose digest fails, a match without `game_episodes`). A count is
+    never the pull's failure."""
+    from zero import farm_eval as FE
+    try:
+        return FE.credited_single_games(layouts.record_game(st), st['spec'], r, rows)
+    except Exception:                              # noqa: BLE001 - exact or absent
+        return None
 
 
 def records_rows(st, body):
