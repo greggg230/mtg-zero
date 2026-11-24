@@ -48039,3 +48039,58 @@ release (the owner's go, 2026-11-23).
 (new) and `test_selfplay_local_0_leaves_the_games_to_a_delivering_farm` (unchanged, the default); the whole zero-core
 suite on 9538e15; the worker crate's classify tests. This repo: the optin-core and python gates on this commit (results
 below when they finish). **Measured**: not yet - the first stew's generation-2 specialist turns.
+
+## 259. Best-of-three matches in the game database: each game a row, its game number and each seat's sideboard plan (`tools/gamedb.py`, docs/gamedb.md "Best-of-three matches"; branch `feat/gamedb-bo3`, 2026-11-24)
+
+**Why.** The Delver mirror's dealt self-play and the stew's specialists play best-of-three with one episode per game
+(ENGINE.md 121): each match is one chained contest record (zero-core records/1, episode boundaries `{"next": seat|null}`
+in its steps). The game database (187, 190) skipped them ("chained contest(s) ... NOT replayed"), so a stew's
+self-play was not in it at all. The user (2026-11-24): "Database should record what game they're in and what
+sideboard plans were."
+
+**259.1 What.** `gamedb ingest` replays a chained contest game by game (`replay_match`; light and full as a single
+game, the whole match sampled by its match id) into one `games` row per game, with new columns: `match_id` (the
+record's id), `game_no` (the engine's game number), `match_games`, `match_winner`, `match_result` ('2-1'),
+`pre_wins0/1` (game wins before the game), and per seat `deckP_60` (the 60 as played: the match block of the state at
+the game's end), `deckP_in` / `deckP_out` ('N Card' against the seat's main), `deckP_mode` (`main` / `dealt` / `table` /
+`chosen`) and `deckP_dealt` - those two from the engine's own best-of-three game log (168.2), switched on to a temporary
+file for the match's replay only and checked against the match block's 60s and wins. A game's `game_id` is blake2b over
+`'<match_id>|game|<k>'`. `events` gain `game_no`; a game's events are its episode's steps, its sideboarding's `Sideboard`
+choices first (no turn or step: the state there shows the last game's board). combo_stats' Reader and the Bauble
+Reader are new per game, fed its own steps only (no sideboarding step), finished at its end; a later game's Oracle count
+is its own 60's. Views: `game_results` gains the match and per-seat plan columns (`deck_mode`, `dealt`, `sb_in`,
+`sb_out`, `wins_before`, `match_outcome`), `casts` `game_no` and `match_id`. `prune` keeps or drops a match whole.
+
+**259.2 The checks.** Every boundary replays as recorded: a game ended by the rules has no conceding seat and vice
+versa, `next_episode` continues the match exactly at each boundary and ends it after the last game with the record's
+result; the record's `episodes`, when it has them, per game. The farm's and the local driver's records carry no
+`episodes` and no boundary after the last game: a last game the record leaves in progress was conceded, by the seat
+whose concession ends the match with the record's result - tried both ways on the engine, exactly one must fit (not
+always the match's loser: a match 0-1 after a drawn game 2 ends drawn when game 3's loser P1 concedes - game 810 of the
+first stew's Delver-mirror iteration 35, which the first version of this code refused).
+
+**259.3 No new format.** The new columns are additive: a database of `mtgz-gamedb/2` reads its older files with the
+columns NULL, and `connect` reads them as single games (`game_no` 1, `match_id` the game's id, `match_games` 1,
+`match_winner` its winner). A unit an earlier gamedb ingested with `chained_skipped` is ingested again by the next
+`ingest`. `--engine-checkout` now passes `--iters` on (it ingested the other engine's every iteration). A publisher
+replay of a whole match (zero-replay/1 with `games`) is still indexed without its games.
+
+**259.4 Measured** (read-only, a scratch database): the first stew's Delver-mirror specialist
+(`spec-izzet_delver_8016541-izzet_delver_8016541`), iterations 63-64 (records of main 66288d93's engine, ingested
+through `--engine-checkout` with this gamedb), all in full: 1,732 matches -> 4,317 games (1,732 game 1s, 1,732 game 2s,
+853 game 3s), 1,385,243 events, ~32 s wall on 6 processes (4-7 CPU-ms a game). Matches 2-0 456, 0-2 423, 2-1 422, 1-2 423,
+three-game draws and 2-0 / 0-2 after a drawn game 8. Dealt seats: both 1,264 matches, one 425, none 43 (the spec's
+p 0.85 per seat). In games 2 and 3 a dealt seat brings in 7.56 cards on average (169 + 87 of 4,385 dealt seats got the
+main back); every undealt seat sideboards by the choice table (`table`, v0048) and played the main 60 in all 785 of its
+games 2 and 3 (no seat's mode is `chosen` in this run). Pyroblast / Hydroblast casts appear in games 2 and 3 only (they
+are sideboard cards), all by dealt seats: game 2 685 Pyroblast / 452 Hydroblast, game 3 346 / 215; their targets'
+colours (the card IR's) make 152 + 84 casts in game 2 and 68 + 33 in game 3 a no-op (the wrong colour).
+
+**Tests.** tests/test_gamedb_bo3.py (new): random-move Delver mirror matches (dealt per seat, random concessions,
+`episodes` in some records) recorded as the drivers record a chained contest: the games split with `game_no` 1..k and the
+id scheme, each game's winner and wins before it, the sideboard columns equal to the engine's 60s at each game's end
+against the main, `dealt` exactly for the seats that made no sideboarding decision (and `chosen` for those that did),
+events tagged with their game (sideboarding choices only in games 2-3, without a turn), the Bauble Reader's actions inside
+their game, light rows equal to full rows, ingest idempotent (a second ingest, `--redo`, a state with `chained_skipped`),
+an older database's files read as single games, a match whose boundary is falsified fails loudly. The existing gamedb
+tests pass unchanged. Gate: python tier (below).

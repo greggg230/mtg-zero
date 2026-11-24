@@ -51,7 +51,7 @@ The database of run R: `$MTGZ_GAMEDB/R`, else `<ZERO_BIG_DISK>/mtg-zero-gamedb/R
 | `combo` | `tools/combo_stats.py play --records DIR`; the publisher's combo pass (the run's `records/combo/iter_NNNN`) | the generation (publisher), none | the checkpoint at each player's simulations |
 | `combo_selfplay` | `combo_stats.py selfplay --records DIR` (the forced find on) | none | as `combo` |
 | `h2h` | `python -m mtgz.az.h2h A B --records DIR` (any zero.h2h match; `--records-kind` names another) | none | A and B (`--label-a`, `--label-b`) |
-| `keep_h2h` | `python -m mtgz.az.keep_h2h ... --records DIR` (chained best-of-three: kept, not replayed here) | none | A and B |
+| `keep_h2h` | `python -m mtgz.az.keep_h2h ... --records DIR` (chained best-of-three: a row per game, "Best-of-three matches") | none | A and B |
 | `publisher` | the delverai publisher's recorded games (`<run>/replays/`, recorded with `game_records`) | the recorded generation | the replay's seats |
 
 A player is `{ckpt, sha, label, sims, rule}`: `ckpt` '<run>/iter_NNNN' (a run's checkpoint) or the file's name (an
@@ -64,9 +64,10 @@ cells match's `pair` and `chooser`, a batch's `batch` / `gid_offset`, `backend` 
 Not recorded (no whole game to keep): the canary library (`blunders`: positions searched, not games played), the cells'
 joint fit (no games), a cached cells baseline (its games were recorded when they were played). zero-core's standalone
 `zero.farm_h2h` (its eval jobs run without `eval_trace`: the farm returns no moves; the yardsticks' farm jobs, by
-`mtgz.az.farm_campaign`, trace every game and are recorded). A chained contest (a best-of-three match: `keep_h2h`, a
-best-of-three run's evaluation) is recorded but not replayed by the database (its steps hold episode boundaries; ingest
-says how many it skipped).
+`mtgz.az.farm_campaign`, trace every game and are recorded). A chained contest (a best-of-three match with one episode
+per game: a best-of-three run's self-play and evaluation, `keep_h2h`) is replayed game by game since ENGINE.md 259
+("Best-of-three matches" below); a publisher replay of a whole match (`zero-replay/1` with `games`) is still indexed
+without its games (`skipped: chained contest` in `state.json`).
 
 ## The engine
 
@@ -109,7 +110,7 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 
 | column | meaning |
 |---|---|
-| game_id | BIGINT, unique (a hash of iteration, source, game id, seed, actions; another kind's: of its unit, game id, seed, actions) |
+| game_id | BIGINT, unique (a hash of iteration, source, game id, seed, actions; another kind's: of its unit, game id, seed, actions; a best-of-three match's game: of its `match_id` and `game_no`, "Best-of-three matches") |
 | iter | self-play: the accepting iteration; another kind's: see "Kinds" (NULL for a standalone tool's) |
 | kind | the game's kind (above: `selfplay`, `eval`, `elo`, `anchor`, `ref`, `cells`, `cells_gen`, `cells_base`, `bo1`, `combo`, `h2h`, `keep_h2h`, `publisher`, ...) |
 | unit | its unit (`iter=NNNN`, `m=<kind>.<sub>/<file>`, `r=publisher/<file>`) |
@@ -138,6 +139,13 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 | detailed | replayed in full (its events and combo rows exist) |
 | last_attackers | JSON {turn, attackers} of the winner's last attack (detailed games) |
 | lines_lost | play-by-play lines a state did not carry (detailed games): 0 since the engine exports every line a step writes (ENGINE.md 191), a check; before it a state carried the newest 40 and a step that wrote more (Doomsday exiling a library, ~50 lines) lost its oldest, ~6 a real self-play game |
+| match_id, game_no, match_games | the match (its record's id: the `game_id` scheme above over the whole record), this game's number in it (1, 2, 3: the engine's), the games the record holds; a single game: its own `game_id`, 1, 1 |
+| match_winner, match_result | the match's winning seat (NULL: drawn or unfinished) and its game wins `'<seat 0>-<seat 1>'` (`'2-1'`); a single game: its winner, `'1-0'` / `'0-1'` / `'0-0'` |
+| pre_wins0, pre_wins1 | each seat's game wins before this game (0 in game 1; a `start_game` 2 match counts its drawn game 1) |
+| deck0_60, deck1_60 | the seat's 60 as played this game, `'N Card'` in its 75's list order (NULL: a single game) |
+| deck0_in, deck0_out, deck1_in, deck1_out | the sideboard plan: the cards the 60 holds more / fewer copies of than the seat's main (`'N Card'`; `[]` the main itself) |
+| deck0_mode, deck1_mode | how the 60 was made (the engine's game log, ENGINE.md 168.2): `main` (game 1), `dealt` (dealt from its 75 at random, `dealt_decks`, ENGINE.md 154), `table` (the choice table's 60, ENGINE.md 168.3), `chosen` (the seat's own sideboarding decisions: its network) |
+| deck0_dealt, deck1_dealt | the seat is dealt in this match (a rule of the match, the same in every game; game 1 is still the main) |
 
 **events** - one row per play-by-play line and per choice of a detailed game.
 
@@ -150,7 +158,8 @@ its full name, `Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar`); lists
 | type | `cast`, `land` (a land played), `activate`, `mana` (a mana ability), `move` (a zone change), `find` (a search's pick), `trigger` (a trigger put on the stack), `counter` (a spell countered), `attack`, `look`, `choose`, `turn` (a turn begins), `forced_find` (the wheel's draw line), `empty_draw`, `mulligan` (detail `n`: the mulligan's number), `damage` (detail `amount`; `card` the damaged object, or `player` the damaged seat with detail `player` true), `target` (a spell or ability's target as it is chosen: `card`, or `player`), `life_half` (Doomsday's cost: detail `amount`), `fizzle`, `wins`, `lines_lost` (detail `n`: the next state did not carry `n` of a step's lines, which are not in `events`; never since ENGINE.md 191, a check - an engine before it exported a state's newest 40 lines, and a resolving Doomsday exiling the rest of a library lost its oldest; `combo_stats` reads the same lines, and the `doomsday` rows come from the state, not the lines), `choice` (a decision with two or more options other than priority and mana payment: mulligans, targets, modes, piles, Brainstorm's put-backs, ...), `other` |
 | card | the card the line names (cast / land / activate / mana / find / move / trigger / counter / attack: the attacker); a choice's chosen option text |
 | from_zone, to_zone | a move's zones (`Library`, `Hand`, `Battlefield`, `Graveyard`, `Stack`, `Exile`); a cast's zone it was cast from (`Hand`, `Graveyard`, ...) |
-| detail | JSON: a choice's `kind` (`Mulligan`, `ChooseTarget`, `SearchLibrary`, `PutOnTop`, ...) and `n_options` (and `source` while a spell resolves); an activation's `ability`; the forced find's `class` and `drawn`; an `other` line's `text` |
+| detail | JSON: a choice's `kind` (`Mulligan`, `ChooseTarget`, `SearchLibrary`, `PutOnTop`, `Sideboard`, ...) and `n_options` (and `source` while a spell resolves); an activation's `ability`; the forced find's `class` and `drawn`; an `other` line's `text` |
+| game_no | the game's number in its match (`games.game_no`; 1 for a single game) |
 
 **doomsday** - one row per resolved Doomsday (detailed games): caster, turn, `pile` (the library after it, top first),
 `pile_size`, `library`, `choices` (the option texts that built it), `hand` (the caster's hand after it), `life`,
@@ -192,17 +201,81 @@ P<n>" line after it.
 
 | view | one row per | columns |
 |---|---|---|
-| game_results | game x seat | game_id, iter, kind, seat, deck, opp_deck, player, player_label, opp_player, opp_label, on_play, score, outcome (win / loss / draw), method, turns, resigned, executor, mulligans |
+| game_results | game x seat | game_id, iter, kind, seat, deck, opp_deck, player, player_label, opp_player, opp_label, on_play, score, outcome (win / loss / draw), method, turns, resigned, executor, mulligans, match_id, game_no, match_games, match_outcome (the seat's match: win / loss / draw), wins_before, opp_wins_before, deck_mode, dealt, deck_60, sb_in, sb_out (the seat's columns of "Best-of-three matches") |
 | mulligans | game x seat | game_id, iter, kind, seat, deck, opp_deck, on_play, mulligans, score, outcome |
 | doomsday_piles | resolved Doomsday | game_id, iter, kind, idx, caster, caster_deck, caster_label, opp_label, opp_deck, turn, pile, pile_size, card1..card5 (top first), oracle (class), oracle_in_pile, oracle_in_hand, oracle_where, oracle_place (`in_pile` / `in_hand` / `not_findable` / `missed`), forced (the wheel chose the Oracle), ff_drawn, forced_find_p, life, hand, choices, won (the caster won the game), win_method (its method when it won), method, turns |
 | doomsday_pile_cards | card of a pile | game_id, iter, kind, idx, caster, caster_deck, opp_deck, oracle, forced, won, win_method, pos (1 = top), card |
-| casts | cast | game_id, iter, kind, seq, turn, step, player, card, cast_from, deck, opp_deck, won |
+| casts | cast | game_id, iter, kind, game_no, match_id, seq, turn, step, player, card, cast_from, deck, opp_deck, won |
 | show_and_tell | resolved Show and Tell | game_id, iter, kind, idx, caster, caster_deck, opp_deck, turn, put_caster, put_opponent, caster_pick / opponent_pick (the first of each list), won, method |
 | sneak_attack | Sneak Attack activation | game_id, iter, kind, idx, player, deck, turn, sneaked_in (what entered by Sneak Attack that turn), won, method |
 
 Every view holds every kind: add `WHERE kind = 'selfplay'` (or another) for one kind's games - the ten queries below
 were written for self-play. Rates over the combo tables and `events` use detailed games only: with `--sample` below 1, count the denominators
 from `games WHERE detailed` (every query below does that implicitly by joining the detailed tables).
+
+## Best-of-three matches (ENGINE.md 259)
+
+A best-of-three run with one episode per game (the spec's `game_episodes`, ENGINE.md 121: the Delver mirror's dealt
+self-play, the stew's specialists, their evaluations) records a match as ONE chained contest (zero-core records/1): its
+`steps` hold every game's actions with an episode boundary `{"next": <conceding seat or null>}` between two games, and
+its outcome is the match's. Ingest replays it game by game (light or full as any game; the whole match one way:
+`--sample` draws by its match id), and each game is its own `games` row, so every per-game query and view keeps meaning
+"a game":
+
+* **Ids.** `match_id` is the record's id (`game_id`'s hash of the whole record, as a single game's); game k's `game_id`
+  is 63 bits of blake2b over `'<match_id>|game|<k>'` (`gamedb.match_game_id`): deterministic, the same at every ingest.
+  `game_no` is the engine's game number (a `start_game` 2 match begins at 2); `match_games` the games the record holds.
+* **A game's actions** are its episode's: the sideboarding before it first (its `Sideboard` decisions are its `choice`
+  events, with no turn or step - the state there shows the last game's board), then the game. `n_actions`, `decisions`
+  and the events' `action` count within the game (-1: its lines before its first action).
+* **How a game ended**: by the rules, or by a concession - its boundary's seat, or for the match's last game (the
+  record over, that game not) the seat whose concession ends the match with the record's result (not always the
+  match's loser: after a drawn game the last game's loser can concede into a drawn match). A conceded game is the
+  winner's with `resigned` true and `method` `resigned`, as a single resigned game. Every boundary and the match's result
+  are checked against the replay (and against the record's `episodes` when it has them): a mismatch fails the unit.
+* **The sideboard plan** per seat: `deckP_60` (the 60 as the match block of the engine's state holds it at the game's
+  end), `deckP_in` / `deckP_out` against the seat's main (the spec's deck, or the metagame deck its pairing names), and
+  `deckP_mode` / `deckP_dealt` from the engine's best-of-three game log (ENGINE.md 168.2, switched on for the match's
+  replay only, a temporary file: its 60s are checked equal to the match block's). A game the record ends inside (an
+  unfinished contest) has no log line: its mode is `dealt` for a dealt seat, else NULL.
+* **The Readers** (`combo_stats`, the Bauble Reader) read one game at a time: new at each game, fed its own steps only
+  (never a sideboarding step), finished at its end; the Oracle count of a later game is its own 60's.
+* **A database from before** (no match columns, its chained contests skipped: `chained_skipped` in `state.json`) needs
+  no new format: a unit that skipped matches is ingested again by the next `ingest` (its games then in full), and the
+  files without the columns read as single games (`game_no` 1, `match_id` the game's own, `match_winner` its winner).
+* **Another engine's records** (`--engine-checkout`): the delegate runs that checkout's own `tools/gamedb.py`; one
+  older than ENGINE.md 259 still skips chained contests: copy this `tools/gamedb.py` into it when the files it imports
+  there (`tools/combo_stats.py`, `tools/gamedb_bauble.py`, `mtgz/az/layouts.py`) equal this checkout's (`git diff`).
+
+Examples:
+
+```sql
+-- games per game number (how often a match goes to game 3) and how they ended
+SELECT game_no, count(*) AS games, count(*) FILTER (WHERE resigned) AS conceded, round(avg(turns), 1) AS turns
+FROM games WHERE match_games > 1 GROUP BY 1 ORDER BY 1;
+
+-- what each seat boarded in game 2, dealt vs chosen: the cards brought in, copies and seats
+SELECT deck_mode, substr(c, strpos(c, ' ') + 1) AS card, sum(CAST(split_part(c, ' ', 1) AS INT)) AS copies,
+       count(*) AS seats
+FROM (SELECT deck_mode, unnest(sb_in) AS c FROM game_results WHERE game_no = 2)
+GROUP BY ALL ORDER BY deck_mode, copies DESC;
+
+-- Pyroblast and Hydroblast casts per game number, each with the target it chose (the next target line)
+WITH c AS (SELECT game_id, game_no, seq, player, card FROM events
+           WHERE type = 'cast' AND card IN ('Pyroblast', 'Hydroblast'))
+SELECT c.game_no, c.card, t.card AS target, count(*) AS casts
+FROM c LEFT JOIN LATERAL (SELECT card FROM events t WHERE t.game_id = c.game_id AND t.type = 'target'
+                          AND t.seq > c.seq ORDER BY t.seq LIMIT 1) t ON true
+GROUP BY ALL ORDER BY 1, 2, casts DESC;
+
+-- a seat's game-2 result by its plan and whether it was behind (lost game 1)
+SELECT deck_mode, wins_before < opp_wins_before AS behind, count(*) AS seats,
+       avg(CASE outcome WHEN 'win' THEN 1 WHEN 'draw' THEN 0.5 ELSE 0 END) AS score
+FROM game_results WHERE game_no = 2 GROUP BY ALL ORDER BY ALL;
+```
+
+(The target's colour - whether a Pyroblast hit something blue - is the card's, not in the database: join a name ->
+colours table of your own, e.g. from `data/cards/*.ir.json`.)
 
 ## Branch games (zero-core records/2; ENGINE.md 233)
 

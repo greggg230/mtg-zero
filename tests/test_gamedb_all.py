@@ -274,14 +274,15 @@ def test_a_farm_jobs_traced_games_become_records(tmp_path):
 
 
 def test_every_query_of_the_docs_runs(kinds):
-    """docs/gamedb.md's example queries (the ten and the kinds' five) run on a database of every kind."""
+    """docs/gamedb.md's example queries (the ten, the kinds' five and the best-of-three matches' four) run on a database
+    of every kind."""
     import re
     base, run, db = kinds
     text = open(os.path.join(ROOT, 'docs', 'gamedb.md'), encoding='utf-8').read()
     blocks = re.findall(r'```sql\n(.*?)```', text, re.S)
     stmts = [x.strip() for b in blocks for x in b.split(';') if x.strip() and not
              all(ln.strip().startswith('--') for ln in x.strip().splitlines())]
-    assert len(stmts) == 15
+    assert len(stmts) == 19
     con = GDB.connect(db)
     for sql in stmts:
         con.execute(sql).fetchall()

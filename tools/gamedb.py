@@ -33,6 +33,9 @@ priority:
   step and read by tools/combo_stats.py's Reader (the same code as `combo_stats.py scan`) -> its `events` (every
   play-by-play line and every choice of two or more options) and the combo tables (`doomsday`, `shows`, `spells`,
   `sneak`, `entered`); its `games` row is the full replay's (`detailed` true).
+* a best-of-three match recorded as one chained contest (one episode per game, docs/ENGINE.md 121) game by game
+  (docs/gamedb.md "Best-of-three matches"): a `games` row per game (`match_id`, `game_no`, each seat's 60 as played
+  and its sideboarding against the main, dealt or chosen), its events tagged with the game; sampled whole.
 Tables are written per unit (`<db>/<table>/iter=NNNN/part.parquet` for a self-play iteration, replaced whole;
 `<db>/<table>/m=<kind>.<sub>/<file>.parquet` for a records file, `r=publisher/<file>.parquet` for a replay);
 `<db>/state.json` lists the units ingested. A game that does not replay is never dropped silently: its unit fails loudly.
@@ -343,12 +346,14 @@ def _final_fields(final, n_dec, method, rec, decks):
             'score0': res[0], 'score1': res[1] if len(res) > 1 else None, 'decisions': n_dec}
 
 
-def replay_light(E, C, spec_txt, rec, decks):
-    """Light replay (module docs): the game to its end with the log on, two exports. -> games fields."""
+def _new_game(E, spec_txt, rec):
     sp = json.loads(spec_txt)
     sp['log'] = True
-    g = E.Game(_lay().record_game(rec), json.dumps(sp), int(rec['n']), int(rec['seed']))
-    acts = actions_of(rec)
+    return E.Game(_lay().record_game(rec), json.dumps(sp), int(rec['n']), int(rec['seed']))
+
+
+def _play_light(g, acts):
+    """One game's actions played with two exports (module docs) -> (decisions, the state before the last, the final)."""
     n_dec = 0
     prev = None
     for i, a in enumerate(acts):
@@ -357,7 +362,13 @@ def replay_light(E, C, spec_txt, rec, decks):
         if i == len(acts) - 1:
             prev = json.loads(g.export_state())
         g.step(int(a))
-    final = json.loads(g.export_state())
+    return n_dec, prev, json.loads(g.export_state())
+
+
+def replay_light(E, C, spec_txt, rec, decks):
+    """Light replay (module docs): the game to its end with the log on, two exports. -> games fields."""
+    g = _new_game(E, spec_txt, rec)
+    n_dec, prev, final = _play_light(g, actions_of(rec))
     check_end(g, rec)
     method = C.method_of(final, prev, final.get('log') or [])
     return _final_fields(final, n_dec, method, rec, decks)
@@ -389,80 +400,378 @@ def check_end(g, rec):
             raise ValueError(f'game {rec["gid"]}: replayed result {got}, the record says {rec["result"]}')
 
 
-def replay_full(E, C, spec_txt, rec, decks, mains):
-    """Full replay (module docs): the state at every step, the Reader of combo_stats.py, every line and choice.
-    -> (games fields, events, combo dict)."""
-    sp = json.loads(spec_txt)
-    sp['log'] = True
-    g = E.Game(_lay().record_game(rec), json.dumps(sp), int(rec['n']), int(rec['seed']))
-    R = C.Reader(decks)
-    import gamedb_bauble
-    B = gamedb_bauble.Reader()
-    if mains and all(m is not None for m in mains):
-        R.oracle_main = [list(m).count(C.ORACLE) for m in mains]
-    st = json.loads(g.export_state())
-    events = []
-    lost = 0
+def _game_of(st):
+    """The game number of a best-of-three's state (its `match` block's), None in a single game."""
+    return (st.get('match') or {}).get('game')
 
-    def lines_ev(lines, state, step_ix):
+
+def _sideboarding(st):
+    """A state between the games of a match: the next game's sideboarding (its decisions are that game's first)."""
+    return (st.get('decision') or {}).get('kind') == 'Sideboard'
+
+
+def _oracles(st, C):
+    """The Oracles in each seat's 60 as a match's state holds it (`match.decks`)."""
+    return [sum(int(n) for c, n in deck if c == C.ORACLE) for deck in (st.get('match') or {}).get('decks') or [[], []]]
+
+
+class FullGame:
+    """One game read in full (module docs): the state at every step, combo_stats.py's Reader and the Bauble Reader (both
+    fed this game's own steps only - never across a match's game boundary, never a sideboarding step), every line and
+    choice. `start`: the game's first state; `lines0`: its lines from before its first action (events of action -1)."""
+
+    def __init__(self, C, decks, mains, start, lines0, lost0=0):
+        import gamedb_bauble
+        self.C = C
+        self.R = C.Reader(decks)
+        self.B = gamedb_bauble.Reader()
+        if mains and all(m is not None for m in mains):
+            self.R.oracle_main = [list(m).count(C.ORACLE) for m in mains]
+        self.st = start
+        self.events = []
+        self.lost = lost0
+        self.prev = None
+        self.n_dec = 0
+        self.cut = None
+        self.lines_ev(lines0, start, -1)
+
+    def lines_ev(self, lines, state, step_ix):
         for ln in lines:
             t, s, p, kind, card, fz, tz, det = parse_line(ln, state)
-            events.append((len(events), step_ix, t, s, p, kind, card, fz, tz, det))
-    frm = branch_from(rec)
-    lines_ev(st.get('log') or [], st, -1)
-    if st.get('log_n', 0) > len(st.get('log') or []):
-        lost += st['log_n'] - len(st['log'])
-    prev = None
-    n_dec = 0
-    # (A branch: its first `from` actions are its game's, whose rows hold them - its events and combo rows count from
-    # action `from` on; the combo lists' lengths there are the cut.)
-    cut = None
-    for i, a in enumerate(actions_of(rec)):
-        if frm and i == frm:
-            cut = {k: len(v) for k, v in (('spells', R.spells), ('doomsday', R.doomsday), ('show', R.show),
-                                          ('sneak', R.sneak), ('entered', R.entered))}
+            self.events.append((len(self.events), step_ix, t, s, p, kind, card, fz, tz, det))
+
+    def snapshot(self):
+        R = self.R
+        return {k: len(v) for k, v in (('spells', R.spells), ('doomsday', R.doomsday), ('show', R.show),
+                                       ('sneak', R.sneak), ('entered', R.entered))}
+
+    def step(self, g, i, a):
+        st = self.st
         d = st.get('decision') or {}
         opts = d.get('options') or []
         text = next((o.get('t') for o in opts if o.get('a') == a), None)
+        sb = _sideboarding(st)
         if len(opts) > 1:
-            n_dec += 1
+            self.n_dec += 1
             if d.get('kind') not in NO_CHOICE_EVENT:
-                events.append((len(events), i, st.get('turn'), st.get('step'), d.get('player'), 'choice', text, None, None,
-                               {'kind': d.get('kind'), 'n_options': len(opts), **({'source': d['source']} if d.get('source') else {})}))
+                # (a sideboarding decision's state shows the last game's board: no turn or step of its own)
+                self.events.append((len(self.events), i, None if sb else st.get('turn'), None if sb else st.get('step'),
+                                    d.get('player'), 'choice', text, None, None,
+                                    {'kind': d.get('kind'), 'n_options': len(opts),
+                                     **({'source': d['source']} if d.get('source') else {})}))
         g.step(int(a))
         nxt = json.loads(g.export_state())
-        k = nxt['log_n'] - st['log_n']
+        # (a match's next game begins inside a step - its sideboarding's last -: its log counts from 0 again)
+        k = nxt['log_n'] - (st['log_n'] if _game_of(nxt) == _game_of(st) else 0)
         lines = nxt['log'][-k:] if k > 0 else []
         if k > len(nxt['log']):
             # (a step whose lines the next state does not all carry: never since the engine exports every line a step
             # writes, ENGINE.md 191 - before it a state carried its newest 40 and a resolving Doomsday's oldest exile
             # lines were lost. Kept as a check: an event says how many, as combo_stats marks them)
-            lost += k - len(nxt['log'])
+            self.lost += k - len(nxt['log'])
             lines = ['(log lines lost)'] + lines
-            events.append((len(events), i, nxt.get('turn'), nxt.get('step'), None, 'lines_lost', None, None, None,
-                           {'n': k - len(nxt['log'])}))
-        R.step(st, d.get('kind'), text, lines, nxt)
-        B.step(i, st, d, [ln for ln in lines if ln != '(log lines lost)'])
-        lines_ev([ln for ln in lines if ln != '(log lines lost)'], nxt, i)
-        prev, st = st, nxt
+            self.events.append((len(self.events), i, nxt.get('turn'), nxt.get('step'), None, 'lines_lost', None, None,
+                                None, {'n': k - len(nxt['log'])}))
+        real = [ln for ln in lines if ln != '(log lines lost)']
+        if not sb:
+            self.R.step(st, d.get('kind'), text, lines, nxt)
+            self.B.step(i, st, d, real)
+        elif _game_of(nxt) != _game_of(st):
+            self.R.oracle_main = _oracles(nxt, self.C)     # (the game has begun: the Oracles of its own 60)
+        self.lines_ev(real, nxt, i)
+        self.prev, self.st = st, nxt
+
+    def finish(self, over, frm=0):
+        """The game's end (`over`: the rules ended it) -> (decisions, final state, method, combo dict, events)."""
+        final = self.st
+        R = self.R
+        method = self.C.method_of(final, self.prev, R.recent)
+        w = final.get('winner') if final.get('over') else None
+        last_attack = None
+        if w is not None:
+            ts = [t for t, (act, _) in R.attacks.items() if act == w]
+            if ts:
+                last_attack = {'turn': max(ts), 'attackers': R.attacks[max(ts)][1]}
+        combo = {'spells': R.spells, 'doomsday': R.doomsday, 'show': R.show, 'sneak': R.sneak, 'entered': R.entered,
+                 'last_attack': last_attack, 'lines_lost': self.lost, 'bauble': self.B.finish(over)}
+        events = self.events
+        if frm:
+            cut = self.cut or {k: len(combo[k]) for k in ('spells', 'doomsday', 'show', 'sneak', 'entered')}
+            combo = dict(combo, **{k: combo[k][n:] for k, n in cut.items()})
+            combo['bauble'] = [x for x in combo['bauble'] if x['action'] >= frm]
+            events = [e for e in events if e[1] >= frm]
+            events = [(j,) + tuple(e[1:]) for j, e in enumerate(events)]
+        return self.n_dec, final, method, combo, events
+
+
+def replay_full(E, C, spec_txt, rec, decks, mains):
+    """Full replay (module docs): the state at every step, the Reader of combo_stats.py, every line and choice.
+    -> (games fields, events, combo dict)."""
+    g = _new_game(E, spec_txt, rec)
+    st = json.loads(g.export_state())
+    F = FullGame(C, decks, mains, st, st.get('log') or [], max(0, st.get('log_n', 0) - len(st.get('log') or [])))
+    frm = branch_from(rec)
+    # (A branch: its first `from` actions are its game's, whose rows hold them - its events and combo rows count from
+    # action `from` on; the combo lists' lengths there are the cut.)
+    for i, a in enumerate(actions_of(rec)):
+        if frm and i == frm:
+            F.cut = F.snapshot()
+        F.step(g, i, a)
     check_end(g, rec)
-    final = st
-    method = C.method_of(final, prev, R.recent)
-    w = final.get('winner') if final.get('over') else None
-    last_attack = None
-    if w is not None:
-        ts = [t for t, (act, _) in R.attacks.items() if act == w]
-        if ts:
-            last_attack = {'turn': max(ts), 'attackers': R.attacks[max(ts)][1]}
-    combo = {'spells': R.spells, 'doomsday': R.doomsday, 'show': R.show, 'sneak': R.sneak, 'entered': R.entered,
-             'last_attack': last_attack, 'lines_lost': lost, 'bauble': B.finish(g.to_move is None)}
-    if frm:
-        cut = cut or {k: len(combo[k]) for k in ('spells', 'doomsday', 'show', 'sneak', 'entered')}
-        combo = dict(combo, **{k: combo[k][n:] for k, n in cut.items()})
-        combo['bauble'] = [x for x in combo['bauble'] if x['action'] >= frm]
-        events = [e for e in events if e[1] >= frm]
-        events = [(j,) + tuple(e[1:]) for j, e in enumerate(events)]
+    n_dec, final, method, combo, events = F.finish(g.to_move is None, frm)
     return _final_fields(final, n_dec, method, rec, decks), events, combo
+
+
+# ====================================================================================== best-of-three matches
+def chained(rec, spec):
+    """A chained contest (zero-core records/1: a best-of-three match with one episode per game, the spec's
+    `game_episodes`, docs/ENGINE.md 121): episode boundaries in its steps, its `episodes`, or a spec that chains."""
+    if rec.get('episodes') or spec.get('game_episodes') is True:
+        return True
+    return rec.get('actions') is None and any(isinstance(a, dict) for a in rec.get('steps') or [])
+
+
+def match_game_id(match_id, game_no):
+    """Game `game_no` of the match `match_id` (docs/gamedb.md "Best-of-three matches"): 63 bits of blake2b over
+    '<match id>|game|<game number>' - deterministic, never a single game's id (another hash input)."""
+    k = f'{match_id}|game|{game_no}'.encode()
+    return int.from_bytes(hashlib.blake2b(k, digest_size=8).digest(), 'little') & ((1 << 63) - 1)
+
+
+def sideboard_plan(deck60, main):
+    """A seat's 60 as the match holds it (`match.decks[p]`: [[name, copies], ...] in its 75's list order) against its
+    main (names; None unknown) -> (its 60, in, out: lists of 'N Card' - the 60's cards, and the cards it has more /
+    fewer copies of than the main; in / out None without a main)."""
+    have = collections.Counter()
+    order = []
+    for name, n in deck60:
+        if name not in have:
+            order.append(name)
+        have[name] += int(n)
+    sixty = [f'{have[c]} {c}' for c in order if have[c]]
+    if main is None:
+        return sixty, None, None
+    m = collections.Counter(main)
+    order += [c for c in dict.fromkeys(main) if c not in have]
+    return (sixty, [f'{have[c] - m[c]} {c}' for c in order if have[c] > m[c]],
+            [f'{m[c] - have[c]} {c}' for c in order if m[c] > have[c]])
+
+
+_GLOG = [0]
+
+
+def _game_log_on(E):
+    """The engine's best-of-three game log (docs/ENGINE.md 168.2: each finished game's dealt seats, each seat's mode and
+    60) on, to a file of this process's own -> its path; None with an engine without it (dealt / mode then NULL). The
+    log is process-wide: on only while one match replays."""
+    if not hasattr(E, 'game_log'):
+        return None
+    import tempfile
+    _GLOG[0] += 1
+    path = os.path.join(tempfile.gettempdir(), f'gamedb-glog-{os.getpid()}-{_GLOG[0]}.jsonl')
+    if os.path.exists(path):
+        os.remove(path)
+    E.game_log(path)
+    return path
+
+
+def _game_log_off(E, path):
+    """The log off -> its lines (the file removed)."""
+    if path is None:
+        return []
+    E.game_log(None)
+    try:
+        with open(path, encoding='utf-8') as f:
+            return [json.loads(x) for x in f if x.strip()]
+    except FileNotFoundError:
+        return []
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def _segments(rec):
+    """A chained contest's moves split at its episode boundaries -> [(actions, conceding seat or None, boundary)]: one
+    per episode, the last without a boundary after it."""
+    if rec.get('actions') is not None:
+        return [(actions_of(rec), None, False)]
+    segs, cur = [], []
+    for a in rec.get('steps') or []:
+        if isinstance(a, dict):
+            if set(a) != {'next'}:
+                raise ValueError(f'game {rec["gid"]}: a step {a} that is neither an action nor an episode boundary')
+            segs.append((cur, a['next'], True))
+            cur = []
+        elif isinstance(a, int):
+            cur.append(a)
+        else:
+            raise ValueError(f'game {rec["gid"]}: a step that is not an action (MTG self-play has none)')
+    return segs + [(cur, None, False)]
+
+
+def replay_match(E, C, spec_txt, rec, decks, mains, full):
+    """A chained contest (docs/gamedb.md "Best-of-three matches") replayed game by game, light or `full` -> one
+    (games fields, events or None, combo or None, match fields) per game it holds. Each game replays as a single game
+    does (a full one's Readers fed its own steps only); its actions are its episode's - the sideboarding before it
+    first. A game ends by the rules, or by a concession: its episode boundary's seat, or - the match's last game, the
+    record over and that game not - the match's loser. Each step of the replay is checked as zero-core's replay checks
+    it (the record's `episodes` when it has them, the match's result), a mismatch raising. The engine's game log (on
+    for this match only) gives each game's dealt seats and each seat's mode; the match block at the game's end its 60
+    (the two checked equal)."""
+    path = _game_log_on(E)
+    try:
+        g = _new_game(E, spec_txt, rec)
+        if not g.chained:
+            raise ValueError(f'game {rec["gid"]}: a chained record of a game that does not chain its episodes')
+        eps = rec.get('episodes') or None
+        segs = _segments(rec)
+        if eps is not None and len(eps) != len(segs):
+            raise ValueError(f'game {rec["gid"]}: {len(segs)} episodes replayed, the record lists {len(eps)}')
+        st = json.loads(g.export_state())
+        wins = list((st.get('match') or {}).get('wins') or [0, 0])
+        lines0, lost0 = st.get('log') or [], max(0, st.get('log_n', 0) - len(st.get('log') or []))
+        games = []
+        contest = None
+        for k, (acts, conceded, boundary) in enumerate(segs):
+            if full:
+                F = FullGame(C, decks, mains, st, lines0, lost0)
+                if not _sideboarding(st):
+                    F.R.oracle_main = _oracles(st, C)
+                for i, a in enumerate(acts):
+                    F.step(g, i, a)
+            else:
+                n_dec, prev, fin = _play_light(g, acts) if acts else (0, None, st)
+            if not boundary and g.to_move is not None and rec.get('over'):
+                # (the record's last episode, the match over and its game not: a seat conceded it - the one whose
+                # concession ends the match with the record's result: not always the match's loser, a drawn game
+                # before it makes the last game's loser's concession a drawn match)
+                if eps is not None and eps[-1].get('resigned') is not None:
+                    conceded = 1 - int(eps[-1]['resigned'])
+                else:
+                    want = [round(float(x), 5) for x in rec.get('result') or []]
+                    fits = []
+                    for c in (0, 1):
+                        nx, r = g.next_episode(c)
+                        if nx is None and [round(float(x), 5) for x in r][:2] == want:
+                            fits.append(c)
+                    if len(fits) != 1:
+                        raise ValueError(f'game {rec["gid"]}: the match is over at {want}, its last game is not, and '
+                                         f'{len(fits)} seats whose concession ends it so')
+                    conceded = fits[0]
+            ended = g.to_move is None
+            if conceded is not None and ended:
+                raise ValueError(f'game {rec["gid"]}: episode {k + 1} conceded by P{conceded} after its game ended')
+            if boundary and conceded is None and not ended:
+                raise ValueError(f'game {rec["gid"]}: episode {k + 1} ends by the rules, its game goes on')
+            if conceded is not None:
+                gres = [1.0 if s != conceded else 0.0 for s in (0, 1)]
+                grec = {'gid': rec['gid'], 'resigned': 1 - conceded, 'result': gres, 'over': True}
+            elif ended and not g.aborted:
+                gres = [round(float(x), 5) for x in g.result()][:2]
+                grec = {'gid': rec['gid'], 'resigned': None, 'result': gres, 'over': True}
+            else:
+                gres = None
+                grec = {'gid': rec['gid'], 'resigned': None, 'result': None, 'over': False}
+            if eps is not None:
+                e = eps[k]
+                want = None if not e.get('over') else [round(float(x), 5) for x in e.get('result') or []]
+                if bool(e.get('over')) != grec['over'] or e.get('resigned') != grec['resigned'] or (
+                        grec['over'] and want != [round(x, 5) for x in gres]):
+                    raise ValueError(f'game {rec["gid"]}: episode {k + 1} replayed over={grec["over"]} resigned='
+                                     f'{grec["resigned"]} result={gres}, the record says {e}')
+            if full:
+                n_dec, fin, method, combo, events = F.finish(ended)
+            else:
+                method, combo, events = C.method_of(fin, prev, fin.get('log') or []), None, None
+            f = _final_fields(fin, n_dec, method, grec, decks)
+            f.update(n_actions=len(acts), over=grec['over'], resigned=conceded is not None,
+                     aborted=ended and conceded is None and bool(g.aborted))
+            m = fin.get('match') or {}
+            games.append({'game_no': m.get('game'), 'f': f, 'events': events, 'combo': combo,
+                          'plans': [sideboard_plan(dk, mains[p] if mains else None)
+                                    for p, dk in enumerate(m.get('decks') or [])]})
+            if not boundary and conceded is None and not (ended and not g.aborted):
+                break                              # (the record ends inside its last game, or that game was aborted)
+            pre = json.loads(g.export_state())
+            nxt, contest_r = g.next_episode(conceded)
+            if not boundary:
+                if nxt is not None:
+                    raise ValueError(f"game {rec['gid']}: the match goes on after the record's last episode")
+                contest = [round(float(x), 5) for x in contest_r][:2]
+                break
+            if nxt is None:
+                raise ValueError(f'game {rec["gid"]}: the match ended at episode {k + 1}, the record goes on')
+            g = nxt
+            st = json.loads(g.export_state())
+            if _game_of(st) == _game_of(pre):
+                # (the sideboarding: lines next_episode wrote - a concession's - are the ended game's, after its last
+                # action)
+                n_new = st['log_n'] - pre['log_n']
+                if full and n_new > 0:
+                    ev = games[-1]['events']
+                    for ln in st['log'][-n_new:]:
+                        t, s, p, kind, card, fz, tz, det = parse_line(ln, st)
+                        ev.append((len(ev), len(acts), t, s, p, kind, card, fz, tz, det))
+                lines0, lost0 = [], 0
+            else:
+                # (both seats dealt: the next game began at once - its lines from its start)
+                lines0 = st['log'][-st['log_n']:] if st['log_n'] else []
+                lost0 = max(0, st['log_n'] - len(st['log']))
+        want = [round(float(x), 5) for x in rec.get('result') or []] if rec.get('over') else None
+        if contest != want:
+            raise ValueError(f'game {rec["gid"]}: the match replayed to {contest}, the record says '
+                             f'{want if rec.get("over") else "not over"}')
+    finally:
+        glog = _game_log_off(E, path)
+    spec_line = next((x for x in glog if x.get('kind') == 'bo3-spec'), None)
+    by_game = {x['game']: x for x in glog if x.get('kind') == 'bo3'}
+    dealt_m = next((x['dealt'] for x in by_game.values()), None)
+    if path is not None and len(by_game) < sum(1 for x in games if x['f']['over'] or x['f']['aborted']):
+        raise ValueError(f'game {rec["gid"]}: {len(games)} games replayed, the game log has {len(by_game)}')
+    out = []
+    for x in games:
+        gl = by_game.get(x['game_no'])
+        if gl is not None:
+            if list(gl['wins']) != wins:
+                raise ValueError(f'game {rec["gid"]} game {x["game_no"]}: {wins} wins before it, the game log {gl["wins"]}')
+            for p in (0, 1):
+                logged = collections.Counter()
+                for (card, _), n in zip(spec_line['lists'][p], gl['decks'][p]):
+                    logged[card] += n
+                mine = collections.Counter({c.split(' ', 1)[1]: int(c.split(' ', 1)[0]) for c in x['plans'][p][0]})
+                if +logged != +mine:
+                    raise ValueError(f"game {rec['gid']} game {x['game_no']}: P{p}'s 60 in the game log differs from "
+                                     f"the match block's")
+        if gl is not None:
+            mode, dealt = gl['mode'], gl['dealt']
+        else:
+            # (a game the record ends inside: no line - the match's dealt seats are every line's)
+            dealt = dealt_m or [None, None]
+            mode = (['main', 'main'] if x['game_no'] == 1 else
+                    [('dealt' if dealt[p] else None) for p in (0, 1)])
+        mf = {'game_no': x['game_no'], 'pre_wins0': wins[0], 'pre_wins1': wins[1]}
+        for p in (0, 1):
+            pl = x['plans'][p] if p < len(x['plans']) else (None, None, None)
+            mf.update({f'deck{p}_60': pl[0], f'deck{p}_in': pl[1], f'deck{p}_out': pl[2], f'deck{p}_mode': mode[p],
+                       f'deck{p}_dealt': dealt[p]})
+        w = x['f']['winner']
+        if x['f']['over'] and w is not None:
+            wins[w] += 1
+        out.append((x, mf))
+    res = rec.get('result') or [None, None]
+    mw = None
+    if rec.get('over') and None not in res[:2] and float(res[0]) != float(res[1]):
+        mw = 0 if float(res[0]) > float(res[1]) else 1
+    return [(x['f'], x['events'], x['combo'],
+             dict(mf, match_games=len(out), match_winner=mw, match_result=f'{wins[0]}-{wins[1]}')) for x, mf in out]
+
+
+def single_match_fields(f):
+    """A single game's match columns (docs/gamedb.md "Best-of-three matches"): a match of one game, no sideboarding."""
+    w = f.get('winner')
+    return {'game_no': 1, 'match_games': 1, 'match_winner': w, 'pre_wins0': 0, 'pre_wins1': 0,
+            'match_result': f'{int(w == 0)}-{int(w == 1)}',
+            **{f'deck{p}_{k}': None for p in (0, 1) for k in ('60', 'in', 'out', 'mode', 'dealt')}}
 
 
 # ====================================================================================== one chunk of games
@@ -487,7 +796,9 @@ def _worker_init():
 
 
 def ingest_chunk(args):
-    """[(record, spec JSON)], sample rate -> table rows (dict of lists of row dicts)."""
+    """[(record, spec JSON)], sample rate -> table rows (dict of lists of row dicts). A chained contest (a
+    best-of-three match, docs/gamedb.md "Best-of-three matches") is a row per game it holds, sampled whole (by its match
+    id)."""
     items, rate = args
     import mtgz.az  # noqa: F401
     from mtgz import _engine as E
@@ -495,65 +806,73 @@ def ingest_chunk(args):
     out = {t: [] for t in TABLES}
     t0 = time.process_time()
     for rec, spec_txt in items:
-        gid = game_id(rec)
+        mid = game_id(rec)
         it = int(rec['it']) if rec.get('it') is not None else None
         spec = json.loads(spec_txt)
         decks, mains = seat_decks(spec, rec.get('setup'))
         ff = (spec.get('forced_find') or {}).get('p')
-        full = sampled(gid, rate)
+        full = sampled(mid, rate)
         try:
-            if full:
+            if chained(rec, spec):
+                games = replay_match(E, C, spec_txt, rec, decks, mains, full)
+            elif full:
                 f, events, combo = replay_full(E, C, spec_txt, rec, decks, mains)
+                games = [(f, events, combo, None)]
             else:
-                f, events, combo = replay_light(E, C, spec_txt, rec, decks), None, None
+                f = replay_light(E, C, spec_txt, rec, decks)
+                games = [(f, None, None, None)]
         except Exception as e:         # a game that does not replay: loud (the iteration fails)
             raise RuntimeError(f'{rec.get("_unit") or "iteration " + str(rec["it"])} source {rec["src"]} game '
                                f'{rec["gid"]} (seed {rec["seed"]}): {type(e).__name__}: {e}') from e
         nets = rec.get('nets') or [None, None]
         pl = players_of(rec)
-        row = {'game_id': gid, 'iter': it, 'kind': rec.get('kind') or 'selfplay',
-               'unit': rec.get('_unit') or f'iter={it:04d}', 'engine': rec.get('_engine'),
-               'p0_ckpt': pl[0].get('ckpt'), 'p1_ckpt': pl[1].get('ckpt'), 'p0_label': pl[0].get('label'),
-               'p1_label': pl[1].get('label'), 'p0_sha': pl[0].get('sha'), 'p1_sha': pl[1].get('sha'),
-               'p0_sims': pl[0].get('sims'), 'p1_sims': pl[1].get('sims'), 'p0_rule': pl[0].get('rule'),
-               'p1_rule': pl[1].get('rule'),
-               'meta': json.dumps(rec['meta'], separators=(',', ':'), sort_keys=True) if rec.get('meta') else None,
-               'src': str(rec['src']), 'executor': executor(rec['src']),
-               'machine': rec.get('machine'), 'gid': int(rec['gid']), 'seed': str(rec['seed']), 'spec': rec['spec'],
-               'deck0': decks[0], 'deck1': decks[1], 'net_lo': nets[0], 'net_hi': nets[1], 'forced_find_p': ff,
-               'over': bool(rec.get('over')), 'aborted': bool(rec.get('aborted')),
-               'resigned': rec.get('resigned') is not None, 'n_actions': int(rec['n_actions']), 'detailed': full,
-               'lines_lost': combo['lines_lost'] if combo else None,
-               'last_attackers': json.dumps(combo['last_attack']) if combo and combo['last_attack'] else None,
-               **branch_fields(rec), **f}
-        out['games'].append(row)
-        if not full:
-            continue
-        for seq, step_ix, t, s, p, kind, card, fz, tz, det in events:
-            out['events'].append({'game_id': gid, 'iter': it, 'seq': seq, 'action': step_ix, 'turn': t, 'step': s,
-                                  'player': p, 'type': kind, 'card': card, 'from_zone': fz, 'to_zone': tz,
-                                  'detail': json.dumps(det, separators=(',', ':')) if det else None})
-        for k, x in enumerate(combo['doomsday']):
-            out['doomsday'].append({'game_id': gid, 'iter': it, 'idx': k, 'caster': x['p'], 'turn': x['turn'],
-                                    'pile': x['pile'], 'pile_size': len(x['pile']), 'library': x['library'],
-                                    'choices': x['choices'], 'hand': x['hand'], 'life': x['life'],
-                                    'oracle_in_pile': x['oracle_in_pile'], 'oracle_in_hand': x['oracle_in_hand'],
-                                    'oracle_where': x['oracle_where'], 'oracle': x['ff'], 'ff_drawn': x['ff_drawn']})
-        for k, x in enumerate(combo['show']):
-            put = x['put']
-            out['shows'].append({'game_id': gid, 'iter': it, 'idx': k, 'caster': x['p'], 'turn': x['turn'],
-                                'put_caster': put[x['p']] if put[x['p']] is not None else None,
-                                'put_opponent': put[1 - x['p']] if put[1 - x['p']] is not None else None})
-        for k, x in enumerate(combo['spells']):
-            out['spells'].append({'game_id': gid, 'iter': it, 'idx': k, 'player': x['p'], 'card': x['card'],
-                                  'turn': x['turn'], 'outcome': x['outcome'], 'countered_by': x['by']})
-        for k, x in enumerate(combo['sneak']):
-            out['sneak'].append({'game_id': gid, 'iter': it, 'idx': k, 'player': x['p'], 'turn': x['turn']})
-        for k, x in enumerate(combo['entered']):
-            out['entered'].append({'game_id': gid, 'iter': it, 'idx': k, 'player': x['p'], 'card': x['card'],
-                                   'turn': x['turn'], 'how': x['how']})
-        for x in combo['bauble']:
-            out['bauble'].append({'game_id': gid, 'iter': it, **x})
+        for f, events, combo, mf in games:
+            gid = mid if mf is None else match_game_id(mid, mf['game_no'])
+            row = {'game_id': gid, 'iter': it, 'kind': rec.get('kind') or 'selfplay',
+                   'unit': rec.get('_unit') or f'iter={it:04d}', 'engine': rec.get('_engine'),
+                   'p0_ckpt': pl[0].get('ckpt'), 'p1_ckpt': pl[1].get('ckpt'), 'p0_label': pl[0].get('label'),
+                   'p1_label': pl[1].get('label'), 'p0_sha': pl[0].get('sha'), 'p1_sha': pl[1].get('sha'),
+                   'p0_sims': pl[0].get('sims'), 'p1_sims': pl[1].get('sims'), 'p0_rule': pl[0].get('rule'),
+                   'p1_rule': pl[1].get('rule'),
+                   'meta': json.dumps(rec['meta'], separators=(',', ':'), sort_keys=True) if rec.get('meta') else None,
+                   'src': str(rec['src']), 'executor': executor(rec['src']),
+                   'machine': rec.get('machine'), 'gid': int(rec['gid']), 'seed': str(rec['seed']), 'spec': rec['spec'],
+                   'deck0': decks[0], 'deck1': decks[1], 'net_lo': nets[0], 'net_hi': nets[1], 'forced_find_p': ff,
+                   'over': bool(rec.get('over')), 'aborted': bool(rec.get('aborted')),
+                   'resigned': rec.get('resigned') is not None, 'n_actions': int(rec['n_actions']), 'detailed': full,
+                   'lines_lost': combo['lines_lost'] if combo else None,
+                   'last_attackers': json.dumps(combo['last_attack']) if combo and combo['last_attack'] else None,
+                   'match_id': mid, **(mf or single_match_fields(f)), **branch_fields(rec), **f}
+            out['games'].append(row)
+            if not full:
+                continue
+            game_no = row['game_no']
+            for seq, step_ix, t, s, p, kind, card, fz, tz, det in events:
+                out['events'].append({'game_id': gid, 'iter': it, 'seq': seq, 'action': step_ix, 'turn': t, 'step': s,
+                                      'player': p, 'type': kind, 'card': card, 'from_zone': fz, 'to_zone': tz,
+                                      'detail': json.dumps(det, separators=(',', ':')) if det else None,
+                                      'game_no': game_no})
+            for k, x in enumerate(combo['doomsday']):
+                out['doomsday'].append({'game_id': gid, 'iter': it, 'idx': k, 'caster': x['p'], 'turn': x['turn'],
+                                        'pile': x['pile'], 'pile_size': len(x['pile']), 'library': x['library'],
+                                        'choices': x['choices'], 'hand': x['hand'], 'life': x['life'],
+                                        'oracle_in_pile': x['oracle_in_pile'], 'oracle_in_hand': x['oracle_in_hand'],
+                                        'oracle_where': x['oracle_where'], 'oracle': x['ff'], 'ff_drawn': x['ff_drawn']})
+            for k, x in enumerate(combo['show']):
+                put = x['put']
+                out['shows'].append({'game_id': gid, 'iter': it, 'idx': k, 'caster': x['p'], 'turn': x['turn'],
+                                    'put_caster': put[x['p']] if put[x['p']] is not None else None,
+                                    'put_opponent': put[1 - x['p']] if put[1 - x['p']] is not None else None})
+            for k, x in enumerate(combo['spells']):
+                out['spells'].append({'game_id': gid, 'iter': it, 'idx': k, 'player': x['p'], 'card': x['card'],
+                                      'turn': x['turn'], 'outcome': x['outcome'], 'countered_by': x['by']})
+            for k, x in enumerate(combo['sneak']):
+                out['sneak'].append({'game_id': gid, 'iter': it, 'idx': k, 'player': x['p'], 'turn': x['turn']})
+            for k, x in enumerate(combo['entered']):
+                out['entered'].append({'game_id': gid, 'iter': it, 'idx': k, 'player': x['p'], 'card': x['card'],
+                                       'turn': x['turn'], 'how': x['how']})
+            for x in combo['bauble']:
+                out['bauble'].append({'game_id': gid, 'iter': it, **x})
     out['_cpu_s'] = time.process_time() - t0
     return out
 
@@ -573,9 +892,15 @@ def schemas():
                             ('mull0', i), ('mull1', i), ('life0', i), ('life1', i), ('winner', i), ('reason', s),
                             ('method', s), ('score0', f), ('score1', f), ('decisions', i), ('is_branch', b),
                             ('branch_from', i), ('branch_alt', i), ('branch_merged', i), ('branch_tag', i),
-                            ('branch_gap', f)]),
+                            ('branch_gap', f),
+                            # (best-of-three matches, docs/gamedb.md: the match, the game in it, each seat's 60)
+                            ('match_id', pa.int64()), ('game_no', i), ('match_games', i), ('match_winner', i),
+                            ('match_result', s), ('pre_wins0', i), ('pre_wins1', i),
+                            ('deck0_60', ls), ('deck0_in', ls), ('deck0_out', ls), ('deck0_mode', s), ('deck0_dealt', b),
+                            ('deck1_60', ls), ('deck1_in', ls), ('deck1_out', ls), ('deck1_mode', s), ('deck1_dealt', b)]),
         'events': pa.schema([('game_id', pa.int64()), ('iter', i), ('seq', i), ('action', i), ('turn', i), ('step', s),
-                             ('player', i), ('type', s), ('card', s), ('from_zone', s), ('to_zone', s), ('detail', s)]),
+                             ('player', i), ('type', s), ('card', s), ('from_zone', s), ('to_zone', s), ('detail', s),
+                             ('game_no', i)]),
         'doomsday': pa.schema([('game_id', pa.int64()), ('iter', i), ('idx', i), ('caster', i), ('turn', i), ('pile', ls),
                                ('pile_size', i), ('library', i), ('choices', ls), ('hand', ls), ('life', i),
                                ('oracle_in_pile', b), ('oracle_in_hand', b), ('oracle_where', s), ('oracle', s),
@@ -778,10 +1103,13 @@ def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, l
     rname = os.path.basename(os.path.normpath(run)) if run else None
     todo = []
     for key, what, info in units(run, records, replays):
+        # (a unit an earlier gamedb ingested without its chained contests - `chained_skipped` - is ingested again:
+        # its best-of-three matches, docs/gamedb.md "Best-of-three matches")
         if what == 'selfplay':
-            if (not redo and str(info) in st['iterations']) or (iters is not None and not iters[0] <= info <= iters[1]):
+            if (not redo and 'chained_skipped' not in st['iterations'].get(str(info), {'chained_skipped': 1})) or (
+                    iters is not None and not iters[0] <= info <= iters[1]):
                 continue
-        elif not redo and key in st['units']:
+        elif not redo and 'chained_skipped' not in st['units'].get(key, {'chained_skipped': 1}):
             continue
         todo.append((key, what, info))
     if not todo:
@@ -835,7 +1163,6 @@ def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, l
             if not recs:
                 raise SystemExit(f'{key}: no records (an empty unit is never ingested silently)')
             items = []
-            chained = 0
             # (Branch games, records/2: each one's game - the same iteration, source, gid and seed, no branch - for a
             # merged branch's result, `check_end`.)
             parents = {(p.get('it'), str(p.get('src')), p.get('gid'), p.get('seed')): p for p in recs if p.get('branch') is None}
@@ -848,20 +1175,15 @@ def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, l
                     r['_run'] = rname
                 else:
                     r['_unit'] = key
-                if r.get('actions') is None and not all(isinstance(a, int) for a in r.get('steps') or []):
-                    chained += 1                   # (a chained contest: episode boundaries in its steps)
-                    continue
                 items.append((r, specs[r['spec']]))
-            if chained:
-                log(f'{key}: {chained} chained contest(s) (a best-of-three match: episode boundaries in its moves) NOT '
-                    f'replayed - the database replays single games (docs/gamedb.md)')
             rows, cpu = _replay_items(items, sample, pool, chunk) if items else ({t: [] for t in TABLES}, 0.0)
             n = len(rows['games'])
             info_d = {'games': n, 'detailed': sum(1 for g in rows['games'] if g['detailed']), 'sample': sample,
                       'events': len(rows['events']), 'cpu_s': round(cpu, 2), 'wall_s': round(time.time() - t0, 2),
                       'engine': eng, 'commit': b.get('commit'), 'time': time.time()}
-            if chained:
-                info_d['chained_skipped'] = chained
+            matches = len({g['match_id'] for g in rows['games'] if g['match_games'] and g['game_id'] != g['match_id']})
+            if matches:
+                info_d['matches'] = matches
             if what == 'selfplay':
                 size = sum(write_part(db, t, info, rows[t]) for t in TABLES)
                 done = GR.read_done(run, info)
@@ -876,7 +1198,8 @@ def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, l
                 st['units'][key] = info_d
                 label = key
             write_state(db, st)
-            log(f'{label}: {n} games ({info_d["detailed"]} detailed), {len(rows["events"])} events, {size / 1e6:.2f} MB '
+            log(f'{label}: {n} games ({info_d["detailed"]} detailed' + (f'; {matches} best-of-three matches' if matches else '')
+                + f'), {len(rows["events"])} events, {size / 1e6:.2f} MB '
                 f'parquet, {cpu:.1f} CPU-s ({cpu / max(1, n) * 1000:.1f} ms a game), {time.time() - t0:.1f} s'
                 + (f'; MISSING records {info_d["missing"]}' if info_d.get('missing') else ''))
     finally:
@@ -896,6 +1219,8 @@ def ingest(run, db=None, sample=1.0, jobs=1, iters=None, redo=False, chunk=64, l
                 [os.path.abspath(run)] if run else []) + ['--db', os.path.abspath(db), '--only-engine', eid,
                                                           '--sample', str(sample), '--jobs', str(jobs),
                                                           '--chunk', str(chunk)]
+            if iters is not None:
+                cmd += ['--iters', f'{iters[0]}-{iters[1]}']
             if records:
                 cmd += ['--records', os.path.abspath(records)]
             if replays:
@@ -930,7 +1255,16 @@ SELECT g.game_id, g.iter, g.kind, s.seat, CASE s.seat WHEN 0 THEN g.deck0 ELSE g
        CASE s.seat WHEN 0 THEN g.score0 ELSE g.score1 END AS score,
        CASE WHEN g.winner = s.seat THEN 'win' WHEN g.winner IS NULL THEN 'draw' ELSE 'loss' END AS outcome,
        g.method, g.turns, g.resigned, g.executor,
-       CASE s.seat WHEN 0 THEN g.mull0 ELSE g.mull1 END AS mulligans
+       CASE s.seat WHEN 0 THEN g.mull0 ELSE g.mull1 END AS mulligans,
+       g.match_id, g.game_no, g.match_games,
+       CASE WHEN g.match_winner = s.seat THEN 'win' WHEN g.match_winner IS NULL THEN 'draw' ELSE 'loss' END AS match_outcome,
+       CASE s.seat WHEN 0 THEN g.pre_wins0 ELSE g.pre_wins1 END AS wins_before,
+       CASE s.seat WHEN 0 THEN g.pre_wins1 ELSE g.pre_wins0 END AS opp_wins_before,
+       CASE s.seat WHEN 0 THEN g.deck0_mode ELSE g.deck1_mode END AS deck_mode,
+       CASE s.seat WHEN 0 THEN g.deck0_dealt ELSE g.deck1_dealt END AS dealt,
+       CASE s.seat WHEN 0 THEN g.deck0_60 ELSE g.deck1_60 END AS deck_60,
+       CASE s.seat WHEN 0 THEN g.deck0_in ELSE g.deck1_in END AS sb_in,
+       CASE s.seat WHEN 0 THEN g.deck0_out ELSE g.deck1_out END AS sb_out
 FROM games g, (SELECT 0 AS seat UNION ALL SELECT 1) s;
 
 CREATE OR REPLACE VIEW mulligans AS
@@ -955,7 +1289,7 @@ SELECT p.game_id, p.iter, p.kind, p.idx, p.caster, p.caster_deck, p.opp_deck, p.
 FROM doomsday_piles p, UNNEST(p.pile) WITH ORDINALITY AS u(card, pos);
 
 CREATE OR REPLACE VIEW casts AS
-SELECT e.game_id, e.iter, g.kind, e.seq, e.turn, e.step, e.player, e.card, e.from_zone AS cast_from,
+SELECT e.game_id, e.iter, g.kind, e.game_no, g.match_id, e.seq, e.turn, e.step, e.player, e.card, e.from_zone AS cast_from,
        CASE e.player WHEN 0 THEN g.deck0 ELSE g.deck1 END AS deck, CASE e.player WHEN 0 THEN g.deck1 ELSE g.deck0 END AS opp_deck,
        (g.winner = e.player) AS won
 FROM events e JOIN games g USING (game_id) WHERE e.type = 'cast';
@@ -974,6 +1308,26 @@ FROM sneak s JOIN games g USING (game_id);
 """
 
 
+# A database ingested before best-of-three matches (docs/gamedb.md "Best-of-three matches"): its games are single games,
+# each a match of one game - the views read their match columns so.
+MATCH_DEFAULTS = {
+    'games': {'match_id': 'coalesce(match_id, game_id)', 'game_no': 'coalesce(game_no, 1)',
+              'match_games': 'coalesce(match_games, 1)', 'match_winner': 'CASE WHEN match_id IS NULL THEN winner '
+                                                                       'ELSE match_winner END',
+              'match_result': "coalesce(match_result, CASE winner WHEN 0 THEN '1-0' WHEN 1 THEN '0-1' ELSE '0-0' END)",
+              'pre_wins0': 'coalesce(pre_wins0, 0)', 'pre_wins1': 'coalesce(pre_wins1, 0)'},
+    'events': {'game_no': 'coalesce(game_no, 1)'},
+}
+
+
+def _duck_type(t):
+    import pyarrow as pa
+    if pa.types.is_list(t):
+        return _duck_type(t.value_type) + '[]'
+    return {pa.int64(): 'BIGINT', pa.int32(): 'INTEGER', pa.bool_(): 'BOOLEAN', pa.float64(): 'DOUBLE',
+            pa.string(): 'VARCHAR'}[t]
+
+
 def connect(db):
     import duckdb
     con = duckdb.connect()
@@ -983,8 +1337,18 @@ def connect(db):
             # (every unit's partition - iter=NNNN, m=<kind>.<sub>, r=publisher -; union_by_name: a later checkout's
             # columns read as NULL in an earlier one's files)
             pat = os.path.join(db, t, '*=*', '*.parquet').replace('\\', '/')
-            con.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet('{pat}', hive_partitioning = false, "
-                        f"union_by_name = true)")
+            src = f"read_parquet('{pat}', hive_partitioning = false, union_by_name = true)"
+            if t in MATCH_DEFAULTS:
+                # (an earlier gamedb's files have no match columns: NULL there, then a single game's values)
+                have = {d[0] for d in con.execute(f'SELECT * FROM {src} LIMIT 0').description}
+                sch = schemas()[t]
+                cols = [n if n in have else f'CAST(NULL AS {_duck_type(sch.field(n).type)}) AS {n}' for n in sch.names]
+                cols += [n for n in sorted(have - set(sch.names))]
+                src = f'(SELECT {", ".join(cols)} FROM {src})'
+                rep = ', '.join(f'{e} AS {n}' for n, e in MATCH_DEFAULTS[t].items())
+                con.execute(f'CREATE VIEW {t} AS SELECT * REPLACE ({rep}) FROM {src}')
+            else:
+                con.execute(f'CREATE VIEW {t} AS SELECT * FROM {src}')
         else:
             con.register(f'_{t}_empty', schemas()[t].empty_table())
             con.execute(f'CREATE VIEW {t} AS SELECT * FROM _{t}_empty')
@@ -1130,7 +1494,8 @@ def prune(run, db=None, keep_iters=64, old_sample=0.1, delete_raw=False, log=say
             continue
         gpath = os.path.join(db, 'games', f'iter={it:04d}', 'part.parquet')
         games = pq.read_table(gpath).to_pylist()
-        keep = {g['game_id'] for g in games if sampled(g['game_id'], old_sample)}
+        # (a best-of-three match is kept or deleted whole: sampled by its match id)
+        keep = {g['game_id'] for g in games if sampled(g.get('match_id') or g['game_id'], old_sample)}
         for t in TABLES:
             p = os.path.join(db, t, f'iter={it:04d}', 'part.parquet')
             if os.path.exists(p):
@@ -1197,7 +1562,9 @@ def bench(run, it=None, games=200, log=say):
         for r in recs:
             sp = specs[r['spec']]
             decks, mains = seat_decks(json.loads(sp), r.get('setup'))
-            if mode == 'light':
+            if chained(r, json.loads(sp)):
+                replay_match(E, C, sp, r, decks, mains, mode == 'full')
+            elif mode == 'light':
                 replay_light(E, C, sp, r, decks)
             else:
                 replay_full(E, C, sp, r, decks, mains)
