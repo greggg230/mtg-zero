@@ -48094,3 +48094,207 @@ events tagged with their game (sideboarding choices only in games 2-3, without a
 their game, light rows equal to full rows, ingest idempotent (a second ingest, `--redo`, a state with `chained_skipped`),
 an older database's files read as single games, a match whose boundary is falsified fails loudly. The existing gamedb
 tests pass unchanged. Gate: python tier (below).
+
+### 270.2 Lane B: Life from the Loam, Exploration, Carnivorous Cultivator // Enroot, Yavimaya, Cradle of Growth (branch `lands-b`, 2026-11-24)
+
+**Why.** Lane B of MTGGoldfish's Legacy Lands (paper, the archetype's representative list, deck 8027955: "Lands" by
+juubs, North American Eternal Weekend - Legacy Championship 2026-10-31, 6th place; fetched 2026-11-24,
+`E:/mtg-zero-scratch/lands/`, its PROVENANCE.md and BRIEF.md): four of the deck's fourteen new cards, all main deck.
+Branch `lands-b` from main 6f3a30d8. Lanes A (Dark Depths, Thespian's Stage, Blast Zone, Ghost Quarter, Maze of Ith,
+Bojuka Bog) and C (Pithing Needle, Cursed Totem, Torpor Orb, Damping Sphere, Choke, The Tabernacle at Pendrell Vale)
+are other branches; the integration (270.4) merges them. The user's rules: no approximation of any class
+(docs/shortcuts.md unchanged), no encoding gap (one point written up, below, not decided), every ruling tested,
+digests equal. CR text: the 2026-11-06 Comprehensive Rules (prepare is CR 723 there; the engine's older notes say
+722). New code in `engine/src/lands_b.rs` and `engine/src/lower/lands_b.rs`, hooks elsewhere.
+
+* Life from the Loam {1}{G}, Sorcery: "Return up to three target land cards from your graveyard to your hand. /
+  Dredge 3 (If you would draw a card, you may mill three cards instead. If you do, return this card from your
+  graveyard to your hand.)"
+* Exploration {G}, Enchantment: "You may play an additional land on each of your turns."
+* Carnivorous Cultivator {1}{G}, Creature — Elf Warlock 2/3: "Deathtouch / This creature enters prepared. / Whenever
+  this creature deals combat damage to a player, return target land card from your graveyard to your hand." //
+  Enroot {G}, Sorcery: "Search your library for a land card, put it into your graveyard, then shuffle."
+* Yavimaya, Cradle of Growth, Legendary Land: "Each land is a Forest in addition to its other land types."
+
+#### 270.2.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | `ir/data/legacy_delver.json` (+ sheet, meta: 34 cards), `data/cards/*`, `card_ir/src/generated.rs`, `tests/ir/test_legacy_lands_b.py` (5), `test_fetch_cube.py`, `test_legacy_creatures.py` | the four Scryfall records appended; parsed with no parser change; schema `180659137ece` -> **`37d99217c47e`** (the roto pool's `Dredge` joins `zone_abilities`' category); 270.2.2 |
+| Identities | `engine/src/az/legacy_cards.txt` | the four appended after Massacre (lane order; final numbers at integration, no test names one) |
+| Lowering | `lower/lands_b.rs`, `lower/printing.rs`, `lower/mod.rs`, `db.rs` (`CardDef::lands_b`, `CardDb::dredge`) | `Dredge { n }` -> `LandsBDef::dredge`; `grants_basic_land_type_to_all_lands` -> a W3 subtype grant over every land (`W3Def::grants_subtype`, `Filter::Type(LAND)`) and the type's mana ability (`Lowerer::given_subtype`, `CardDb::basic_abilities`), `SEEN_W3_BASIC_TYPE` |
+| Dredge | `lands_b.rs` (`dredgers`, `dredge_due`, `queue_dredge`, `dredge_choice`, `dredge`), `game.rs` (`draw_instruction`, `draw_seq`, `draw_cut`, `draw_order`, `draw_disallowed`), `flow.rs` (`Task::Dredge`), `pay_twins.rs` | 270.2.3 |
+| Yavimaya | `eoe_w3.rs` (`granted_subtype_ts`: no grant from a Moon-made Mountain), `cost_order.rs` (a basic-type grant changes abilities) | 270.2.3 |
+| Exploration, Cultivator | nothing new: Fastbond's `extra_lands`, Emeritus of Abundance's prepare (26.7) | 270.2.3 |
+| Testkit | `testkit.rs` | `Game::move_to`, `Game::activated_count` |
+| Tests | `engine/tests/cards_lands_b.rs` (49, `cards_suite`), `tests/az.rs` (`lands_b_positions`), `tests/constructed.rs`, `tests/support.rs` (`SUPPORTED_LEGACY`), `tests/test_single_games.py` | 270.2.6, 270.2.7 |
+| Fuzz | `engine/src/fuzz/games.rs` (`FUZZ_POOL=lands_b`, `LANDS_B_DECK`, `LANDS_B_SEEN`), `worker/src/fuzz.rs` (the pool lists) | 270.2.6 |
+| Rulings | `data/rulings/legacy.rulings.json` (the four's 25, fetched 2026-11-24; the other cards' entries not refetched), `triage.tsv` (14 rows, 8c23b69e reclassified a), `docs/rulings.md` | every ruling tested |
+| Docs | this section, `docs/ir_defects.md` section AC, `docs/interactions.md` | |
+
+#### 270.2.2 The IR
+
+No parser change and no defect (docs/ir_defects.md section AC; entries 480-499 unused). Life from the Loam:
+`ReturnFromGraveyard { land, min_n 0, max_n 3, hand }` and the roto pool's `zone_abilities: [Dredge { n: 3 }]`;
+Exploration: `grants_additional_land_per_turn: 1`; Carnivorous Cultivator: the preparation layout as Emeritus's
+(`enters_prepared`, `prepare_spell` Enroot `SearchLibrary { Land, graveyard }`), deathtouch, the combat-damage trigger;
+Yavimaya: `grants_basic_land_type_to_all_lands: "Forest"`, no `produces` (its {G} is the Forest type's, not printed).
+`python tools/card_ir.py export`: schema `37d99217c47e` (the `Dredge` class), `powerlsv.ir.json` and `eoe.ir.json`
+byte for byte but `schema_sha256`, `legacy.ir.json` 34 cards; `check` identical, `roundtrip` ok (cube 546, legacy 34,
+eoe 483).
+
+#### 270.2.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Dredge 3 | 702.52a-b, 121.2, 121.6b | before each draw of an instruction (`draw_seq`: the draw step's, Brainstorm's three, a cycling draw...) the drawer is asked when a card of their own graveyard has dredge N <= their library's size and the draw is allowed: `Task::Dredge`, `ChooseGraveyardCard` over the dredge cards (list ids, each card an option) and `PASS` = draw (its other replacements, then the draw). The instruction's draws left and the draw step's event wait under it (`Task::DrawRest`, as a miracle question's). Dredging mills N and returns the card to its owner's hand at once, no decision between (ruling ea37d02f); no card is drawn (no `DrawsCard` event, `drawn` and the draw-step count unchanged: 614.6) |
+| ... with other replacements of a draw | 616.1, 121.2a | an opponent's Hullbreacher ("create a Treasure instead"): per draw, the dredge question first; declining lets the token apply. Quantum Riddler ("draw that many plus one") modifies a one-card instruction as a whole: the drawer orders the replacements in `Task::DrawOrder` (`ChooseReplacement`: `NUMBER` 5 the token first, 6 Riddler first, 7 dredge first - offered when each applies); dredge first then asks which card, without `PASS` (`Task::Dredge { forced }`); Riddler first makes the instruction two draws, each asked again. To more than one card Riddler applies first (its ruling), then each draw is asked |
+| ... and "can't draw more than one card each turn" | 121.2b; Narset's, Leovold's rulings | a draw Narset or Leovold stops is not replaced by dredge: no question (`Game::draw_disallowed`); a dredged draw didn't happen, so the next one is allowed |
+| ... and miracle, Laboratory-style wins | 702.94a, 121.6a | a dredged draw isn't the first card drawn; with an empty library dredge can't apply (702.52b) and Jace, Wielder of Mysteries's replacement does |
+| "Return up to three target land cards from your graveyard" | 601.2c, 115.1 | the existing `ReturnFromGraveyard` (0 to 3 targets, land cards of the caster's graveyard) |
+| "You may play an additional land on each of your turns" | 305.2, 305.2a-b, 305.3 | Fastbond's `extra_lands`, summed over the player's permanents (two Explorations: three lands; with Fastbond any number); land plays counted, not lands put onto the battlefield (Crop Rotation); Crucible of Worlds' graveyard lands are plays |
+| "This creature enters prepared" / Enroot | 723.2-723.3d | Emeritus of Abundance's prepare (ENGINE.md 26.7): the Enroot copy in exile, cast by the prepared creature's controller for {G}, unprepared as it is cast |
+| Deathtouch, the combat-damage trigger | 702.2b, 510.3a, 603.3d | the existing keyword and trigger (no land card: no target, removed) |
+| "Each land is a Forest in addition to its other land types" | 305.6, 305.7 (last sentence), 613.1d | EoE W3's subtype grant (Ragost's Foods): every land on the battlefield, either player's, Yavimaya itself; its intrinsic "{T}: Add {G}" (`basic_abilities`, `granted_activated`) unless printed (Dryad Arbor, Forest, Tropical Island: no second); names, supertypes (basic stays basic), other types and abilities kept; cards off the battlefield not Forests |
+| ... under Magus of the Moon | 305.7, 613.8a-b | Yavimaya is a nonbasic land: the Moon's effect makes it a Mountain and removes its rules text's abilities, so the grant depends on the Moon's effect (same layer, its existence changed) and applies after it whatever the timestamps - it doesn't exist: no land is a Forest by it, a basic Island neither (`granted_subtype_ts` leaves out a grant whose source is `moon_on`). The Magus gone, every land is a Forest again |
+| ... in a cost's ordering | 601.2h, 100.4.9 | a cost part taking Yavimaya (Crop Rotation's sacrifice) changes the lands' abilities ({G}): `SEEN_W3_BASIC_TYPE` adds `kind::ABILITIES` to `chars_may_change_in` |
+| Legendary | 704.5j | the legend rule |
+
+#### 270.2.4 Readings taken
+
+* **Which dredge card replaces a draw** is a choice of a card (two Lives from the Loam in a graveyard are two options,
+  as every graveyard-card choice of the engine: the graveyard list, ENGINE.md 65.10).
+* **The 616.1 order with Riddler**: applying dredge is the drawer's choice to apply it (its "may"); once chosen first,
+  declining is not a choice left (a forced question). Declining at the per-draw question is "not to apply dredge to
+  this draw".
+* **"Return this card"**: the 2026-11-06 CR's 702.52a reads "mill N cards and return this card" (the card's reminder
+  text "If you do"): with an opponent's Leyline of the Void the milled cards are exiled and the card still returns.
+* **Prepare's rulings without a reachable state**: no effect of the tables makes a creature unprepared (c6772882:
+  only casting the copy, tested), gives a "becomes prepared" ability to a permanent without a prepare spell (513b768f:
+  the lowering refuses such a card, tested), or lets a spell in exile be cast for an alternative cost (a5afe2a8: the
+  copy's cost and increases tested, Omniscience's free cast not offered). Disruptor Flute (constructed play) names
+  Enroot (8c23b69e, reclassified a).
+
+#### 270.2.5 The encoding
+
+No layout change, no spare float. A dredge question is the decision kind `ChooseGraveyardCard`, its decider and
+options, the asking task's code 18, the graveyard list block; the order question is `ChooseReplacement` with its
+`NUMBER` options; the prepared Cultivator and its Enroot copy are 26.7's; Yavimaya's Forests and their {G} are
+functions of the public permanents. The public-state gate gets the lane's positions (`tests/az.rs::lands_b_positions`:
+the turn's dredge question with two dredge cards, Exploration with a land played under Yavimaya, Brainstorm's draws
+asked one at a time, the order question with Riddler and Magus of the Moon beside Yavimaya, the forced question, a
+prepared Cultivator) in the single pass, the pairwise pass and the hidden-information check: **538 positions, 266
+perturbations encoded, 2 deliberate limits, 0 known gaps, 0 gaps for the next layout**. Test
+`a_dredge_question_reaches_both_players_inputs`.
+
+**Written up, not decided (the brief's rule 2): the draws left of a draw instruction at a dredge question**
+(`Task::DrawRest.n`, and whether the draw step's event follows) are public and in no input; the miracle question
+already has the same unencoded fact (no perturbation of `DrawRest` in the gate, so neither shows). Options (spare
+context floats 251-252, or an additive layout) in `E:/mtg-zero-scratch/lands/encoding_needs_b.md`.
+
+#### 270.2.6 Tests, the fuzz pool
+
+* **`engine/tests/cards_lands_b.rs`, 49 tests** (in `cards_suite`; every ruling of the four, `// ruling:`; the CR in
+  each name): the definitions; Loam's spell; dredge (the draw step's, any draw, no draw without "draw", one at a time
+  with a milled Loam, at once, one ability a draw, N cards needed, the owner's graveyard only, miracle, Narset and
+  Leovold, Hullbreacher, Quantum Riddler both orders, all three at once, Leyline of the Void, Jace on an empty library);
+  Exploration (one more, cumulative with Exploration and Fastbond, the count now and the turn, plays vs. lands put
+  onto the battlefield with Crop Rotation and Crucible); Yavimaya (each land a Forest in addition, {G} pays, only on the
+  battlefield, the legend rule, Magus of the Moon in both timestamp orders and leaving, no second {G}, Wasteland and
+  basics); the Cultivator and Enroot (prepared and cast, the copy through checks and gone with its creature, cast only
+  as the creature, a creature card in every zone, deathtouch, the trigger, prepared once, no prepare spell, not
+  copiable, the copy's cost with Thalia and Omniscience, Mockingbird's exceptions, Enroot finding nothing, Oko's Elk,
+  Oko's exchange, Disruptor Flute naming Enroot); the deck's lines (Loam + Exploration + Wastelands, Enroot then Loam,
+  the draw-step loop); the encoding.
+* **`tests/az.rs`** `lands_b_positions` (270.2.5); **`tests/constructed.rs`** (the legacy faces now Enroot, Rough,
+  Tumble; the five basic types' mana-ability definitions Yavimaya brings to the constructed table; the Hogaak seven
+  consecutive lines of the registry); **`tests/support.rs`** the legacy registry's 34.
+* **`FUZZ_POOL=lands_b`** (`engine/src/fuzz/games.rs`): the Lands 61 with the other lanes' 12 cards out, Loam and
+  Yavimaya four each, six more Forests, Force of Vigor 2, Dismember (`LANDS_B_DECK`, 60; not the sideboard's Endurance:
+  270.2.7), against the Delver 60 in either seat, one game in three the mirror; games only (with hidden decklists too,
+  the lane's counters counted there as well). With 200 games or more, nonzero: Loam cast, draws
+  dredged, dredges declined, Exploration cast, second lands of a turn, Cultivator cast, Enroot cast, the Cultivator's
+  trigger, Yavimaya played, a land a Forest by Yavimaya alone (`LANDS_B_SEEN`).
+
+#### 270.2.7 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/lands-b`, heavy commands through `tools/slotd.sh` (a training run
+live on the desktop), at most 4 fuzz shards at once.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **3,024 passed, 0 failed, 45 ignored**.
+  `cards_lands_b` 49, `az` 58 (the gate with the lane's positions), `support` (the legacy list of 34).
+* **Behaviour digests (the cube's) EQUAL to main's**: full **5a09242cf4f2cbab** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **be0626d4b97cebae**, `DIGEST_ENCODING=v5` **cbae655806dcad36**,
+  `DIGEST_ENCODING=v7` **12c92841a2d4f628** (the full digest hashes layout v8's rows, so their projections are main's).
+* **`digest_formats`**: EoE **d754f4eef3c8adae** and driver **cab97c01912f7e3f** equal; constructed 68e6d9334d2fdfdf ->
+  **8f4bb827f31969d2**, metagame e2884dfcccf49ebe -> **60207ab5778c5f4f**, pair 60e0d7de900cef7e -> **a9bf1f0521c7181a**
+  (every line); the dealt digests (`dealt_decks.rs`) cc0d138ac5c80402 -> **9b1c602a713ce54f** and dealt per seat
+  (`dealt_per_seat.rs`) e2a91849b5b9f372 -> **3bac0d305067c954**: **not re-recorded**. The cause is the constructed
+  table holding four more cards (and the five basic types' ability definitions Yavimaya's grant brings), not this
+  branch's rules: a scratch build with every change but the four cards filtered out of `CardDb::constructed` gives the
+  recorded 68e6d9334d2fdfdf, e2884dfcccf49ebe, 60e0d7de900cef7e, cc0d138ac5c80402 and e2a91849b5b9f372 exactly (all
+  seven digest tests pass), as 220.1.8 found for Hogaak.
+* **The public-state gate** (`--test az`): 538 positions, 266 perturbations encoded, 2 deliberate limits, 0 known gaps,
+  0 next-layout gaps.
+* **`FUZZ_POOL=lands_b`, 5,000 games** (`tools/fuzz_shards.py`, 8 shards, 4 at once): **no failure**; wins 2,373 /
+  2,377, 250 drawn, none aborted, 37.6 turns and 470.0 decisions a game, 4,954,584 options completed; Loam cast 12,373,
+  draws dredged 13,044, dredges declined 10,801, Exploration cast 4,480, second lands of a turn 16,516, Cultivator cast
+  4,638, Enroot cast 3,987, the Cultivator's trigger 7,638, Yavimaya played 14,592, (land, turn) Forests by Yavimaya
+  555,861; the fuzz binary's 20 other tests passed.
+* **Under the `fuzz` profile** (debug assertions), 1,000 games (8 shards): no failure (482 / 468, 50 drawn; 1,522,520
+  options completed; Loam cast 2,357, dredged 2,493, declined 2,097). **`FUZZ_CHANCE=10`**, 600 games: no failure
+  (28,327 chance walks, 9,358 replays whose outcome the force changed). **`FUZZ_BELIEF=2`**, 600 games: no failure
+  (12,948 weighted worlds). **`FUZZ_HIDDEN_DECKS=1`**, 1,000 games: no failure (23,752 hidden-decklist worlds, 23,733
+  with another deck; 92,374 information-set steps; the lane's counters nonzero).
+* **IR**: `python tools/card_ir.py check` identical, `roundtrip` ok; `python -m pytest tests/ir -q`: **2,735 passed**.
+* `bash tools/build_py.sh`, `python -m pytest -q tests --ignore=tests/ir`: **876 passed, 25 skipped, 2 failed** -
+  `test_mac_remote.py::test_the_macs_selfplay_settings` (Mac-only, fails on the desktop: 220.1.8) and
+  `test_single_games.py::test_best_of_three_matches_are_counted_from_their_records_episodes`, which pinned the ids of
+  the first four best-of-three matches a rolling driver finishes: they follow the constructed table's games (matches
+  0, 1, 2, 5 with the four cards in the table; 0-3 with them filtered out, checked), so the test now plays until
+  matches 0-3 are done and reads those (`tests/test_single_games.py`: 7 passed).
+* `python tools/rulings_doc.py --check`: current (1,715 rulings, 1,333 distinct, a 1,342; **untested 0**);
+  `python tools/untested_cards.py`: 580 supported (34 legacy), **0** named by no card test. `python tools/privacy_check.py`: 0 findings.
+* No docs/shortcuts.md entry; layout v7 and v8 unchanged (no spare float used); no zero-core change.
+
+**A finding outside the lane** (not fixed: it changes encodings of existing games; the maintainer's decision). The
+first `fuzz`-profile run, with the Lands sideboard's Endurance in the lane's deck, failed at seed 936 (the
+information-set check, `check_information_set`: "same keys, different rows of P0", head float 43541 = stack slot 0's
+event reference, a digit of its last-known identity): P0's Endurance put P1's graveyard (13 instants and sorceries) on
+the bottom of P1's library in a random order; each card leaving triggered P1's Murktide Regent; the 13 triggers are
+interchangeable (`put_triggers`' `same`: the effect ignores the event) and go on the stack in waiting order - the order
+the cards moved, the random order - while each stack item's encoding shows its event object's last-known identity
+(public: it was in the graveyard). So the stack's order of identities shows the random library order, which the worlds
+of one information set don't share (as 248.4's random bottom order through a find group). No card of this lane is
+involved (Endurance and Murktide Regent, supported cards no main pool pairs); the integration's `FUZZ_POOL=lands` (the
+real 75, Endurance in the sideboard, against Delver) will meet it. Fix candidates: interchangeable triggers put on the
+stack in a canonical order of what their encoding shows, or no event object in a stack item's encoding when its effect
+ignores the event. The lane's deck dropped Endurance (two more Forests); the reruns are the ones reported above.
+Rerun: `LANDS_B_DECK` with `(2, "Endurance")`, `FUZZ_POOL=lands_b FUZZ_FIRST=936 FUZZ_GAMES=1 FUZZ_LOG=1` on the
+`fuzz` profile's fuzz binary.
+
+#### 270.2.8 Limits, open items and the integration's merge points
+
+* **Written up, not decided: the draws left of a draw instruction at a dredge (or miracle) question** (270.2.5,
+  `E:/mtg-zero-scratch/lands/encoding_needs_b.md`: spare context floats 251-252 recommended, or an additive layout).
+* **The Endurance x Murktide Regent finding** (270.2.7): the integration's `lands` pool will meet it.
+* **Constructed play's table holds four more cards** (270.2.7): the constructed, metagame, pair and dealt digests change
+  (every line), not re-recorded - the integration's decision (all fourteen cards at once). `tests/known_face_key.rs` and
+  `tests/fuzz.rs` pass unchanged on this branch.
+* **The other lanes' cards** aren't on this branch: Choke (Yavimaya makes every land a Forest, not an Island), Dark
+  Depths and Thespian's Stage under Yavimaya (a Stage copying Yavimaya grants Forest too: `granted_subtype_ts` reads the
+  copy's definition), Loam dredging back Depths, Wasteland and Bog, Torpor Orb and Cursed Totem against the Cultivator
+  (entering prepared is no trigger, CR 723.3a; casting the Enroot copy is casting a spell, no activated ability,
+  723.3c), Tabernacle taxing the Cultivator: the integration's tests.
+* **Merge points**: `legacy_cards.txt` (lane order A, B, C: the four after lane A's), the legacy pool's data
+  (`legacy_delver.json` + sheet + meta: the union, lane order), the export (re-export once: schema, the three IR files,
+  `generated.rs`; `zone_abilities`' category gains `Dredge`), `tests/ir/test_fetch_cube.py` / `test_legacy_creatures.py`
+  (the pinned list), `lower/printing.rs` (`lands_b::lower_zone_abilities`, `lower_land_type_grant`, the
+  `grants_basic_land_type_to_all_lands` deny removed, `SEEN_W3_BASIC_TYPE`), `lower/mod.rs`, `db.rs` (`CardDef::lands_b`,
+  `CardDb::dredge`), `lib.rs`, `game.rs` (the draw machinery: `draw_instruction`, `draw_seq`, `draw_cut`, `draw_order`,
+  `draw_disallowed`), `flow.rs` (`Task::Dredge`), `pay_twins.rs`, `eoe_w3.rs` (`granted_subtype_ts`,
+  `SEEN_W3_BASIC_TYPE`), `cost_order.rs`, `testkit.rs`, `fuzz/games.rs` (the pool beside `hogaak_c`, the hidden-decklist
+  loop's counting), `worker/src/fuzz.rs`, `tests/az.rs` (`lands_b_positions`), `tests/constructed.rs`,
+  `tests/support.rs`, `tests/cards_suite.rs`, `tests/test_single_games.py`, `data/rulings/*`, `docs/rulings.md`
+  (regenerate), `docs/interactions.md`, `docs/ir_defects.md`.
+* No docs/shortcuts.md entry; no layout change; no zero-core change.
