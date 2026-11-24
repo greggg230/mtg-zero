@@ -3483,9 +3483,21 @@ impl Game {
         if cards.is_empty() {
             return;
         }
+        // The cards move in the order given (a public one: the graveyard's), so the events of the move - a card
+        // leaving a graveyard, the triggers it sets off (Murktide Regent's, in their stack order) - come in that
+        // order and not in the hidden random one (ENGINE.md 270.3.5: Endurance's random order leaked to the other
+        // player through the triggers' order). Then the cards that reached the library take the random order: the
+        // same library, from the same draws, as moving them in that order.
+        let given = cards.clone();
         self.rng.shuffle(&mut cards);
-        for &c in &cards {
+        for &c in &given {
             self.move_card(c, Zone::Library, Pos::Bottom);
+        }
+        let landed: Vec<CardIdx> = cards.iter().copied().filter(|&c| self.objs[c.i()].zone == Zone::Library).collect();
+        let lib = &mut self.players[p as usize].library;
+        debug_assert!(lib[..landed.len()].iter().all(|c| landed.contains(c)), "the moved cards are the library's bottom");
+        for (k, &c) in landed.iter().rev().enumerate() {
+            lib[k] = c;
         }
         self.forget_order(p, &cards);
     }

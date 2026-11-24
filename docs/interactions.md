@@ -274,3 +274,23 @@ Mockingbird and Massacre with these cards: the integration's.)
 | Dryad Arbor x Magus of the Moon, Painter's Servant | a Mountain Dryad creature; colours | `cr_305_7_dryad_arbor_under_magus_of_the_moon`, `cr_204_1_dryad_arbor_is_green_in_every_zone` | tested |
 | Dryad Arbor x removal | Lightning Bolt, Orcish Bowmasters, Fatal Push, Wasteland; Karakas can't | `dryad_arbor_is_a_creature_and_a_nonbasic_land_for_removal`, `karakas_cant_return_dryad_arbor` | tested |
 | The deck's line | Moonshadow, Verdant Catacombs for Dryad Arbor, Stitcher's Supplier | `the_decks_line_moonshadow_a_fetch_for_dryad_arbor_and_stitchers_supplier` | tested |
+
+## The Legacy Lands deck, lane C (ENGINE.md 270.3)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_lands_c.rs`. (The other lanes'
+cards with these - Thespian's Stage and Dark Depths under Pithing Needle, Yavimaya with Choke, Torpor Orb and
+Carnivorous Cultivator, the Tabernacle and Marit Lage: the integration's.)
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Pithing Needle x activated abilities | Karakas (mana and not), Otawara's channel, Street Wraith's cycling, Urza's Saga, Nissa's loyalty abilities, Wasteland | `cr_602_5_pithing_needle_*`, `cr_602_1_pithing_needle_leaves_triggered_and_static_abilities`, `cr_606_3_pithing_needle_stops_loyalty_abilities`, `pithing_needle_naming_wasteland_protects_the_tabernacle` | tested |
+| Pithing Needle x names | a card without activated abilities, a token name, `PASS`; the Needle leaving (Force of Vigor) | `cr_201_3_pithing_needle_names_any_card_not_a_token_name`, `cr_611_3a_pithing_needle_gone_the_abilities_come_back` | tested |
+| Cursed Totem x creatures | Birds of Paradise, Dryad Arbor, an animated land (Nissa), a crewed Smuggler's Copter; Karakas, Skullclamp; Street Wraith and Simian Spirit Guide in hand; Thalia, Guide of Souls; Urza's Saga | `cr_602_5_cursed_totem_*`, `cr_302_1_cursed_totem_leaves_creature_cards_in_other_zones`, `cr_702_122a_cursed_totem_lets_a_vehicle_crew_then_stops_it`, `cr_603_2a_cursed_totem_leaves_static_and_triggered_abilities`, `cursed_totem_leaves_urzas_saga_and_the_tabernacle_taxes_its_construct` | tested |
+| Torpor Orb x enters triggers | Archon of Cruelty, Guide of Souls, Kappa Cannoneer, Lotus Cobra with Dryad Arbor, Phyrexian Metamorph, Orcish Bowmasters | `cr_603_6a_torpor_orb_*`, `cr_603_6b_torpor_orb_looks_at_the_permanent_as_it_entered` | tested |
+| Torpor Orb x what isn't a trigger of an entering | Walking Ballista's counters, Anointed Peacekeeper's name, City of Traitors (a land played), Staff of the Storyteller (a token created), Stitcher's Supplier dying, the Tabernacle's upkeep trigger | `cr_614_12_torpor_orb_leaves_replacement_effects_and_as_enters`, `cr_603_2_torpor_orb_leaves_other_events`, `cr_603_6c_torpor_orb_leaves_dies_triggers`, `cr_305_7_the_tabernacle_under_magus_of_the_moon_grants_nothing` | tested |
+| Torpor Orb x Show and Tell | the Orb and a creature entering at once | `cr_603_6a_torpor_orb_entering_with_a_creature_stops_its_trigger` | tested |
+| Damping Sphere x lands | Ancient Tomb, Sunken Ruins, Gaea's Cradle, Mishra's Workshop, a Forest under Nissa, two Spheres, Tinker sacrificing the Sphere | `cr_106_12b_damping_sphere_*`, `cr_601_2g_damping_sphere_*`, `cr_616_1f_damping_sphere_two_spheres_and_additional_mana` | tested |
+| Damping Sphere x spells cast | Ponder, Brainstorm, Lightning Bolt, the other player's first spell, Force of Will's alternative cost, Murktide Regent's delve, Otawara's channel | `cr_601_2f_damping_sphere_*`, `cr_702_66a_damping_sphere_delve_pays_the_increase`, `cr_602_2b_damping_sphere_doesnt_tax_an_activated_ability` | tested |
+| Choke x lands | Island, Volcanic Island, Mountain, Forest, Magus of the Moon, Force of Vigor, Nissa's untap | `cr_502_3_choke_*`, `cr_305_7_choke_reads_land_types_after_magus_of_the_moon` | tested |
+| The Tabernacle x creatures | Thalia, Guide of Souls, Lotus Cobra, Birds of Paradise, Dryad Arbor, an Urza's Saga Construct, Delver's Dragon's Rage Channeler and Murktide Regent under Choke | `cr_503_1a_the_tabernacle_*`, `cr_118_3_the_tabernacle_without_mana_the_creature_is_destroyed`, `cr_605_3a_the_tabernacle_a_creature_pays_for_itself`, `choke_and_the_tabernacle_lock_delvers_islands` | tested |
+| The Tabernacle x the rules | Karakas bouncing the source, Magus of the Moon, The Wondrous Wasp (timestamps), two Tabernacles | `cr_400_7_the_tabernacle_the_source_gone_nothing_happens`, `cr_305_7_the_tabernacle_under_magus_of_the_moon_grants_nothing`, `cr_613_7_the_tabernacle_and_losing_all_abilities_by_timestamp`, `cr_704_5j_the_tabernacle_two_grants_trigger_twice` | tested |

@@ -1323,3 +1323,41 @@ fn cr_601_2g_damping_sphere_sacrificed_for_tinker_still_damped_its_mana() {
         }
     }
 }
+
+/// Endurance (the deck's sideboard) puts the Delver player's graveyard on the bottom of the library in a random
+/// order: Murktide Regent's "whenever an instant or sorcery card leaves your graveyard" triggers once per card (one
+/// event, CR 603.2c), and the triggers' order on the stack is the graveyard's (public) order, not the hidden random
+/// one (ENGINE.md 270.3.5: the fuzz pool `lands_c` found the other player's worlds telling the random orders apart
+/// through it). Whatever the random draws, the same order.
+#[test]
+fn endurance_and_murktide_the_triggers_dont_show_the_random_order() {
+    let orders: Vec<Vec<String>> = (0..6u64)
+        .map(|seed| {
+            let mut g = scen()
+                .battlefield(0, &["Forest", "Forest", "Forest"])
+                .hand(0, &["Endurance"])
+                .battlefield(1, &["Murktide Regent"])
+                .graveyard(1, &["Brainstorm", "Lightning Bolt", "Force of Will", "Ponder", "Island"])
+                .at(Step::Main1, 0)
+                .start();
+            g.reseed_rng(seed);
+            let p1 = Choice::Target(engine::Target::Player(1));
+            cast(&mut g, 0, "Endurance");
+            g.pass_until(|g| g.kind() != Some(DecisionKind::Priority) || g.stack().iter().any(|s| matches!(s.kind, engine::game::StackKind::Ability { .. })));
+            until_priority(&mut g, &|g| g.has_option(p1).then_some(p1));
+            // The Endurance trigger resolves.
+            g.pass_until(|g| g.stack().iter().filter(|s| matches!(s.kind, engine::game::StackKind::Ability { source, .. } if g.name(source.idx) == "Murktide Regent")).count() == 4 || g.stack().is_empty());
+            let trig: Vec<String> = g
+                .stack()
+                .iter()
+                .filter_map(|s| match s.kind {
+                    engine::game::StackKind::Ability { source, .. } if g.name(source.idx) == "Murktide Regent" => s.ev.obj.map(|r| g.name(r.idx).to_string()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(trig.len(), 4, "{}", log(&g));
+            trig
+        })
+        .collect();
+    assert!(orders.iter().all(|o| *o == orders[0]), "{orders:?}");
+}
