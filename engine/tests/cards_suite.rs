@@ -76,6 +76,8 @@ mod cards_hogaak;
 mod cards_hogaak_a;
 #[path = "cards_hogaak_c.rs"]
 mod cards_hogaak_c;
+#[path = "cards_lands_c.rs"]
+mod cards_lands_c;
 #[path = "cards_legacy.rs"]
 mod cards_legacy;
 #[path = "cards_m4b1.rs"]
