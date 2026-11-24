@@ -80,3 +80,33 @@ def test_a_shards_settings_are_its_own(monkeypatch):
     monkeypatch.setenv('DIGEST_WRITE', '1')
     env = F.child_env({'FUZZ_FIRST': '250'})
     assert 'FUZZ_SKIP' not in env and 'DIGEST_WRITE' not in env and env['FUZZ_FIRST'] == '250'
+
+def test_a_callers_fuzz_setting_is_refused_not_dropped(monkeypatch, capsys):
+    # (ENGINE.md 270.4: FUZZ_BELIEF=2 in the caller's shell once ran a sharded fuzz without it, silently.)
+    monkeypatch.setenv('FUZZ_BELIEF', '2')
+    assert F.stray_settings() == ['FUZZ_BELIEF']
+    assert F.main(['--games', '10', '--exe', 'no-such-binary']) == 2
+    err = capsys.readouterr().err
+    assert 'FUZZ_BELIEF' in err and '--belief' in err
+    monkeypatch.delenv('FUZZ_BELIEF')
+    assert F.stray_settings({'PATH': 'x', 'DIGEST_WRITE': '1'}) == []
+
+
+def test_the_flags_reach_every_shard_and_must_show_at_work():
+    s = F.flag_settings(belief=2.0, chance=10)
+    assert s == {'FUZZ_BELIEF': '2', 'FUZZ_CHANCE': '10'}
+    assert F.flag_settings(belief=0.5) == {'FUZZ_BELIEF': '0.5'} and F.flag_settings() == {}
+    for bad in ({'belief': 0.0}, {'chance': 0}):
+        try:
+            F.flag_settings(**bad)
+        except F.SetupError:
+            pass
+        else:
+            raise AssertionError(bad)
+    # a shard's environment holds them (child_env keeps what the shard is given, scrubs the caller's)
+    env = F.child_env({**s, 'FUZZ_FIRST': '0'})
+    assert env['FUZZ_BELIEF'] == '2' and env['FUZZ_CHANCE'] == '10'
+    # no trace in the merged totals: a failure, not a pass
+    assert len(F.settings_at_work(s, {'belief_worlds': 0, 'chance_walks': 0})) == 2
+    assert F.settings_at_work(s, {'belief_worlds': 5, 'chance_walks': 7}) == []
+    assert F.settings_at_work({}, {}) == []

@@ -4,6 +4,16 @@
     python tools/fuzz_shards.py --pool default --games 2000 --shards 8
     python tools/fuzz_shards.py --pool default --hidden --games 2000        # FUZZ_HIDDEN_DECKS=1
     python tools/fuzz_shards.py --pool delver_dealt --games 2000 --jobs 4 --out E:/tmp/fz
+    python tools/fuzz_shards.py --pool lands --games 600 --belief 2 --jobs 4          # FUZZ_BELIEF=2 in every shard
+    python tools/fuzz_shards.py --pool lands --games 600 --chance 10 --jobs 4         # FUZZ_CHANCE=10 in every shard
+
+The fuzz's own settings come from the flags only (each shard states its own): a caller's environment holding a FUZZ_*
+variable is refused (exit 2), never silently dropped (ENGINE.md 270.4: a sharded FUZZ_BELIEF=2 run once played without
+it). `--belief T` / `--chance N` put FUZZ_BELIEF / FUZZ_CHANCE into every games and matches shard and the merged
+checks (echoed in the first line and each shard's log), and the run fails unless the merged totals show them at work
+(`belief_worlds` / `chance_walks` > 0). The rest of the fuzz binary runs in the pool's settings alone (its
+`the_murktide_trigger_is_asserted_over_enough_games` fails under any FUZZ_CHANCE: its synthetic totals hold no chance
+walks, ENGINE.md 220.3.8).
 
 What it runs, all from the fuzz test binary of THIS checkout (built first: `cargo test --release -p engine --test fuzz
 --no-run`, into $CARGO_TARGET_DIR):
@@ -53,12 +63,44 @@ def lines_of(out):
     """A test process's output with the harness's "test <name> ... " prefix taken off the line it shares."""
     return HARNESS_RE.sub('', out)
 # the settings a shard's process takes from the caller's environment: none of the fuzz's own (each shard states its
-# own), so a stray FUZZ_SKIP or FUZZ_GAMES in the caller's shell never changes what a shard plays
+# own), so a stray FUZZ_SKIP or FUZZ_GAMES in the caller's shell never changes what a shard plays; a FUZZ_* one in the
+# caller's environment is refused (`stray_settings`), not dropped: the flags set what a shard takes
 SCRUB = ('FUZZ_', 'DIGEST_')
 
 
 class SetupError(Exception):
     pass
+
+
+def stray_settings(environ=None):
+    """The caller's FUZZ_* variables (sorted): settings a shard would not take - main() refuses to run with any."""
+    env = os.environ if environ is None else environ
+    return sorted(k for k in env if k.upper().startswith('FUZZ_'))
+
+
+def flag_settings(belief=None, chance=None):
+    """The fuzz settings the flags give every games / matches shard and the merged checks."""
+    out = {}
+    if belief is not None:
+        if not belief > 0:
+            raise SetupError(f'--belief {belief}: a tilt > 0')
+        out['FUZZ_BELIEF'] = str(int(belief)) if belief == int(belief) else repr(float(belief))
+    if chance is not None:
+        if chance < 1:
+            raise SetupError(f'--chance {chance}: one decision in n, n >= 1')
+        out['FUZZ_CHANCE'] = str(int(chance))
+    return out
+
+
+def settings_at_work(settings, games_totals):
+    """Problems when a flag's setting left no trace in the merged games totals (a silent no-op is a failure)."""
+    t = games_totals or {}
+    probs = []
+    for var, counter in (('FUZZ_BELIEF', 'belief_worlds'), ('FUZZ_CHANCE', 'chance_walks')):
+        if var in settings and not t.get(counter):
+            probs.append(f'{var}={settings[var]} was given but the merged totals hold {t.get(counter, 0)} {counter}: '
+                         f'the setting did not reach the shards')
+    return probs
 
 
 def split_ranges(first, count, shards):
@@ -244,8 +286,21 @@ def main(argv=None):
     ap.add_argument('--exe', default=None, help='that test binary (default: built and found through cargo)')
     ap.add_argument('--out', default=None, help='directory for the logs and the merged totals (default: a temp dir)')
     ap.add_argument('--timeout', type=float, default=3600.0, help='seconds per shard (default 3600)')
+    ap.add_argument('--belief', type=float, default=None, help="FUZZ_BELIEF=T in every shard (the belief-weighted deal's checks)")
+    ap.add_argument('--chance', type=int, default=None, help='FUZZ_CHANCE=N in every shard (a chance walk one decision in N)')
     a = ap.parse_args(argv)
     t0 = time.time()
+    stray = stray_settings()
+    if stray:
+        print(f"fuzz_shards: the environment holds {', '.join(stray)}: a shard takes none of the caller's FUZZ_* settings, "
+              f'and dropping them silently would run something else than asked - unset them and pass the flags '
+              f'(--pool, --hidden, --games, --matches, --first, --belief, --chance)', file=sys.stderr)
+        return 2
+    try:
+        settings = flag_settings(a.belief, a.chance)
+    except SetupError as e:
+        print(f'fuzz_shards: {e}', file=sys.stderr)
+        return 2
     if a.games < 1 or a.shards < 1:
         print('fuzz_shards: --games and --shards must be >= 1', file=sys.stderr)
         return 2
@@ -258,7 +313,7 @@ def main(argv=None):
     pool_env = {} if a.pool == 'default' else {'FUZZ_POOL': a.pool}
     if a.hidden:
         pool_env['FUZZ_HIDDEN_DECKS'] = '1'
-    label = a.pool + (' +hidden decklists' if a.hidden else '')
+    label = a.pool + (' +hidden decklists' if a.hidden else '') + ''.join(f' {k}={v}' for k, v in settings.items())
     try:
         exe = a.exe or find_exe(a.target, {**os.environ})
         names = list_tests(exe)
@@ -273,7 +328,7 @@ def main(argv=None):
     plan = {'games': split_ranges(a.first, a.games, a.shards), 'matches': split_ranges(a.first, matches, a.shards)}
     for kind, test, count_var in (('games', t_games, 'FUZZ_GAMES'), ('matches', t_matches, 'FUZZ_MATCHES')):
         for k, (f, n) in enumerate(plan[kind]):
-            env = child_env({**pool_env, 'FUZZ_SHARD': '1', 'FUZZ_FIRST': str(f), count_var: str(n)})
+            env = child_env({**pool_env, **settings, 'FUZZ_SHARD': '1', 'FUZZ_FIRST': str(f), count_var: str(n)})
             j = Job(f'{kind}[{f},{f + n})', [exe, test, '--exact', '--nocapture', '--test-threads=1'], env,
                     os.path.join(out, f'{kind}-{k:02d}.log'))
             j.kind, j.first, j.n = kind, f, n
@@ -295,6 +350,8 @@ def main(argv=None):
         m, p = merge(kind, parts, a.first, sum(j.n for j in own))
         problems += p
         merged[kind] = m
+        if kind == 'games' and m is not None and 'skipped' not in m:
+            problems += settings_at_work(settings, m.get('totals'))
         if kind == 'matches' and posts:
             if len(posts) != len(own):
                 problems.append(f'post: {len(posts)} of {len(own)} matches shards played post-sideboard matches')
@@ -309,7 +366,7 @@ def main(argv=None):
         with open(mpath, 'w', encoding='utf-8') as f:
             json.dump({k: v for k, v in merged.items() if 'skipped' not in v}, f, indent=1, sort_keys=True)
         final = [Job('merged checks', [exe, t_totals, '--exact', '--nocapture', '--test-threads=1'],
-                     child_env({**pool_env, 'FUZZ_TOTALS_FILE': mpath}), os.path.join(out, 'merged-checks.log')),
+                     child_env({**pool_env, **settings, 'FUZZ_TOTALS_FILE': mpath}), os.path.join(out, 'merged-checks.log')),
                  Job('the rest of the fuzz binary', [exe, '--skip', t_games, '--skip', t_matches, '--skip', t_totals,
                                                      '--nocapture'],
                      child_env(dict(pool_env)), os.path.join(out, 'rest.log'))]
@@ -338,15 +395,19 @@ def main(argv=None):
                'shards': a.shards, 'passed': not problems, 'seconds': round(secs, 1),
                'slowest_shard_s': round(secs_shards, 1), 'checked': checked, 'rest_passed': rest_passed,
                'post': merged.get('post', {}).get('n'), 'matches_skipped': (merged.get('matches') or {}).get('skipped'),
-               'logs': out, 'problems': problems[:20]}
+               'logs': out, 'problems': problems[:20], 'settings': settings,
+               'belief_worlds': ((merged.get('games') or {}).get('totals') or {}).get('belief_worlds'),
+               'chance_walks': ((merged.get('games') or {}).get('totals') or {}).get('chance_walks')}
     if problems:
         print(f'fuzz shards: FAILED - {label}: ' + '; '.join(problems[:5]) + (f' (+{len(problems) - 5} more)' if len(problems) > 5 else ''))
     else:
         mt = ('matches skipped: ' + summary['matches_skipped']) if summary['matches_skipped'] else f'{matches} matches'
         if summary['post']:
             mt += f' + {summary["post"]} post-sideboard'
+        at_work = ''.join(f'; {c} {summary[c]}' for c, v in (('belief_worlds', 'FUZZ_BELIEF'), ('chance_walks', 'FUZZ_CHANCE'))
+                          if v in settings)
         print(f'fuzz shards: PASSED - {label}: {a.games} games, {mt} in {len(jobs)} shards from seed {a.first}; merged '
-              f'checks: {", ".join(checked)}; {rest_passed} other fuzz tests; {secs:.0f}s (slowest shard {secs_shards:.0f}s)')
+              f'checks: {", ".join(checked)}{at_work}; {rest_passed} other fuzz tests; {secs:.0f}s (slowest shard {secs_shards:.0f}s)')
     print(json.dumps({'fuzz_shards': summary}), flush=True)
     return 0 if not problems else 1
 
