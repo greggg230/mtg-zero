@@ -122,8 +122,14 @@ def child_env(extra):
     return env
 
 
+# (--idle: the shards at idle priority beside a live run's own processes; below normal otherwise)
+IDLE = False
+
+
 def creationflags():
-    return subprocess.BELOW_NORMAL_PRIORITY_CLASS if WIN else 0
+    if not WIN:
+        return 0
+    return subprocess.IDLE_PRIORITY_CLASS if IDLE else subprocess.BELOW_NORMAL_PRIORITY_CLASS
 
 
 def find_exe(target, cargo_env):
@@ -288,7 +294,10 @@ def main(argv=None):
     ap.add_argument('--timeout', type=float, default=3600.0, help='seconds per shard (default 3600)')
     ap.add_argument('--belief', type=float, default=None, help="FUZZ_BELIEF=T in every shard (the belief-weighted deal's checks)")
     ap.add_argument('--chance', type=int, default=None, help='FUZZ_CHANCE=N in every shard (a chance walk one decision in N)')
+    ap.add_argument('--idle', action='store_true', help='the shards at idle priority (Windows; default below normal)')
     a = ap.parse_args(argv)
+    global IDLE
+    IDLE = a.idle
     t0 = time.time()
     stray = stray_settings()
     if stray:
