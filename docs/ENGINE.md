@@ -49780,3 +49780,62 @@ guarded table plays the main.
   specs with every table's `explore` (share 0.5, three members: each context's deck that of a rotated context), each
   line naming the match's draws: combined **b2a4ed50ae9c0d4f** (recorded with `DIGEST_WRITE=1` for this test alone,
   re-run equal). `gate.py`'s `digest-formats` step now expects seven lines and "7 passed" (`tests/test_gate.py`).
+
+### 274.7 The CPU smoke
+
+`python -m mtgz.az.run --run <scratch>/mirror --preset delver-bo3-varied-smoke --iters 4 --games 32 --conc 32
+--infer-device cpu --train-device cpu --matchup-explore 1.0 --matchup-table-min-gain -10` (CUDA hidden; the table bar
+off so the tiny network's model publishes tables; `matchup_every` 1, 5 members, 1,000 worlds - the preset's): iterations
+1-3 self-played without a table; the retrains published v0002 (114 games) and v0003 (166 games), each with
+`"explore": 1.0` and its table's `explore` of 5 members (`index.jsonl` `member_plans`: 5 of 5 members boarding in
+both); iteration 4 self-played with v0002 ("the chosen-60 seats sideboard by the matchup model's choice table
+v0002.json"). The game log: 56 `bo3` lines carry `"table"`; the iteration's 6 table seats each played EXACTLY its drawn
+member's 60 for its context (checked line by line against v0002's members by a script outside the repo: 0 mismatches),
+members m1 (2 seats), m3 (2), m2, m4 - 4 different plans, 4 different 60s (each member's plan differs from the
+others' and from the table's own); `python -m mtgz.az.matchup census` lists the seats' plans per game (`plans`: m1, m3
+...). (At this size the plans are noise: 50 games an iteration.)
+
+**Farm compatibility with a Thompson table** (`tools/farm_compat.py --preset delver-mirror-bo3-varied --set spec=<the
+preset's spec with the smoke's v0002 table, explore share 1, 5 members>` on this commit's release worker): PASSED -
+gate 2 identical, 6 games, 3,200 rows, 150 batches; gate 3 identical, 6 games, 2,480 rows; the torch worker identical
+(6 of 6 games, 1,987 rows).
+
+### 274.8 Gates (warm pool; this section's own lines are docs only after f360f1f1)
+
+* `python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,meta_pair` on f360f1f1: **GATE FAILED
+  suite f360f1f1b29f in 410s** - every step passed (the full engine suite 3,140 passed in 24 binaries; the default
+  pool, its hidden decklists, `delver_dealt`) but `meta_pair`: its match 19 fails "determinize changed the encoding of
+  P1 (mover P0) at 146: 0 -> 1" (head segment 0 slot 0 float 18, at P0's ChooseGraveyardCard decision). **Main's own
+  failure, not this branch's**: the same match fails identically on main 57449923 (a warm worktree of it, the fuzz
+  binary of main), and on bd45a8c8 and its parent (the Legacy Lands merge, 270); match 19's spec has no `explore` with
+  or without this branch's fuzz change (its trajectory plays no table decision at all), and no suite gate since
+  261 ran `meta_pair` (270.4.6's and 272.3's ran default, default+hidden, delver_dealt, lands, cross). Left for main's owner (an
+  encoding / determinize gap reached since 270's merge); rerun: `FUZZ_POOL=meta_pair FUZZ_FIRST=19 FUZZ_MATCHES=1
+  cargo test --release -p engine --test fuzz fuzz_random_matches -- --exact --nocapture`.
+* The same `meta_pair` fuzz from seed 20 (`python tools/fuzz_shards.py --pool meta_pair --games 2000 --first 20`, by
+  hand on f360f1f1's code): **PASSED** - 2,000 games, 100 matches + 100 post-sideboard in 16 shards, the merged checks,
+  20 other fuzz tests; seats that drew a Thompson member: 58 over the matches' shards (`thompson_member`).
+* `python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt` on f360f1f1: **GATE PASSED suite
+  f360f1f1b29f in 167s** (the report the engine tier reads).
+* `python tools/gate.py engine --tested-sha f360f1f1b29f --suite-report <that report> --expect-digest
+  5a09242cf4f2cbab --expect-digest0 be0626d4b97cebae` on f360f1f1: **GATE PASSED WITH SKIPS engine f360f1f1b29f in
+  936s** - skipped: one live-run-hazard test fenced (the live stew). Full 5a09242cf4f2cbab and encoding-free
+  be0626d4b97cebae (= main's); digest formats constructed 33fd025bacb21413, eoe d754f4eef3c8adae, driver
+  cab97c01912f7e3f, metagame f1ca224f901d809d, pair 9611d13bb054de40, pair_around ebaa7f7e45dc8e32 (each = main's
+  recorded file, unchanged), pair_explore b2a4ed50ae9c0d4f (new); dealt 4c28ec816ed1245f (unchanged); farm compat
+  identical (gate 2: 6 games, 2,542 rows, 150 batches; gate 3: 6 games, 2,634 rows).
+* `python tools/gate.py python` on f360f1f1: **GATE PASSED WITH SKIPS python f360f1f1b29f in 1130s** (the same fence).
+
+### 274.9 Open
+
+* `meta_pair` match 19 (274.8): main's failure; the suite gate with `meta_pair` passes again once main fixes it.
+* No preset or stew recipe turns the option on (default 0). A stew using it sets `recipe.settings.matchup_explore` (or
+  per pairing) and needs a farm release of this commit before its specialists' farm self-play plays an `explore` table
+  (an older worker refuses the key).
+* Exploration reaches table seats only (the dealt base stays the table's own, 274.2). The option not built: deal around
+  the drawn plan with the draw declared public, and condition the tables on the opponent's draw.
+* The member climbs cost ~20 x the guarded climb's per context at dim 0 (246 s for the real mirror's tables at 20
+  members and 8,000 worlds, against ~47 s for the fit and the guarded table: 273.2) - on the retrain's CPU job, never in
+  self-play.
+* The member index is in the game log and every record's replay (gamedb's `replay_match` lines), not a gamedb column;
+  sb-health reads the played 60s from the database and the members from the log.
