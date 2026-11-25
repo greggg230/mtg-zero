@@ -313,3 +313,38 @@ def test_every_card_of_the_stew_75s_is_supported_in_best_of_three():
             E.mtg_spec_check(sp)
             E.mtg_spec_check(ev)
             E.mtg_spec_check(D.pair_spec(a, b, fmt='bo3', game_episodes=True, dealt_decks=A.PAIR_DEALT))
+
+
+def test_a_61_card_main_gets_tables_of_61s_the_engine_plays():
+    # docs/ENGINE.md 272: a best-of-three main of at least 60 - the Lands deck's 61 against the Delver 60. The matchup
+    # model's tables are of each deck's own size (its registered main's: every legal deck after sideboarding), and the
+    # engine takes them on the pairing's spec, the fixed spec and the Lands mirror's.
+    E = pytest.importorskip('mtgz._engine')
+    decks = []
+    for k, name in enumerate((D.LEGACY_LANDS, D.IZZET_DELVER)):
+        d = D.load(name)
+        main, side = D.names(d['main']), D.names(d['sideboard'])
+        names = list(dict.fromkeys(main + side))
+        decks.append({'name': d['name'], 'list': [[n, (main + side).count(n)] for n in names],
+                      'main': [main.count(n) for n in names], 'index': k})
+    assert (sum(decks[0]['main']), sum(decks[1]['main'])) == (61, 60)
+    P = MU.Pairing(decks, False)
+    # the Lands deck gains from its sideboard's Torpor Orb, the Delver from nothing: Torpor Orbs come in for Lands
+    torpor = [n for n, _ in decks[0]['list']].index('Torpor Orb')
+    wC = [2.0 if i == torpor else 0.0 for i in range(len(decks[0]['list']))]
+    mem = pair_members(wC, [0.0] * len(decks[1]['list']))
+    tables, _ = MU.pair_choice_tables(mem, P, (0, 4), 'v0272', worlds=200, seed=3, log=lambda s: None)
+    for t, d in zip(tables, decks):
+        copies = [k for _, k in d['list']]
+        for c in t['choices']:
+            assert sum(c[4]) == sum(d['main']) and all(0 <= a <= b for a, b in zip(c[4], copies))
+    assert all(c[4][torpor] == 3 for c in tables[0]['choices']), 'every Torpor Orb in, the deck still 61'
+    MU.check_tables(D.pairing_spec(D.LEGACY_LANDS, D.IZZET_DELVER, dealt_decks=A.PAIR_DEALT), tables)
+    MU.check_tables(D.pair_spec(D.LEGACY_LANDS, D.IZZET_DELVER, fmt='bo3', game_episodes=True), tables)
+    MU.check_tables(D.mirror_bo3_spec(D.LEGACY_LANDS, game_episodes=True), tables[:1])
+    # a table of 60s over the Lands 76's list is not the Lands deck's: refused
+    bad = json.loads(json.dumps(tables[0]))
+    for c in bad['choices']:
+        c[4][[n for n, _ in decks[0]['list']].index('Forest')] -= 1
+    with pytest.raises(Exception, match="61 cards here, the table's 60"):
+        MU.check_tables(D.pair_spec(D.LEGACY_LANDS, D.IZZET_DELVER, fmt='bo3', game_episodes=True), [bad, tables[1]])

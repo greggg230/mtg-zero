@@ -26945,7 +26945,8 @@ and the cube's best-of-three (36.11) are unchanged (the digests, 120.6). (Sectio
 1. `"constructed": true` with `"format": "bo3"` is legal. Each player's pool is exactly their 75 with its copies,
    **no free basic land entries** (CR 100.4a: a constructed player sideboards with the 75 only; the Delver 75 has one
    Island, so that entry's maximum is 1), and **every deck after sideboarding is exactly 60 cards** (the user's format
-   restriction, as limited's exactly 40 in section 42); the sideboard is the rest. Every legal 60 is reachable in
+   restriction, as limited's exactly 40 in section 42; **since 2026-11-24 the registered main's size, any N >= 60**:
+   section 272); the sideboard is the rest. Every legal 60 is reachable in
    exactly one decision sequence (36.2's property).
 2. Both 75s are public. Game 1 is best-of-one's model (the opponent's 60 = their registered main, known). From game 2
    on each player's chosen 60 is hidden from the opponent (its size, 60, is public), dealt by `determinize` through a
@@ -49136,6 +49137,7 @@ public and were in no input - nor under a miracle question, the same fact since 
   registered main of at least 60 in best-of-three (CR 100.2a; the sideboarding's 60 then a choice of 60 of 76, the
   dealt decks and the deck prior read "exactly 60" too: a format change). Nothing here decides it: the deck files keep
   the 61, best-of-one plays it, and only the fuzz's matches (below) and the best-of-three test take one Forest out.
+  **Decided 2026-11-24 (the user): a main of at least 60; built in section 272** - the workaround is gone there.
 * **`FUZZ_POOL=lands`** (`engine/src/fuzz/games.rs`): games - the real 61 against the real Delver, Doomsday, Sneak and
   Show and Hogaak 60s in either seat, one game in five the mirror (`seed % 10`), best-of-one, every check of the default
   mode; the three lanes' counters run in its games, and with 200 games or more every lane A and lane B counter and lane
