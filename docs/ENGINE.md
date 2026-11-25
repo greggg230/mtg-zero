@@ -48354,3 +48354,103 @@ script outside the repo.
   pairing's spec, p 0.85 per seat, swaps [1, 4], around "table", the smoke's v0002 table per deck>` on the gate's
   release worker): PASSED - gate 2 identical, 6 games, 3,477 rows, 150 batches; gate 3 identical, 6 games, 2,353 rows,
   6 decks.
+
+## 273. The matchup model reads farm self-play: its games from the run's game records (`mtgz/az/bo3_records.py`; branch `fix/matchup-from-records`, 2026-11-24)
+
+### 273.1 Why
+
+The per-pairing matchup model (sections 168, 240, 261) was fitted on the run's best-of-three **game log**
+(`<run>/games/games-<pid>.jsonl`), which only the run's own process writes: its local self-play. The stew's specialists
+self-play on the farm only (`selfplay_local` 0), so their models starved and then stopped. The first stew's Delver mirror:
+v0048 fitted on 40,446 games, v0064 on 6,411 (the farm took over during its window), and the retrain of v0080 failed
+("no logged self-play game in iterations 49-80 ... keeping v0064.json"); the run went on with v0064's tables and nothing
+said so beyond that one log line. Its Sneak and Show and Doomsday pairings failed the same way at v0080 / v0112 ("games of
+1 iterations: too few for 2 validation iterations"). Under farm self-play no choice table could learn.
+
+### 273.2 What
+
+* **The records as the model's data** (`mtgz.az.bo3_records`, `matchup.load_games`). zero-core's game records
+  (`game_records`, `<run>/records/iter_NNNN/*.jsonl.gz` + DONE.json) hold every game an iteration's quota accepted -
+  local, a remote host's and the farm's - each best-of-three match one chained contest (`{"next": seat}` episode
+  boundaries in its steps, section 121). Each match is replayed by tools/gamedb.py's own replay (`replay_match`, light,
+  section 259: every check it makes - each episode's end, a concession, the match's result, the 60s against the match
+  block - a mismatch raising, never a dropped game) with the engine's game log on for that match; the `bo3-spec` and
+  `bo3` lines the engine writes are the lines the live match wrote to its process's log, and they become game dicts
+  through the log reader's own line handling (`matchup.game_line`: the same filters). Two fields differ by meaning: a
+  game's `iter` is its record's accepting iteration (the log's is the first metrics line after its wall-clock time) and
+  its `time` the record's (`t`), not the replay's. Nothing downstream changed: the same `the_pairing`, fit, selection,
+  ensembles and tables, only their input's coverage.
+* **gamedb's replay gives the lines** (`replay_match(..., glog_out=)`). One fix on the way: a match whose last game is
+  conceded without an `episodes` list (the farm's records) finds the conceding seat by trying `next_episode` of each
+  seat, and each try ends the game and writes a line - three `bo3` lines for that game. gamedb's own readers took the
+  last line per game (right by luck: the real concession comes last); `glog_out` gives one line per game in game order,
+  the last, checked against the replayed game's result.
+* **The source rule** (`matchup.data_source`), per retrain window: the **game log** when it covers the window - no
+  iteration of it has records, or every one that has them accepted local self-play only (DONE.json's sources all
+  `local`) -, the **records** otherwise (any iteration with a remote host's or the farm's games). So pb3 and every
+  local-only run publish exactly the versions they always did (the log's iteration attribution and order kept), and a
+  window with any farm game reads every accepted game. In records mode an iteration of the window without records (the
+  setting turned on mid-window) comes from the log (its local games), said in the data note.
+* **The engine.** A record replays only on the engine that played it (gamedb's identity check over the files' build
+  lines). The retrain runs in the run's pinned checkout, so after a re-pin the window's iterations played by the
+  previous engine cannot replay there: they are **left out, counted and said** (not refused): refusing would starve the
+  model for a whole window after every re-pin - the failure this section fixes - and the left-out share is exact
+  (matches and games per engine and iterations, from the records themselves, with gamedb's hint for replaying them from
+  a checkout of that engine). A window with nothing left fails loudly, as before.
+* **Loud failure and starvation.** The version (`v*.json` `data`: the source and why, games per source, the left-out
+  games, accepted games without a record, the replay's seconds; `starved`), its `index.jsonl` row (`source`,
+  `excluded_games`, `starved`) and the job's `status.json` (`data`, `data_note`, `starved`, `min_games`) record what the
+  model was fitted on; a version is **STARVED** below `matchup.MIN_GAMES_PER_ITER` (500) games per iteration of its window
+  (published - fewer games are still data - and said). A module constant, not a run setting: every run setting must be
+  known to the farm worker's setting classes (`tests/test_farm_release.py`), so a setting would need a worker release
+  for a threshold the worker never reads. The run log: the published line
+  carries the data note, plus `MATCHUP MODEL STARVED vNNNN: fitted on N games (< X ...)` and `MATCHUP MODEL vNNNN: N
+  games of its window LEFT OUT`; a failure stays `MATCHUP RETRAIN FAILED` with the data note in its error. **sb-health**
+  (section 260, `sbhealth.model_health`) alerts per specialist, in the stew's report and `stew.py status`: "matchup
+  model: no new version since vNNNN (last retrain failed: ...)" (a retrain after the newest version that failed or died
+  without a status), "matchup model vNNNN: fitted on N games (< X ...)" (a version without recorded data: its games against the constant), "... games of its window left out". On the live first stew it now alerts all three
+  specialists (each "no new version since v0064", the Delver mirror and Doomsday also "fitted on 6,411 / 8,136 games
+  (< 16,000)").
+* **Cost.** A cold window of the first stew (iterations 65-96, 27,712 matches, 67,576 games) replays in 80.6 s with 6
+  processes (~7 ms a game per process; one process: iteration 65's 2,085 games in 13 s); the retrain replays in
+  `matchup_threads` processes at below-normal priority (gamedb's worker init) and caches each iteration's lines
+  (`<run>/matchup/replayed/iter_NNNN.json.gz`, keyed by its DONE.json, the engine and the format; pruned below the
+  window), so a rolling retrain (every 16 iterations over 32) replays only its new half. The fit and the table after
+  it: 47 s.
+* Unchanged: `sbhealth.play_from_log` reads the log only (`source='log'`: its rows are labelled local self-play, the game
+  database is its full source); `census` and `fit` take the rule (`fit --source --jobs --cache`).
+
+### 273.3 Tests and checks
+
+* `tests/test_matchup_records.py` (random-move Delver mirror matches with per-seat dealt decks and random concessions,
+  played with the engine's game log on and recorded as the farm records them): the source rule (local-only records -> the
+  log; one farm iteration -> the records for the whole window); records-sourced game dicts **equal to the log's, field
+  for field** (the time aside) and the spec lines equal; an iteration without records from the log; the cache (reused,
+  replayed again when DONE.json changes, pruned); another engine's records left out with exact matches and games and the
+  note; a record that does not replay failing the load; a starved version (status, version, index, the run log's
+  `MATCHUP MODEL STARVED`, the sb-health alert); a failed retrain (status with the data, `MATCHUP RETRAIN FAILED` with
+  the left-out note, sb-health's "no new version since ..."); a version recorded before its data (its games against the
+  setting); pb3's window 113-144 read from its log, exactly `log_games`'s 61,967 games of v0144 (skipped without the
+  maintainer's data).
+* **Real data, log vs records** (read-only; the first stew's Sneak and Show specialist, iterations 45-48 - 45 local
+  only, 46-48 local + farm - on a checkout of their engine 790483c5 with this branch's Python): 9,359 games in both, **every
+  field equal** but the iteration attribution and the time; the log puts many games one or two iterations earlier than
+  the records' accepting iteration (2,910 of iteration 45's 4,237 logged games are the records' 45, 1,162 the records'
+  46, ...), and it holds 3 game-1 lines twice (an interrupted attempt's games played again after the resume; no record
+  - the reader takes the finished attempt's files only). So the two sources give the same games, attributed to
+  iterations differently: the reason the rule keeps the log wherever it covers a window (identical versions) and never
+  mixes the two within an iteration.
+* **pb3 regression** (by hand: window 113-144 of `delver-bo3-pb3`, the branch's path `load_games` -> `the_pairing` ->
+  `_mirror_version`): **identical** - source `log` ("no game records in the window"), 61,967 games, and `list`,
+  `main`, `members`, `report`, `table`, `table_detail`, `dealt_swaps` each equal to the published `v0144.json` (248 s).
+* **The real fit** (read-only, a checkout of the records' engine 52e05153 = b703aa2e with this branch's Python, a scratch
+  directory): the first stew's Delver mirror, iterations 65-96 from its records (all farm): **67,576 games** (27,712
+  matches, none left out), held-out log loss 0.67999 vs play / draw 0.69296, **gain +0.01297 nats** (above the 0.005
+  table bar), selected dim 0, l2_w 0.003; the table: **0 swaps in all 24 contexts** (every context the main; the plain
+  argmax would board e.g. +3 Pyroblast +2 Hydroblast in game 2, but no swap clears `matchup_swap_z` 2). The strongest
+  copies against the main: Volcanic Island +0.112, Murktide Regent +0.042; the weakest: Meltdown -0.132, Price of
+  Progress -0.112, Consign to Memory -0.105, Rough // Tumble -0.103. v0048 / v0064 were all main as well.
+* **The gate** on 03080832 (this section's code; the next commit adds this line only): `python tools/gate.py python` -
+  **GATE PASSED WITH SKIPS python 03080832a95b in 150s** (skipped: one live-run-hazard test fenced by the live stew). An
+  earlier commit (f6b7c361) failed it on a new run setting the farm worker's setting classes did not know
+  (`tests/test_farm_release.py`): the threshold became the module constant above.

@@ -42,7 +42,7 @@ window - no records there, or records of local self-play only -, else the run's 
 `game_records`: every game the quota accepted, local, a remote host's and the farm's), each match replayed on this
 checkout's engine into exactly the lines the log would hold (mtgz.az.bo3_records); records another engine played (an
 earlier pin) are left out, counted and said. A version records its data (`data`: the source, the games per source, what
-was left out) and whether it is STARVED (fewer games than `matchup_min_games_per_iter` times its window's iterations);
+was left out) and whether it is STARVED (fewer games than `MIN_GAMES_PER_ITER` (500) times its window's iterations);
 the run log says both loudly, and the stew's sideboarding health alerts on them (mtgz.stew.sbhealth).
 
 **The rolling retrain** (run setting `matchup_every` N > 0; `mtgz.sealed.rolling`'s design): at the start of iteration
@@ -117,10 +117,11 @@ SETTINGS = {
     'matchup_swap_z': 2.0,        # the table moves from the main one card at a time, only by swaps whose bootstrap gain
                                   # exceeds this many standard errors (0: the model's plain argmax climb)
     'matchup_members': 20,        # the published ensemble's bootstrap fits (the swaps' standard errors come from them)
-    'matchup_min_games_per_iter': 500,  # a version fitted on fewer games than this times its window's iterations is
-                                        # STARVED: published, and said loudly (the run log, its record, sb-health;
-                                        # docs/ENGINE.md 273)
 }
+# a version fitted on fewer games than this times its window's iterations is STARVED: published, and said loudly (the run
+# log, its record, sb-health; docs/ENGINE.md 273). A constant, not a run setting: a setting is one the farm's worker must
+# know (its setting classes), a release for a threshold the worker never reads.
+MIN_GAMES_PER_ITER = 500
 DIMS = (0, 2)
 L2_W = (1e-3, 3e-3, 1e-2, 3e-2, 0.1, 0.3, 1.0)   # (strong L2 shrinks every copy's w to 0: the main's 60)
 L2_INTER = (1e-3, 3e-3)
@@ -1306,8 +1307,7 @@ def launch_if_due(R, it):
            '--val-iters', str(V), '--half-life', str(float(c.get('matchup_half_life', 0.0) or 0.0)),
            '--threads', str(th), '--worlds', str(int(c.get('matchup_worlds', 8000))),
            '--min-gain', str(float(c.get('matchup_table_min_gain', 0.005))), '--swap-z', str(float(c.get('matchup_swap_z', 2.0))),
-           '--members', str(int(c.get('matchup_members', 20))),
-           '--min-games-per-iter', str(int(c.get('matchup_min_games_per_iter', 500)))]
+           '--members', str(int(c.get('matchup_members', 20)))]
     from mtgz.sealed.rolling import background_flags, job_env
     log = open(os.path.join(d, 'log.txt'), 'w', encoding='utf-8')
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -1383,7 +1383,7 @@ def replay_cache(run):
 
 
 def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log=print, min_gain=0.005, z=2.0,
-            members_n=20, min_games_per_iter=500, source='auto', cache='run'):
+            members_n=20, min_games_per_iter=MIN_GAMES_PER_ITER, source='auto', cache='run'):
     """The job (module docs): the run's self-play games of iterations lo..b (`load_games`: the game log, or every
     accepted game from the records, docs/ENGINE.md 273) -> status (status.json; a failure raises after writing it). The
     games' one pairing (`the_pairing`): a mirror's version is pb3's (one model, one table), two different 75s' the
@@ -1512,7 +1512,7 @@ def main(argv=None):
     r.add_argument('--min-gain', type=float, default=0.005)
     r.add_argument('--swap-z', type=float, default=2.0)
     r.add_argument('--members', type=int, default=20)
-    r.add_argument('--min-games-per-iter', type=int, default=500)
+    r.add_argument('--min-games-per-iter', type=int, default=MIN_GAMES_PER_ITER)
     r.add_argument('--source', default='auto', choices=('auto', 'log', 'records'))
     f = sub.add_parser('fit')
     f.add_argument('run')
