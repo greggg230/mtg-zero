@@ -2131,7 +2131,7 @@ def tier_encoding(ctx, args):
 # pool, sharded across cores (tools/fuzz_shards.py), the hidden-information checks included; the 20k depth runs on the
 # farm continuously, on main and each live run's build, not in the gate.
 FUZZ_GAMES = 2000
-FUZZ_POOLS = 'default,default+hidden,delver_dealt'    # the suite tier's default --fuzz-pools (+hidden: FUZZ_HIDDEN_DECKS=1)
+FUZZ_POOLS = 'default,default+hidden,delver_dealt,meta_pair'    # the suite tier's default --fuzz-pools (+hidden: FUZZ_HIDDEN_DECKS=1)
 FUZZ_RE = re.compile(r'^(\d+) games: wins \[', re.M)
 SUITE_STEPS = ('cargo-test-engine',)          # + one 'fuzz-<pool>' step per --fuzz-pools entry
 

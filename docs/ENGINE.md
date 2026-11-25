@@ -35478,7 +35478,7 @@ mtgz-worker), `core-pyd` (zero-core's zero._engine, for the core tiers).
 The user's decision D1 (2026-11-15): the gate fuzzes ~2,000 games per affected pool, the hidden-information checks
 included, on engine changes only (the python and docs tiers fuzz nothing, as before); the 20k depth leaves the gate and
 becomes continuous farm fuzz on main and on each live run's build (phase 4). `gate.py suite` now runs, per
-`--fuzz-pools` entry (default `default,default+hidden,delver_dealt`; `<pool>+hidden` = `FUZZ_HIDDEN_DECKS=1`), one step
+`--fuzz-pools` entry (default `default,default+hidden,delver_dealt,meta_pair` since 275.8; `<pool>+hidden` = `FUZZ_HIDDEN_DECKS=1`), one step
 `python tools/fuzz_shards.py --pool <pool> [--hidden] --games 2000 --shards 8`:
 
 * **Shards.** The fuzz test binary of the checkout (built by the tier's first step) runs `fuzz_random_games` over 8
@@ -49921,3 +49921,10 @@ matches (ENGINE.md 275)` line.
   decides whether to add it; without it, no suite gate reached this failure from 261 to 274.
 * The first pass's `meta_pair` line (240) counts forced-find resolutions over both passes but prints before the
   post-sideboard pass, so that pass's resolutions are not reported.
+
+### 275.8 meta_pair in the suite tier's default fuzz pools
+
+The user's decision (2026-11-25, 275.7's open point): tools/gate.py `FUZZ_POOLS` is now
+`default,default+hidden,delver_dealt,meta_pair`, so every suite gate runs the best-of-three metagame pool (the forced
+find, choice tables, dealt decks around a table, Thompson members) that no gate reached from 261 to 274. Cost: one
+more sharded fuzz step, ~1-1.5 min on the Mac (75 s and 61 s in 275.6's two runs).
