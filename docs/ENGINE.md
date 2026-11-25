@@ -49509,6 +49509,17 @@ On the desktop beside the live stew: cargo `-j 8` through `tools/slotd.sh`, the 
   **3,663 passed, 25 skipped**, 0 failed (26 min beside the stew).
 * No dealt-deck code changed (the deals were always the main's size); the dealt and around-the-table deals of the 61
   are covered by `dealt_decks_of_the_61_stay_61_within_their_range` above.
+* **The gates** on eac5457d (this section's commit; the next adds this paragraph only): `python tools/gate.py suite
+  --fuzz-pools default,default+hidden,delver_dealt,lands,cross --offload local --throttle on --jobs 8` - **GATE PASSED
+  suite eac5457d8fdd in 452s** (privacy; the engine suite 3,135 passed over 24 binaries; the sharded 2,000-game fuzz of
+  each pool with 100 matches + 100 post-sideboard, `lands` playing the real 61; the checkout unchanged); `python
+  tools/gate.py engine --tested-sha eac5457d8fdd --expect-digest 5a09242cf4f2cbab --expect-digest0 be0626d4b97cebae
+  --offload mac` - **GATE PASSED WITH SKIPS engine eac5457d8fdd in 705s** (skipped: one live-run-hazard test fenced by
+  the live stew): both digests = expected, the formats constructed 33fd025bacb21413, EoE d754f4eef3c8adae, driver
+  cab97c01912f7e3f, metagame f1ca224f901d809d, pair 9611d13bb054de40, pair_around ebaa7f7e45dc8e32 and dealt
+  4c28ec816ed1245f (each = the recorded file); `az` 58, `limits` 13, `hidden` 28; pytest in four Mac shards and the
+  desktop part; the smoke config; **farm compat identical** on `delver-mirror-bo3-dealt` (gate 2: 6 games, 2,542 rows,
+  150 batches; gate 3 identical); the suite evidence; the checkout unchanged.
 
 ### 272.4 Limits, decisions, merge points
 
