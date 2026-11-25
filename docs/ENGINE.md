@@ -49904,3 +49904,20 @@ matches (ENGINE.md 275)` line.
   evidence). Without the fix it fails with the original message, as the repro does (checked with a temporary switch
   that was not kept).
 * The repro above: passes, and the post-sideboard line reads 1.
+
+### 275.6 Gates
+
+* `python tools/gate.py suite --fuzz-pools default,default+hidden,delver_dealt,meta_pair` on e1304af9: every step
+  passed, but the gate FAILED its tree-unchanged check (this section was appended to the checkout while it ran). The
+  same gate on 35b6cc26 (e1304af9 + this section): **GATE PASSED suite 35b6cc2633a9 in 176s**. The full engine
+  suite, 3,141 passed in 24 binaries. The default pool, its hidden decklists, `delver_dealt`, and `meta_pair`: 2,000
+  games, 100 matches + 100 post-sideboard from seed 0 (so the post-sideboard match 19 too).
+* Tier (feedback_tiered_gates): a fuzz check only, with no engine behaviour change (the check draws nothing from a
+  match's random stream), as 234 was. The engine tier's digests are not affected and were not re-run.
+
+### 275.7 Open
+
+* The suite tier's default `--fuzz-pools` (tools/gate.py `FUZZ_POOLS`) still leaves out `meta_pair`. The maintainer
+  decides whether to add it; without it, no suite gate reached this failure from 261 to 274.
+* The first pass's `meta_pair` line (240) counts forced-find resolutions over both passes but prints before the
+  post-sideboard pass, so that pass's resolutions are not reported.
