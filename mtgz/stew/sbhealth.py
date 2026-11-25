@@ -22,7 +22,7 @@ play and card use over the window of its newest `iters` iterations, default the 
   game database: a run not ingested says so (never a silent zero).
 * **the model's data** (`model_health`, docs/ENGINE.md 273): a retrain newer than the newest version that FAILED
   ("matchup model: no new version since vNNNN (last retrain failed: ...)"), the newest version STARVED ("fitted on N
-  games (< X)": fewer than the run's `matchup_min_games_per_iter` times its window's iterations), games of its window
+  games (< X)": fewer than `matchup.MIN_GAMES_PER_ITER` times its window's iterations), games of its window
   left out (records another engine played) - each an alert.
 * **alerts**: a deck's table all main for `all_main_versions` or more consecutive versions; a card's wrong-colour rate
   above its alert line (`misaim_alert` 'reference': the pb2 reference below - the level before pb3's matchup model found
@@ -309,15 +309,11 @@ def table_plan(run, mirror_name=None, upto_iter=None):
 def model_health(run, upto_iter=None):
     """The matchup model's data and retrains (docs/ENGINE.md 273) at or before `upto_iter` -> {'version', 'games',
     'window', 'source', 'excluded_games', 'starved', 'min_games', 'failed': the newest retrain after the newest version
-    that failed, or None, 'alerts': [lines]}. A version written before its data was recorded: its games against the
-    run's `matchup_min_games_per_iter` (its index row)."""
+    that failed, or None, 'alerts': [lines]}. A version written before its data was recorded: its games against
+    `matchup.MIN_GAMES_PER_ITER` times its window's iterations."""
     from mtgz.az import matchup as M
     vs = [(b, p) for b, p in _versions(run) if upto_iter is None or b <= upto_iter]
-    try:
-        per = int(_load(os.path.join(run, 'config.json')).get('matchup_min_games_per_iter',
-                                                               M.SETTINGS['matchup_min_games_per_iter']))
-    except (OSError, ValueError):
-        per = M.SETTINGS['matchup_min_games_per_iter']
+    per = M.MIN_GAMES_PER_ITER
     out = {'version': None, 'failed': None, 'alerts': []}
     newest = vs[-1][0] if vs else None
     if vs:
