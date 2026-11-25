@@ -5874,6 +5874,21 @@ static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_RES: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_FORCED: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_FORCED_LATER: AtomicU64 = AtomicU64::new(0);
+/// Worlds of the caster's opponent dealt inside a drawn forced-find resolution, checked against the same state without
+/// the option (ENGINE.md 275: the opponent's worlds are not conditioned on the forcing, 180.4).
+static PAIR_FF_OPP_STRIPPED: AtomicU64 = AtomicU64::new(0);
+
+/// `PAIR_FF_OPP_STRIPPED`'s count so far (this process; ENGINE.md 275's regression test reads it).
+pub fn pair_ff_opp_stripped() -> u64 {
+    PAIR_FF_OPP_STRIPPED.load(Ordering::Relaxed)
+}
+
+/// Whether `g`'s pending decision is asked by a drawn forced-find resolution (the spec's spell's frame running, the
+/// game's draw forcing it: ENGINE.md 180) - where a world of the caster's opponent applies the rule to its own dealt
+/// hand and library (ENGINE.md 180.4, 275).
+fn in_drawn_ff_resolution(g: &crate::az::MtgAz) -> bool {
+    g.g.forced_find().is_some_and(|ff| g.g.ff_draw() == Some(true) && matches!(g.g.agenda.last(), Some(crate::flow::Task::Run(f)) if f.source_def == ff.spell))
+}
 /// Dealt 60s checked around a seat's choice table (ENGINE.md 261, `FUZZ_POOL=meta_pair`'s `"around": "table"` matches).
 static PAIR_AROUND_TABLE: AtomicU64 = AtomicU64::new(0);
 /// Seats whose Thompson draw picked a member's plan (ENGINE.md 274, `FUZZ_POOL=meta_pair`'s tables with `explore`).
@@ -6245,6 +6260,20 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
             // and encoding, and samples the opponent's hidden pool and deck
             // consistently (ENGINE.md 36.11).
             for viewer in [p, 1 - p] {
+                // (ENGINE.md 275: inside a drawn forced-find resolution, a world of the caster's opponent applies the
+                // forcing to its own dealt hand and library - the opponent's beliefs are not conditioned on it, the
+                // warm-up mismatch of 180.4 - so its pending pick can differ from the real one; that viewer's checks
+                // run on the same state without the option, which reads nothing hidden)
+                let stripped;
+                let g = if viewer != p && in_drawn_ff_resolution(&g) {
+                    let mut s = g.clone();
+                    s.g.strip_forced_find();
+                    PAIR_FF_OPP_STRIPPED.fetch_add(1, Ordering::Relaxed);
+                    stripped = s;
+                    &stripped
+                } else {
+                    &g
+                };
                 let mut d = g.clone();
                 d.determinize(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()));
                 d.legal_actions(&mut legal2);
@@ -6525,10 +6554,11 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     }
     if pair_mode() {
         println!(
-            "FUZZ_POOL=meta_pair (ENGINE.md 240): the forced find in best-of-three - {} Doomsday resolutions, {} forced ({} in a game 2 or 3)",
+            "FUZZ_POOL=meta_pair (ENGINE.md 240): the forced find in best-of-three - {} Doomsday resolutions, {} forced ({} in a game 2 or 3); {} opponent worlds inside one checked without the option (275)",
             PAIR_FF_RES.load(Ordering::Relaxed),
             PAIR_FF_FORCED.load(Ordering::Relaxed),
-            PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)
+            PAIR_FF_FORCED_LATER.load(Ordering::Relaxed),
+            PAIR_FF_OPP_STRIPPED.load(Ordering::Relaxed)
         );
         println!("FUZZ_POOL=meta_pair (ENGINE.md 261): {} dealt 60s checked around their seat's choice table", PAIR_AROUND_TABLE.load(Ordering::Relaxed));
     }
@@ -6593,6 +6623,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         ("ff_res", PAIR_FF_RES.load(Ordering::Relaxed)),
         ("ff_forced", PAIR_FF_FORCED.load(Ordering::Relaxed)),
         ("ff_forced_later", PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)),
+        ("ff_opp_stripped", PAIR_FF_OPP_STRIPPED.load(Ordering::Relaxed)),
         ("dealt_around_table", PAIR_AROUND_TABLE.load(Ordering::Relaxed)),
         ("thompson_member", PAIR_THOMPSON_MEMBER.load(Ordering::Relaxed)),
         ("sb", sb),
@@ -6642,6 +6673,7 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     let mut stats = HiddenStats::default();
     let (mut meta_cells, mut meta_steps, mut meta_worlds) = ([0u64; 9], 0u64, 0u64);
     let new_games0 = PK_NEW_GAMES.load(Ordering::Relaxed);
+    let ff_opp_stripped0 = PAIR_FF_OPP_STRIPPED.load(Ordering::Relaxed);
     for seed in first..first + n {
         if !hooks.before(seed) {
             return Run::Stopped { at: seed };
@@ -6685,6 +6717,10 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             println!("post-sideboard choice tables (ENGINE.md 168.3): {table_decisions} table decisions played, each table 60 reached");
         }
     }
+    let ff_opp_stripped = PAIR_FF_OPP_STRIPPED.load(Ordering::Relaxed) - ff_opp_stripped0;
+    if pair_mode() {
+        println!("FUZZ_POOL=meta_pair post-sideboard matches (ENGINE.md 275): {ff_opp_stripped} opponent worlds inside a drawn forced-find resolution checked without the option");
+    }
     // (a keeper's decisions, or with dealt decks - which refuse a keeper - the dealt 60s)
     let kept_or_dealt = if dealt_mode() { dealt_decks } else { kept };
     println!(
@@ -6725,6 +6761,7 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         ("choices_dealt", stats.choices_dealt),
         ("tilted", stats.tilted),
         ("pk_new_games", PK_NEW_GAMES.load(Ordering::Relaxed) - new_games0),
+        ("ff_opp_stripped", ff_opp_stripped),
     ] {
         t.set(k, v);
     }

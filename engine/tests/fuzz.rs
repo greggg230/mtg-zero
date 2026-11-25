@@ -540,6 +540,30 @@ fn same_seed_and_actions_replay_identically() {
     }
 }
 
+/// ENGINE.md 275: `FUZZ_POOL=meta_pair`'s post-sideboard match 19 (`delver_post_spec`, start_game 2; at the release
+/// profile's denominator, 40), step 271: P0's Doomsday resolving, the
+/// game's draw forcing it, four graveyard cards picked and the fifth pick asked (Dark Ritual or `PASS`: P0 holds
+/// Thassa's Oracle, so in the real game the forcing does not apply); a world dealt for P1 gave P0 another hand and the
+/// forcing sent the pile on to the library ("determinize changed the encoding of P1 (mover P0) at 146": the decision
+/// kind, `SearchLibrary` for `ChooseGraveyardCard`). The opponent's worlds are not conditioned on the forcing (180.4,
+/// the accepted warm-up mismatch); the fuzz now checks that viewer's world of the same state without the option. The
+/// match plays through, with such a world checked (positive evidence).
+#[test]
+fn an_opponents_world_inside_a_forced_doomsday_is_checked_without_the_option() {
+    use engine::fuzz::games::{pair_ff_opp_stripped, CHECKPOINT_EVERY_OVERRIDE};
+    if pool_mode() != PoolMode::Default || sealed_mode() || hidden_decks_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::MetaPair)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(40)));
+    let before = pair_ff_opp_stripped();
+    let r = std::panic::catch_unwind(|| play_match_spec(19, &delver_post_spec(19), true, &mut HiddenStats::default()));
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| panic!("meta_pair post-sideboard match 19 failed (rerun: FUZZ_POOL=meta_pair FUZZ_FIRST=19 FUZZ_MATCHES=1, release profile): {e:?}"));
+    assert!(pair_ff_opp_stripped() > before, "no opponent world inside a drawn forced-find resolution was checked");
+}
+
 #[test]
 fn fuzz_random_matches() {
     let games: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
