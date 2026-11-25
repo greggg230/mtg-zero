@@ -49839,3 +49839,68 @@ gate 2 identical, 6 games, 3,200 rows, 150 batches; gate 3 identical, 6 games, 2
   self-play.
 * The member index is in the game log and every record's replay (gamedb's `replay_match` lines), not a gamedb column;
   sb-health reads the played 60s from the database and the members from the log.
+
+## 275. The fuzz checks an opponent's world inside a drawn forced-find resolution without the option (`FUZZ_POOL=meta_pair` post-sideboard match 19; branch `fix/m19-hidden-info`, 2026-11-25)
+
+Branch `fix/m19-hidden-info` from main 071f2337 (274). Section number: the next free after 274, as the maintainer's
+thread notes listed it on 2026-11-24.
+
+### 275.1 The failure
+
+`FUZZ_POOL=meta_pair FUZZ_FIRST=19 FUZZ_MATCHES=1 cargo test --release -p engine --test fuzz fuzz_random_matches --
+--exact --nocapture`: "match 19: determinize changed the encoding of P1 (mover P0) at 146: 0 -> 1". Found by the T5
+Thompson agent's suite gate (274.8). It fails on main 57449923 and 071f2337, and on bd45a8c8 and its parent. It passes
+at 52e05153 and e8187195, and fails from 7cd4a742 (the merge of the Legacy Lands lane C, 270). That merge only moved the
+match's random stream into the state; the check it trips is older. No suite gate ran `meta_pair` from 261 to 274 (they
+ran default, default+hidden, delver_dealt, lands and cross), which is how it slipped through.
+
+**Which match.** The match with seed 19 passes; the failure is in the post-sideboard match with seed 19
+(`post_sideboard_matches`, `delver_post_spec(19)`: start_game 2). `random_matches` plays that pass after it prints the
+first pass's summary and totals. A test that replays `play_match(19, true)` never reaches the state.
+
+### 275.2 The state
+
+Step 271 at the release profile's checkpoint denominator (40):
+
+* P0 is resolving Doomsday (def 558) with the spec's forced find on (card 458, Thassa's Oracle; `unless_in_hand`), and
+  the game's draw forces this resolution (`ff_draw() == Some(true)`).
+* P0 has picked four graveyard cards. The fifth pick is asked (`ChooseGraveyardCard`: Dark Ritual or `PASS`).
+* P0 holds Thassa's Oracle, so in the real game the forcing does not apply (`ff_must` returns None on
+  `unless_in_hand`).
+* A world determinized for P1 deals P0 another hand, without the Oracle, and an Oracle can be found in the library.
+  `ff_must` returns `Must::Library` and the world's pile jumps to the library search. Float 146 is the context's
+  decision-kind one-hot 18 (`SearchLibrary` where the real game asks `ChooseGraveyardCard`).
+
+### 275.3 The cause: the check, not the engine
+
+`ff_must` reads the caster's hand and library, which are hidden from the opponent. 180.4 accepts the consequence: the
+opponent's beliefs are not conditioned on the forcing, and its search worlds apply the rule as the real game does, to
+the world's own dealt hand and library (the warm-up mismatch the user accepted). So inside a drawn resolution, an
+opponent's world can be at another pending decision than the real game, by design. The fuzz's viewer loop compared that
+world's encoding against the real game's, which holds only where the forcing reads nothing hidden.
+
+**Not a hidden-information bug; no effect on self-play.** Nothing the engine deals, keys, shows or encodes changes.
+Worlds used by search are as before, at any commit.
+
+### 275.4 The fix (fuzz only)
+
+In `play_match_spec`'s viewer loop (engine/src/fuzz/games.rs), the viewer is the mover's opponent and the pending
+decision belongs to a drawn forced-find resolution (`in_drawn_ff_resolution`: the spec's forced find,
+`ff_draw() == Some(true)`, and the agenda's last task the spell's frame). Then every check of that viewer runs on a
+clone of the same state with `Game::strip_forced_find`. That state is the same game without the option: its encoding
+is the same (180.4, `nothing_of_it_reaches_an_encoding`), and its worlds read nothing hidden. Those checks are
+determinize, the encoding, the constructed world, the tilted deal and the private keys. The mover's own worlds are
+still checked with the option (the forcing reads only the mover's own cards, which its worlds keep). The test draws
+nothing from the match's random stream, so no seed's match moves.
+
+Counter `ff_opp_stripped`: in both passes' `FUZZ_TOTALS` (the post-sideboard pass's own count). The first pass prints
+it in its `meta_pair` line (240). The post-sideboard pass prints it in a new `FUZZ_POOL=meta_pair post-sideboard
+matches (ENGINE.md 275)` line.
+
+### 275.5 Tests
+
+* `an_opponents_world_inside_a_forced_doomsday_is_checked_without_the_option` (engine/tests/fuzz.rs): the
+  post-sideboard match 19 under `meta_pair` at denominator 40. It plays through, and the counter moves (positive
+  evidence). Without the fix it fails with the original message, as the repro does (checked with a temporary switch
+  that was not kept).
+* The repro above: passes, and the post-sideboard line reads 1.
