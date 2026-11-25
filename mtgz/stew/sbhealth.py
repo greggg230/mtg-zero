@@ -20,6 +20,11 @@ play and card use over the window of its newest `iters` iterations, default the 
   `target_colours`) -> right colour / WRONG colour (the spell does nothing; a land is colourless) / unknown colour
   (never guessed, counted apart) / no target; the counter mode's share (the mode that counters a spell). Only from the
   game database: a run not ingested says so (never a silent zero).
+* **Thompson-sampled plans** (docs/ENGINE.md 274, run setting `matchup_explore`): a table with `"explore"` - its share,
+  how many bootstrap members' plans board (leave the main in some context), the most common member plans over members x
+  contexts (`member_stats`); and the plans table seats actually PLAYED in the window (`played_plans`: their 60s as
+  changes against the main, how many boarded; from the game database's table-mode seats, or from the run's game log,
+  which also names each seat's drawn member - the database holds the 60, not the member index).
 * **the model's data** (`model_health`, docs/ENGINE.md 273): a retrain newer than the newest version that FAILED
   ("matchup model: no new version since vNNNN (last retrain failed: ...)"), the newest version STARVED ("fitted on N
   games (< X)": fewer than `matchup.MIN_GAMES_PER_ITER` times its window's iterations), games of its window
@@ -279,6 +284,32 @@ def table_stats(table, names, main):
             'top': [{'changes': {a: b for a, b in ch}, 'contexts': k} for ch, k in tops.most_common(3)]}
 
 
+def _changes(names, main, c):
+    return tuple(sorted((names[i], c[i] - main[i]) for i in range(len(c)) if c[i] != main[i]))
+
+
+def member_stats(table, names, main):
+    """A table's Thompson-sampled plans (docs/ENGINE.md 274) against its main -> {share, members, boarding (members
+    whose plan leaves the main in some context), top (the most common member plans over members x contexts, as changes
+    with their share)} or None without `explore`."""
+    e = (table or {}).get('explore')
+    if not e:
+        return None
+    tops = collections.Counter()
+    board = 0
+    n = 0
+    for ch in e['members']:
+        moved = False
+        for c in ch:
+            d = _changes(names, main, c[4])
+            tops[d] += 1
+            n += 1
+            moved = moved or bool(d)
+        board += moved
+    return {'share': e['share'], 'members': len(e['members']), 'boarding': board,
+            'top': [{'changes': dict(d), 'share': round(k / n, 3)} for d, k in tops.most_common(3)]}
+
+
 def table_plan(run, mirror_name=None, upto_iter=None):
     """The run's newest matchup version at or before `upto_iter` (None: the newest) -> {'version', 'iter', 'versions',
     'decks': {deck: {'state', 'streak', ...table_stats}}} or {'note'} without a version."""
@@ -302,6 +333,9 @@ def table_plan(run, mirror_name=None, upto_iter=None):
         row = {'state': st, 'streak': streak}
         if d['table'] is not None:
             row.update(table_stats(d['table'], d['names'], d['main']))
+            ms = member_stats(d['table'], d['names'], d['main'])
+            if ms is not None:
+                row['thompson'] = ms
         out['decks'][d['name']] = row
     return out
 
@@ -449,6 +483,69 @@ SELECT c.deck, c.game_no, c.card, m.mode_line, t.target
 FROM c LEFT JOIN t ON t.game_id = c.game_id AND t.act = c.seq LEFT JOIN m ON m.game_id = c.game_id AND m.act = c.seq"""
 
 
+PLANS_SQL = """
+SELECT deck, game_no, sb_in, sb_out FROM game_results
+WHERE kind = 'selfplay' AND iter BETWEEN $lo AND $hi AND deck_mode = 'table' AND score IS NOT NULL"""
+
+
+def played_plans(rows):
+    """Table seats' played 60s (docs/ENGINE.md 274) [{deck, changes (a tuple of (card, +/-n)), member (or absent)}] ->
+    {deck: {seats, boarding (60 other than the main), top (the most common 60s as changes, with their share), members
+    (seats per drawn plan: 'own' / 'm<k>'; only from the game log)}}."""
+    acc = {}
+    for r in rows:
+        a = acc.setdefault(r['deck'], {'seats': 0, 'boarding': 0, 'top': collections.Counter(),
+                                       'members': collections.Counter()})
+        a['seats'] += 1
+        a['boarding'] += bool(r['changes'])
+        a['top'][r['changes']] += 1
+        if 'member' in r:
+            a['members']['own' if r['member'] is None else f"m{r['member']}"] += 1
+    out = {}
+    for deck, a in sorted(acc.items()):
+        out[deck] = {'seats': a['seats'], 'boarding': a['boarding'],
+                     'top': [{'changes': dict(c), 'share': round(k / a['seats'], 3)} for c, k in a['top'].most_common(3)]}
+        if a['members']:
+            out[deck]['members'] = dict(a['members'].most_common())
+    return out
+
+
+def _db_changes(sb_in, sb_out):
+    d = []
+    for xs, sign in ((sb_in or [], 1), (sb_out or [], -1)):
+        for x in xs:
+            n, card = x.split(' ', 1)
+            d.append((card, sign * int(n)))
+    return tuple(sorted(d))
+
+
+def plans_from_db(con, lo, hi):
+    rows = _rows(con, PLANS_SQL, {'lo': lo, 'hi': hi})
+    return played_plans([{'deck': r['deck'], 'changes': _db_changes(r['sb_in'], r['sb_out'])} for r in rows])
+
+
+def plans_from_log(run, lo, hi):
+    """Table seats' played plans of iterations lo..hi from the run's game log (local self-play only), with each seat's
+    drawn member (the line's `table`, docs/ENGINE.md 274) -> as `played_plans`, or None without a log."""
+    from mtgz.az import matchup as M
+    if not glob.glob(os.path.join(run, 'games', '*.jsonl')):
+        return None
+    games, specs = M.load_games(run, lo, hi, source='log')
+    rows = []
+    for g in games:
+        sp = specs[g['spec']]
+        mg = sp.get('metagame')
+        for p in (0, 1):
+            if g['mode'][p] != 'table':
+                continue
+            names = [x[0] for x in sp['lists'][p]]
+            r = {'deck': mg['names'][p] if mg else f'p{p}', 'changes': _changes(names, sp['mains'][p], g['decks'][p])}
+            if g.get('table') and g['table'][p] is not None:
+                r['member'] = g['table'][p][1]
+            rows.append(r)
+    return played_plans(rows)
+
+
 def _mode_of(line):
     if not line:
         return None
@@ -492,11 +589,14 @@ def card_use_rows(rows, cmap, answers):
     return res
 
 
-def from_db(db, lo, hi, cmap, answers):
-    """The play and the card use of iterations lo..hi from the database at `db`."""
+def from_db(db, lo, hi, cmap, answers, plans=None):
+    """The play and the card use of iterations lo..hi from the database at `db` (`plans` a dict: receives the table
+    seats' played plans, docs/ENGINE.md 274)."""
     con = _gamedb().connect(db)
     play = _rows(con, PLAY_SQL, {'lo': lo, 'hi': hi})
     rows = _rows(con, CAST_SQL, {'lo': lo, 'hi': hi, 'cards': sorted(answers)}) if answers else []
+    if plans is not None:
+        plans.update(plans_from_db(con, lo, hi))
     return play, card_use_rows(rows, cmap, answers)
 
 
@@ -571,10 +671,12 @@ def specialist(run, decks, opts, upto_iter, iters, cmap=None, answers=None):
                 cmap = colour_map()
             if answers is None:
                 answers = conditional_answers()
-            play, use = from_db(db, lo, hi, cmap, answers)
+            plans = {}
+            play, use = from_db(db, lo, hi, cmap, answers, plans)
             cov = {'source': 'game database', 'iterations': len(have), 'of': hi - lo + 1}
             out['play'] = dict(cov, rows=play)
             out['card_use'] = dict(cov, decks=use)
+            out['played'] = dict(cov, decks=plans)
             return out
         except Exception as e:                   # noqa: BLE001 - said in the report, never fails the stew
             why = f"the game database failed ({type(e).__name__}: {' '.join(str(e).split())[:300]})"
@@ -585,6 +687,11 @@ def specialist(run, decks, opts, upto_iter, iters, cmap=None, answers=None):
         rows, why = None, f'{why}; the game log failed ({type(e).__name__}: {e})'
     out['play'] = ({'source': 'game log (local self-play only)', 'rows': rows, 'db': why} if rows is not None
                    else {'note': f'{why}; no game log'})
+    if rows is not None:
+        try:
+            out['played'] = {'source': 'game log (local self-play only)', 'decks': plans_from_log(run, lo, hi)}
+        except Exception as e:                   # noqa: BLE001 - said in the report
+            out['played'] = {'note': f'the game log failed ({type(e).__name__}: {e})'}
     return out
 
 
@@ -672,7 +779,9 @@ def status_lines(stew):
         for deck, d in t['decks'].items():
             alert = d['state'] == 'all main' and d['streak'] >= opts['all_main_versions']
             parts.append(f"{deck} {d['state']} x{d['streak']}" + (f", swaps {d['swaps']['mean']}" if 'swaps' in d
-                                                                   else '') + (' ALERT' if alert else ''))
+                                                                   else '') + (' ALERT' if alert else '')
+                         + (f", Thompson {d['thompson']['boarding']} of {d['thompson']['members']} members board "
+                            f"(share {d['thompson']['share']})" if d.get('thompson') else ''))
         L.append(f"  sb health {sn}: table {t['version']}: " + '; '.join(parts))
     return L
 
@@ -746,6 +855,10 @@ def _ref(card):
             f"{100 * r2['counter'][card]:.0f}% / {100 * r3['counter'][card]:.0f}%)")
 
 
+def _plan(changes):
+    return 'main' if not changes else ' '.join(f'{n:+d} {k}' for k, n in sorted(changes.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
 def md_lines(h):
     """The report's "Sideboarding health" section (reports/gen_NNN.md)."""
     if not h:
@@ -775,6 +888,26 @@ def md_lines(h):
                      + (f"{sw['min']} / {sw['mean']} / {sw['max']} | " if sw else ' | ')
                      + ', '.join(f'{k} {v}' for k, v in list((d.get('in') or {}).items())[:5]) + ' | '
                      + ', '.join(f'{k} {v}' for k, v in list((d.get('out') or {}).items())[:5]) + ' |')
+    th = [(sn, deck, t['version'], d['thompson']) for sn, s in sp.items() if 'error' not in s
+          for t in [s.get('table') or {}] for deck, d in (t.get('decks') or {}).items() if d.get('thompson')]
+    pl = [(sn, s['played']) for sn, s in sp.items() if (s.get('played') or {}).get('decks')]
+    if th or pl:
+        L += ['', '### Thompson-sampled plans (docs/ENGINE.md 274)', '']
+    if th:
+        L += ['| specialist | deck | version | share | members boarding | most common member plans (share of members x contexts) |',
+              '|---|---|---|---|---|---|']
+        for sn, deck, ver, x in th:
+            L.append(f"| {_c(sn)} | {deck} | {ver} | {x['share']} | {x['boarding']} of {x['members']} | "
+                     + '; '.join(f"{_plan(y['changes'])} {100 * y['share']:.0f}%" for y in x['top']) + ' |')
+        L.append('')
+    if pl:
+        L += ['| specialist | source | deck | table seats | boarding | drawn plans | most common played 60s |',
+              '|---|---|---|---|---|---|---|']
+        for sn, p in pl:
+            for deck, x in p['decks'].items():
+                L.append(f"| {_c(sn)} | {p['source']} | {deck} | {x['seats']} | {x['boarding']} | "
+                         + (', '.join(f'{k} {v}' for k, v in x['members'].items()) if x.get('members') else '') + ' | '
+                         + '; '.join(f"{_plan(y['changes'])} {100 * y['share']:.0f}%" for y in x['top']) + ' |')
     L += ['', '### Play by game and deck mode', '',
           '| specialist | source | deck | game | mode | seats | score | cards in |', '|---|---|---|---|---|---|---|---|']
     for sn, s in sp.items():

@@ -192,6 +192,10 @@ impl Eq for Share {}
 /// exactly seat p's 75 - two different 75s each with its deck's table; in a metagame a deck entry's `"table"` (below).
 /// A self-play setting: the evaluation spec drops them.
 ///
+/// Thompson-sampled plans (ENGINE.md 274): any of these tables may carry `"explore": {"share": e, "members":
+/// [choices, ...]}` - each seat of the table draws its plan for the match from the match's seed (a member with
+/// probability e, uniform; else the table's own choices) and its teacher decisions play that plan (`sbtable.rs`).
+///
 /// A metagame (ENGINE.md 176, `metagame.rs`): `"metagame": {"decks": [{"name", "main", "sideboard"}, ...], "weights":
 /// [[...], ...]}` (with `"constructed": true`, instead of `decks`) plays, in each game (a best-of-three: each match), the
 /// ordered pair (p0's 75, p1's 75) drawn from that game's seed - uniform over the n x n pairs, or by the optional integer
@@ -1158,7 +1162,8 @@ impl MtgAz {
         let t = self.m.table[p as usize].as_ref()?;
         let o = 1 - p;
         let lead = self.m.wins[p as usize] as i8 - self.m.wins[o as usize] as i8;
-        let target = t.choice(self.m.game_no + 1, sb.turn == 0, lead, self.m.is_dealt(o));
+        // (ENGINE.md 274: the seat's drawn plan - the table's own without Thompson-sampled plans)
+        let target = t.plan(self.m.table_member[p as usize], self.m.game_no + 1, sb.turn == 0, lead, self.m.is_dealt(o));
         let from = sb.last.map_or(0, |l| l as usize + 1);
         Some(sbtable::SideboardTable::next_action(&self.m.pools[p as usize], &sb.counts, from, sb.asking, target))
     }
@@ -1222,6 +1227,8 @@ impl MtgAz {
             // (ENGINE.md 168.3: the seats that sideboard by the choice table - its list is their 75; ENGINE.md 240: or each
             // seat by its own deck's table)
             az.m.table = spec.seat_tables_of(seed, &az.m.pools);
+            // (ENGINE.md 274: each table seat's plan for the match, drawn from its seed - None without `explore`)
+            az.m.table_member = [0u8, 1].map(|p| az.m.table[p as usize].as_ref().and_then(|t| t.draw(seed, p)));
             // (ENGINE.md 141: the other seat's worlds know the keepers keep - the yardstick's informed arm)
             az.m.keep_known = spec.keep_known;
             if spec.start_game == 2 {

@@ -54,6 +54,7 @@ static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("matchup_table_min_gain", "trainer", "the matchup model's held-out gain a table needs"),
     ("matchup_swap_z", "trainer", "the matchup table's swap evidence (standard errors)"),
     ("matchup_members", "trainer", "the matchup model's bootstrap members"),
+    ("matchup_explore", "trainer", "the share of table-seat matches playing a Thompson-sampled member plan (ENGINE.md 274): the retrain writes the member plans into the table, which reaches self-play through the spec"),
     ("forced_find_schedule", "trainer", "the forced find's p per iteration (ENGINE.md 180): the selfplay_specs hook writes it into the self-play spec, which remote self-play follows per iteration (zero-core docs/az.md 52); the worker plays the spec's forced_find"),
 ];
 

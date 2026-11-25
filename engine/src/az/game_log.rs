@@ -238,6 +238,15 @@ impl Bo3Log {
                 spec_json["tables"] = json!(t.map(|t| t.map(|t| t.version.clone())));
             }
         }
+        // (ENGINE.md 274: each seat's table's Thompson share, or null; only when a seat's table has `explore`, so every
+        // other spec line is what it was)
+        if !bo1 {
+            let pools = seats.each_ref().map(|s| super::matches::MatchPool::constructed(&s.deck, &s.sideboard).0);
+            let t = spec.seat_tables_of(seed, &pools);
+            if t.iter().any(|t| t.as_ref().is_some_and(|t| t.explore.is_some())) {
+                spec_json["explore"] = json!(t.map(|t| t.and_then(|t| t.explore.as_ref().map(|e| json!({"share": e.share, "members": t.members()})))));
+            }
+        }
         let spec_key = spec_json.to_string().bytes().fold(0x6A3E_B030u64, |h, b| crate::rng::split64(h ^ b as u64));
         LiveLog(Some(Arc::new(Bo3Log { spec_key, spec: spec_json, seed, pairing: pairing.map(|p| p.decks), bo1 })))
     }
@@ -306,6 +315,11 @@ impl Bo3Log {
         // (ENGINE.md 176: a metagame match's pairing; no key for any other spec)
         if let Some(p) = self.pairing {
             line["pairing"] = json!(p);
+        }
+        // (ENGINE.md 274: each seat's plan - [its table's version, the Thompson member or null for the table's own], null
+        // without a table - only when a seat's table has `explore`, so every other line is what it was)
+        if m.table.iter().any(|t| t.as_ref().is_some_and(|t| t.explore.is_some())) {
+            line["table"] = json!([0usize, 1].map(|p| m.table[p].as_ref().map(|t| json!([t.version, m.table_member[p]]))));
         }
         write_line(self.spec_key, &self.spec, &line);
     }

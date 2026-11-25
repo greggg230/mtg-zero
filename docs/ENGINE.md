@@ -49638,3 +49638,145 @@ said so beyond that one log line. Its Sneak and Show and Doomsday pairings faile
   **GATE PASSED WITH SKIPS python 03080832a95b in 150s** (skipped: one live-run-hazard test fenced by the live stew). An
   earlier commit (f6b7c361) failed it on a new run setting the farm worker's setting classes did not know
   (`tests/test_farm_release.py`): the threshold became the module constant above.
+
+## 274. Thompson-sampled sideboard plans: a table's `"explore"`, run setting `matchup_explore` (fix A of the stew's sideboarding plan; branch `feat/thompson-plans`, 2026-11-24)
+
+Branch `feat/thompson-plans` from main 57449923 (273); zero-core pinned at 9538e15, unchanged (the existing teacher
+hook suffices: `SearchGame::teacher_policy`, 168.3). Section number: the next free after 273 on 2026-11-24, claimed in
+the maintainer's thread notes.
+
+### 274.1 Why
+
+The per-pairing matchup model (168, 240, 261, 273) publishes a choice table by a GUARDED climb (`confident_climb`,
+`matchup_swap_z` 2): a card leaves the main only when the swap's gain clears two standard errors across the bootstrap
+members. Measured on the first stew's Delver mirror (273.3's real fit, iterations 65-96 from the records, 67,576 games):
+gain +0.013 nats over play / draw, and the plain argmax climb boards +3 Pyroblast +2 Hydroblast in game 2 (pb3's plan,
+which beat "board nothing" 55.7% +- 2.5% in a forced A/B: 260) - but no swap clears z 2, so the table stays all main in
+all 24 contexts. The guard prevents exploration: a plan the table seats never play never collects the evidence that
+would let it clear the guard. Fix A: Thompson sampling over the bootstrap members - each table seat plays a plan one
+member prefers in a share of its matches, so plausible plans are played and generate evidence.
+
+### 274.2 The semantics (the decisions, each the exact option and why)
+
+* **What a member's plan is.** For bootstrap member k of the published ensemble (`matchup_members`, 20), each context's
+  60 is the plain argmax climb on member k's model alone: `confident_climb` with z 0 over `Objective.member(k)` (the
+  table's own objective restricted to member k; `PairObjective.member` for two 75s), from the main, against the SAME
+  worlds as the table's own context (`member_plans`). A bootstrap fit is a draw from the estimate's sampling
+  distribution, so playing member k's argmax is Thompson sampling over that posterior: a plan a share s of the members
+  prefers is played in s of the explored matches. With dim 0 a member's objective increases with its own w . dA, so the
+  climb ends at the member's exact strength optimum (tested against `strength_optimum`); with a matchup term it is the
+  same local climb as the table's (168.3's statement of its exactness).
+* **When a seat plays a member's plan.** Per match and seat, once: the table's `"explore": {"share": e, "members":
+  [choices_0, ...]}` (each member a `"choices"` list) and the match's seed give the seat's draw
+  (`sbtable::draw_member`): a stream of the match's seed of its own per seat (salt `0x7403_5A3F_1E00_0274`, the seat
+  through `split64(seat + 1)`), a 53-bit uniform below e -> a member, uniform over the members by exact rejection
+  sampling, else the table's own choices. `matchup_explore` e = the share of a table seat's matches that play a member
+  plan (1: always a member - pure Thompson sampling; 0: off). Per match, not per game: one posterior sample per match
+  (games 2 and 3 of one match play one member's plan - its context's 60 for each game), the usual Thompson unit; the
+  draw is made at the match's start (`MtgAz::new`, after the seat tables) into `MatchState::table_member`.
+* **The teacher target** is the plan played. zero-core's teacher decision records the action it plays (168.3: the
+  canonical path's next action, one-hot); a seat cannot play member k's path and be taught the table's own (the
+  canonical paths part at the first differing entry, and `next_action` on a state off its target's path is undefined).
+  So the prior learns the mixture: (1 - e) the guarded table's 60, e the members' plans in proportion to the members
+  that prefer them - the posterior-predictive plan distribution. The evaluation spec drops the tables (168.3, 240.1):
+  evaluation, keep_h2h and the census measure what the network's own sideboarding learned.
+* **A dealt seat's base stays the table's OWN choice** (`MtgAz::dealt_base`, 261), never the seat's drawn plan. Why:
+  under `"around": "table"` the other player's worlds deal a dealt seat's 60 around its base, so the base must be
+  public (261.2: "the base is as public as the table"). The draw is a function of the match's seed the other player
+  does not know - making the base follow it would either leak it (worlds clone the real draw) or need the draw declared
+  public, and then the matchup model's choice table would have to condition on the opponent's draw (24 x (K + 1)
+  contexts) to stay a best response. Keeping the base public keeps 261's information rules unchanged and the matchup
+  model's dealt-opponent belief EXACT with no new code: `sample_around` around the opponent deck's table's own choice
+  for `opponent_context` (tested: with explore the job draws exactly the bases it drew without). The cost: exploration
+  reaches the table seats only (at the stew's p 0.85 per seat, ~15% of seat-games of games 2 and 3); a later option
+  could deal around member plans with the draw made public.
+* **Information.** `MatchState::table_member` is classified **Hidden** in the public-state gate (a seat's own policy,
+  as `table`, 168.3): never encoded, never reseeded - drawn once from the match's seed, so every world of either viewer
+  carries the real draw unchanged (determinize never touches it; tested), and nothing reads it but the seat's own
+  teacher decisions and the game log. The other player's worlds deal a choosing seat's 60 from the constructed prior
+  (168.3, unchanged), so the draw never reaches them. The table itself (with its members) is the spec's: public, as
+  before. Replays (a record's, the farm's worker, the trainer's) rebuild the match from its seed: the same draw.
+* **The guarded table is unchanged.** Each member's climb draws no random number, so with e > 0 the job's tables'
+  own choices, details and worlds are exactly e = 0's (tested); `matchup_explore` 0 writes no `explore` key at all.
+
+### 274.3 The engine
+
+* **Spec** (`sbtable.rs`): a table (pb3's `sideboard_table`, a seat's `decks.pN_table`, a metagame deck's `table`) may
+  carry `"explore": {"share", "members"}`. Refused loudly ("mtg spec: <where>: explore...", ENGINE.md 274): explore
+  not an object, an unknown key, a share not a number in (0, 1], members not a non-empty list (at most 65,536), any
+  member's choices malformed by the table's own rules (24 contexts once each, within the list's copies) or of another
+  size than the table's (`explore.members[k]: ...`). `parse_choices` is now one function for the table's own choices
+  and each member's. A table without `explore` parses to exactly what it was (its `key` unchanged; with `explore` the
+  key mixes in the share and the members). `Metagame::pair_json` and the seat tables carry it as any table key;
+  `eval_json` drops the tables with it.
+* **Play**: `MtgAz::table_action` targets `SideboardTable::plan(table_member[p], context)`; `MtgAz::new` sets
+  `table_member` (None without `explore`, so every existing spec plays byte for byte as before: the digests below).
+* **The game log** (168.2): only when a seat's table has `explore`, each `bo3` line carries `"table": [[version, member
+  or null] or null, x2]` (per seat: its table's version and its drawn member, null the table's own; null without a
+  table) and the spec line `"explore": [{"share", "members"} or null, x2]`; every other line is what it was.
+* **The farm worker** plays the engine crate (no code of its own); `worker/src/main.rs` classifies `matchup_explore`
+  `trainer` (the retrain writes the members into the table, which reaches self-play through the phase spec). A farm run
+  using the option needs a release of this commit (an older worker refuses the `explore` key loudly).
+
+### 274.4 Python
+
+* **`mtgz.az.matchup`**: setting `matchup_explore` (default 0.0: off); `launch_if_due` passes `--explore e` (refused
+  outside [0, 1]); `retrain(..., explore)`, `choice_table` / `pair_choice_tables(..., explore)` -> the table's `explore`
+  (`member_plans`, `explore_of`); the version records `explore`, its `index.jsonl` row `explore` and `member_plans`
+  (`member_plan_summary`: per table the share, members, how many board, the most common plans per context); `fit
+  --table --explore e`; `census` adds per mode the seats' drawn plans (`plans`: own / m<k>) from the lines' `table`.
+  `with_tables` places a table with its `explore` unchanged.
+* **Sideboarding health** (`mtgz.stew.sbhealth`, 260): per deck with `explore`, `thompson` in the table plan (share,
+  members boarding, the most common member plans over members x contexts; `member_stats`) and a status-line suffix;
+  per specialist `played` - the table seats' played 60s in the window (`played_plans`: seats, how many boarded, the
+  most common 60s as changes) from the game database's `table`-mode seats (`PLANS_SQL`; the database holds the 60,
+  not the member index - no new gamedb column: an old database would have no such column, and the 60 is what was
+  played), or from the run's game log with each seat's drawn member; a report table "Thompson-sampled plans".
+* **The stew**: `recipe.settings` / `recipe.pair_settings` carry `matchup_explore` like every run setting (tested);
+  no preset or recipe default changed.
+
+### 274.5 The real fit's member plans
+
+The first stew's Delver mirror, the scratch refit of 273.3 (v0096: iterations 65-96 from the records, 67,576 games, 20
+members, around the table, 8,000 worlds, z 2), its tables recomputed with explore (read-only, 246 s on this desktop's
+CPU for the 24 contexts' table and 20 x 24 member climbs): the table's own choices EQUAL the published v0096 (all main,
+24 of 24 contexts); **all 20 members board**, every member's plan brings in **+3 Pyroblast +2 Hydroblast** (each
+member's plan is one 60 for all 24 contexts: dim 0, no context term reaches the deck), the outs differ by member: -3
+Tamiyo -2 Unholy Heat (2 members), -4 Lightning Bolt -1 Cori-Steel Cutter -1 Prismari Charm +1 Unholy Heat (2), -4
+Tamiyo -1 Unholy Heat (1), -3 Cori-Steel Cutter -3 Daze +1 Unholy Heat (1), ... So with `matchup_explore` 1 every
+table seat of that mirror would play a +3 Pyroblast +2 Hydroblast plan with a member-specific set of outs, where the
+guarded table plays the main.
+
+### 274.6 Tests
+
+* **Engine** (`engine/tests/thompson_plans.rs` in `misc_suite`, 4): `explore_parses_and_malformed_alternatives_are_refused`
+  (members read exactly; a table without explore keeps its key; eleven refusals each naming explore; `pair_json`
+  carries it, `eval_json` drops it); `the_draw_is_the_seeds_per_seat_and_uniform_over_its_members` (40,000 seeds at
+  share 0.5, 3 members: the table's own and each member within 5 se of 0.5 / 1/6 per seat, both seats' own within 5 se
+  of 0.25 - independent seats; share 1 always a member; `MtgAz::new` sets the draws, none without explore);
+  `a_table_seat_plays_its_drawn_plan_and_a_replay_draws_the_same` (40 whole matches with two seat tables: 158 table
+  seats' next 60s each its drawn plan's for its context, P0's 4 members all drawn, 122 plans other than the table's own;
+  each replay from the seed and actions the same draws and final state); `worlds_keep_the_draw_and_a_dealt_base_is_the_tables_own_choice`
+  (4,980 worlds of both viewers keep the draws; 86 dealt 60s at swaps [1, 1] each 1 swap from the table's OWN choice,
+  all 86 not 1 from the drawn plan). `bo3_game_log.rs`: `a_thompson_table_seat_logs_its_drawn_member_and_plays_its_plan`
+  (40 post-sideboard mirror matches: every line's `table` the seed's draw, the spec line's `explore`, each table seat's
+  60 its drawn plan's, all four plans seen; the binary's two tests now take the process-wide sink one at a time).
+* **Python** (`tests/test_thompson_plans.py`, 7): member plans are each member's exact strength optimum (dim 0) and
+  the plain climb by hand, the guarded table and its details unchanged, the members disagree; the same per deck for two
+  75s; the dealt-opponent worlds with explore drawn around exactly the bases drawn without (the table's own choices,
+  never a member's); the engine parses the placed table and refuses four malformed `explore`s, and 300 logged matches'
+  `table` fields equal an independent Python reimplementation of the draw (splitmix64 + xoshiro256++, rejection), the
+  table's own within 5 se of 0.5, every member seen, no field or key without explore; the setting off by default and in
+  no preset, `--explore` in the job's command only when set, 1.5 refused; the stew's `recipe.settings` and
+  `pair_settings` set it; sb-health's member stats, played plans from the game log (with members) and from database
+  rows, the Markdown table.
+* **Fuzz** (`FUZZ_POOL=meta_pair`, 240.6): in half the matches with tables (`(seed / 18) % 2 == 1`) every deck's
+  table carries `explore` (share 1 or 0.5 by `(seed / 36) % 2`, 1-4 members of random legal 60s); every seat's draw
+  recomputed by the harness's own code (`harness_member`) against `table_member`; a table seat's sideboarding target is
+  its drawn plan's; the lockstep with the pairing's fixed spec compares the draws; every constructed world of either
+  viewer keeps them; with 100 matches or more some seat must have drawn a member (`thompson_member`).
+* **Digests**: every existing one EQUAL (no spec of theirs has `explore`; the gates below). **New**:
+  `digest_formats.rs::pair_explore_digests`, `tests/data/digests_pair_explore.txt` - `pair_around_digests`' three
+  specs with every table's `explore` (share 0.5, three members: each context's deck that of a rotated context), each
+  line naming the match's draws: combined **b2a4ed50ae9c0d4f** (recorded with `DIGEST_WRITE=1` for this test alone,
+  re-run equal). `gate.py`'s `digest-formats` step now expects seven lines and "7 passed" (`tests/test_gate.py`).

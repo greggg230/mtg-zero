@@ -586,6 +586,50 @@ fn pair_around_digests() {
     finish("pair_around", "digests_pair_around.txt", "40 best-of-three matches", &lines, t);
 }
 
+/// Thompson-sampled plans (ENGINE.md 274): `pair_around_digests`' three specs (around the tables) with every deck's table
+/// carrying `"explore"` - share 0.5, three members, member j each context's deck that of context (k + j) mod 24 (legal
+/// 60s of the deck's own 75) -: the preset's pairing (20), the Delver mirror (10) and the fixed two-75 spec with its seat
+/// tables (10). Each seat plays its drawn plan's teacher decisions (`play` takes `table_action` first); a dealt seat's
+/// base stays its table's own choice. A spec of its own: every other digest is unchanged.
+#[test]
+#[ignore]
+fn pair_explore_digests() {
+    let t = std::time::Instant::now();
+    let explore_v = |mut v: serde_json::Value| {
+        v["dealt_decks"]["around"] = serde_json::json!("table");
+        for d in v["metagame"]["decks"].as_array_mut().unwrap() {
+            let ch = d["table"]["choices"].as_array().unwrap().clone();
+            let members: Vec<serde_json::Value> = (1..=3usize)
+                .map(|j| {
+                    serde_json::json!((0..ch.len())
+                        .map(|k| {
+                            let mut c = ch[k].clone();
+                            c[4] = ch[(k + j) % ch.len()][4].clone();
+                            c
+                        })
+                        .collect::<Vec<_>>())
+                })
+                .collect();
+            d["table"]["explore"] = serde_json::json!({"share": 0.5, "members": members});
+        }
+        v
+    };
+    let parse = |v: serde_json::Value| MtgSpec::parse(&explore_v(v).to_string()).unwrap();
+    let dd = parse(pair_value(&[0, 1], Some(0.0)));
+    let mirror = parse(pair_value(&[0], None));
+    let fixed = MtgSpec::parse(&engine::az::metagame::Metagame::pair_json(&explore_v(pair_value(&[0, 1], Some(0.5))).to_string(), [1, 0]).unwrap()).unwrap();
+    assert!(fixed.seat_tables.iter().all(|t| t.as_ref().is_some_and(|t| t.members() == 3)), "the fixed spec's seat tables with explore");
+    let cell = |s: &MtgSpec, seed: u64| s.pairing(seed).map_or("f".to_string(), |p| format!("{}{}", p.decks[0], p.decks[1]));
+    let mut lines = Vec::new();
+    for (tag, s, n, base) in [("xp", &dd, 20u64, 7400u64), ("xm", &mirror, 10, 7500), ("xf", &fixed, 10, 7600)] {
+        for seed in 0..n {
+            let m = MtgAz::new(s, base + seed).unwrap().m.table_member;
+            lines.push(format!("{tag} {seed} {} {m:?} {:016x}", cell(s, base + seed), play::<MtgAz>(s, base + seed, None)));
+        }
+    }
+    finish("pair_explore", "digests_pair_explore.txt", "40 best-of-three matches", &lines, t);
+}
+
 #[test]
 #[ignore]
 fn eoe_digests() {

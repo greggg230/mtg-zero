@@ -1107,6 +1107,28 @@ fn pair_settings(seed: u64, v: &mut serde_json::Value) {
             let names = |x: &serde_json::Value| -> Vec<String> { x.as_array().map_or(Vec::new(), |a| a.iter().map(|n| n.as_str().unwrap().to_string()).collect()) };
             let (main, side) = (names(&d["main"]), names(&d["sideboard"]));
             d["table"] = fuzz_table(seed ^ (k as u64) << 40, &main, &side);
+            // (ENGINE.md 274: Thompson-sampled plans in half the matches with tables, by `(seed / 18) % 2` - share 1
+            // or 0.5 by `(seed / 36) % 2`, 1 to 4 members of random legal 60s of the deck's own 75)
+            if (seed / 18) % 2 == 1 {
+                let n = 1 + (seed / 72) % 4;
+                let members: Vec<serde_json::Value> = (0..n).map(|j| fuzz_table(seed ^ (k as u64) << 40 ^ (j + 1) << 48, &main, &side)["choices"].clone()).collect();
+                d["table"]["explore"] = serde_json::json!({"share": if (seed / 36) % 2 == 0 { 1.0 } else { 0.5 }, "members": members});
+            }
+        }
+    }
+}
+
+/// A seat's Thompson draw recomputed by the fuzz harness (ENGINE.md 274), independently of `SideboardTable::draw`: its
+/// own stream of the match's seed per seat, a uniform below the share, then a member uniform by rejection.
+fn harness_member(seed: u64, seat: u8, share: f64, n: u64) -> Option<u16> {
+    let mut r = Rng::new(crate::rng::split64(seed ^ 0x7403_5A3F_1E00_0274 ^ crate::rng::split64(seat as u64 + 1)));
+    if (r.next_u64() >> 11) as f64 / (1u64 << 53) as f64 >= share {
+        return None;
+    }
+    loop {
+        let x = r.next_u64();
+        if x < u64::MAX / n * n {
+            return Some((x % n) as u16);
         }
     }
 }
@@ -1182,6 +1204,7 @@ fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
     // (ENGINE.md 240: the per-deck settings follow the pairing - each seat's dealt flag and choice table)
     assert_eq!([a.m.is_dealt(0), a.m.is_dealt(1)], [b.m.is_dealt(0), b.m.is_dealt(1)], "seed {seed}: the dealt seats");
     assert_eq!(a.m.table, b.m.table, "seed {seed}: the seats' choice tables");
+    assert_eq!(a.m.table_member, b.m.table_member, "seed {seed}: the seats' Thompson draws (ENGINE.md 274)");
     assert_eq!(a.m.pools, b.m.pools, "seed {seed}: the match's pools are the pairing's 75s");
     let (ra, rb): (serde_json::Value, serde_json::Value) = (serde_json::from_str(&a.record_setup()).unwrap(), serde_json::from_str(&b.record_setup()).unwrap());
     assert_eq!((&ra["decks"], &ra["pairing"]), (&rb["decks"], &pairing.json()), "seed {seed}: the record");
@@ -5309,6 +5332,8 @@ pub fn check_matches(n: u64, t: &Totals) {
         assert!(g("ff_res") > 0 && g("ff_forced") > 0, "FUZZ_POOL=meta_pair: no Doomsday resolution forced in {n} matches ({} resolutions)", g("ff_res"));
         // (ENGINE.md 261: dealt 60s around a seat's table, half the matches deal so)
         assert!(g("dealt_around_table") > 0, "FUZZ_POOL=meta_pair: no dealt 60 around a choice table in {n} matches");
+        // (ENGINE.md 274: some seat drew a Thompson member's plan)
+        assert!(g("thompson_member") > 0, "FUZZ_POOL=meta_pair: no seat drew a Thompson member's plan in {n} matches");
     }
     assert!(g("pk_new_games") > 0 && g("pk_new_game_keys") > 0, "the private-key check reached no game a world started (ENGINE.md 141)");
     assert!(g("sb") > 0 && g("changed") > 0 && g("three") > 0, "no sideboarding, changed deck or match of three");
@@ -5616,6 +5641,8 @@ fn check_constructed_world(g: &crate::az::MtgAz, d: &crate::az::MtgAz, viewer: u
     assert_eq!(g.m.pools[ou].list, d.m.pools[ou].list, "{}: the opponent's 75 is public", what());
     // (ENGINE.md 176: a metagame match's pairing is public, the same in every world; None in every other match)
     assert_eq!(g.m.pairing, d.m.pairing, "{}: a world changed the metagame pairing", what());
+    // (ENGINE.md 274: the seats' Thompson draws are the match's, never reseeded: the same in every world)
+    assert_eq!(g.m.table_member, d.m.table_member, "{}: a world changed a seat's Thompson draw", what());
     let pool = &d.m.pools[ou];
     // (ENGINE.md 272: the deck size is the registered main's - the real match's pool, checked against the spec when
     // the match began - and public: the same in every world)
@@ -5849,6 +5876,8 @@ static PAIR_FF_FORCED: AtomicU64 = AtomicU64::new(0);
 static PAIR_FF_FORCED_LATER: AtomicU64 = AtomicU64::new(0);
 /// Dealt 60s checked around a seat's choice table (ENGINE.md 261, `FUZZ_POOL=meta_pair`'s `"around": "table"` matches).
 static PAIR_AROUND_TABLE: AtomicU64 = AtomicU64::new(0);
+/// Seats whose Thompson draw picked a member's plan (ENGINE.md 274, `FUZZ_POOL=meta_pair`'s tables with `explore`).
+static PAIR_THOMPSON_MEMBER: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAMES: AtomicU64 = AtomicU64::new(0);
 static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
 /// Of `PK_HAND_LOOKS`, the looks in a step that ended the game and began the next (both seats dealt, ENGINE.md 168.1,
@@ -6108,6 +6137,12 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
         if let Some(t) = &g.m.table[p] {
             assert!(t.fits(&g.m.pools[p]), "match {seed}: P{p}'s table is not of its 75");
         }
+        // (ENGINE.md 274: the seat's Thompson draw, recomputed from the spec's JSON by the harness; None without explore)
+        let member = g.m.table[p].as_ref().and_then(|t| t.explore.as_ref().and_then(|e| harness_member(seed, p as u8, e.share, t.members() as u64)));
+        assert_eq!(g.m.table_member[p], member, "match {seed}: P{p}'s Thompson draw");
+        if member.is_some() {
+            PAIR_THOMPSON_MEMBER.fetch_add(1, Ordering::Relaxed);
+        }
     }
     // (A post-sideboard match, ENGINE.md 130, starts at the sideboarding before game 2: game 1 drawn, never a
     // draw, its loser sideboarding first (CR 103.1). A dealt loser (ENGINE.md 154.1) is dealt at once - its 60
@@ -6183,7 +6218,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
             assert!(legal.contains(&t), "match {seed}: the table's action {t} is not legal at {legal:?}");
             let s = g.sideboarding().unwrap();
             let lead = g.m.wins[p] as i8 - g.m.wins[1 - p] as i8;
-            let want = g.m.table[p].as_ref().unwrap().choice(g.m.game_no + 1, s.turn == 0, lead, g.m.is_dealt(1 - p as u8)).clone();
+            let want = g.m.table[p].as_ref().unwrap().plan(g.m.table_member[p], g.m.game_no + 1, s.turn == 0, lead, g.m.is_dealt(1 - p as u8)).clone();
             assert!(table_target[p].as_ref().is_none_or(|x| *x == want), "match {seed}: P{p}'s table target moved in a sideboarding");
             table_target[p] = Some(want);
             table_decisions += 1;
@@ -6559,6 +6594,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         ("ff_forced", PAIR_FF_FORCED.load(Ordering::Relaxed)),
         ("ff_forced_later", PAIR_FF_FORCED_LATER.load(Ordering::Relaxed)),
         ("dealt_around_table", PAIR_AROUND_TABLE.load(Ordering::Relaxed)),
+        ("thompson_member", PAIR_THOMPSON_MEMBER.load(Ordering::Relaxed)),
         ("sb", sb),
         ("changed", changed),
         ("three", three),

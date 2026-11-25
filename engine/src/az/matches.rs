@@ -479,6 +479,11 @@ pub struct MatchState {
     /// The seats that sideboard by a choice table (ENGINE.md 168.3, the spec's `"sideboard_table"`: a seat whose 75 is
     /// the table's list). Public: the spec's, the same in every world; a dealt seat never sideboards (its deal).
     pub table: [Option<Arc<super::sbtable::SideboardTable>>; 2],
+    /// Each table seat's plan for the match (ENGINE.md 274, a table's `"explore"`: `SideboardTable::draw` from the
+    /// match's seed at its start): Some(k) the k-th Thompson member's 60s, None the table's own (and every seat of a
+    /// table without `explore`, or without a table). A seat's own policy, as `table`: never encoded, never reseeded (the
+    /// same in every world), read only by its teacher decisions (`MtgAz::table_action`) and the game log.
+    pub table_member: [Option<u16>; 2],
     /// The live match's best-of-three game log record (ENGINE.md 168.2; `game_log::LiveLog`: a clone carries none).
     /// Never read by the rules, the encodings or the search.
     pub glog: super::game_log::LiveLog,
@@ -643,6 +648,7 @@ impl MatchState {
             dealt: None,
             dealt_both: false,
             table: [None, None],
+            table_member: [None, None],
             glog: Default::default(),
             dealt_seed: 0,
             dealt_around: None,
@@ -1137,7 +1143,9 @@ impl super::MtgAz {
     /// `"around": "table"` its choice table's 60 for the deal's context - the next game, whether `d` sideboards first,
     /// its game wins less the other's, whether the other seat is dealt (`table_action`'s context for a deciding seat,
     /// ENGINE.md 168.3) -, or its registered main when it has no table. None without `"around": "table"` (ENGINE.md
-    /// 154's deal around the main, the prior `set_dealt` gave). Public: the tables are the spec's.
+    /// 154's deal around the main, the prior `set_dealt` gave). Public: the tables are the spec's. Always the table's own
+    /// choice, never the seat's Thompson-drawn plan (ENGINE.md 274: the draw is the seat's own policy, hidden; the base is
+    /// public).
     pub(crate) fn dealt_base(&self, d: PlayerId) -> Option<Arc<[u8]>> {
         let a = self.m.dealt_around.as_ref()?;
         let main = a.mains[d as usize].clone().expect("a dealt seat's main");

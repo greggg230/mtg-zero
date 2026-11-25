@@ -81,6 +81,19 @@ contexts depend only on the tables' `opp_dealt` 0 contexts, so the job solves ev
 first, then its `opp_dealt` 1 contexts against the worlds around the other deck's (`choice_table` and
 `pair_choice_tables` with `around` "table"). `"around": "main"` (the default) is unchanged.
 
+**Thompson-sampled plans** (docs/ENGINE.md 274, run setting `matchup_explore` e > 0; default 0: off, every version as
+before). The guarded climb above keeps the table at the main until a swap clears `matchup_swap_z` standard errors - and
+a plan the table seats never play never gets the evidence to clear it. With e > 0 each version's table also carries the
+plan of every bootstrap member (`"explore": {"share": e, "members": [choices, ...]}`): member k's 24 contexts' 60s by
+the same climb on member k's model alone with no guard (`confident_climb` with z 0 over `Objective.member(k)`: the plain
+argmax climb of one posterior sample), against the same worlds as the table's own. In self-play each seat of the table
+draws its plan for the match from the match's seed (the engine: a member with probability e, uniform over the members;
+else the table's own) and plays it by teacher decisions: Thompson sampling over the bootstrap posterior, so a plan that
+a share of the members prefers is played in about that share of the explored matches. Its teacher target is the plan
+played. A dealt seat's base (`"around": "table"`) stays the table's OWN choice - the engine's rule (the base is public,
+the draw is the seat's hidden policy) - so the dealt-opponent belief here is unchanged and exact. Each member's climb
+draws no random number: e > 0 leaves the table's own choices exactly what e = 0 computes.
+
 Commands:
 
     python -m mtgz.az.matchup retrain RUN --iter B --from-iter LO [--val-iters 2] [--half-life 16] [--worlds 8000]
@@ -117,6 +130,9 @@ SETTINGS = {
     'matchup_swap_z': 2.0,        # the table moves from the main one card at a time, only by swaps whose bootstrap gain
                                   # exceeds this many standard errors (0: the model's plain argmax climb)
     'matchup_members': 20,        # the published ensemble's bootstrap fits (the swaps' standard errors come from them)
+    # Thompson-sampled plans (docs/ENGINE.md 274): e > 0 - each table also carries every bootstrap member's plain argmax
+    # plan, and each table seat plays a member's plan (uniform) in a share e of its matches; 0: off
+    'matchup_explore': 0.0,
 }
 # a version fitted on fewer games than this times its window's iterations is STARVED: published, and said loudly (the run
 # log, its record, sb-health; docs/ENGINE.md 273). A constant, not a run setting: a setting is one the farm's worker must
@@ -643,6 +659,13 @@ class Objective:
         """F of candidates dA (k x E) -> (k,): the members' mean."""
         return self.per_member(dA).mean(axis=0)
 
+    def member(self, k):
+        """The objective of bootstrap member k alone (docs/ENGINE.md 274: its plain argmax climb), on the same worlds."""
+        import copy
+        o = copy.copy(self)
+        o.parts = [self.parts[k]]
+        return o
+
 
 def strength_optimum(members, copies, main):
     """The legal 60 maximising the members' mean w . dA exactly: the 60 copies of the highest per-copy w (a copy of an
@@ -698,11 +721,25 @@ def confident_climb(F, copies, main, z=2.0):
     return [int(x) for x in c], float(cur.mean()), swaps
 
 
+def member_plans(F, copies, main, n):
+    """Each bootstrap member's plain argmax climb from the main on objective F (docs/ENGINE.md 274: `confident_climb`
+    with z 0 over `F.member(k)`) -> [counts] per member. Draws no random number."""
+    return [confident_climb(F.member(k), copies, main, 0.0)[0] for k in range(n)]
+
+
+def explore_of(share, plans):
+    """A table's `"explore"` (docs/ENGINE.md 274) from {context: [member k's counts]} -> {"share", "members": [choices]}."""
+    n = len(next(iter(plans.values())))
+    return {'share': float(share),
+            'members': [[[g, f, l, o, plans[(g, f, l, o)][k]] for (g, f, l, o) in contexts()] for k in range(n)]}
+
+
 def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0,
-                 around='main'):
+                 around='main', explore=0.0):
     """The 24 contexts' best 60s (module docs) -> (the spec's "sideboard_table", per-context detail). `around` 'table'
     (docs/ENGINE.md 261): a dealt opponent's worlds around this table's own choice for its context (`sample_around`),
-    the opp_dealt 0 contexts solved first."""
+    the opp_dealt 0 contexts solved first. `explore` e > 0 (docs/ENGINE.md 274): the table also carries every member's
+    plain argmax plan (`member_plans`, the same worlds), `"explore": {"share": e, "members"}`."""
     import numpy as np
     rng = np.random.default_rng(seed)
     S = sum(copies) - sum(main)
@@ -727,6 +764,7 @@ def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000
         F = Objective(members, B, g, f, l, o)
         c, fv, sw = confident_climb(F, copies, main, z)
         solved[(g, f, l, o)] = (c, fv, sw, F)
+    plans = {ctx: member_plans(v[3], copies, main, len(members)) for ctx, v in solved.items()} if explore > 0 else None
     choices, detail = [], []
     for (g, f, l, o) in contexts():
         c, fv, sw, F = solved[(g, f, l, o)]
@@ -739,6 +777,8 @@ def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000
         log(f'# context game {g} first {f} lead {l} opp_dealt {o}: F {fv:.4f} (main {detail[-1]["F_main"]:.4f}) '
             f'in {detail[-1]["in"]} out {detail[-1]["out"]}')
     table = {'version': version, 'list': [[n, k] for n, k in zip(names, copies)], 'choices': choices}
+    if plans is not None:
+        table['explore'] = explore_of(explore, plans)
     return table, detail
 
 
@@ -1031,14 +1071,23 @@ class PairObjective:
     def __call__(self, d):
         return self.per_member(d).mean(axis=0)
 
+    def member(self, k):
+        """Bootstrap member k alone (docs/ENGINE.md 274), on the same worlds."""
+        import copy
+        o = copy.copy(self)
+        o.parts = [self.parts[k]]
+        return o
 
-def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0, around='main'):
+
+def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0, around='main',
+                       explore=0.0):
     """Two different 75s (docs/ENGINE.md 240.3): one choice table PER DECK - each deck's 24 contexts' 60s by the same
     guarded climb (`confident_climb`, `z`) against the other deck's constructed prior (its full swap range; the spec's
     dealt range for a dealt opponent) -> ([C's table, D's table] - each the spec's {"version", "list", "choices"} of
     its own 75 -, {deck name: per-context detail}). `around` 'table' (docs/ENGINE.md 261): a dealt opponent's worlds
     around the other deck's own choice in these tables for its context (`sample_around`), every deck's opp_dealt 0
-    contexts solved first."""
+    contexts solved first. `explore` e > 0 (docs/ENGINE.md 274): each table also carries every member's plain argmax plan
+    for its deck (`member_plans`, the same worlds)."""
     import numpy as np
     rng = np.random.default_rng(seed)
     decks = P.decks
@@ -1077,6 +1126,8 @@ def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, lo
         F = PairObjective(members, B, role, g, f, l, o)
         c, fv, sw = confident_climb(F, copies, main, z)
         solved[(role, (g, f, l, o))] = (c, fv, sw, F)
+    plans = ({k: member_plans(v[3], info[k[0]][2], info[k[0]][3], len(members)) for k, v in solved.items()}
+             if explore > 0 else None)
     tables, details = [], {}
     for role in (0, 1):
         d, names, copies, main, S = info[role]
@@ -1095,6 +1146,8 @@ def pair_choice_tables(members, P, dealt_swaps, version, worlds=8000, seed=0, lo
             log(f'# {d["name"]} context game {g} first {f} lead {l} opp_dealt {o}: F {fv:.4f} (main '
                 f'{detail[-1]["F_main"]:.4f}) in {detail[-1]["in"]} out {detail[-1]["out"]}')
         tables.append({'version': version, 'list': [[n, k] for n, k in zip(names, copies)], 'choices': choices})
+        if plans is not None:
+            tables[-1]['explore'] = explore_of(explore, {c: plans[(role, c)] for c in contexts()})
         details[d['name']] = detail
     return tables, details
 
@@ -1308,6 +1361,11 @@ def launch_if_due(R, it):
            '--threads', str(th), '--worlds', str(int(c.get('matchup_worlds', 8000))),
            '--min-gain', str(float(c.get('matchup_table_min_gain', 0.005))), '--swap-z', str(float(c.get('matchup_swap_z', 2.0))),
            '--members', str(int(c.get('matchup_members', 20)))]
+    ex = float(c.get('matchup_explore', 0.0) or 0.0)
+    if not 0.0 <= ex <= 1.0:
+        raise ValueError(f'matchup_explore {ex}: a share in [0, 1] (docs/ENGINE.md 274)')
+    if ex > 0:
+        cmd += ['--explore', str(ex)]
     from mtgz.sealed.rolling import background_flags, job_env
     log = open(os.path.join(d, 'log.txt'), 'w', encoding='utf-8')
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -1322,7 +1380,7 @@ def launch_if_due(R, it):
 # ----------------------------------------------------------------------------- the retrain job
 
 def _mirror_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads, worlds, log, min_gain, z,
-                    members_n):
+                    members_n, explore=0.0):
     """A mirror's version (pb3's, docs/ENGINE.md 168.3-168.4, unchanged): one model on the shared 75's count deltas, one
     table for every seat -> (the version's dict, report, tables or None, table changes, per-copy strengths)."""
     lst, main = P.decks[0]['list'], P.decks[0]['main']
@@ -1337,7 +1395,7 @@ def _mirror_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, thr
     # docs/ENGINE.md 168.4)
     if rep['gain_nats'] >= min_gain:
         table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log, z=z,
-                                     around=around)
+                                     around=around, explore=explore)
         check_table(cfg['spec'], table)
     else:
         table, detail = None, []
@@ -1348,11 +1406,14 @@ def _mirror_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, thr
            'dealt_swaps': list(sw), 'time': time.time()}
     if around != 'main':
         out['dealt_around'] = around
+    if explore > 0:
+        out['explore'] = explore
     changes = [{'context': x['context'], 'in': x['in'], 'out': x['out']} for x in detail]
     return out, rep, (None if table is None else [table]), changes, dict(zip(names, rep['per_copy']))
 
 
-def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads, worlds, log, min_gain, z, members_n):
+def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads, worlds, log, min_gain, z, members_n,
+                  explore=0.0):
     """Two different 75s' version (docs/ENGINE.md 240.3): the non-mirror model, then one table per deck, published only
     when the model beats its baseline (the pairing's base rate, play / draw, game 3) on the held-out games by
     `min_gain` nats -> as `_mirror_version`."""
@@ -1363,7 +1424,8 @@ def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threa
     sw = tuple(dd.get('swaps') or (0, min(S)))
     around = dealt_around(cfg['spec'])
     if rep['gain_nats'] >= min_gain:
-        tables, detail = pair_choice_tables(members, P, sw, name, worlds=worlds, seed=b, log=log, z=z, around=around)
+        tables, detail = pair_choice_tables(members, P, sw, name, worlds=worlds, seed=b, log=log, z=z, around=around,
+                                            explore=explore)
         check_tables(cfg['spec'], tables)
     else:
         tables, detail = None, {}
@@ -1373,6 +1435,8 @@ def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threa
            'worlds': worlds, 'min_gain': min_gain, 'swap_z': z, 'dealt_swaps': list(sw), 'time': time.time()}
     if around != 'main':
         out['dealt_around'] = around
+    if explore > 0:
+        out['explore'] = explore
     changes = [{'deck': k, 'context': x['context'], 'in': x['in'], 'out': x['out']} for k, xs in detail.items() for x in xs]
     return out, rep, tables, changes, rep['per_copy']
 
@@ -1383,13 +1447,14 @@ def replay_cache(run):
 
 
 def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log=print, min_gain=0.005, z=2.0,
-            members_n=20, min_games_per_iter=MIN_GAMES_PER_ITER, source='auto', cache='run'):
+            members_n=20, min_games_per_iter=MIN_GAMES_PER_ITER, source='auto', cache='run', explore=0.0):
     """The job (module docs): the run's self-play games of iterations lo..b (`load_games`: the game log, or every
     accepted game from the records, docs/ENGINE.md 273) -> status (status.json; a failure raises after writing it). The
     games' one pairing (`the_pairing`): a mirror's version is pb3's (one model, one table), two different 75s' the
     non-mirror model with one table per deck (docs/ENGINE.md 240). Fewer games than `min_games_per_iter` times the
     window's iterations: STARVED (published; `starved` in the status, the version's `data` and the index). `cache`:
-    'run' (`replay_cache`), a directory, or None."""
+    'run' (`replay_cache`), a directory, or None. `explore` > 0: the tables carry the members' plans (docs/ENGINE.md
+    274)."""
     t0 = time.time()
     d = job_dir(run, b)
     os.makedirs(d, exist_ok=True)
@@ -1422,7 +1487,7 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
         P = the_pairing(specs, games)
         make = _mirror_version if P.mirror else _pair_version
         out, rep, tables, changes, per_copy = make(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads,
-                                                   worlds, log, min_gain, z, members_n)
+                                                   worlds, log, min_gain, z, members_n, explore=explore)
         out['data'] = dict(info, note=status['data_note'], starved=status['starved'], min_games=min_games)
         staged = os.path.join(d, f'{name}.json')
         with open(staged, 'w', encoding='utf-8') as f:
@@ -1440,7 +1505,10 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
             'gain_nats': rep['gain_nats'], 'val_logloss_dealt': rep['val_logloss_dealt'],
             'val_logloss_pd_dealt': rep['val_logloss_pd_dealt'], 'per_copy': per_copy,
             'table': tables is not None, 'table_changes': changes, 'source': info.get('source'),
-            'excluded_games': info.get('excluded_games', 0), 'starved': status['starved'], 'time': time.time()})
+            'excluded_games': info.get('excluded_games', 0), 'starved': status['starved'],
+            **({'explore': explore, 'member_plans': member_plan_summary(tables, [d['main'] for d in P.decks])}
+               if explore > 0 and tables else {}),
+            'time': time.time()})
     except Exception as e:                         # noqa: BLE001 (recorded, then raised: the run logs it loudly)
         status.update(ok=False, error=f'{type(e).__name__}: {e}', traceback=traceback.format_exc()[-3000:],
                       seconds=round(time.time() - t0, 1))
@@ -1450,6 +1518,38 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
     with open(os.path.join(d, 'status.json'), 'w', encoding='utf-8') as f:
         json.dump(status, f, indent=1)
     return status
+
+
+def plan_changes(names, main, counts):
+    """A 60 as its changes against the main: {card: +in / -out}, sorted by name."""
+    return dict(sorted((names[i], counts[i] - main[i]) for i in range(len(counts)) if counts[i] != main[i]))
+
+
+def member_plan_summary(tables, mains):
+    """Thompson plans of a version's tables (docs/ENGINE.md 274; `mains` each table's registered main, copies per list
+    entry) -> per table {share, members, boarding (members whose plan leaves the main in some context), the most common
+    plans per context}."""
+    from collections import Counter
+    out = []
+    for t, base in zip(tables or [], mains):
+        e = t.get('explore')
+        if not e:
+            out.append(None)
+            continue
+        names = [x[0] for x in t['list']]
+        board = 0
+        by_ctx = {}
+        for k, ch in enumerate(e['members']):
+            moved = False
+            for g, f, l, o, c in ch:
+                d = plan_changes(names, base, c)
+                moved = moved or bool(d)
+                by_ctx.setdefault((g, f, l, o), Counter())[json.dumps(d, sort_keys=True)] += 1
+            board += moved
+        common = {f'{g},{f},{l},{o}': [{'changes': json.loads(x), 'members': n} for x, n in c.most_common(3)]
+                  for (g, f, l, o), c in sorted(by_ctx.items())}
+        out.append({'share': e['share'], 'members': len(e['members']), 'boarding': board, 'by_context': common})
+    return out
 
 
 # ----------------------------------------------------------------------------- yardsticks
@@ -1479,8 +1579,12 @@ def census(run, lo=None, hi=None):
             names = [x[0] for x in deck['list']]
             main = deck['main']
             k = f'{mode} game {g["game"]}' if P.mirror else f'{deck["name"]} {mode} game {g["game"]}'
-            o = out.setdefault(k, {'seats': 0, 'decks': Counter(), 'in': Counter(), 'out': Counter()})
+            o = out.setdefault(k, {'seats': 0, 'decks': Counter(), 'in': Counter(), 'out': Counter(), 'plan': Counter()})
             o['seats'] += 1
+            # (docs/ENGINE.md 274: the seat's drawn plan - 'own' the table's own, 'm<k>' Thompson member k)
+            if g.get('table') and g['table'][p] is not None:
+                m = g['table'][p][1]
+                o['plan']['own' if m is None else f'm{m}'] += 1
             c = g['decks'][p]
             ch = tuple(sorted((names[i], c[i] - main[i]) for i in range(len(c)) if c[i] != main[i]))
             o['decks'][ch] += 1
@@ -1495,6 +1599,8 @@ def census(run, lo=None, hi=None):
         res[k] = {'seats': n, 'in': {x: round(v / n, 3) for x, v in o['in'].most_common()},
                   'out': {x: round(v / n, 3) for x, v in o['out'].most_common()},
                   'top': [{'changes': dict(ch), 'share': round(v / n, 3)} for ch, v in o['decks'].most_common(5)]}
+        if o['plan']:
+            res[k]['plans'] = dict(o['plan'].most_common())
     return {'games': len(games), 'by': res}
 
 
@@ -1514,6 +1620,7 @@ def main(argv=None):
     r.add_argument('--members', type=int, default=20)
     r.add_argument('--min-games-per-iter', type=int, default=MIN_GAMES_PER_ITER)
     r.add_argument('--source', default='auto', choices=('auto', 'log', 'records'))
+    r.add_argument('--explore', type=float, default=0.0, help='Thompson-sampled plans: the share (docs/ENGINE.md 274)')
     f = sub.add_parser('fit')
     f.add_argument('run')
     f.add_argument('--iters', default=None, help='LO-HI')
@@ -1524,6 +1631,7 @@ def main(argv=None):
     f.add_argument('--worlds', type=int, default=4000)
     f.add_argument('--swap-z', type=float, default=2.0)
     f.add_argument('--members', type=int, default=20)
+    f.add_argument('--explore', type=float, default=0.0, help='with --table: the members\' plans too (docs/ENGINE.md 274)')
     f.add_argument('--out', default=None)
     f.add_argument('--source', default='auto', choices=('auto', 'log', 'records'))
     f.add_argument('--jobs', type=int, default=1, help='processes replaying the records')
@@ -1539,7 +1647,8 @@ def main(argv=None):
         def log(m):
             print(m, flush=True)
         s = retrain(a.run, a.iter, a.from_iter, a.val_iters, a.half_life, a.threads, a.worlds, log=log, min_gain=a.min_gain,
-                    z=a.swap_z, members_n=a.members, min_games_per_iter=a.min_games_per_iter, source=a.source)
+                    z=a.swap_z, members_n=a.members, min_games_per_iter=a.min_games_per_iter, source=a.source,
+                    explore=a.explore)
         print(json.dumps({k: s[k] for k in ('version', 'games', 'val_logloss', 'val_logloss_pd', 'gain_nats', 'seconds')}))
     elif a.cmd == 'fit':
         lo, hi = rng(a.iters)
@@ -1563,7 +1672,7 @@ def main(argv=None):
             if a.table:
                 S = min(sum(int(x[1]) for x in dk['list']) - sum(dk['main']) for dk in P.decks)
                 out['tables'], out['table_detail'] = pair_choice_tables(members, P, (0, S), 'fit', worlds=a.worlds,
-                                                                        z=a.swap_z)
+                                                                        z=a.swap_z, explore=a.explore)
             if a.out:
                 os.makedirs(a.out, exist_ok=True)
                 with open(os.path.join(a.out, 'matchup_fit.json'), 'w', encoding='utf-8') as fh:
@@ -1582,7 +1691,7 @@ def main(argv=None):
         if a.table:
             S = sum(int(x[1]) for x in lst) - sum(main_)
             out['table'], out['table_detail'] = choice_table(members, names, [int(x[1]) for x in lst], main_, (0, S),
-                                                             'fit', worlds=a.worlds, z=a.swap_z)
+                                                             'fit', worlds=a.worlds, z=a.swap_z, explore=a.explore)
         if a.out:
             os.makedirs(a.out, exist_ok=True)
             with open(os.path.join(a.out, 'matchup_fit.json'), 'w', encoding='utf-8') as fh:
