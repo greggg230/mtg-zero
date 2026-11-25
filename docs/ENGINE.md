@@ -49414,3 +49414,116 @@ v5 **cbae655806dcad36**, v7 **12c92841a2d4f628**; `digest_formats` driver **cab9
 270.3.5); with this merged, `FUZZ_POOL=lands` can keep the real 75's Endurance. Lane C's 336aaa8b changes the same
 function (the bottom-block form): the merge keeps this section's version, a superset; its test is here as
 `engine_271_endurances_triggers_come_in_the_graveyards_order` (lane C's copy in cards_lands_c.rs can stay).
+
+## 272. Constructed best-of-three with a registered main of at least 60 (CR 100.2a): the Lands 61 plays its real list (branch `feat/bo3-main-60-plus`, 2026-11-24)
+
+**Why.** The user's decision of 2026-11-24 on 270.4.4's open point: a constructed best-of-three accepts a registered
+main of **at least 60** cards (CR 100.2a's minimum), so the Legacy Lands deck (`Decklist::legacy_lands`, 61 main + 15
+sideboard, 270.4) plays best-of-three with its real 61. Until now a best-of-three's decks were exactly 60 (the user's
+format restriction of 2026-11-11, section 120: the registered main and every deck after sideboarding), the 61 was refused
+there, and the fuzz's matches and the best-of-three test took one Forest out (`LANDS_BO3_OUT`).
+
+**The scope (the orchestrator's decision).** A registered main of N >= 60 (CR 100.2a) and a sideboard of at most 15 (CR
+100.4a), as best-of-one already checked (`constructed::check`; the engine's 64-card limit, `MAX_DECK`, unchanged).
+Sideboarding stays what the engine does - one-for-one swaps (`MatchPool::constructed`: `min_deck` = `max_deck` = the
+main's size) - so each deck keeps its registered size N in every game of the match: the format restriction became "the
+registered size" instead of "60". Non-swap sideboarding (a deck changing size between games, which the tournament rules
+allow: a 75 of T cards may board to any main of max(60, T - 15)..=T, so boarding UP is legal for every registered deck
+here) is **not built**: it would change every existing best-of-three run's action space. The point is written up for the
+user outside the repository (the maintainer's notes): it is a format restriction of the same kind as section 120's,
+the user's call.
+
+### 272.1 What assumed 60, and how each handles N now
+
+| Where | Before | Now |
+|---|---|---|
+| `MtgSpec::parse` (`az/mod.rs`), fixed decklists | best-of-three refused a main != 60 ("a constructed best-of-three's decks are exactly 60") | the refusal is gone: `constructed::check` (CR 100.2a at least 60, 100.4a a sideboard of at most 15, four copies over both) and `check_size` (the engine's 64) as for best-of-one; a 59 is refused with the best-of-one message ("59 cards in the deck (CR 100.2a: at least 60)") |
+| `MtgSpec::parse`, a metagame's decks (`DeckMode::Metagame`) | the same refusal by name | gone; `constructed::check` per deck as before |
+| `constructed::BO3_DECK` | the constant 60 | removed (the comment in its place says where the size comes from) |
+| `MatchPool::constructed` (`az/matches.rs`), sideboarding (`Sideboarding`, 36.2 / 120.1) | `min_deck` = `max_deck` = the main's length | unchanged (it never read 60): sideboarding reaches every deck of the main's size N within the 75's copies, each in exactly one decision sequence, `PASS` only at N |
+| `ConstructedPrior` (`az/hidden_decks.rs`), the K-sample deal, the deck tilt, `deal_constructed_between`, dealt decks (`ConstructedPrior::dealt`, 154; `dealt_decks.around`, 261) | sized by the main (`n`) and the request's size (the real decks' sizes) | unchanged (never read 60); a request of another size than the main's panics as before (`assert_eq!(want.n, self.n)`) |
+| the choice table (`az/sbtable.rs`, 168.3; `decks.pN_table`, a metagame deck's `table`, 240) | every context's deck exactly 60 (`const DECK`) | every context's deck one size N >= 60 (`SideboardTable::size`; choices of two sizes, or under 60, refused naming them); `fits(pool)` also asks `pool.min_deck` = `max_deck` = N - one list of 76 cards could be a 61 + 15 or a 60 + 16 (the latter illegal, but a 75 could be 60 + 15 or 61 + 14); the refusals of a table that does not fit its seat or metagame deck name both sizes. `SideboardTable::key` is unchanged (the size is fixed by the choices), so every existing table's key and every digest are as before |
+| the encoding (`az/encode.rs`) | `MY_DECK` / `OPP_DECK` = size / 40, `OPP_POOL` 0.25 per copy, the list block's 64 entries, `KEY_GAME`'s 8-bit sizes, `KEY_DEALT`'s 5-bit counts per entry | unchanged: every size is encoded exactly (61 / 40), nothing sized to 60; the Lands 76 has 33 list entries (<= 64) and at most 4 copies (<= 31) |
+| the deck target, the belief, `sample::knowledge`, the information model (120.2) | sizes from the real decks (public) | unchanged |
+| the fuzz (`fuzz/games.rs`) | `check_legal_60` (a deck of exactly 60), `check_constructed_world`'s pool `(60, 60)`, the match loop's size 60 and sideboard 75 - 60; `LANDS_BO3_OUT` and `bo3_lists` cutting the Lands 61 to 60 | `check_legal_deck(.., size)`: the registered main's size - the match checks at its start that each seat's pool and game-1 deck are its spec's registered main's size (`sp.seats(seed)`), every later game's deck and sideboard (size, T - size), and every world's dealt decks (the real pool's size; the world's pool equal); `LANDS_BO3_OUT` is gone, `bo3_lists` takes the whole main |
+| `mtgz/az/decklists.py` | `mirror_bo3_spec` and `_seat_lists(.., 'bo3')` (so `pair_spec`, `pairing_spec`, `metagame_spec` with `fmt='bo3'`) refused a main != 60 | `_check_bo3`: a main of at least 60 and a sideboard of at most 15 (the engine checks both too); `pair_spec(LEGACY_LANDS, .., fmt='bo3')` gives the real 61 + 15 |
+| `mtgz/az/sideboard_census.py` | each census deck must be 60 cards | each deck the seat's registered main's size (`replays.main_decks`) |
+| the matchup model (`mtgz/az/matchup.py`), the stew's tooling (`mtgz/stew`), the game log readers | count deltas against the registered main (summing to 0), `sum(main)` decks (`strength_optimum`), the prior's tables by the main | unchanged (never read 60); a Lands-vs-Delver pair of tables is of 61s and 60s (test below) |
+| docs | ENGINE.md 120's decision 1 and 270.4.4's open point | a pointer to this section in each |
+
+### 272.2 Tests
+
+* **`engine/tests/bo3_main_60_plus.rs`** (new, `misc_suite`, 8): the spec (the Lands 76 in either seat and its mirror
+  parse, each pool's decks its main's size, sideboards 15, the evaluation spec the spec, no sideboard legal, a main up to
+  the engine's 64 and 65 refused, a 59 main / a 16-card sideboard / a fifth Disruptor Flute refused with CR 100.2a /
+  100.4a); `the_lands_76_is_sideboarded_to_exactly_61_cards` (300 legal 61s drawn by the prior - every swap count 0-15 -
+  each reached by its canonical path, a 60 or 62 by none, 600 random walks ending only at 61 with `PASS` offered exactly
+  there); `cr_100_4a_sideboarding_a_main_above_the_minimum_reaches_every_deck_of_its_size_exactly_once` (the exhaustive
+  DFS on a small pool with mains of 6 and 7: 31 and 35 decks, each once); `the_constructed_prior_of_a_hidden_61_meets_its_contract`
+  (3,200 untilted 61s uniform over the 16 swap counts, conditioned on shown sideboard and main cards, a tilt of 1 draw
+  for draw, the expected fill the draws' mean and summing to 61 - shown, a request for a 60 refused, the dealt prior's
+  range); `lands_against_delver_best_of_three_plays_the_61_in_every_game_and_deals_hidden_61s` (12 whole matches, both
+  seats: every game's decks 61 / 60 with sideboards 15, `KEY_GAME` carrying 61 | 60 | 15 | 15, 4,320 worlds of both
+  viewers with the viewer's whole encoding and the decider's actions kept, 1,232 later-game worlds dealing a hidden 61
+  holding every card the viewer saw); `a_choice_table_of_61s_is_followed_and_a_table_of_another_size_refused` (a table
+  of 61s on the Lands seat: 1,014 teacher decisions, 60 table 61s reached exactly; a table of 60s or 62s over the 76's
+  list refused naming both sizes, the Delver's table of 60s beside it accepted, mixed sizes and 59s refused);
+  `dealt_decks_of_the_61_stay_61_within_their_range` (both seats dealt, swaps 1-8, around the main and around a table of
+  61s: 64 dealt later games, every Lands deck a 61 within the range, 1,132 worlds); `a_best_of_three_metagame_plays_the_lands_61`.
+* Changed: `constructed.rs::the_lands_75_and_its_provenance` (best-of-three plays the 61: pool 61 / 61, deck 61,
+  sideboard 15 - was "refuses the 61") and `the_lands_75_plays_best_of_one_and_best_of_three` (the real 61, no Forest
+  taken out, each seat's deck its registered size at every decision of the match);
+  `constructed_bo3.rs::the_constructed_bo3_spec` (a Delver main + an Island, 61, plays - was refused -; a 59 is
+  refused); `metagame.rs::unsupported_combinations_are_refused_loudly` (a 61 metagame deck accepted in best-of-three, a
+  59 refused - was "exactly 60").
+* Python: `tests/test_delver.py::test_the_lands_deck_and_its_loader` (every helper's best-of-three of the Lands deck
+  runs in the engine: `pair_spec` both seats, `mirror_bo3_spec`, `metagame_spec(fmt='bo3')`; 61 + 15 in the spec; a 59
+  main and a 16-card sideboard refused - was "refuses the 61"); `tests/test_pair_sideboarding.py::test_a_61_card_main_gets_tables_of_61s_the_engine_plays`
+  (the matchup model's pair tables for Lands vs Delver: 61s and 60s, the planted Torpor Orb gain taken with the deck
+  still 61; the engine takes them on the pairing, fixed and mirror specs; a table of 60s for the 76 refused).
+
+### 272.3 Checks
+
+On the desktop beside the live stew: cargo `-j 8` through `tools/slotd.sh`, the fuzz four shards at once at idle priority.
+
+* **Digests: every one EQUAL** (no `DIGEST_WRITE`): `--test digest` full **5a09242cf4f2cbab**, `DIGEST_ENCODING=0`
+  **be0626d4b97cebae**; `--test digest_formats` (each against its recorded file): constructed 33fd025bacb21413, metagame
+  f1ca224f901d809d, pair 9611d13bb054de40, pair_around ebaa7f7e45dc8e32 (40 matches), EoE d754f4eef3c8adae, driver
+  cab97c01912f7e3f; `--test dealt_decks` dealt 4c28ec816ed1245f; dealt per seat (`misc_suite`) passes against its file.
+  Every existing 60-card deck plays exactly as before: the change removes refusals, and the code it touches reads the
+  size the deck already had (`sbtable`'s `fits` adds a size test every existing table passes, its key unchanged).
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, 27 binaries including `az`): **3,140
+  passed, 0 failed, 46 ignored** (`misc_suite` 247 with the 8 new, `az` 58, `cards_suite` 1,685, `rules_suite` 510,
+  `rulings_suite` 397, `fuzz` 23, `hidden` 28, `limits` 13).
+* **`FUZZ_POOL=lands`, 2,000 games + 500 matches + 500 post-sideboard matches** with the real 61
+  (`tools/fuzz_shards.py --pool lands --games 2000 --matches 500`): **PASSED**, 289 s. Games: wins 888 / 954, 158
+  drawn, none aborted. Matches: 1,319 games (319 matches of three, 440 drawn games - one match in four 12-turn -, 0
+  aborted), 12,915 sideboarding decisions, 1,577 later-game decks changed, every game's decks checked at their
+  registered size (61 for a Lands seat, 60 for the others) against the spec; 20,740 checked worlds, the opponent's deck
+  hidden in 12,396 (12,252 another than the real one), 12,158 deck-tilted; the sideboard cast: Choke 8, Cursed Totem 19,
+  Damping Sphere 32, Torpor Orb 247, Endurance 10. Post-sideboard (the Lands mirror, `start_game` 2): 500 matches, 347
+  of three, 11,022 sideboarding decisions, 1,361 decks changed. The fuzz binary's 20 other tests passed.
+* **`--belief 2`**, 600 games + 30 matches + 30 post-sideboard: **PASSED**, **11,082 belief-weighted worlds**.
+  **`--chance 10`**, 600 games + 30 + 30: **PASSED**, **23,049 chance walks** (release builds).
+* **pytest** (`bash tools/build_py.sh`, then `python -m pytest -q tests` with `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME`):
+  **3,663 passed, 25 skipped**, 0 failed (26 min beside the stew).
+* No dealt-deck code changed (the deals were always the main's size); the dealt and around-the-table deals of the 61
+  are covered by `dealt_decks_of_the_61_stay_61_within_their_range` above.
+
+### 272.4 Limits, decisions, merge points
+
+* **Non-swap sideboarding is not built** (the scope above): every deck of a match is its registered size N. The
+  tournament rules let a player board to any main of max(60, T - 15)..=T from a 75 of T cards (so a 60 + 15 may board up
+  to 75, the Lands 61 + 15 to 76, never down to 60); the engine reaches the registered size only - a format restriction
+  as section 120's "exactly 60" was, not a rules approximation inside the format. Building it would offer `PASS` at
+  every legal size (an action-space change for every best-of-three run), condition the constructed prior on the
+  current game's public size and deal the first sideboarder's hidden size between games (a prior over sizes: a
+  modelling decision), and give `sbtable`, the matchup model, the dealt decks and the census a size per choice. The
+  user's call.
+* **The Lands deck in runs**: still in no preset, stew or metagame spec (`legacy-meta3`, the stew's decks, the
+  yardsticks' cells unchanged); `decklists.pair_spec` / `metagame_spec` / `mirror_bo3_spec` and the engine now take it in
+  best-of-three, so adding it to a run is a spec change only - the user's call.
+* **The farm**: farm compatibility is unchanged for every existing spec (the release worker plays the same games; the
+  gate's farm-compat runs `delver-mirror-bo3-dealt`). The release worker's `FUZZ_POOL=lands` matches play the real 61
+  from the first release built on this commit (until then the published worker cuts a Forest).
+* The fuzz's printed lines still say "the opponent's 60 hidden" (a label; the checks read the registered size).
