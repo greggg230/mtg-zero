@@ -20,6 +20,10 @@ play and card use over the window of its newest `iters` iterations, default the 
   `target_colours`) -> right colour / WRONG colour (the spell does nothing; a land is colourless) / unknown colour
   (never guessed, counted apart) / no target; the counter mode's share (the mode that counters a spell). Only from the
   game database: a run not ingested says so (never a silent zero).
+* **the model's data** (`model_health`, docs/ENGINE.md 273): a retrain newer than the newest version that FAILED
+  ("matchup model: no new version since vNNNN (last retrain failed: ...)"), the newest version STARVED ("fitted on N
+  games (< X)": fewer than the run's `matchup_min_games_per_iter` times its window's iterations), games of its window
+  left out (records another engine played) - each an alert.
 * **alerts**: a deck's table all main for `all_main_versions` or more consecutive versions; a card's wrong-colour rate
   above its alert line (`misaim_alert` 'reference': the pb2 reference below - the level before pb3's matchup model found
   a signal; a number: that rate for every card) over at least `min_casts` casts; card use not ingested.
@@ -302,6 +306,63 @@ def table_plan(run, mirror_name=None, upto_iter=None):
     return out
 
 
+def model_health(run, upto_iter=None):
+    """The matchup model's data and retrains (docs/ENGINE.md 273) at or before `upto_iter` -> {'version', 'games',
+    'window', 'source', 'excluded_games', 'starved', 'min_games', 'failed': the newest retrain after the newest version
+    that failed, or None, 'alerts': [lines]}. A version written before its data was recorded: its games against the
+    run's `matchup_min_games_per_iter` (its index row)."""
+    from mtgz.az import matchup as M
+    vs = [(b, p) for b, p in _versions(run) if upto_iter is None or b <= upto_iter]
+    try:
+        per = int(_load(os.path.join(run, 'config.json')).get('matchup_min_games_per_iter',
+                                                               M.SETTINGS['matchup_min_games_per_iter']))
+    except (OSError, ValueError):
+        per = M.SETTINGS['matchup_min_games_per_iter']
+    out = {'version': None, 'failed': None, 'alerts': []}
+    newest = vs[-1][0] if vs else None
+    if vs:
+        v = _load(vs[-1][1])
+        d = v.get('data') or {}
+        w = v.get('window') or [newest, newest]
+        games = (v.get('report') or {}).get('games')
+        mn = d.get('min_games', per * (w[1] - w[0] + 1))
+        out.update(version=f'v{newest:04d}', games=games, window=w, source=d.get('source', 'log'),
+                   excluded_games=d.get('excluded_games', 0), min_games=mn,
+                   starved=d['starved'] if 'starved' in d else (games is not None and games < mn))
+        if out['starved']:
+            out['alerts'].append(f"matchup model {out['version']}: fitted on {games} games (< {mn}: "
+                                 f"{per} a game per iteration of its window {w[0]}-{w[1]})"
+                                 + (f" - {d['note']}" if d.get('note') else ''))
+        if out['excluded_games']:
+            out['alerts'].append(f"matchup model {out['version']}: {out['excluded_games']} games of its window left out "
+                                 f"(records another engine played) - {d.get('note')}")
+    jobs = []
+    for dd in glob.glob(os.path.join(M.mdir(run), 'work', 'v*')):
+        try:
+            b = int(os.path.basename(dd)[1:])
+        except ValueError:
+            continue
+        if (upto_iter is None or b <= upto_iter) and (newest is None or b > newest):
+            jobs.append((b, dd))
+    for b, dd in sorted(jobs, reverse=True):
+        st = os.path.join(dd, 'status.json')
+        if os.path.exists(st):
+            s = _load(st)
+            if s.get('ok'):
+                continue                         # (published after the newest version read: a race, not a failure)
+            err = s.get('error')
+        elif os.path.exists(os.path.join(dd, 'reported')):
+            err = 'the job ended without a status (killed?)'
+        else:
+            continue                             # (running)
+        out['failed'] = {'version': f'v{b:04d}', 'error': err}
+        since = out['version'] or 'none (no version yet)'
+        out['alerts'].append(f"matchup model: no new version since {since} (last retrain failed: v{b:04d}: "
+                             f"{' '.join(str(err).split())[:300]})")
+        break
+    return out
+
+
 def newest_tables(run, mirror_name=None, upto_iter=None):
     """{deck: {'table', 'names', 'main'}} of the newest version at or before `upto_iter` (the plan arm's), or {}."""
     vs = [(b, p) for b, p in _versions(run) if upto_iter is None or b <= upto_iter]
@@ -449,7 +510,7 @@ def play_from_log(run, lo, hi):
     from mtgz.az import matchup as M
     if not glob.glob(os.path.join(run, 'games', '*.jsonl')):
         return None
-    games, specs = M.load_games(run, lo, hi)
+    games, specs = M.load_games(run, lo, hi, source='log')
     acc = collections.defaultdict(lambda: [0, 0.0, 0])
     for g in games:
         sp = specs[g['spec']]
@@ -491,6 +552,10 @@ def specialist(run, decks, opts, upto_iter, iters, cmap=None, answers=None):
     mirror = len(set(decks)) == 1
     out = {'run': os.path.basename(os.path.normpath(run)), 'table': table_plan(run, decks[0] if mirror else None,
                                                                                upto_iter)}
+    try:
+        out['model'] = model_health(run, upto_iter)
+    except Exception as e:                       # noqa: BLE001 - said in the report (an alert), never fails the stew
+        out['model'] = {'alerts': [f'matchup model health failed: {type(e).__name__}: {e}']}
     hi = upto_iter if upto_iter is not None else _newest_model(run)
     if hi is None:
         out['play'] = {'note': 'no checkpoint'}
@@ -531,6 +596,8 @@ def alerts(h, opts):
     """The specialists' health -> [alert lines]; also marks each card-use row's level."""
     out = []
     for sn, s in (h.get('specialists') or {}).items():
+        for a in (s.get('model') or {}).get('alerts') or []:
+            out.append(f'{sn}: {a}')
         t = s.get('table') or {}
         for deck, d in (t.get('decks') or {}).items():
             if d['state'] == 'all main' and d['streak'] >= opts['all_main_versions']:
@@ -597,6 +664,11 @@ def status_lines(stew):
         except Exception as e:                   # noqa: BLE001
             L.append(f'  sb health {sn}: {type(e).__name__}: {e}')
             continue
+        try:
+            for a in model_health(st.abs(st.net(sn)['run']))['alerts']:
+                L.append(f'  sb health {sn}: ALERT {a}')
+        except Exception as e:                   # noqa: BLE001
+            L.append(f'  sb health {sn}: matchup model health: {type(e).__name__}: {e}')
         if 'note' in t:
             L.append(f"  sb health {sn}: {t['note']}")
             continue

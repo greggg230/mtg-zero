@@ -609,7 +609,7 @@ def _segments(rec):
     return segs + [(cur, None, False)]
 
 
-def replay_match(E, C, spec_txt, rec, decks, mains, full):
+def replay_match(E, C, spec_txt, rec, decks, mains, full, glog_out=None):
     """A chained contest (docs/gamedb.md "Best-of-three matches") replayed game by game, light or `full` -> one
     (games fields, events or None, combo or None, match fields) per game it holds. Each game replays as a single game
     does (a full one's Readers fed its own steps only); its actions are its episode's - the sideboarding before it
@@ -617,8 +617,15 @@ def replay_match(E, C, spec_txt, rec, decks, mains, full):
     record over and that game not - the match's loser. Each step of the replay is checked as zero-core's replay checks
     it (the record's `episodes` when it has them, the match's result), a mismatch raising. The engine's game log (on
     for this match only) gives each game's dealt seats and each seat's mode; the match block at the game's end its 60
-    (the two checked equal)."""
+    (the two checked equal). `glog_out` (a list): receives the match's game log lines - its `bo3-spec` line and one
+    `bo3` line per finished game in game order, the lines the live match wrote to its process's game log - once the
+    replay has passed every check (the matchup model's data from records: mtgz.az.bo3_records, docs/ENGINE.md 273). A
+    concession found by trying both seats (`next_episode` of each: each try ends the game and writes its line) leaves
+    the tries' lines in the log before the real one: a game's line is its last (as `by_game` reads them), checked
+    against the replayed game's result."""
     path = _game_log_on(E)
+    if glog_out is not None and path is None:
+        raise ValueError('this engine has no best-of-three game log (docs/ENGINE.md 168.2): no game log lines to give')
     try:
         g = _new_game(E, spec_txt, rec)
         if not g.chained:
@@ -758,6 +765,19 @@ def replay_match(E, C, spec_txt, rec, decks, mains, full):
         if x['f']['over'] and w is not None:
             wins[w] += 1
         out.append((x, mf))
+    if glog_out is not None:
+        if spec_line is None:
+            raise ValueError(f"game {rec['gid']}: no bo3-spec line in the game log")
+        glog_out.append(spec_line)
+        for x in games:
+            if not (x['f']['over'] or x['f']['aborted']):
+                continue                           # (a game the record ends inside: no line, as a live match's)
+            gl = by_game[x['game_no']]
+            want = None if x['f']['aborted'] else [round(float(x['f']['score0']), 5), round(float(x['f']['score1']), 5)]
+            got = None if gl.get('result') is None else [round(float(r), 5) for r in gl['result']]
+            if got != want:
+                raise ValueError(f"game {rec['gid']} game {x['game_no']}: the game log's result {got}, the replay's {want}")
+            glog_out.append(gl)
     res = rec.get('result') or [None, None]
     mw = None
     if rec.get('over') and None not in res[:2] and float(res[0]) != float(res[1]):
