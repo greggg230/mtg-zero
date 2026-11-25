@@ -34,10 +34,16 @@ construction: z(B, A) = -z(A, B) with the context mirrored, so P(A beats B) + P(
 (A = seat 0) is the whole likelihood. Results only - no distillation from the network's value (the value head judges a
 60 before the game barely better than play / draw: hub note value_pregame_check/report.md).
 
-**Its data.** Every finished self-play game of the run's own processes (the best-of-three game log, docs/ENGINE.md
-168.2: `<run>/games/games-<pid>.jsonl`, one line a game with both 60s, the starter, the score, the dealt flags and the
-result). Dealt seats (p 0.85 per seat in pb3) give the unconfounded signal: their 60s are drawn at random. Remote
-self-play (the Mac, the farm) does not log: their games are not in the data (a share of the games, the same spec).
+**Its data** (docs/ENGINE.md 273, `load_games`). Every finished self-play game of the window, as the best-of-three game
+log's lines (docs/ENGINE.md 168.2: one line a game with both 60s, the starter, the score, the dealt flags and the
+result). Dealt seats (p 0.85 per seat in pb3) give the unconfounded signal: their 60s are drawn at random. The source
+(`data_source`): the run's own game log (`<run>/games/games-<pid>.jsonl`: its local self-play only) when it covers the
+window - no records there, or records of local self-play only -, else the run's game records (zero-core
+`game_records`: every game the quota accepted, local, a remote host's and the farm's), each match replayed on this
+checkout's engine into exactly the lines the log would hold (mtgz.az.bo3_records); records another engine played (an
+earlier pin) are left out, counted and said. A version records its data (`data`: the source, the games per source, what
+was left out) and whether it is STARVED (fewer games than `matchup_min_games_per_iter` times its window's iterations);
+the run log says both loudly, and the stew's sideboarding health alerts on them (mtgz.stew.sbhealth).
 
 **The rolling retrain** (run setting `matchup_every` N > 0; `mtgz.sealed.rolling`'s design): at the start of iteration
 it, when b = it - 1 is a multiple of N, at least `matchup_min_window` iterations of the run's logged games exist and no
@@ -111,6 +117,9 @@ SETTINGS = {
     'matchup_swap_z': 2.0,        # the table moves from the main one card at a time, only by swaps whose bootstrap gain
                                   # exceeds this many standard errors (0: the model's plain argmax climb)
     'matchup_members': 20,        # the published ensemble's bootstrap fits (the swaps' standard errors come from them)
+    'matchup_min_games_per_iter': 500,  # a version fitted on fewer games than this times its window's iterations is
+                                        # STARVED: published, and said loudly (the run log, its record, sb-health;
+                                        # docs/ENGINE.md 273)
 }
 DIMS = (0, 2)
 L2_W = (1e-3, 3e-3, 1e-2, 3e-2, 0.1, 0.3, 1.0)   # (strong L2 shrinks every copy's w to 0: the main's 60)
@@ -161,11 +170,28 @@ def iteration_times(run):
     return sorted(out)
 
 
-def load_games(run, lo=None, hi=None, selfplay=True):
+def game_line(x, specs, where, selfplay=True):
+    """One best-of-three game log line (the run's log, or a record's replay: mtgz.az.bo3_records) -> the game to keep,
+    or None: a spec line (taken into `specs`), another kind, an aborted game, a game of a spec that does not deal (with
+    `selfplay`: the run's evaluation spec never deals)."""
+    if x.get('kind') == 'bo3-spec':
+        specs[x['spec']] = x
+        return None
+    if x.get('kind') != 'bo3':
+        return None
+    sp = specs.get(x['spec'])
+    if sp is None:
+        raise ValueError(f'{where}: a game of spec {x["spec"]} before its spec line')
+    if x.get('result') is None or (selfplay and not sp.get('dealt_decks')):
+        return None
+    return x
+
+
+def log_games(run, lo=None, hi=None, selfplay=True):
     """The best-of-three game log's finished games of `run` (a run directory, or a directory of .jsonl files) ->
     (games, spec lines by key). Each game gets 'iter' (the first metrics line at or after its time; None for an
     iteration in progress, or no metrics). `selfplay`: only games of a self-play spec (one with dealt decks; the run's
-    evaluation spec never deals). Aborted games are left out."""
+    evaluation spec never deals). Aborted games are left out. Local self-play only (the run's own process logs)."""
     import bisect
     d = os.path.join(run, 'games')
     files = sorted(glob.glob(os.path.join(d if os.path.isdir(d) else run, '*.jsonl')))
@@ -177,16 +203,8 @@ def load_games(run, lo=None, hi=None, selfplay=True):
             for n, line in enumerate(f, 1):
                 if not line.endswith('\n') or not line.strip():
                     continue                       # (a line being written)
-                x = json.loads(line)
-                if x.get('kind') == 'bo3-spec':
-                    specs[x['spec']] = x
-                    continue
-                if x.get('kind') != 'bo3':
-                    continue
-                sp = specs.get(x['spec'])
-                if sp is None:
-                    raise ValueError(f'{path}:{n}: a game of spec {x["spec"]} before its spec line')
-                if x.get('result') is None or (selfplay and not sp.get('dealt_decks')):
+                x = game_line(json.loads(line), specs, f'{path}:{n}', selfplay)
+                if x is None:
                     continue
                 i = bisect.bisect_left(tt, x['time'])
                 x['iter'] = times[i][1] if i < len(times) else None
@@ -196,6 +214,128 @@ def load_games(run, lo=None, hi=None, selfplay=True):
                     continue
                 games.append(x)
     return games, specs
+
+
+def record_iterations(run, lo=None, hi=None):
+    """The iterations lo..hi with complete game records (zero-core `game_records`: records/iter_NNNN/DONE.json)."""
+    from zero import gamerec as GR
+    if not os.path.isdir(os.path.join(run, GR.DIR)):
+        return []
+    return [it for it in GR.done_iterations(run) if (lo is None or it >= lo) and (hi is None or it <= hi)]
+
+
+def data_source(run, lo=None, hi=None):
+    """The source rule (docs/ENGINE.md 273) -> ('log' | 'records', why). The game log when it covers the window - no
+    iteration of it has game records, or every one that has them accepted local self-play only (DONE.json's sources:
+    'local'; the log holds those games: pb3 and any local-only run publish the versions they always did) -; the game
+    records otherwise (an iteration with a remote host's or the farm's games: the log misses them)."""
+    from zero import gamerec as GR
+    its = record_iterations(run, lo, hi)
+    if not its:
+        return 'log', 'no game records in the window'
+    off = [it for it in its if set((GR.read_done(run, it) or {}).get('by_source') or {}) - {'local'}]
+    if not off:
+        return 'log', f'the game log covers the window: its {len(its)} iterations of records are local self-play only'
+    return 'records', (f'{len(off)} of the window\'s {len(its)} iterations of records hold games played off this '
+                       f'machine (remote or farm self-play: not in the game log)')
+
+
+def _ranges(its):
+    out = []
+    for i in sorted(its):
+        if out and out[-1][1] == i - 1:
+            out[-1][1] = i
+        else:
+            out.append([i, i])
+    return ', '.join(f'{a}' if a == b else f'{a}-{b}' for a, b in out) or 'none'
+
+
+def load_games(run, lo=None, hi=None, selfplay=True, source='auto', jobs=1, cache=None, info=None, log=None):
+    """The run's finished self-play games of iterations lo..hi -> (games, spec lines by key), from the source
+    `data_source` picks ('auto'), or 'log' / 'records' (docs/ENGINE.md 273). The game log: `log_games`. The records:
+    every iteration of the window with records replayed (mtgz.az.bo3_records: each game the dict the log holds, 'iter'
+    its record's accepting iteration, 'time' the record's), an iteration whose records another engine played EXCLUDED
+    and counted (never replayed on this one), an iteration of the window without records from the game log (its local
+    games). `info` (a dict): receives what was read - the source and why, the games per source, the excluded
+    iterations with their matches and games and why, the accepted games without a record, the replay's seconds."""
+    if info is None:
+        info = {}
+    if source == 'auto':
+        source, why = data_source(run, lo, hi)
+    else:
+        why = f'source {source} asked'
+    info.update(source=source, why=why)
+    if source == 'log':
+        games, specs = log_games(run, lo, hi, selfplay)
+        info.update(games=len(games), games_log=len(games), games_records=0, excluded=[], excluded_games=0)
+        return games, specs
+    if source != 'records':
+        raise ValueError(f'source {source!r}: auto, log or records')
+    from mtgz.az import bo3_records as BR
+    its = record_iterations(run, lo, hi)
+    t0 = time.time()
+    got = BR.games_of(run, its, jobs=jobs, cache=cache, log=log)
+    specs, games = {}, []
+    excluded, missing, used = [], {}, []
+    for it in its:
+        o = got[it]
+        if o.get('missing'):
+            missing[str(it)] = o['missing']
+        if 'excluded' in o:
+            excluded.append(dict(o['excluded'], iteration=it, matches=o['matches'], games=o['games']))
+            continue
+        used.append(it)
+        for m in o['lines']:
+            for k, x in enumerate(m['lines']):
+                g = game_line(x, specs, f'iteration {it} source {m["src"]} match {m["gid"]} line {k + 1}', selfplay)
+                if g is not None:
+                    games.append(dict(g, iter=it, time=m['t']))
+    n_rec = len(games)
+    # (the window's iterations without records: their logged - local - games)
+    rest = []
+    if lo is not None and hi is not None:
+        have = set(its)
+        if any(i not in have for i in range(lo, hi + 1)):
+            lg, ls = log_games(run, lo, hi, selfplay)
+            rest = [g for g in lg if g['iter'] not in have]
+            for k in {g['spec'] for g in rest}:
+                if k in specs and specs[k] != ls[k]:
+                    raise ValueError(f'spec {k}: the game log\'s spec line differs from the records\' replay')
+                specs[k] = ls[k]
+    games += rest
+    groups = {}
+    for e in excluded:
+        k = (e['why'], e['engine'], e['commit'])
+        gr = groups.setdefault(k, {'why': e['why'], 'engine': e['engine'], 'commit': e['commit'], 'hint': e.get('hint'),
+                                   'iterations': [], 'matches': 0, 'games': 0})
+        gr['iterations'].append(e['iteration'])
+        gr['matches'] += e['matches']
+        gr['games'] += e['games']
+    info.update(games=len(games), games_records=n_rec, games_log=len(rest),
+                records_iterations=_ranges(used), log_iterations=_ranges({g['iter'] for g in rest}),
+                matches=sum(len(got[i]['lines']) for i in used),
+                cached_iterations=sum(1 for i in used if got[i].get('cached')),
+                excluded=[dict(g, iterations=_ranges(g['iterations'])) for g in groups.values()],
+                excluded_games=sum(g['games'] for g in groups.values()),
+                missing=missing, seconds=round(time.time() - t0, 1))
+    return games, specs
+
+
+def data_note(info):
+    """`load_games`'s info -> one line for the job's log and the version's report."""
+    s = f'{info.get("games")} games from the {info.get("source")} ({info.get("why")})'
+    if info.get('source') == 'records':
+        s += (f': {info["games_records"]} replayed from the records of iterations {info["records_iterations"]} '
+              f'({info["matches"]} matches, {info["cached_iterations"]} iterations cached, {info["seconds"]} s)')
+        if info.get('games_log'):
+            s += f', {info["games_log"]} from the game log of iterations {info["log_iterations"]} (no records)'
+    for e in info.get('excluded') or []:
+        s += (f'; LEFT OUT {e["games"]} games ({e["matches"]} matches) of iterations {e["iterations"]}: their records '
+              f'were played by engine {e["engine"]} (mtg-zero {(e["commit"] or "?")[:12]}; {e["why"]}), which this '
+              f'checkout cannot replay')
+    if info.get('missing'):
+        s += f'; accepted games without a record: {info["missing"]}'
+    return s
 
 
 def the_75(specs, games):
@@ -1127,7 +1267,14 @@ def poll(R):
         if s.get('ok'):
             R.log(f'matchup model {name} published: {s.get("games")} games of iterations {s.get("window")}, held-out '
                   f'log loss {s.get("val_logloss"):.5f} vs play / draw {s.get("val_logloss_pd"):.5f} '
-                  f'(gain {s.get("gain_nats"):+.5f} nats){"" if s.get("table", True) else ": no table"}, {s.get("seconds")} s')
+                  f'(gain {s.get("gain_nats"):+.5f} nats){"" if s.get("table", True) else ": no table"}, {s.get("seconds")} s'
+                  + (f' - data: {s["data_note"]}' if s.get('data_note') else ''))
+            if s.get('starved'):
+                R.log(f'MATCHUP MODEL STARVED {name}: fitted on {s.get("games")} games (< {s.get("min_games")}: '
+                      f'{s.get("min_games_per_iter")} a game per iteration of its window) - {s.get("data_note")}')
+            if (s.get('data') or {}).get('excluded_games'):
+                R.log(f'MATCHUP MODEL {name}: {s["data"]["excluded_games"]} games of its window LEFT OUT (records of '
+                      f'another engine) - {s.get("data_note")}')
         else:
             keep = versions(R.run)
             kept = os.path.basename(keep[-1][1]) if keep else 'no table (the seats sideboard by search)'
@@ -1159,7 +1306,8 @@ def launch_if_due(R, it):
            '--val-iters', str(V), '--half-life', str(float(c.get('matchup_half_life', 0.0) or 0.0)),
            '--threads', str(th), '--worlds', str(int(c.get('matchup_worlds', 8000))),
            '--min-gain', str(float(c.get('matchup_table_min_gain', 0.005))), '--swap-z', str(float(c.get('matchup_swap_z', 2.0))),
-           '--members', str(int(c.get('matchup_members', 20)))]
+           '--members', str(int(c.get('matchup_members', 20))),
+           '--min-games-per-iter', str(int(c.get('matchup_min_games_per_iter', 500)))]
     from mtgz.sealed.rolling import background_flags, job_env
     log = open(os.path.join(d, 'log.txt'), 'w', encoding='utf-8')
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -1229,27 +1377,53 @@ def _pair_version(cfg, games, specs, P, b, lo, name, val_iters, half_life, threa
     return out, rep, tables, changes, rep['per_copy']
 
 
+def replay_cache(run):
+    """Where a run's retrains keep the records' replayed games (mtgz.az.bo3_records; one file per iteration)."""
+    return os.path.join(mdir(run), 'replayed')
+
+
 def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log=print, min_gain=0.005, z=2.0,
-            members_n=20):
-    """The job (module docs): the run's logged self-play games of iterations lo..b -> status (status.json; a failure
-    raises after writing it). The games' one pairing (`the_pairing`): a mirror's version is pb3's (one model, one
-    table), two different 75s' the non-mirror model with one table per deck (docs/ENGINE.md 240)."""
+            members_n=20, min_games_per_iter=500, source='auto', cache='run'):
+    """The job (module docs): the run's self-play games of iterations lo..b (`load_games`: the game log, or every
+    accepted game from the records, docs/ENGINE.md 273) -> status (status.json; a failure raises after writing it). The
+    games' one pairing (`the_pairing`): a mirror's version is pb3's (one model, one table), two different 75s' the
+    non-mirror model with one table per deck (docs/ENGINE.md 240). Fewer games than `min_games_per_iter` times the
+    window's iterations: STARVED (published; `starved` in the status, the version's `data` and the index). `cache`:
+    'run' (`replay_cache`), a directory, or None."""
     t0 = time.time()
     d = job_dir(run, b)
     os.makedirs(d, exist_ok=True)
     name = f'v{b:04d}'
-    status = {'ok': False, 'version': name, 'iter': b, 'window': [lo, b], 'half_life': half_life, 'started': t0}
+    min_games = int(min_games_per_iter) * (b - lo + 1)
+    status = {'ok': False, 'version': name, 'iter': b, 'window': [lo, b], 'half_life': half_life, 'started': t0,
+              'min_games': min_games, 'min_games_per_iter': int(min_games_per_iter)}
     try:
         cfg = _load(os.path.join(run, 'config.json'))
-        games, specs = load_games(run, lo, b)
+        info = {}
+        cdir = replay_cache(run) if cache == 'run' else cache
+        try:
+            games, specs = load_games(run, lo, b, source=source, jobs=max(1, int(threads)), cache=cdir, info=info,
+                                      log=log)
+        finally:
+            status['data'] = info
+            if info.get('source'):
+                status['data_note'] = data_note(info) if 'games' in info else f'the {info["source"]}: failed'
+        if cdir and info.get('source') == 'records':
+            from mtgz.az import bo3_records as BR
+            BR.prune_cache(cdir, lo)
         status['games'] = len(games)
-        log(f'# {len(games)} games of iterations {lo}-{b}')
+        status['starved'] = len(games) < min_games
+        log(f'# {len(games)} games of iterations {lo}-{b}: {status["data_note"]}')
+        if status['starved']:
+            log(f'# STARVED: {len(games)} games < {min_games} ({min_games_per_iter} a game per iteration of the window)')
         if not games:
-            raise RuntimeError(f'no logged self-play game in iterations {lo}-{b} (the game log: {os.path.join(run, "games")})')
+            raise RuntimeError(f'no self-play game in iterations {lo}-{b}: {status["data_note"]} (the game log: '
+                               f'{os.path.join(run, "games")}, the records: {os.path.join(run, "records")})')
         P = the_pairing(specs, games)
         make = _mirror_version if P.mirror else _pair_version
         out, rep, tables, changes, per_copy = make(cfg, games, specs, P, b, lo, name, val_iters, half_life, threads,
                                                    worlds, log, min_gain, z, members_n)
+        out['data'] = dict(info, note=status['data_note'], starved=status['starved'], min_games=min_games)
         staged = os.path.join(d, f'{name}.json')
         with open(staged, 'w', encoding='utf-8') as f:
             json.dump(out, f)
@@ -1265,7 +1439,8 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
             'selected': rep['selected'], 'val_logloss': rep['val_logloss'], 'val_logloss_pd': rep['val_logloss_pd'],
             'gain_nats': rep['gain_nats'], 'val_logloss_dealt': rep['val_logloss_dealt'],
             'val_logloss_pd_dealt': rep['val_logloss_pd_dealt'], 'per_copy': per_copy,
-            'table': tables is not None, 'table_changes': changes, 'time': time.time()})
+            'table': tables is not None, 'table_changes': changes, 'source': info.get('source'),
+            'excluded_games': info.get('excluded_games', 0), 'starved': status['starved'], 'time': time.time()})
     except Exception as e:                         # noqa: BLE001 (recorded, then raised: the run logs it loudly)
         status.update(ok=False, error=f'{type(e).__name__}: {e}', traceback=traceback.format_exc()[-3000:],
                       seconds=round(time.time() - t0, 1))
@@ -1337,6 +1512,8 @@ def main(argv=None):
     r.add_argument('--min-gain', type=float, default=0.005)
     r.add_argument('--swap-z', type=float, default=2.0)
     r.add_argument('--members', type=int, default=20)
+    r.add_argument('--min-games-per-iter', type=int, default=500)
+    r.add_argument('--source', default='auto', choices=('auto', 'log', 'records'))
     f = sub.add_parser('fit')
     f.add_argument('run')
     f.add_argument('--iters', default=None, help='LO-HI')
@@ -1348,6 +1525,9 @@ def main(argv=None):
     f.add_argument('--swap-z', type=float, default=2.0)
     f.add_argument('--members', type=int, default=20)
     f.add_argument('--out', default=None)
+    f.add_argument('--source', default='auto', choices=('auto', 'log', 'records'))
+    f.add_argument('--jobs', type=int, default=1, help='processes replaying the records')
+    f.add_argument('--cache', default=None, help='a directory for the records\' replayed games (default: none)')
     p = sub.add_parser('report')
     p.add_argument('run')
     c = sub.add_parser('census')
@@ -1359,11 +1539,14 @@ def main(argv=None):
         def log(m):
             print(m, flush=True)
         s = retrain(a.run, a.iter, a.from_iter, a.val_iters, a.half_life, a.threads, a.worlds, log=log, min_gain=a.min_gain,
-                    z=a.swap_z, members_n=a.members)
+                    z=a.swap_z, members_n=a.members, min_games_per_iter=a.min_games_per_iter, source=a.source)
         print(json.dumps({k: s[k] for k in ('version', 'games', 'val_logloss', 'val_logloss_pd', 'gain_nats', 'seconds')}))
     elif a.cmd == 'fit':
         lo, hi = rng(a.iters)
-        games, specs = load_games(a.run, lo, hi)
+        info = {}
+        games, specs = load_games(a.run, lo, hi, source=a.source, jobs=a.jobs, cache=a.cache, info=info,
+                                  log=lambda m: print(m, flush=True))
+        print(f'data: {data_note(info)}')
         P = the_pairing(specs, games)
         if not P.mirror:
             members, rep = select_and_fit_pair(games, specs, P, a.val_iters, a.half_life, a.threads, members_n=a.members)
@@ -1376,7 +1559,7 @@ def main(argv=None):
                 rp = {'per_copy': rep['per_copy'][dk['name']], 'per_copy_se': rep['per_copy_se'][dk['name']]}
                 for line in per_copy_lines([x[0] for x in dk['list']], rp):
                     print(line)
-            out = {'report': rep, 'members': members, 'pairing': P.json()}
+            out = {'report': rep, 'members': members, 'pairing': P.json(), 'data': info}
             if a.table:
                 S = min(sum(int(x[1]) for x in dk['list']) - sum(dk['main']) for dk in P.decks)
                 out['tables'], out['table_detail'] = pair_choice_tables(members, P, (0, S), 'fit', worlds=a.worlds,
@@ -1395,7 +1578,7 @@ def main(argv=None):
               f'{rep["gain_nats"]:+.5f} nats a game (the value head\'s bar: +0.005)')
         print('per copy (w: logit per copy beyond the main, ensemble mean +- sd):')
         print('\n'.join(per_copy_lines(names, rep)))
-        out = {'report': rep, 'members': members, 'list': lst, 'main': main_}
+        out = {'report': rep, 'members': members, 'list': lst, 'main': main_, 'data': info}
         if a.table:
             S = sum(int(x[1]) for x in lst) - sum(main_)
             out['table'], out['table_detail'] = choice_table(members, names, [int(x[1]) for x in lst], main_, (0, S),
