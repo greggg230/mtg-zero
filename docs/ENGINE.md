@@ -49634,3 +49634,7 @@ said so beyond that one log line. Its Sneak and Show and Doomsday pairings faile
   argmax would board e.g. +3 Pyroblast +2 Hydroblast in game 2, but no swap clears `matchup_swap_z` 2). The strongest
   copies against the main: Volcanic Island +0.112, Murktide Regent +0.042; the weakest: Meltdown -0.132, Price of
   Progress -0.112, Consign to Memory -0.105, Rough // Tumble -0.103. v0048 / v0064 were all main as well.
+* **The gate** on 03080832 (this section's code; the next commit adds this line only): `python tools/gate.py python` -
+  **GATE PASSED WITH SKIPS python 03080832a95b in 150s** (skipped: one live-run-hazard test fenced by the live stew). An
+  earlier commit (f6b7c361) failed it on a new run setting the farm worker's setting classes did not know
+  (`tests/test_farm_release.py`): the threshold became the module constant above.
