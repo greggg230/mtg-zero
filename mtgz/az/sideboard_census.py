@@ -135,7 +135,8 @@ def run_starts(ckpt, starts=STARTS, sims=None, device='cpu', seed=1, conc=None, 
 def sideboardings(records, spec):
     """Each start's two sideboardings: [{start, seat, chooser, play, deck: {name: copies}, delta: {name: change}}].
     Checks what a census start must be (CensusError otherwise): game 1's loser sideboarded first and chose, each
-    deck is 60 cards of the seat's 75, and exactly one player is on the play."""
+    deck is its registered main's size (60, or the Lands deck's 61: docs/ENGINE.md 272) of the seat's 75, and exactly
+    one player is on the play."""
     mains, pools = replays.main_decks(spec), _pool_counts(spec)
     out = []
     for k, r in enumerate(records):
@@ -147,9 +148,10 @@ def sideboardings(records, spec):
             raise CensusError(f'start {k}: no starting player in game 2 ({r.get("starting")})')
         for p in (0, 1):
             deck = replays._tally(r['decks'][p])
-            if sum(deck.values()) != 60 or any(c > pools[p].get(n, 0) for n, c in deck.items()):
-                raise CensusError(f'start {k}: seat {p} deck is not 60 cards of its 75: {deck}')
             main = mains[p]
+            size = sum(main.values())
+            if sum(deck.values()) != size or any(c > pools[p].get(n, 0) for n, c in deck.items()):
+                raise CensusError(f"start {k}: seat {p} deck is not {size} cards (its registered main's size) of its 75: {deck}")
             delta = {n: deck.get(n, 0) - main.get(n, 0) for n in set(deck) | set(main)}
             out.append({'start': k, 'seat': p, 'chooser': p == r['chooser'], 'play': p == r['starting'],
                         'choice': r.get('choice'), 'deck': deck, 'delta': {n: d for n, d in delta.items() if d}})

@@ -7,9 +7,9 @@ it; the engine's `az::constructed` reads the same file and checks the two agree)
 cards and the legacy ones of `engine/src/az/legacy_cards.txt`: Murktide Regent, Prismari Charm, the
 Legacy Doomsday deck's ten, ENGINE.md 124, ..., the Legacy Hogaak Tempo deck's seven, 220); the engine checks CR 100.2a and 100.4a (at least 60 cards, at
 most four of a card but basic lands, a sideboard of at most 15). Best-of-one plays the mains; best-of-three
-(`"format": "bo3"`, docs/ENGINE.md 120) sideboards between games: each pool is exactly the 75, every deck
-exactly 60 of it, game 1 the mains (open) and each later game's 60 hidden from the other player within the
-public 75. A metagame (`"metagame"`, docs/ENGINE.md 176: `metagame_spec`) plays every ordered pairing of a
+(`"format": "bo3"`, docs/ENGINE.md 120) sideboards between games: each pool is exactly the 75, the main any
+legal size N >= 60 (docs/ENGINE.md 272; the Lands deck's 61) and every deck N of it (one-for-one swaps), game 1 the
+mains (open) and each later game's deck hidden from the other player within the public 75. A metagame (`"metagame"`, docs/ENGINE.md 176: `metagame_spec`) plays every ordered pairing of a
 list of named 75s, each game's pairing drawn by the engine from its seed; `pair_spec` is one fixed pairing.
 
 Kept light (no torch / numpy): `json` only.
@@ -73,7 +73,7 @@ def names(entries):
 def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=True, game_episodes=False,
                     start_game=1, keep_deck=None, keep_known=False, dealt_decks=None):
     """The `mtg` spec of a constructed best-of-three mirror (docs/ENGINE.md 120): both seats the
-    decklist's main (exactly 60) and `sideboard` ([[count, name], ...]; None: the decklist's own 15),
+    decklist's main (at least 60, docs/ENGINE.md 272) and `sideboard` ([[count, name], ...]; None: the decklist's own),
     `"format": "bo3"` (JSON); `game_episodes`: each game its own episode, labelled by its own outcome
     (`"game_episodes": true`, ENGINE.md 121); `start_game` 2: post-sideboard games only, each match starting
     at the sideboarding before game 2 with game 1's result drawn (`"start_game": 2`, ENGINE.md 130; the
@@ -86,8 +86,7 @@ def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=T
     d = load(name)
     main = names(d['main'])
     side = names(d['sideboard'] if sideboard is None else sideboard)
-    if len(main) != 60:
-        raise ValueError(f'decklist {name}: {len(main)} maindeck cards (constructed best-of-three: exactly 60)')
+    _check_bo3(name, main, side)
     full = names(d['sideboard'])
     for card in set(side):
         if side.count(card) > full.count(card):
@@ -137,9 +136,19 @@ def selfplay_spec(run, it):
     return f if f is not None else s
 
 
+def _check_bo3(name, main, side):
+    """A constructed best-of-three seat's lists (docs/ENGINE.md 120, 272): a main of at least 60 (CR 100.2a; any legal
+    size - every deck of the match keeps it) and a sideboard of at most 15 (CR 100.4a). The engine checks it too."""
+    if len(main) < 60:
+        raise ValueError(f'decklist {name}: {len(main)} maindeck cards (constructed: at least 60)')
+    if len(side) > 15:
+        raise ValueError(f'decklist {name}: {len(side)} sideboard cards (constructed: at most 15)')
+
+
 def _seat_lists(name, fmt):
     """(main, sideboard) names of decklist `name` as a seat of format `fmt` plays it: 'bo1' the main (at least 60; no
-    sideboard, as `mirror_spec`), 'bo3' the main (exactly 60) and the 75's sideboard (ENGINE.md 120)."""
+    sideboard, as `mirror_spec`), 'bo3' the main (at least 60: docs/ENGINE.md 272) and the 75's sideboard (ENGINE.md
+    120)."""
     d = load(name)
     main = names(d['main'])
     if fmt == 'bo1':
@@ -147,9 +156,9 @@ def _seat_lists(name, fmt):
             raise ValueError(f'decklist {name}: {len(main)} maindeck cards (constructed: at least 60)')
         return main, []
     if fmt == 'bo3':
-        if len(main) != 60:
-            raise ValueError(f'decklist {name}: {len(main)} maindeck cards (constructed best-of-three: exactly 60)')
-        return main, names(d['sideboard'])
+        side = names(d['sideboard'])
+        _check_bo3(name, main, side)
+        return main, side
     raise ValueError(f"format {fmt!r}: 'bo1' or 'bo3'")
 
 
@@ -180,7 +189,7 @@ def _dealt(dealt_decks):
 def pair_spec(p0, p1, fmt='bo1', max_turns=60, mulligans=True, game_episodes=False, start_game=1, dealt_decks=None):
     """The `mtg` spec of one fixed pairing (docs/ENGINE.md 176's evaluation cells): seat 0 plays decklist `p0`, seat 1
     `p1` (names of data/decks/; the same name is that deck's mirror). `fmt` 'bo1': the mains, no sideboards (as
-    `mirror_spec`); 'bo3': constructed best-of-three, each seat's main (exactly 60) and its 75's sideboard
+    `mirror_spec`); 'bo3': constructed best-of-three, each seat's main (at least 60, ENGINE.md 272) and its 75's sideboard
     (`game_episodes`, `start_game` as `mirror_bo3_spec`; the engine refuses `start_game` 2 for two different 75s,
     ENGINE.md 147.4); `dealt_decks` as `metagame_spec`'s. Its games are exactly the metagame spec's games of that pairing
     (`metagame_spec`: the engine's `Metagame::pair_json`). JSON."""

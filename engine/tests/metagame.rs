@@ -160,12 +160,17 @@ fn unsupported_combinations_are_refused_loudly() {
     let mut key = v.clone();
     key["metagame"]["decks"][0]["side"] = json!([]);
     refused(&key, "unknown key \"side\"");
-    let mut short = b3.clone();
-    // (61 cards: legal constructed, not a best-of-three's 60)
-    let mut m: Vec<Value> = short["metagame"]["decks"][2]["main"].as_array().unwrap().clone();
+    // (ENGINE.md 272: a best-of-three main of at least 60, CR 100.2a: a 61 is legal there too, a 59 refused)
+    let mut long = b3.clone();
+    let mut m: Vec<Value> = long["metagame"]["decks"][2]["main"].as_array().unwrap().clone();
     m.push(json!("Island"));
+    long["metagame"]["decks"][2]["main"] = json!(m);
+    parse(&long).unwrap();
+    let mut short = b3.clone();
+    let mut m: Vec<Value> = short["metagame"]["decks"][2]["main"].as_array().unwrap().clone();
+    m.truncate(59);
     short["metagame"]["decks"][2]["main"] = json!(m);
-    refused(&short, "exactly 60");
+    refused(&short, "59 cards in the deck (CR 100.2a: at least 60)");
     let mut unknown = v.clone();
     unknown["metagame"]["decks"][0]["main"][0] = json!("Not A Card");
     unknown["metagame"]["decks"][0]["main"][1] = json!("Not A Card Either");

@@ -38,7 +38,8 @@
 //!   each player's pool is exactly their 75 (main and sideboard, CR 100.4a),
 //!   its list every card of it with its copies, basic lands included and no
 //!   free entry (`MatchPool::constructed`); every deck after sideboarding is
-//!   exactly the first deck's size, 60 (the user's format restriction). Game
+//!   exactly the first deck's size, the registered main's N >= 60 (CR 100.2a;
+//!   one-for-one swaps; ENGINE.md 272 - exactly 60 until 2026-11-24). Game
 //!   1's decks are the registered mains (open, as best-of-one); each later
 //!   game's deck is hidden from the other player within the public 75
 //!   (`GameSpec::hidden_decks` and `deck_clouds` from game 2 on; dealt by the
@@ -147,8 +148,8 @@ impl MatchPool {
     /// player sideboards with these cards only). The list is every card of it
     /// by definition with its copies - basic lands too, which are pool cards
     /// here, with no free entry (limited's any number of basic lands, 100.4b,
-    /// does not apply) - and the deck's size is kept exactly (60: the user's
-    /// format restriction). Returns the deck's counts per entry too.
+    /// does not apply) - and the deck's size is kept exactly (the registered
+    /// main's, N >= 60: ENGINE.md 272). Returns the deck's counts per entry too.
     pub fn constructed(deck: &[DefId], sideboard: &[DefId]) -> (MatchPool, Vec<u8>) {
         let mut cards: Vec<DefId> = deck.iter().chain(sideboard).copied().collect();
         cards.sort_unstable();

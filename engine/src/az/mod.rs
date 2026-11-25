@@ -127,16 +127,16 @@ impl Eq for Share {}
 /// a `team_draft` payload plays exactly the event's match. Without these
 /// keys every spec is what it was (the behaviour digests are unchanged).
 ///
-/// Constructed (ENGINE.md 54): `"constructed": true` plays fixed 60-card
+/// Constructed (ENGINE.md 54): `"constructed": true` plays fixed
 /// decklists (`decks` lists, CR 100.2a: at least 60 cards, at most four of a
 /// card but basic lands, a sideboard of at most 15, 100.4a, the four-card
 /// limit over deck and sideboard together) with the card table of constructed
 /// play (`CardDb::constructed`: the cube's cards and the legacy ones, Murktide
 /// Regent, Prismari Charm), and never random, evaluation or drafted decks
 /// (those are limited's). With `"format": "bo3"` (ENGINE.md 120) each
-/// player's pool is exactly their 75 (`pN` the registered main of exactly 60
-/// cards, `pN_sideboard` at most 15), every deck after sideboarding exactly
-/// 60 of it; game 1 plays the mains (open), each later game's deck is hidden
+/// player's pool is exactly their 75 (`pN` the registered main of N >= 60
+/// cards, `pN_sideboard` at most 15; ENGINE.md 272), every deck after sideboarding
+/// N of it (one-for-one swaps); game 1 plays the mains (open), each later game's deck is hidden
 /// from the other player within the public 75 (`hidden_decks::ConstructedPrior`).
 ///
 /// Hidden decklists (ENGINE.md 102): `"hidden_decklists": true` (default false; best-of-one,
@@ -809,8 +809,10 @@ impl MtgSpec {
                     if let Some(t) = t {
                         if !t.fits(&matches::MatchPool::constructed(seats[p].0, seats[p].1).0) {
                             return Err(format!(
-                                "mtg spec: decks.p{p}_table (version {:?}) is not of p{p}'s 75: a seat's table lists exactly that seat's main and sideboard (ENGINE.md 240)",
-                                t.version
+                                "mtg spec: decks.p{p}_table (version {:?}) is not of p{p}'s 75: a seat's table lists exactly that seat's main and sideboard, its decks the main's size (ENGINE.md 240, 272; {} cards here, the table's {})",
+                                t.version,
+                                seats[p].0.len(),
+                                t.size
                             ));
                         }
                     }
@@ -871,39 +873,16 @@ impl MtgSpec {
                 }
                 DeckMode::Metagame(m) => {
                     for d in &m.decks {
+                        // (ENGINE.md 272: in best-of-three too the main is any legal size, N >= 60, CR 100.2a)
                         constructed::check(db, &d.main, &d.sideboard).map_err(|e| format!("mtg spec: metagame deck {:?}: {e}", d.name))?;
-                        if s.format == Format::Bo3 && d.main.len() != constructed::BO3_DECK {
-                            return Err(format!(
-                                "mtg spec: metagame deck {:?}'s main has {} cards: a constructed best-of-three's decks are exactly {} (ENGINE.md 120)",
-                                d.name,
-                                d.main.len(),
-                                constructed::BO3_DECK
-                            ));
-                        }
                     }
                 }
                 _ => return Err("mtg spec: constructed needs decklists (decks: {\"p0\": [...], \"p1\": [...]}) or a metagame (ENGINE.md 176)".into()),
             }
-            // Constructed best-of-three (ENGINE.md 120): the pool is the 75 and every deck after
-            // sideboarding is exactly 60 cards (the user's format restriction), so the registered
-            // main is exactly 60 too.
+            // Constructed best-of-three (ENGINE.md 120, 272): the pool is the 75 and the registered main any legal
+            // size N >= 60 (CR 100.2a, `constructed::check` above; a sideboard of at most 15, 100.4a); sideboarding is
+            // one-for-one swaps, so every deck after it keeps the main's N (`MatchPool::constructed`).
             if s.format == Format::Bo3 {
-                let mains: Vec<&Vec<DefId>> = match &s.decks {
-                    DeckMode::Lists(a, b) => vec![a, b],
-                    DeckMode::ListsWithSideboards(p) => p.iter().map(|x| &x.0).collect(),
-                    // (checked above, by name)
-                    DeckMode::Metagame(_) => Vec::new(),
-                    _ => unreachable!("refused above"),
-                };
-                for (p, d) in mains.into_iter().enumerate() {
-                    if d.len() != constructed::BO3_DECK {
-                        return Err(format!(
-                            "mtg spec: p{p}'s constructed main has {} cards: a constructed best-of-three's decks are exactly {} (ENGINE.md 120)",
-                            d.len(),
-                            constructed::BO3_DECK
-                        ));
-                    }
-                }
                 // (ENGINE.md 154: a dealt 60 swaps at most the seat's whole sideboard; either seat may be dealt)
                 if let Some(dd) = &s.dealt_decks {
                     // (ENGINE.md 240: a metagame deals each seat from its own 75 - every deck of a played pairing)
@@ -915,7 +894,7 @@ impl MtgSpec {
                             let d = &m.decks[i as usize];
                             if dd.swaps.1 as usize > d.sideboard.len() {
                                 return Err(format!(
-                                    "mtg spec: dealt_decks.swaps [{}, {}]: metagame deck {:?}'s sideboard has {} cards, a 60 of its 75 swaps at most {} (ENGINE.md 154, 223)",
+                                    "mtg spec: dealt_decks.swaps [{}, {}]: metagame deck {:?}'s sideboard has {} cards, a deck of its 75 swaps at most {} (ENGINE.md 154, 223)",
                                     dd.swaps.0,
                                     dd.swaps.1,
                                     d.name,
@@ -934,7 +913,7 @@ impl MtgSpec {
                     for (p, &n) in sides.iter().enumerate() {
                         if dd.swaps.1 as usize > n {
                             return Err(format!(
-                                "mtg spec: dealt_decks.swaps [{}, {}]: p{p}'s sideboard has {n} cards, a 60 of its 75 swaps at most {n} (ENGINE.md 154)",
+                                "mtg spec: dealt_decks.swaps [{}, {}]: p{p}'s sideboard has {n} cards, a deck of its 75 swaps at most {n} (ENGINE.md 154)",
                                 dd.swaps.0, dd.swaps.1
                             ));
                         }
@@ -1392,7 +1371,7 @@ impl MtgAz {
     }
 
     /// A constructed best-of-three whose first game has these seats (ENGINE.md 120; `MtgAz::new`'s
-    /// and the fuzz's): each seat's deck its registered main (exactly 60) and its sideboard, the pools
+    /// and the fuzz's): each seat's deck its registered main (N >= 60 cards, ENGINE.md 272) and its sideboard, the pools
     /// their 75s (`MatchState::constructed`), each seat's deck prior a `ConstructedPrior` of its 75
     /// (the prior of its later decks as the other player deals them). `gspec` is game 1's: open
     /// decks (`hidden_decks` false); the later games hide them.

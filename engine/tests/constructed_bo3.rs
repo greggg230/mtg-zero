@@ -1,5 +1,6 @@
 //! Constructed best-of-three (ENGINE.md 120): the Legacy Izzet Delver mirror's matches with
-//! sideboarding. The spec (`"constructed": true` with `"format": "bo3"`: the main exactly 60, the
+//! sideboarding. The spec (`"constructed": true` with `"format": "bo3"`: the main at least 60 - exactly 60 until
+//! ENGINE.md 272, whose tests are bo3_main_60_plus.rs; these play the Delver's 60 -, the
 //! full Delver 75 since its five sideboard cards are supported (ENGINE.md 122), a 75 with a card the
 //! table does not know refused, every such card named), the pool (exactly
 //! the 75, no free basic land entries, CR 100.4a), sideboarding to exactly 60 (every legal 60
@@ -145,12 +146,16 @@ fn the_constructed_bo3_spec() {
     let main = full.main_names();
     let bad = |v: serde_json::Value| MtgSpec::parse(&v.to_string()).unwrap_err();
     let side8 = names(&SMOKE_SIDEBOARD);
-    // The main is exactly 60 in best-of-three (every deck after sideboarding is): 61 refused (legal
-    // in best-of-one, CR 100.2a).
+    // The main is at least 60 in best-of-three as in best-of-one (CR 100.2a; ENGINE.md 272 - until then exactly 60):
+    // a 61 plays, its decks 61 in every game (bo3_main_60_plus.rs); a 59 is refused.
     let more: Vec<String> = main.iter().cloned().chain(["Island".to_string()]).collect();
-    assert!(bad(serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": main, "p1": more, "p0_sideboard": side8, "p1_sideboard": side8}}))
-        .contains("p1's constructed main has 61 cards"));
+    let s61 = MtgSpec::parse(&serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": main, "p1": more, "p0_sideboard": side8, "p1_sideboard": side8}}).to_string()).unwrap();
+    let g61 = MtgAz::new_game(&s61, 2, 1).unwrap();
+    assert_eq!((g61.m.pools[1].min_deck, g61.m.pools[1].max_deck, g61.m.deck(1).len()), (61, 61, 61));
     MtgSpec::parse(&serde_json::json!({"constructed": true, "decks": {"p0": main, "p1": more}}).to_string()).unwrap();
+    let less: Vec<String> = main[..59].to_vec();
+    assert!(bad(serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": main, "p1": less, "p0_sideboard": side8, "p1_sideboard": side8}}))
+        .contains("p1's constructed deck: 59 cards in the deck (CR 100.2a: at least 60)"));
     // CR 100.4a: a sideboard of at most 15; four copies over deck and sideboard.
     let big: Vec<String> = std::iter::repeat_n("Pyroblast".to_string(), 3).chain(std::iter::repeat_n("Spell Pierce".to_string(), 4)).chain(std::iter::repeat_n("Counterspell".to_string(), 4)).chain(std::iter::repeat_n("Fiery Confluence".to_string(), 4)).chain(["Karakas".to_string()]).collect();
     assert_eq!(big.len(), 16);

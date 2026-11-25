@@ -16,7 +16,8 @@
 //!
 //! The spec: `{"version": name, "list": [[card, copies], ...], "choices": [[game, first, lead, opp_dealt,
 //! [copies per list entry]], ...]}` - every one of the 24 contexts once (game 2 or 3, first 0 or 1, lead -1, 0
-//! or 1, opp_dealt 0 or 1), each 60 cards within the list's copies. Refused loudly otherwise.
+//! or 1, opp_dealt 0 or 1), each within the list's copies, all of one size N >= 60 (CR 100.2a) - the registered main's
+//! of the 75 the table is for (ENGINE.md 272; a seat's pool must have it: `fits`). Refused loudly otherwise.
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -33,16 +34,17 @@ pub struct SideboardTable {
     /// The 75: (definition, copies), sorted by definition - a constructed pool's list order
     /// (`MatchPool::constructed`).
     pub list: Vec<(DefId, u8)>,
-    /// The contexts' 60s, copies per `list` entry, by `context_index`.
+    /// The contexts' decks, copies per `list` entry, by `context_index`.
     choices: Vec<Arc<[u8]>>,
+    /// The decks' size (every context's the same): the registered main's of the 75 it is for, N >= 60 (CR 100.2a;
+    /// a constructed best-of-three keeps the main's size, ENGINE.md 120, 272). Not part of `key` (the choices fix it).
+    pub size: usize,
     /// A digest of the version, the list and the choices (the public state's view).
     pub key: u64,
 }
 
 /// The number of contexts: game 2 or 3, first or second, lead -1 / 0 / 1, the other seat dealt or not.
 pub const CONTEXTS: usize = 24;
-/// The decks' size (a constructed best-of-three's, ENGINE.md 120: exactly 60).
-const DECK: usize = 60;
 
 /// A context's index: `((game - 2) * 2 + first) * 6 + (lead + 1) * 2 + opp_dealt`.
 pub fn context_index(game: u8, first: bool, lead: i8, opp_dealt: bool) -> usize {
@@ -90,6 +92,7 @@ impl SideboardTable {
         let sorted: Vec<(DefId, u8)> = order.iter().map(|&i| given[i]).collect();
         let ch = o.get("choices").and_then(|v| v.as_array()).ok_or_else(|| err("choices must be a list".into()))?;
         let mut choices: Vec<Option<Arc<[u8]>>> = vec![None; CONTEXTS];
+        let mut size: Option<usize> = None;
         for c in ch {
             let a = c.as_array().filter(|a| a.len() == 5).ok_or_else(|| err(format!("a choice {c} is not [game, first, lead, opp_dealt, copies]")))?;
             let game = a[0].as_u64().filter(|g| (2..=3).contains(g)).ok_or_else(|| err(format!("a choice's game {}: 2 or 3", a[0])))? as u8;
@@ -103,9 +106,21 @@ impl SideboardTable {
                 let n = cnt[i].as_u64().filter(|&n| n <= given[i].1 as u64).ok_or_else(|| err(format!("a choice's copies of {}: at most {}", db.def(given[i].0).name, given[i].1)))?;
                 deck[j] = n as u8;
             }
+            // (ENGINE.md 272: every choice the same size, the registered main's - at least 60, CR 100.2a; `fits`
+            // checks it is the pool's)
             let total: usize = deck.iter().map(|&n| n as usize).sum();
-            if total != DECK {
-                return Err(err(format!("the choice of game {game}, first {first}, lead {lead}, opp_dealt {opp_dealt} has {total} cards (exactly {DECK})")));
+            let min = super::constructed::MIN_DECK;
+            if total < min {
+                return Err(err(format!("the choice of game {game}, first {first}, lead {lead}, opp_dealt {opp_dealt} has {total} cards (CR 100.2a: at least {min})")));
+            }
+            match size {
+                None => size = Some(total),
+                Some(n) if n != total => {
+                    return Err(err(format!(
+                        "the choice of game {game}, first {first}, lead {lead}, opp_dealt {opp_dealt} has {total} cards, another choice {n} (every deck the registered main's size)"
+                    )))
+                }
+                _ => {}
             }
             let k = context_index(game, first, lead, opp_dealt);
             if choices[k].is_some() {
@@ -129,15 +144,16 @@ impl SideboardTable {
                 fnv(&mut key, n as u64);
             }
         }
-        Ok(SideboardTable { version: version.to_string(), list: sorted, choices, key })
+        Ok(SideboardTable { version: version.to_string(), list: sorted, choices, key, size: size.expect("24 contexts given") })
     }
 
-    /// Is `pool` the table's 75 (a constructed pool: the same list of definitions and copies)?
+    /// Is `pool` the table's 75 (a constructed pool: the same list of definitions and copies) with its decks' size (the
+    /// registered main's, ENGINE.md 272: one list of 76 can be a 61 and 15 or a 60 and 16)?
     pub fn fits(&self, pool: &MatchPool) -> bool {
-        pool.n_cards == pool.list.len() && pool.list == self.list
+        pool.n_cards == pool.list.len() && pool.list == self.list && pool.min_deck == self.size && pool.max_deck == self.size
     }
 
-    /// The 60 of a context, copies per list entry.
+    /// The deck of a context (the registered main's size), copies per list entry.
     pub fn choice(&self, game: u8, first: bool, lead: i8, opp_dealt: bool) -> &Arc<[u8]> {
         &self.choices[context_index(game, first, lead, opp_dealt)]
     }

@@ -1387,10 +1387,10 @@ impl DeckPrior for SealedPrior {
     }
 }
 
-// ---- The constructed prior (ENGINE.md 120): 60 of a known 75 ----
+// ---- The constructed prior (ENGINE.md 120): N of a known 75 (N the registered main's, ENGINE.md 272) ----
 
 /// The prior of a constructed player's deck in the later games of a best-of-three (ENGINE.md 120):
-/// a deck of exactly the registered main's size (60) out of their public 75 (CR 100.4a: main and
+/// a deck of exactly the registered main's size (N >= 60, ENGINE.md 272) out of their public 75 (CR 100.4a: main and
 /// sideboard; the copies of each card at most the 75's), as the other player samples it.
 ///
 /// **The base prior: uniform over the number of swaps, then uniform over the decks with that

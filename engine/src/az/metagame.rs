@@ -13,7 +13,7 @@
 //!
 //! * `decks`: 1 to [`MAX_DECKS`] entries, each `{"name", "main", "sideboard"?}` (card names; `name` unique and
 //!   non-empty, the game log's and the game record's name of the deck; no other key). Each is a constructed deck
-//!   (CR 100.2a, 100.4a: `constructed::check`), in best-of-three a main of exactly 60 (ENGINE.md 120).
+//!   (CR 100.2a, 100.4a: `constructed::check`), in best-of-three too a main of any legal size N >= 60 (ENGINE.md 120, 272).
 //! * `weights` (optional): an n x n matrix of non-negative integers, row = p0's deck, column = p1's deck (the
 //!   ordered pair), at least one positive, their sum at most [`MAX_TOTAL`]. Default: every entry 1 - uniform over
 //!   the n x n ordered pairs, mirrors included, so every cell gets the same share of games (and of training rows,
@@ -150,8 +150,10 @@ impl Metagame {
                     let t = SideboardTable::parse_as(x, db, &format!("metagame deck {name:?}'s table"))?;
                     if !t.fits(&MatchPool::constructed(&main, &sideboard).0) {
                         return Err(format!(
-                            "mtg spec: metagame deck {name:?}'s table (version {:?}) is not of its 75: a deck's table lists exactly that deck's main and sideboard (ENGINE.md 240)",
-                            t.version
+                            "mtg spec: metagame deck {name:?}'s table (version {:?}) is not of its 75: a deck's table lists exactly that deck's main and sideboard, its decks the main's size (ENGINE.md 240, 272; {} cards here, the table's {})",
+                            t.version,
+                            main.len(),
+                            t.size
                         ));
                     }
                     Some(Arc::new(t))

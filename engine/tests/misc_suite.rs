@@ -8,6 +8,8 @@
 mod autopass_reuse;
 #[path = "bo3_episodes.rs"]
 mod bo3_episodes;
+#[path = "bo3_main_60_plus.rs"]
+mod bo3_main_60_plus;
 #[path = "bots.rs"]
 mod bots;
 #[path = "build.rs"]

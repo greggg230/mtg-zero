@@ -202,10 +202,9 @@
 //! with 200 games or more each of lane A's and lane B's and lane C's main-deck ones (The Tabernacle played and its
 //! triggers, Pithing Needle cast and named) must be non-zero. Matches: constructed best-of-three between the real 75s,
 //! the Lands 76 against each of the four in either seat and its mirror twice (`LANDS_PAIRS`, `seed % 10`; one match in
-//! four 12-turn games), then post-sideboard matches of its mirror, every check of `FUZZ_POOL=delver`'s matches. A
-//! best-of-three deck is exactly 60 cards (the user's format restriction, ENGINE.md 120), so the matches' Lands main
-//! is the 61 less one Forest (`LANDS_BO3_OUT`; fuzz-only, the deck files keep the 61), its sideboard the real 15 with
-//! Endurance; with 500 matches or more each of the sideboard's Choke, Cursed Totem, Damping Sphere, Torpor Orb and
+//! four 12-turn games), then post-sideboard matches of its mirror, every check of `FUZZ_POOL=delver`'s matches. The
+//! matches play the real 61 (a best-of-three main of N >= 60 cards, every deck of the match N: ENGINE.md 272; until
+//! then one Forest was taken out) and the real 15 with Endurance; with 500 matches or more each of the sideboard's Choke, Cursed Totem, Damping Sphere, Torpor Orb and
 //! Endurance must have been cast (`LANDS_SB_SEEN`). `FUZZ_HIDDEN_DECKS=1` is refused (Sneak and Show's Show and Tell).
 //! `FUZZ_POOL=lands_a` (ENGINE.md 270.1): lane A of the Legacy Lands deck (MTGGoldfish 8027955): its 61 with the
 //! other lanes' cards (Exploration, Life from the Loam, Carnivorous Cultivator, Yavimaya, The Tabernacle at Pendrell
@@ -1323,23 +1322,13 @@ fn real_75(k: usize) -> crate::az::constructed::Decklist {
 
 const REAL_75_NAMES: [&str; 5] = ["Delver", "Doomsday", "Sneak and Show", "Hogaak", "Lands"];
 
-/// The card the matches take out of the Lands 61 (ENGINE.md 270.4): a best-of-three deck is exactly 60 cards (the
-/// user's format restriction, ENGINE.md 120; CR 100.2a's minimum is 60), so `FUZZ_POOL=lands`'s matches play the 61
-/// less one Forest (a basic: no other card's count changes). Fuzz-only: the deck files keep the 61.
-const LANDS_BO3_OUT: &str = "Forest";
-
-/// A 75 as a constructed best-of-three spec takes it: the main's names and the sideboard cards
-/// this checkout supports (as `FUZZ_POOL=delver`'s matches; the rest left out, named by `cross_75_report`).
-/// (A main of more than 60 - the Lands 61 - less `LANDS_BO3_OUT`s down to 60, ENGINE.md 270.4.)
+/// A 75 as a constructed best-of-three spec takes it: the main's names - the whole registered main, any legal size
+/// (the Lands 61: ENGINE.md 272) - and the sideboard cards this checkout supports (as `FUZZ_POOL=delver`'s matches; the
+/// rest left out, named by `cross_75_report`).
 fn bo3_lists(d: &crate::az::constructed::Decklist) -> (Vec<String>, Vec<String>) {
     let db = CardDb::constructed();
     let side = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
-    let mut main = d.main_names();
-    while main.len() > crate::az::constructed::BO3_DECK {
-        let i = main.iter().position(|n| n == LANDS_BO3_OUT).unwrap_or_else(|| panic!("a main of {} cards without a {LANDS_BO3_OUT}", main.len()));
-        main.remove(i);
-    }
-    (main, side)
+    (d.main_names(), side)
 }
 
 /// `FUZZ_POOL=cross`'s pairings of the real 75s for matches (`real_75`): every pair with Doomsday, Sneak and Show or
@@ -5600,12 +5589,13 @@ fn holds_all(a: &[u16], b: &[u16]) -> bool {
     })
 }
 
-/// A legal 60 of player `o`'s 75 in match `m` (counts per entry of its constructed pool list).
-fn check_legal_60(m: &crate::az::MatchState, o: usize, counts: &[u8], what: &dyn Fn() -> String) {
+/// A legal deck of player `o`'s 75 in match `m` (counts per entry of its constructed pool list) of `size` cards: the
+/// registered main's (ENGINE.md 272: N >= 60, every deck of the match N).
+fn check_legal_deck(m: &crate::az::MatchState, o: usize, counts: &[u8], size: usize, what: &dyn Fn() -> String) {
     let pool = &m.pools[o];
     let n: usize = counts.iter().map(|&c| c as usize).sum();
     assert_eq!(counts.len(), pool.list.len(), "{}: counts of another list", what());
-    assert_eq!(n, 60, "{}: a deck of {n} cards", what());
+    assert_eq!(n, size, "{}: a deck of {n} cards (the registered main's {size})", what());
     assert!(counts.iter().zip(&pool.list).all(|(&c, e)| c <= e.1), "{}: more copies than the 75 has", what());
 }
 
@@ -5627,8 +5617,11 @@ fn check_constructed_world(g: &crate::az::MtgAz, d: &crate::az::MtgAz, viewer: u
     // (ENGINE.md 176: a metagame match's pairing is public, the same in every world; None in every other match)
     assert_eq!(g.m.pairing, d.m.pairing, "{}: a world changed the metagame pairing", what());
     let pool = &d.m.pools[ou];
-    assert_eq!((pool.n_cards, pool.min_deck, pool.max_deck), (pool.list.len(), 60, 60), "{}: the constructed pool", what());
-    check_legal_60(&d.m, ou, &d.m.decks[ou], &what);
+    // (ENGINE.md 272: the deck size is the registered main's - the real match's pool, checked against the spec when
+    // the match began - and public: the same in every world)
+    let size = g.m.pools[ou].min_deck;
+    assert_eq!((pool.n_cards, pool.min_deck, pool.max_deck), (pool.list.len(), size, size), "{}: the constructed pool", what());
+    check_legal_deck(&d.m, ou, &d.m.decks[ou], size, &what);
     let deck = pool.deck(&d.m.decks[ou]);
     let real = g.m.pools[ou].deck(&g.m.decks[ou]);
     stats.worlds += 1;
@@ -5665,7 +5658,7 @@ fn check_constructed_world(g: &crate::az::MtgAz, d: &crate::az::MtgAz, viewer: u
     if let Some(sb) = d.sideboarding() {
         let rsb = g.sideboarding().unwrap();
         if let Some(x) = &sb.done[ou] {
-            check_legal_60(&d.m, ou, x, &what);
+            check_legal_deck(&d.m, ou, x, size, &what);
             stats.choices_dealt += 1;
         }
         if let Some(x) = &sb.done[v] {
@@ -6076,6 +6069,20 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     // (ENGINE.md 176: a metagame match's pairing is its seed's; None for every other spec)
     assert_eq!(g.m.pairing, sp.pairing(seed), "match {seed}: the metagame pairing");
     DEALT_SPEC.with(|s| *s.borrow_mut() = sp.dealt_decks.map(|_| sp.clone()));
+    // Each seat's registered main's size (ENGINE.md 272: a constructed best-of-three's decks are N >= 60 cards, the
+    // same N in every game of the match): the spec's, and game 1's pool and deck have it.
+    let registered: [usize; 2] = if g.m.constructed_bo3 { sp.seats(seed).map(|s| s.deck.len()) } else { [0, 0] };
+    if g.m.constructed_bo3 {
+        for p in 0..2 {
+            assert!(registered[p] >= crate::az::constructed::MIN_DECK, "match {seed}: P{p}'s main of {} cards", registered[p]);
+            let pool = &g.m.pools[p];
+            assert_eq!(
+                (pool.min_deck, pool.max_deck, g.m.deck(p as u8).len()),
+                (registered[p], registered[p], registered[p]),
+                "match {seed}: P{p}'s pool or game 1 deck is not its registered main's size"
+            );
+        }
+    }
     let mut dealt_decks = 0u32;
     if let Some(dd) = sp.dealt_decks {
         if dd.per_seat {
@@ -6343,12 +6350,13 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                 let pool = &g.m.pools[q as usize];
                 let deck = g.m.deck(q);
                 // (Every fuzzed deck has 40 cards, and a pool's deck keeps
-                // them: ENGINE.md 42; a constructed best-of-three's 60, ENGINE.md 120.)
-                let size = if g.m.constructed_bo3 { 60 } else { 40 };
+                // them: ENGINE.md 42; a constructed best-of-three's its registered
+                // main's N >= 60, ENGINE.md 120, 272.)
+                let size = if g.m.constructed_bo3 { registered[q as usize] } else { 40 };
                 assert_eq!((pool.min_deck, pool.max_deck, deck.len()), (size, size, size), "match {seed}: {} cards", deck.len());
                 if g.m.constructed_bo3 {
-                    check_legal_60(&g.m, q as usize, &g.m.decks[q as usize], &|| format!("match {seed} game {game_no}: P{q}'s deck"));
-                    assert_eq!(g.g.sideboard_size(q), pool.list.iter().map(|e| e.1 as usize).sum::<usize>() - 60);
+                    check_legal_deck(&g.m, q as usize, &g.m.decks[q as usize], size, &|| format!("match {seed} game {game_no}: P{q}'s deck"));
+                    assert_eq!(g.g.sideboard_size(q), pool.list.iter().map(|e| e.1 as usize).sum::<usize>() - size);
                 }
                 for (k, &(_, n)) in pool.list.iter().enumerate() {
                     assert!(g.m.decks[q as usize][k] <= n.max(decks[q as usize][k]));

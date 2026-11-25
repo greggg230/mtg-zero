@@ -293,11 +293,12 @@ fn the_lands_75_and_its_provenance() {
     let mut five = sb.clone();
     five[..2].fill(flute);
     assert!(constructed::check(db(), &ids, &five).unwrap_err().contains("5 copies of Disruptor Flute"));
-    // A best-of-three's decks are exactly 60 (the user's format restriction, ENGINE.md 120): the registered 61 is
-    // refused there (ENGINE.md 270.4: open, the user's call), played in best-of-one.
+    // The registered 61 plays best-of-one and best-of-three (ENGINE.md 272: a best-of-three main of at least 60, CR
+    // 100.2a - until then exactly 60, the 61 refused there, 270.4.4), its decks 61 in every game.
     let (m, sbn) = (d.main_names(), d.sideboard.iter().flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect::<Vec<_>>());
     let bo3 = serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": m, "p1": m, "p0_sideboard": sbn, "p1_sideboard": sbn}});
-    assert!(MtgSpec::parse(&bo3.to_string()).unwrap_err().contains("exactly 60"));
+    let g = MtgAz::new_game(&MtgSpec::parse(&bo3.to_string()).unwrap(), 2, 1).unwrap();
+    assert_eq!((g.m.pools[0].min_deck, g.m.pools[0].max_deck, g.m.deck(0).len(), g.g.sideboard_size(0)), (61, 61, 61, 15));
     MtgSpec::parse(&serde_json::json!({"constructed": true, "decks": {"p0": m, "p1": m}}).to_string()).unwrap();
     let has = |list: &[(u32, String)], n: &str| list.iter().any(|e| e.1 == n);
     let reg = identity::legacy_registry();
@@ -337,9 +338,9 @@ fn the_lands_75_and_its_provenance() {
 }
 
 /// The Lands deck plays: best-of-one games of its 61 against the Delver, Doomsday, Sneak and Show and Hogaak 60s and
-/// itself, and - its main less one Forest, a best-of-three's decks being exactly 60 (ENGINE.md 120, 270.4) -
-/// constructed best-of-three matches with its real sideboard (Endurance too) against each 75, each by random actions
-/// to its end; the network's row finite at every decision.
+/// itself, and constructed best-of-three matches of its real 76 - the 61 and its sideboard (Endurance too), a
+/// best-of-three main of at least 60 (ENGINE.md 272) - against each 75, each by random actions to its end; every deck
+/// of a match its registered main's size in every game; the network's row finite at every decision.
 #[test]
 fn the_lands_75_plays_best_of_one_and_best_of_three() {
     let l = Decklist::legacy_lands();
@@ -351,21 +352,17 @@ fn the_lands_75_plays_best_of_one_and_best_of_three() {
         l.clone(),
     ];
     let side = |d: &Decklist| -> Vec<String> { d.sideboard.iter().flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect() };
-    let sixty = |d: &Decklist| -> Vec<String> {
-        let mut m = d.main_names();
-        if m.len() == 61 {
-            let i = m.iter().position(|n| n == "Forest").unwrap();
-            m.remove(i);
-        }
-        m
-    };
     let play = |spec: &MtgSpec, seed: u64| -> (u32, usize) {
         let mut g = MtgAz::new_game(spec, 2, seed).unwrap();
         let mut rng = Rng::new(seed ^ 0x1A2D5);
         let (mut keys, mut steps) = (Vec::new(), 0usize);
+        let sizes: Vec<usize> = (0..2u8).map(|q| g.m.deck(q).len()).collect();
         while g.to_move().is_some() {
             let lg = legal(&g);
             let p = g.to_move().unwrap();
+            for q in 0..2u8 {
+                assert_eq!(g.m.deck(q).len(), sizes[q as usize], "seed {seed} game {}: P{q}'s deck size", g.m.game_no);
+            }
             assert!(engine::az::tail_encode::Row::of_az(&g, p).flat().iter().all(|x| x.is_finite()));
             g.step(lg[rng.below(lg.len() as u32) as usize], &mut keys).unwrap();
             steps += 1;
@@ -378,7 +375,7 @@ fn the_lands_75_plays_best_of_one_and_best_of_three() {
             let (p0, p1) = if seat == 0 { (l.main_names(), o.main_names()) } else { (o.main_names(), l.main_names()) };
             let bo1 = MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": p0, "p1": p1}}).to_string()).unwrap();
             play(&bo1, 20 * k as u64 + seat);
-            let (p0, p1) = if seat == 0 { (sixty(&l), sixty(o)) } else { (sixty(o), sixty(&l)) };
+            let (p0, p1) = if seat == 0 { (l.main_names(), o.main_names()) } else { (o.main_names(), l.main_names()) };
             let (s0, s1) = if seat == 0 { (side(&l), side(o)) } else { (side(o), side(&l)) };
             let bo3 = MtgSpec::parse(
                 &serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",

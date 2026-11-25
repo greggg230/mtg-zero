@@ -63,8 +63,8 @@ def test_the_hogaak_deck_and_its_loader():
 
 def test_the_lands_deck_and_its_loader():
     # ENGINE.md 270: the Legacy Lands deck, 61 main as listed (legal: CR 100.2a's minimum is 60) and 15, by name in every
-    # spec helper's best-of-one; best-of-three refuses its 61 (a best-of-three's decks are exactly 60, ENGINE.md 120:
-    # the user's call, 270.4). No preset plays it.
+    # spec helper, best-of-one and best-of-three (ENGINE.md 272: a best-of-three main of at least 60, every deck of the
+    # match its size - until then exactly 60, the 61 refused). No preset plays it.
     d = decklists.load(decklists.LEGACY_LANDS)
     assert (d['player'], d['event'], d['date'], d['result']) == (
         'juubs', 'North American Eternal Weekend - Legacy Championship', '2026-10-31', '6th place, 12-3')
@@ -75,11 +75,22 @@ def test_the_lands_deck_and_its_loader():
     E = G.engine()
     for spec in (decklists.mirror_spec(decklists.LEGACY_LANDS),
                  decklists.pair_spec(decklists.LEGACY_LANDS, decklists.IZZET_DELVER),
-                 decklists.metagame_spec(decks=decklists.META3 + (decklists.LEGACY_LANDS,))):
+                 decklists.metagame_spec(decks=decklists.META3 + (decklists.LEGACY_LANDS,)),
+                 decklists.pair_spec(decklists.LEGACY_LANDS, decklists.IZZET_DELVER, fmt='bo3'),
+                 decklists.pair_spec(decklists.IZZET_DELVER, decklists.LEGACY_LANDS, fmt='bo3', game_episodes=True),
+                 decklists.mirror_bo3_spec(decklists.LEGACY_LANDS),
+                 decklists.metagame_spec(decks=decklists.META3 + (decklists.LEGACY_LANDS,), fmt='bo3')):
         g = E.Game('mtg', spec, 2, 1)
         assert not g.over
-    with pytest.raises(ValueError, match='exactly 60'):
-        decklists.pair_spec(decklists.LEGACY_LANDS, decklists.IZZET_DELVER, fmt='bo3')
+    s = json.loads(decklists.pair_spec(decklists.LEGACY_LANDS, decklists.IZZET_DELVER, fmt='bo3'))
+    assert (len(s['decks']['p0']), len(s['decks']['p0_sideboard']), len(s['decks']['p1'])) == (61, 15, 60)
+    # a main under 60 or a sideboard over 15 is still refused in best-of-three (CR 100.2a, 100.4a)
+    with pytest.raises(ValueError, match='59 maindeck cards'):
+        decklists._check_bo3('x', main[:59], side)
+    with pytest.raises(ValueError, match='16 sideboard cards'):
+        decklists._check_bo3('x', main, side + ['Dismember'])
+    with pytest.raises(ValueError, match='16 sideboard cards'):
+        decklists.mirror_bo3_spec(decklists.LEGACY_LANDS, sideboard=d['sideboard'] + [[1, 'Dismember']])
     import mtgz.az as A
     assert not any(decklists.LEGACY_LANDS in p.get('spec', '') for p in A.PRESETS.values())
 
